@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output
+.next/
+out/
+build/
+
+# PartyKit dev/runtime artifacts
+.partykit/
+partykit.json.bak
+
+# Logs
+dev-*.log
+*.log
+test-results/
+*.pid
+
+# Environment files
+.env
+*.env
+
+# TypeScript build artifacts
+*.tsbuildinfo
+
+# OS / editor clutter
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

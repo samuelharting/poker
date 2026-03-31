@@ -1,0 +1,5 @@
+{
+  "name": "poker",
+  "main": "partykit/room.ts",
+  "compatibilityDate": "2023-10-01"
+}
