@@ -1,5 +1,7 @@
 import type { InternalPlayer, Pot } from './types'
 
+type PotParticipant = Pick<InternalPlayer, 'id' | 'status' | 'totalInPot'>
+
 /**
  * Calculate the minimum raise amount.
  * The minimum raise is at least the size of the last raise, or the big blind.
@@ -23,7 +25,7 @@ export function calculateMinRaise(
  * 2. For each all-in threshold, create a pot up to that level
  * 3. Remaining goes to main pot for non-all-in players
  */
-export function buildSidePots(players: InternalPlayer[]): Pot[] {
+export function buildSidePots(players: PotParticipant[]): Pot[] {
   // Only consider players who have committed chips this hand
   const activePlayers = players.filter(p => p.totalInPot > 0 || p.status !== 'waiting')
 

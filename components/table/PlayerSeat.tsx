@@ -1,22 +1,22 @@
 'use client'
 
-import type { SeatPlayer } from '@/lib/poker/types'
+import type { Card, SeatPlayer } from '@/lib/poker/types'
 import clsx from 'clsx'
 import { PlayingCard } from '@/components/ui/PlayingCard'
+import { ChipStack } from '@/components/ui/ChipStack'
 
 interface PlayerSeatProps {
   player: SeatPlayer
   isActing: boolean
+  isWinner?: boolean
+  winnerAmount?: number
   depthClass: 'seat-depth-near' | 'seat-depth-mid' | 'seat-depth-far' | 'seat-depth-top'
   opacityValue: number
   socialMessage?: string
-  socialEmote?: string
   socialMessageExpiresAt?: number
+  socialEmote?: string
   socialEmoteExpiresAt?: number
-  socialEmoteFrom?: string
-  targetedSocialEmote?: string
-  targetedSocialEmoteExpiresAt?: number
-  targetedSocialEmoteFrom?: string
+  socialEmoteTargeted?: boolean
   onNameClick?: (playerId: string) => void
 }
 
@@ -27,19 +27,56 @@ const STATUS_LABELS: Record<string, string> = {
   disconnected: 'Away',
 }
 
+function formatEquityPercent(value: number): string {
+  return `${value.toFixed(1)}%`
+}
+
+export function getVisibleSeatCards(
+  showCards: SeatPlayer['showCards'],
+  holeCards: Card[] | undefined
+): { left: Card | null; right: Card | null } {
+  const cards = holeCards ?? []
+
+  if (cards.length === 0) {
+    return { left: null, right: null }
+  }
+
+  if (showCards === 'both') {
+    return {
+      left: cards[0] ?? null,
+      right: cards[1] ?? cards[0] ?? null,
+    }
+  }
+
+  if (showCards === 'left') {
+    return {
+      left: cards[0] ?? null,
+      right: null,
+    }
+  }
+
+  if (showCards === 'right') {
+    return {
+      left: null,
+      right: cards.length === 1 ? cards[0] ?? null : cards[1] ?? null,
+    }
+  }
+
+  return { left: null, right: null }
+}
+
 export function PlayerSeat({
   player,
   isActing,
+  isWinner = false,
+  winnerAmount,
   depthClass,
   opacityValue,
   socialMessage,
-  socialEmote,
   socialMessageExpiresAt,
+  socialEmote,
   socialEmoteExpiresAt,
-  socialEmoteFrom,
-  targetedSocialEmote,
-  targetedSocialEmoteExpiresAt,
-  targetedSocialEmoteFrom,
+  socialEmoteTargeted = false,
   onNameClick,
 }: PlayerSeatProps) {
   const isFolded = player.status === 'folded'
@@ -47,46 +84,16 @@ export function PlayerSeat({
   const isAllIn = player.status === 'all_in'
   const displayAction = player.lastAction ?? STATUS_LABELS[player.status] ?? null
   const showAction = displayAction && player.status !== 'active' && player.status !== 'waiting'
+  const showEquity = typeof player.equityPercent === 'number' && isFolded === false && isDisconnected === false
 
   const socialBubbleTtl = Math.max(0, socialMessageExpiresAt ? socialMessageExpiresAt - Date.now() : 0)
   const socialEmoteTtl = Math.max(0, socialEmoteExpiresAt ? socialEmoteExpiresAt - Date.now() : 0)
-  const targetedSocialEmoteTtl = Math.max(
-    0,
-    targetedSocialEmoteExpiresAt ? targetedSocialEmoteExpiresAt - Date.now() : 0
-  )
   const holeCards = player.holeCards ?? []
   const holeCardCount = holeCards.length
-  const visibleLeftCard = (() => {
-    if (holeCardCount === 0) {
-      return null
-    }
-
-    if (player.showCards === 'left' || player.showCards === 'both') {
-      return holeCards[0] ?? null
-    }
-
-    if (player.showCards === 'right' && holeCardCount === 1) {
-      return holeCards[0]
-    }
-
-    return null
-  })()
-
-  const visibleRightCard = (() => {
-    if (holeCardCount === 0) {
-      return null
-    }
-
-    if (player.showCards === 'both') {
-      return holeCards[1] ?? holeCards[0] ?? null
-    }
-
-    if (player.showCards === 'right') {
-      return holeCards[1] ?? holeCards[0] ?? null
-    }
-
-    return null
-  })()
+  const { left: visibleLeftCard, right: visibleRightCard } = getVisibleSeatCards(
+    player.showCards,
+    holeCards
+  )
 
   const initials = player.nickname
     .split(' ')
@@ -97,10 +104,10 @@ export function PlayerSeat({
 
   return (
     <div
-      className={clsx('player-seat', depthClass, isFolded && 'is-folded')}
+      className={clsx('player-seat', depthClass, isFolded && 'is-folded', isWinner && 'is-winner')}
       style={{ opacity: isFolded ? opacityValue * 0.5 : opacityValue }}
     >
-      {(socialMessage || socialEmote || targetedSocialEmote) && (
+      {(socialMessage || socialEmote) && (
         <div className="player-social-stack">
           {socialMessage && (
             <div
@@ -114,39 +121,25 @@ export function PlayerSeat({
           {socialEmote && (
             <div
               key={`${socialEmote}-${socialEmoteExpiresAt}`}
-              className="player-emote-badge"
-              title={socialEmoteFrom ? `${socialEmoteFrom} sent ${socialEmote}` : undefined}
-              aria-label={`Emote ${socialEmote}`}
+              className={clsx(
+                'player-emote-badge',
+                socialEmoteTargeted && 'player-emote-badge-targeted'
+              )}
               style={{ ['--chat-ttl' as any]: `${socialEmoteTtl}ms` }}
             >
               {socialEmote}
-            </div>
-          )}
-          {targetedSocialEmote && (
-            <div
-              key={`${targetedSocialEmote}-${targetedSocialEmoteExpiresAt}`}
-              className="player-emote-badge player-emote-badge-targeted"
-              title={
-                targetedSocialEmoteFrom
-                  ? `${targetedSocialEmoteFrom} aimed this at ${player.nickname}: ${targetedSocialEmote}`
-                  : undefined
-              }
-              aria-label={`Emote ${targetedSocialEmote}`}
-              style={{ ['--chat-ttl' as any]: `${targetedSocialEmoteTtl}ms` }}
-            >
-              {targetedSocialEmote}
             </div>
           )}
         </div>
       )}
 
       {player.hasCards && (
-        <div className={clsx('player-held-cards', holeCardCount > 0 && 'is-revealed')}>
+        <div className={clsx('player-held-cards', holeCardCount > 0 && 'is-revealed', isWinner && 'is-winner')}>
           {holeCardCount > 0 ? (
             <>
               {visibleLeftCard ? (
                 <div className="player-card-face player-card-face-left">
-                  <PlayingCard card={visibleLeftCard} size="sm" />
+                  <PlayingCard card={visibleLeftCard} size="sm" highlighted={isWinner} />
                 </div>
               ) : (
                 <div className="player-card-back player-card-back-left" />
@@ -154,7 +147,7 @@ export function PlayerSeat({
 
               {visibleRightCard ? (
                 <div className="player-card-face player-card-face-right">
-                  <PlayingCard card={visibleRightCard} size="sm" />
+                  <PlayingCard card={visibleRightCard} size="sm" highlighted={isWinner} />
                 </div>
               ) : (
                 <div className="player-card-back player-card-back-right" />
@@ -171,15 +164,13 @@ export function PlayerSeat({
 
       {player.bet > 0 && (
         <div key={`${player.id}-${player.bet}`} className="player-bet-stack-anchor">
-          <div className="chip-stack player-bet-stack">
-            <span className="chip chip-red" />
-            <span className="chip chip-white" />
-            <span className="chip chip-blue" />
+          <div className="player-bet-stack">
+            <ChipStack amount={player.bet} compact showAmount={false} />
           </div>
         </div>
       )}
 
-      <div className={clsx('player-seat-marker', isActing && 'is-acting', isDisconnected && 'is-disconnected')}>
+      <div className={clsx('player-seat-marker', isActing && 'is-acting', isDisconnected && 'is-disconnected', isWinner && 'is-winner')}>
         <span>{initials}</span>
         {player.isDealer && <div className="dealer-button">D</div>}
         {player.isSB && !player.isDealer && <div className="blind-badge sb">SB</div>}
@@ -208,6 +199,19 @@ export function PlayerSeat({
       )}
 
       {player.bet > 0 && <div className="player-bet">Bet ${player.bet.toLocaleString()}</div>}
+
+      {isWinner && typeof winnerAmount === 'number' && winnerAmount > 0 && (
+        <div className="winner-payout-chip">Won ${winnerAmount.toLocaleString()}</div>
+      )}
+
+      {showEquity && (
+        <div
+          className="player-equity-badge"
+          title={`Live hand equity: ${formatEquityPercent(player.equityPercent!)}`}
+        >
+          Eq {formatEquityPercent(player.equityPercent!)}
+        </div>
+      )}
 
       {showAction && (
         <div

@@ -18,6 +18,7 @@ import {
   startHand,
   toTableState,
 } from '../lib/poker/engine'
+import { withVisibleHandOdds } from '../lib/poker/odds'
 import { MAX_CHAT_LENGTH, parseC2S } from '../shared/protocol'
 
 interface TableSettings {
@@ -81,6 +82,17 @@ const EMOTE_DURATION = 6000
 const MAX_CHAT_HISTORY = 18
 export const AUTO_START_DELAY = DEFAULT_SETTINGS.autoStartDelay
 const BOT_NAMES = ['Maverick', 'River', 'Bluff', 'Ace', 'Nova', 'Dealer Dan', 'Pocket', 'Lucky', 'Tilt', 'Rook']
+
+function formatCurrency(amount: number): string {
+  return `$${Math.abs(Math.trunc(amount)).toLocaleString()}`
+}
+
+function describeChipAdjustment(playerName: string, delta: number): string {
+  const amount = formatCurrency(delta)
+  return delta > 0
+    ? `Added ${amount} to ${playerName}.`
+    : `Removed ${amount} from ${playerName}.`
+}
 
 export default class PokerRoom implements PartyServer {
   private data: RoomData
@@ -348,6 +360,7 @@ export default class PokerRoom implements PartyServer {
       this.clearAutoStart()
       this.data.gameState = startHand(this.data.gameState)
       this.syncActionTimer(true)
+      this.sendActionResult(conn, this.data.gameState.handNumber > 1 ? 'Dealing next hand.' : 'Dealing the first hand.')
       this.broadcastState()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to start hand'
@@ -498,7 +511,7 @@ export default class PokerRoom implements PartyServer {
     this.data.gameState.sevenTwoRuleEnabled = this.data.tableSettings.sevenTwoRuleEnabled
     this.data.gameState.sevenTwoBountyPercent = this.data.tableSettings.sevenTwoBountyPercent
 
-    this.sendActionResult(conn)
+    this.sendActionResult(conn, 'Updated table settings.')
     this.broadcastState()
   }
 
@@ -536,7 +549,7 @@ export default class PokerRoom implements PartyServer {
       player.status = 'waiting'
     }
 
-    this.sendActionResult(conn)
+    this.sendActionResult(conn, `Rebuy added ${formatCurrency(amount)} to your stack.`)
     this.broadcastState()
   }
 
@@ -557,8 +570,19 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
+    const targetName =
+      this.getPlayer(targetId)?.nickname ??
+      this.data.playerNicknames[targetId] ??
+      'That player'
+    const removedMidHand = this.data.gameState.phase === 'in_hand' && Boolean(this.getPlayer(targetId))
+
     this.evictPlayer(targetId)
-    this.sendActionResult(conn)
+    this.sendActionResult(
+      conn,
+      removedMidHand
+        ? `Kicked ${targetName}. They fold now and leave the table after this hand.`
+        : `Kicked ${targetName} from the table.`
+    )
     this.broadcastState()
   }
 
@@ -577,6 +601,7 @@ export default class PokerRoom implements PartyServer {
 
     const player = this.getPlayer(targetId)
     if (player) {
+      const message = describeChipAdjustment(player.nickname, delta)
       const wasActingPlayer = this.data.gameState.actingPlayerId === targetId
       player.stack = Math.max(0, player.stack + delta)
       if (this.data.gameState.phase === 'in_hand') {
@@ -616,15 +641,16 @@ export default class PokerRoom implements PartyServer {
 
       this.finalizeState()
       this.syncActionTimer(wasActingPlayer)
-      this.sendActionResult(conn)
+      this.sendActionResult(conn, message)
       this.broadcastState()
       return
     }
 
     if (this.data.spectatorIds[targetId] || this.data.playerNicknames[targetId]) {
+      const playerName = this.data.playerNicknames[targetId] ?? 'That player'
       const nextStack = Math.max(0, Math.floor((this.data.spectatorStacks[targetId] ?? 0) + delta))
       this.data.spectatorStacks[targetId] = nextStack
-      this.sendActionResult(conn)
+      this.sendActionResult(conn, describeChipAdjustment(playerName, delta))
       this.broadcastState()
       return
     }
@@ -646,6 +672,7 @@ export default class PokerRoom implements PartyServer {
 
     if (spectator) {
       const seatedPlayer = this.getPlayer(targetId)
+      const targetName = seatedPlayer?.nickname ?? this.data.playerNicknames[targetId] ?? 'That player'
       if (seatedPlayer && this.data.gameState.phase === 'in_hand') {
         const wasActingPlayer = this.data.gameState.actingPlayerId === targetId
         this.data.pendingSpectators[targetId] = true
@@ -663,7 +690,7 @@ export default class PokerRoom implements PartyServer {
         }
         this.finalizeState()
         this.syncActionTimer(wasActingPlayer)
-        this.sendActionResult(conn)
+        this.sendActionResult(conn, `Moved ${targetName} to spectator mode. They fold now and watch the rest of this hand.`)
         this.broadcastState()
         return
       }
@@ -673,14 +700,15 @@ export default class PokerRoom implements PartyServer {
         this.removePlayerFromTable(targetId)
       }
       this.data.spectatorIds[targetId] = true
-      this.sendActionResult(conn)
+      this.sendActionResult(conn, `Moved ${targetName} to spectator mode.`)
       this.broadcastState()
       return
     }
 
+    const targetName = this.data.playerNicknames[targetId] ?? this.getPlayer(targetId)?.nickname ?? 'That player'
     delete this.data.pendingSpectators[targetId]
     delete this.data.spectatorIds[targetId]
-    this.sendActionResult(conn)
+    this.sendActionResult(conn, `${targetName} can rejoin the table.`)
     this.broadcastState()
   }
 
@@ -729,14 +757,7 @@ export default class PokerRoom implements PartyServer {
       messageExpiresAt: now + CHAT_BUBBLE_DURATION,
     }
 
-    this.data.social.chatLog.unshift({
-      id: generateId(12),
-      playerId,
-      nickname,
-      message: trimmed,
-      createdAt: now,
-    })
-    this.data.social.chatLog = this.data.social.chatLog.slice(0, MAX_CHAT_HISTORY)
+    this.appendChatEntry(playerId, nickname, trimmed, now)
 
     this.broadcastState()
   }
@@ -763,14 +784,39 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
+    const nickname = this.data.playerNicknames[playerId] ?? player.nickname ?? 'Player'
+    const targetNickname =
+      normalizedTargetId === player.id
+        ? ''
+        : this.getPlayer(normalizedTargetId)?.nickname ??
+          this.data.playerNicknames[normalizedTargetId] ??
+          'Player'
+    const message = normalizedTargetId === player.id
+      ? emote
+      : `to ${targetNickname}: ${emote}`
+    const now = Date.now()
+
     this.data.social.activeByPlayer[playerId] = {
       ...this.data.social.activeByPlayer[playerId],
       emote,
-      emoteExpiresAt: Date.now() + EMOTE_DURATION,
-      targetPlayerId: normalizedTargetId,
+      emoteExpiresAt: now + EMOTE_DURATION,
+      targetPlayerId: normalizedTargetId !== player.id ? normalizedTargetId : undefined,
     }
 
+    this.appendChatEntry(playerId, nickname, message, now)
+
     this.broadcastState()
+  }
+
+  private appendChatEntry(playerId: string, nickname: string, message: string, createdAt: number) {
+    this.data.social.chatLog.unshift({
+      id: generateId(12),
+      playerId,
+      nickname,
+      message,
+      createdAt,
+    })
+    this.data.social.chatLog = this.data.social.chatLog.slice(0, MAX_CHAT_HISTORY)
   }
 
   private evictPlayer(playerId: string) {
@@ -974,10 +1020,20 @@ export default class PokerRoom implements PartyServer {
 
   private buildSnapshotFor(connId: string): Extract<S2CMessage, { type: 'room_snapshot' }> {
     const playerId = this.data.connectionToPlayer[connId] ?? ''
+    const spectatorCanSeeAllHands = Boolean(
+      playerId && (this.data.spectatorIds[playerId] || this.data.pendingSpectators[playerId])
+    )
+
+    const publicState = withVisibleHandOdds(
+      toTableState(this.data.gameState, playerId, {
+        revealAllHoleCards: spectatorCanSeeAllHands,
+      })
+    )
+
     return {
       type: 'room_snapshot',
       state: {
-        ...toTableState(this.data.gameState, playerId),
+        ...publicState,
         autoStartEnabled: true,
         autoStartDelay: this.data.tableSettings.autoStartDelay,
         lobbyPlayers: this.buildLobbyPlayers(),
@@ -1317,6 +1373,7 @@ export default class PokerRoom implements PartyServer {
       if (social.emote && social.emoteExpiresAt && social.emoteExpiresAt > now) {
         nextState.emote = social.emote
         nextState.emoteExpiresAt = social.emoteExpiresAt
+        nextState.targetPlayerId = social.targetPlayerId
       }
 
       if (nextState.message || nextState.emote) {

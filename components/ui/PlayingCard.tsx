@@ -9,6 +9,7 @@ interface PlayingCardProps {
   size?: 'sm' | 'md' | 'lg' | 'xl'
   className?: string
   animateIn?: boolean
+  highlighted?: boolean
 }
 
 const SUIT_SYMBOL: Record<string, string> = {
@@ -36,6 +37,7 @@ export function PlayingCard({
   size = 'md',
   className,
   animateIn = false,
+  highlighted = false,
 }: PlayingCardProps) {
   const isRed = card?.suit === 'hearts' || card?.suit === 'diamonds'
   const showFaceDown = faceDown || !card
@@ -50,7 +52,8 @@ export function PlayingCard({
           size === 'lg' && 'card-lg',
           size === 'sm' && 'card-sm',
           showFaceDown && 'face-down',
-          animateIn && 'card-deal-anim'
+          animateIn && 'card-deal-anim',
+          highlighted && 'card-highlighted'
         )}
       >
         <div className={clsx('card-face', suitClass, isRed && 'red')}>

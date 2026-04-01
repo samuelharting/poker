@@ -59,6 +59,7 @@ export interface SeatPlayer {
   lastAction?: string
   seatIndex: number    // 0-7
   hasActedThisRound: boolean
+  equityPercent?: number
 }
 
 export interface Pot {

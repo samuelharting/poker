@@ -4,6 +4,7 @@ interface ChipStackProps {
   amount: number
   label?: string
   compact?: boolean
+  showAmount?: boolean
 }
 
 interface ChipConfig {
@@ -42,7 +43,12 @@ function formatAmount(amount: number): string {
   return `$${amount.toLocaleString()}`
 }
 
-export function ChipStack({ amount, label, compact = false }: ChipStackProps) {
+export function ChipStack({
+  amount,
+  label,
+  compact = false,
+  showAmount = true,
+}: ChipStackProps) {
   if (amount <= 0) return null
 
   const chips = buildChipStack(amount, compact ? 5 : 8)
@@ -54,16 +60,18 @@ export function ChipStack({ amount, label, compact = false }: ChipStackProps) {
           <div key={i} className={cls} />
         ))}
       </div>
-      <span
-        style={{
-          fontSize: compact ? '10px' : '11px',
-          fontWeight: 700,
-          color: '#a8d8a8',
-          fontFamily: 'monospace',
-        }}
-      >
-        {label ?? formatAmount(amount)}
-      </span>
+      {showAmount && (
+        <span
+          style={{
+            fontSize: compact ? '10px' : '11px',
+            fontWeight: 700,
+            color: '#a8d8a8',
+            fontFamily: 'monospace',
+          }}
+        >
+          {label ?? formatAmount(amount)}
+        </span>
+      )}
     </div>
   )
 }

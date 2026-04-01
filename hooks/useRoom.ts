@@ -5,6 +5,7 @@ import type { TableState } from '@/lib/poker/types'
 import {
   MAX_CHAT_LENGTH,
   parseS2C,
+  sanitizeEmote,
   sanitizeText,
   type C2SMessage,
   type PlayerSocialState,
@@ -53,6 +54,7 @@ export function useRoom(
   options: UseRoomOptions = {}
 ): RoomState {
   const socketRef = useRef<RoomSocket | null>(null)
+  const reconnectTokenRef = useRef<string | null>(null)
   const hasSeated = useRef(false)
   const playerIdsRef = useRef<Set<string>>(new Set())
   const [tableState, setTableState] = useState<TableState | null>(null)
@@ -82,7 +84,8 @@ export function useRoom(
 
     hasSeated.current = false
 
-    const storedToken = sessionStorage.getItem(`poker_reconnect_${roomCode}`)
+    const tokenStorageKey = `poker_reconnect_${roomCode}`
+    reconnectTokenRef.current = sessionStorage.getItem(tokenStorageKey)
     let active = true
 
     ;(async () => {
@@ -106,7 +109,7 @@ export function useRoom(
           const joinMsg: C2SMessage = {
             type: 'join_room',
             nickname,
-            reconnectToken: storedToken ?? undefined,
+            reconnectToken: reconnectTokenRef.current ?? undefined,
           }
           socket.send(JSON.stringify(joinMsg))
         })
@@ -145,7 +148,8 @@ export function useRoom(
             case 'private_session': {
               setYourId(msg.yourId)
               setIsHost(msg.isHost)
-              sessionStorage.setItem(`poker_reconnect_${roomCode}`, msg.reconnectToken)
+              reconnectTokenRef.current = msg.reconnectToken
+              sessionStorage.setItem(tokenStorageKey, msg.reconnectToken)
               break
             }
 
@@ -172,7 +176,6 @@ export function useRoom(
 
         socket.addEventListener('error', () => {
           setIsConnected(false)
-          onSystemMessage?.('Connection error. Trying to recover.', 'error')
         })
       } catch {
         if (active) {
@@ -303,7 +306,7 @@ function sanitizeSocialEntry(raw: unknown): PlayerSocialState | null {
   }
 
   if (typeof candidate.emote === 'string') {
-    const emote = sanitizeText(candidate.emote, 16)
+    const emote = sanitizeEmote(candidate.emote, 16)
     if (emote) {
       entry.emote = emote
     }

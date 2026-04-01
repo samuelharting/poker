@@ -7,6 +7,7 @@ import { PlayerSeat } from './PlayerSeat'
 import { CommunityCards } from './CommunityCards'
 import { OwnHand } from './OwnHand'
 import { PotDisplay } from './PotDisplay'
+import { SearchableEmojiPicker } from '@/components/ui/SearchableEmojiPicker'
 
 type FeedbackTone = 'info' | 'success' | 'error'
 
@@ -74,20 +75,7 @@ const EMOTE_OPTIONS = [
   { id: 'wave', glyph: '\uD83D\uDC4B', label: 'Wave' },
   { id: 'thumbs_up', glyph: '\uD83D\uDC4D', label: 'Thumbs up' },
   { id: 'laugh', glyph: '\uD83D\uDE02', label: 'Laugh' },
-  { id: 'middle_finger', glyph: '\uD83E\uDD95', label: 'Middle finger' },
-] as const
-
-const EMOJI_PICKER_OPTIONS = [
-  '\uD83D\uDC4B', '\uD83D\uDC4D', '\uD83D\uDE02', '\uD83D\uDE0E', '\uD83D\uDE0F', '\uD83D\uDE31',
-  '\uD83D\uDE2D', '\uD83D\uDE21', '\uD83D\uDE08', '\uD83D\uDC40', '\uD83E\uDD14', '\uD83E\uDEE1',
-  '\uD83D\uDCB0', '\uD83D\uDCA5', '\uD83D\uDD25', '\uD83C\uDF89', '\uD83C\uDFC6', '\uD83E\uDD73',
-  '\uD83E\uDD20', '\uD83E\uDD21', '\uD83D\uDC7B', '\uD83D\uDC7D', '\uD83E\uDD16', '\uD83D\uDC0D',
-  '\uD83D\uDC2C', '\uD83D\uDC3A', '\uD83E\uDD8A', '\uD83D\uDC18', '\uD83D\uDC05', '\uD83E\uDD81',
-  '\uD83D\uDC08', '\uD83D\uDC31', '\uD83D\uDC36', '\uD83E\uDD95', '\uD83C\uDF40', '\uD83C\uDFB2',
-  '\uD83C\uDF0A', '\u2B50', '\uD83D\uDC8E', '\uD83C\uDFAF', '\uD83D\uDE80', '\uD83C\uDF1F',
-  '\uD83E\uDEC0', '\uD83C\uDF55', '\uD83C\uDF7B', '\u2615', '\uD83C\uDF89', '\uD83D\uDC4F',
-  '\uD83E\uDEF6', '\uD83E\uDEC7', '\uD83D\uDE4C', '\uD83D\uDE4F', '\uD83D\uDC8B', '\u2764\uFE0F',
-  '\uD83E\uDDE0', '\uD83D\uDCAF', '\uD83C\uDF1A', '\uD83C\uDF1E', '\uD83D\uDCAB', '\uD83E\uDEAA',
+  { id: 'middle_finger', glyph: '\uD83D\uDD95', label: 'Middle finger' },
 ] as const
 
 type EmoteId = (typeof EMOTE_OPTIONS)[number]['id']
@@ -105,6 +93,24 @@ function getEmoteGlyph(emote?: string): string | undefined {
 
 function formatAmount(amount: number): string {
   return `$${amount.toLocaleString()}`
+}
+
+function formatEquityPercent(value: number): string {
+  return `${value.toFixed(1)}%`
+}
+
+function getLobbyStatusLabel(state: TableState, player: LobbyPlayer): string {
+  if (player.isSpectator) {
+    return state.phase === 'in_hand' && state.players.some(seatedPlayer => seatedPlayer.id === player.id)
+      ? 'spectating next hand'
+      : 'spectating'
+  }
+
+  if (!player.isSeated && state.phase === 'in_hand') {
+    return 'waiting for next hand'
+  }
+
+  return player.status.replace('_', ' ')
 }
 
 export function PokerTable({
@@ -146,8 +152,13 @@ export function PokerTable({
   const [targetEmotePickerOpen, setTargetEmotePickerOpen] = useState(false)
 
   const orderedOpponents = useMemo<OpponentSeat[]>(() => {
-    if (!me) {
-      return []
+    if (isSpectator || !me) {
+      return state.players
+        .map(player => ({
+          ...player,
+          visualSeat: player.seatIndex,
+        }))
+        .sort((a, b) => a.visualSeat - b.visualSeat)
     }
 
     const mySeat = me.seatIndex
@@ -158,7 +169,7 @@ export function PokerTable({
         visualSeat: (player.seatIndex - mySeat + 8) % 8,
       }))
       .sort((a, b) => a.visualSeat - b.visualSeat)
-  }, [me, state.players, yourId])
+  }, [isSpectator, me, state.players, yourId])
 
   const toCall = me ? Math.min(state.currentBet - me.bet, me.stack) : 0
   const canCheck = me ? me.bet >= state.currentBet : false
@@ -180,6 +191,7 @@ export function PokerTable({
     actions.push('all_in')
     return actions
   }, [canCheck, isConnected, isMyTurn, me, toCall])
+  const hasActionTray = isInHand && isMyTurn && Boolean(me) && legalActions.length > 0
 
   const maxRaise = me ? me.stack + me.bet : 0
   const effectiveMin = Math.min(state.minRaise, maxRaise)
@@ -202,15 +214,18 @@ export function PokerTable({
       return bets
     }
 
-    const halfPot = Math.max(effectiveMin, Math.floor(state.totalPot / 2))
-    const fullPot = Math.max(effectiveMin, state.totalPot)
+    const presetBets = [
+      { label: '1/4 Pot', amount: Math.max(effectiveMin, Math.floor(state.totalPot / 4)) },
+      { label: '1/2 Pot', amount: Math.max(effectiveMin, Math.floor(state.totalPot / 2)) },
+      { label: '3/4 Pot', amount: Math.max(effectiveMin, Math.floor((state.totalPot * 3) / 4)) },
+      { label: 'Pot', amount: Math.max(effectiveMin, state.totalPot) },
+    ]
 
-    if (halfPot <= maxRaise) {
-      bets.push({ label: 'Half pot', amount: halfPot })
-    }
-
-    if (fullPot <= maxRaise && fullPot !== halfPot) {
-      bets.push({ label: 'Pot', amount: fullPot })
+    for (const presetBet of presetBets) {
+      const alreadyAdded = bets.some(bet => bet.amount === presetBet.amount)
+      if (!alreadyAdded && presetBet.amount <= maxRaise) {
+        bets.push(presetBet)
+      }
     }
 
     return bets
@@ -225,15 +240,10 @@ export function PokerTable({
     onAction('raise', raiseAmount)
   }, [isConnected, onAction, onFeedback, raiseAmount])
 
-  const timerPercent = useTimerPercent(
+  const turnTimer = useTurnTimer(
     state.actionTimerStart,
     state.actionTimerDuration
   )
-
-  const showWinners =
-    state.phase === 'between_hands' &&
-    Array.isArray(state.winners) &&
-    state.winners.length > 0
 
   useEffect(() => {
     const activeExpiries = socialState.active.flatMap(entry =>
@@ -260,65 +270,64 @@ export function PokerTable({
       emote?: string
       messageExpiresAt?: number
       emoteExpiresAt?: number
+      emoteTargeted?: boolean
     }>()
 
     for (const entry of socialState.active) {
-      const nextEntry: {
-        message?: string
-        emote?: string
-        messageExpiresAt?: number
-        emoteExpiresAt?: number
-      } = {}
-
       if (entry.message && entry.messageExpiresAt && entry.messageExpiresAt > socialTick) {
-        nextEntry.message = entry.message
-        nextEntry.messageExpiresAt = entry.messageExpiresAt
+        const current = entries.get(entry.playerId) ?? {}
+        entries.set(entry.playerId, {
+          ...current,
+          message: entry.message,
+          messageExpiresAt: entry.messageExpiresAt,
+        })
       }
 
       if (entry.emote && entry.emoteExpiresAt && entry.emoteExpiresAt > socialTick) {
-        nextEntry.emote = getEmoteGlyph(entry.emote)
-        nextEntry.emoteExpiresAt = entry.emoteExpiresAt
-      }
-
-      if (nextEntry.message || nextEntry.emote) {
-        entries.set(entry.playerId, nextEntry)
+        const targetSeatId = entry.targetPlayerId?.trim() || entry.playerId
+        const current = entries.get(targetSeatId) ?? {}
+        entries.set(targetSeatId, {
+          ...current,
+          emote: getEmoteGlyph(entry.emote),
+          emoteExpiresAt: entry.emoteExpiresAt,
+          emoteTargeted: targetSeatId !== entry.playerId,
+        })
       }
     }
 
     return entries
   }, [socialState.active, socialTick])
 
-  const activeEmoteByPlayer = useMemo(() => {
-    const entries = new Map<string, {
+  const mySocial = useMemo(() => {
+    return socialState.active.reduce<{
+      message?: string
       emote?: string
-      emoteExpiresAt?: number
-      from?: string
-    }>()
-
-    for (const entry of socialState.active) {
-      if (!entry.emote || !entry.emoteExpiresAt || entry.emoteExpiresAt <= socialTick) {
-        continue
+    } | undefined>((current, entry) => {
+      if (entry.playerId !== yourId) {
+        return current
       }
 
-      const targetId = (entry.targetPlayerId && entry.targetPlayerId.trim()) || entry.playerId
-      if (!targetId) {
-        continue
+      const next = current ? { ...current } : {}
+
+      if (entry.message && entry.messageExpiresAt && entry.messageExpiresAt > socialTick) {
+        next.message = entry.message
       }
 
-      entries.set(targetId, {
-        emote: getEmoteGlyph(entry.emote),
-        emoteExpiresAt: entry.emoteExpiresAt,
-        from: state.players.find(player => player.id === entry.playerId)?.nickname ?? 'Player',
-      })
-    }
+      if (entry.emote && entry.emoteExpiresAt && entry.emoteExpiresAt > socialTick) {
+        next.emote = getEmoteGlyph(entry.emote)
+      }
 
-    return entries
-  }, [socialState.active, socialTick, state.players])
-
-  const mySocial = activeSocialByPlayer.get(yourId)
+      return next.message || next.emote ? next : current
+    }, undefined)
+  }, [socialState.active, socialTick, yourId])
   const targetedPlayer = targetEmotePlayerId
     ? state.players.find(player => player.id === targetEmotePlayerId)
     : null
+  const winnerAmounts = useMemo(
+    () => new Map((state.winners ?? []).map(winner => [winner.playerId, winner.amount])),
+    [state.winners]
+  )
+  const myWinnerAmount = winnerAmounts.get(yourId) ?? 0
 
   const latestChat = useMemo(() => socialState.chatLog.slice(-20), [socialState.chatLog])
 
@@ -329,7 +338,6 @@ export function PokerTable({
     }
 
     onSendTargetEmote(targetedPlayer.id, emote)
-    onFeedback(`Sent ${emote} to ${targetedPlayer.nickname}`, 'success')
     setTargetEmotePlayerId(null)
     setTargetEmotePickerOpen(false)
   }, [onFeedback, onSendTargetEmote, targetedPlayer])
@@ -340,7 +348,12 @@ export function PokerTable({
   }, [])
 
   return (
-    <div className="table-scene" data-suit-colors={suitColorMode}>
+    <div
+      className="table-scene"
+      data-phase={state.phase}
+      data-suit-colors={suitColorMode}
+      data-tray-open={hasActionTray ? 'true' : 'false'}
+    >
       <div className="table-wrapper">
         <div className="table-surface">
           <CommunityCards cards={state.communityCards} round={state.round} />
@@ -355,7 +368,6 @@ export function PokerTable({
           {orderedOpponents.map(player => {
             const layout = SEAT_LAYOUTS[player.visualSeat] ?? SEAT_LAYOUTS[1]
             const seatSocial = activeSocialByPlayer.get(player.id) ?? {}
-            const seatTargetEmote = activeEmoteByPlayer.get(player.id)
             return (
               <div
                 key={player.id}
@@ -364,16 +376,15 @@ export function PokerTable({
                 <PlayerSeat
                   player={player}
                   isActing={state.actingPlayerId === player.id}
+                  isWinner={betweenHands && winnerAmounts.has(player.id)}
+                  winnerAmount={winnerAmounts.get(player.id)}
                   depthClass={layout.depthClass}
                   opacityValue={layout.opacity}
                   socialMessage={seatSocial.message}
-                  socialEmote={seatSocial.emote}
                   socialMessageExpiresAt={seatSocial.messageExpiresAt}
+                  socialEmote={seatSocial.emote}
                   socialEmoteExpiresAt={seatSocial.emoteExpiresAt}
-                  socialEmoteFrom={seatTargetEmote?.from}
-                  targetedSocialEmote={seatTargetEmote?.emote}
-                  targetedSocialEmoteFrom={seatTargetEmote?.from}
-                  targetedSocialEmoteExpiresAt={seatTargetEmote?.emoteExpiresAt}
+                  socialEmoteTargeted={seatSocial.emoteTargeted}
                   onNameClick={playerId => {
                     setTargetEmotePlayerId(playerId)
                     setTargetEmotePickerOpen(false)
@@ -383,24 +394,28 @@ export function PokerTable({
             )
           })}
 
-        {showWinners && (
-          <WinnersOverlay
-            winners={state.winners ?? []}
-            players={state.players}
-            yourId={yourId}
-            handNumber={state.handNumber}
-            bounty={state.bounty}
-          />
-        )}
         </div>
 
-        {me && me.holeCards && me.holeCards.length > 0 && (
-          <OwnHand cards={me.holeCards} isActing={isMyTurn} />
+        {me && !isSpectator && me.holeCards && me.holeCards.length > 0 && (
+          <OwnHand
+            cards={me.holeCards}
+            bet={me.bet}
+            isActing={isMyTurn}
+            isWinner={betweenHands && myWinnerAmount > 0}
+          />
         )}
 
-        {me && (
+        {me && !isSpectator && (
           <div className="hero-inline-status">
             <span className="table-chip table-chip-soft">{formatAmount(me.stack)}</span>
+            {typeof me.equityPercent === 'number' && (
+              <span className="table-chip table-chip-soft">
+                Eq {formatEquityPercent(me.equityPercent)}
+              </span>
+            )}
+            {betweenHands && myWinnerAmount > 0 && (
+              <span className="table-chip winner-chip">Won {formatAmount(myWinnerAmount)}</span>
+            )}
             {me.isDealer && <span className="table-chip">Dealer</span>}
             {me.isSB && <span className="table-chip">SB</span>}
             {me.isBB && <span className="table-chip">BB</span>}
@@ -434,13 +449,19 @@ export function PokerTable({
         />
       )}
 
-      {isInHand && isMyTurn && me && legalActions.length > 0 && (
+      {hasActionTray && me && (
         <div className="betting-tray">
-          <div className="timer-bar">
-            <div
-              className={`timer-bar-fill ${timerPercent < 20 ? 'timer-low' : ''}`}
-              style={{ width: `${timerPercent}%` }}
-            />
+          <div className="timer-bar-shell">
+            <div className="timer-bar-header">
+              <span>Fold timer</span>
+              <span>{turnTimer.secondsLeft}s left</span>
+            </div>
+            <div className="timer-bar">
+              <div
+                className={`timer-bar-fill ${turnTimer.percent < 20 ? 'timer-low' : ''}`}
+                style={{ width: `${turnTimer.percent}%` }}
+              />
+            </div>
           </div>
 
           {legalActions.includes('raise') && effectiveMin > 0 && (
@@ -610,6 +631,7 @@ export function PokerTable({
                 onClose={closeTargetedEmote}
                 fullPickerOpen={targetEmotePickerOpen}
                 onToggleFullPicker={() => setTargetEmotePickerOpen(current => !current)}
+                emotes={EMOTE_OPTIONS}
               />
             )}
           </div>
@@ -639,18 +661,63 @@ function ChatPanel({
   emotes: readonly { id: EmoteId; glyph: string; label: string }[]
 }) {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false)
+  const [isExpanded, setIsExpanded] = useState(false)
   const hasInput = chatInput.trim().length > 0
+  const latestEntry = entries[entries.length - 1]
+  const messageCountLabel = entries.length === 1 ? '1 message' : `${entries.length} messages`
+  const latestEntryLabel = latestEntry
+    ? `${latestEntry.playerId === mySeatId ? 'You' : latestEntry.nickname}: ${latestEntry.message}`
+    : 'Open messages and emoji reactions.'
+
+  if (!isExpanded) {
+    return (
+      <aside className="table-panel chat-panel is-collapsed">
+        <button
+          type="button"
+          className="chat-panel-toggle"
+          aria-expanded={false}
+          aria-label="Open table chat"
+          onClick={() => setIsExpanded(true)}
+        >
+          <span className="chat-panel-toggle-row">
+            <span>
+              <span className="table-panel-kicker">Table chat</span>
+              <span className="chat-panel-toggle-title">Social</span>
+            </span>
+            <span className="table-chip table-chip-soft">{messageCountLabel}</span>
+          </span>
+          <span className="chat-panel-toggle-preview">{latestEntryLabel}</span>
+        </button>
+      </aside>
+    )
+  }
 
   return (
-    <aside className="table-panel chat-panel">
+    <aside className="table-panel chat-panel is-expanded">
       <div className="table-panel-header">
         <div>
           <div className="table-panel-kicker">Table chat</div>
           <div className="table-panel-title">Social</div>
         </div>
-        {mySocial?.message || mySocial?.emote ? (
-          <span className="table-chip table-chip-soft">Your message is visible overhead</span>
-        ) : null}
+        <div className="chat-panel-header-actions">
+          {mySocial?.message || mySocial?.emote ? (
+            <span className="table-chip table-chip-soft">
+              {mySocial.message ? 'Your message is visible overhead' : 'Your emoji is live at the table'}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="btn-subtle chat-panel-collapse"
+            aria-expanded={true}
+            aria-label="Collapse table chat"
+            onClick={() => {
+              setEmojiPickerOpen(false)
+              setIsExpanded(false)
+            }}
+          >
+            Hide
+          </button>
+        </div>
       </div>
 
       <div className="chat-log">
@@ -708,27 +775,19 @@ function ChatPanel({
           disabled={!isConnected}
           onClick={() => setEmojiPickerOpen(current => !current)}
         >
-          Choose emoji
+          {emojiPickerOpen ? 'Hide picker' : 'Search all emojis'}
         </button>
       </div>
 
       {emojiPickerOpen && (
-        <div className="emoji-picker-panel" role="listbox" aria-label="Choose an emoji">
-          {EMOJI_PICKER_OPTIONS.map(emoji => (
-            <button
-              key={emoji}
-              type="button"
-              className="emoji-picker-option"
-              onClick={() => {
-                onSendEmote(emoji)
-                setEmojiPickerOpen(false)
-              }}
-              disabled={!isConnected}
-            >
-              {emoji}
-            </button>
-          ))}
-        </div>
+        <SearchableEmojiPicker
+          isConnected={isConnected}
+          searchPlaceholder="Search all emojis"
+          onSelect={emoji => {
+            onSendEmote(emoji)
+            setEmojiPickerOpen(false)
+          }}
+        />
       )}
     </aside>
   )
@@ -767,6 +826,7 @@ function TargetedEmotePanel({
   onClose,
   fullPickerOpen,
   onToggleFullPicker,
+  emotes,
 }: {
   target: SeatPlayer
   isConnected: boolean
@@ -774,6 +834,7 @@ function TargetedEmotePanel({
   onClose: () => void
   fullPickerOpen: boolean
   onToggleFullPicker: () => void
+  emotes: readonly { id: EmoteId; glyph: string; label: string }[]
 }) {
   return (
     <aside className="table-panel targeted-emote-panel">
@@ -788,21 +849,21 @@ function TargetedEmotePanel({
           onClick={onClose}
           aria-label="Close target emote panel"
         >
-          ×
+          x
         </button>
       </div>
 
       <div className="chat-emotes">
-        {EMOJI_PICKER_OPTIONS.slice(0, 10).map(emoji => (
+        {emotes.map(item => (
           <button
-            key={emoji}
+            key={item.id}
             type="button"
             className="emote-button"
-            onClick={() => onSendEmote(emoji)}
+            onClick={() => onSendEmote(item.glyph)}
             disabled={!isConnected}
-            title={`Send ${emoji} to ${target.nickname}`}
+            title={`Send ${item.label.toLowerCase()} to ${target.nickname}`}
           >
-            {emoji}
+            {item.glyph}
           </button>
         ))}
         <button
@@ -811,44 +872,49 @@ function TargetedEmotePanel({
           disabled={!isConnected}
           onClick={onToggleFullPicker}
         >
-          {fullPickerOpen ? 'Hide all emojis' : 'Choose any emoji'}
+          {fullPickerOpen ? 'Hide picker' : 'Search all emojis'}
         </button>
       </div>
 
       {fullPickerOpen && (
-        <div className="emoji-picker-panel targeted-emote-picker" role="listbox" aria-label="Choose an emoji">
-          {EMOJI_PICKER_OPTIONS.map(emoji => (
-            <button
-              key={emoji}
-              type="button"
-              className="emoji-picker-option"
-              onClick={() => onSendEmote(emoji)}
-              disabled={!isConnected}
-            >
-              {emoji}
-            </button>
-          ))}
-        </div>
+        <SearchableEmojiPicker
+          className="targeted-emote-picker"
+          isConnected={isConnected}
+          searchPlaceholder={`Search emojis for ${target.nickname}`}
+          onSelect={emoji => onSendEmote(emoji)}
+        />
       )}
     </aside>
   )
 }
 
-function useTimerPercent(timerStart: number | null, duration: number): number {
-  const [percent, setPercent] = useState(100)
+function useTurnTimer(timerStart: number | null, duration: number): { percent: number; secondsLeft: number } {
+  const [timer, setTimer] = useState({
+    percent: 100,
+    secondsLeft: Math.max(0, Math.ceil(duration / 1000)),
+  })
   const rafRef = useRef<number>(0)
 
   useEffect(() => {
     if (!timerStart) {
-      setPercent(100)
+      setTimer({
+        percent: 100,
+        secondsLeft: Math.max(0, Math.ceil(duration / 1000)),
+      })
       return
     }
 
     const tick = () => {
       const elapsed = Date.now() - timerStart
-      const remaining = Math.max(0, 100 - (elapsed / duration) * 100)
-      setPercent(remaining)
-      if (remaining > 0) {
+      const remainingMs = Math.max(0, duration - elapsed)
+      const remainingPercent = duration > 0 ? (remainingMs / duration) * 100 : 0
+
+      setTimer({
+        percent: remainingPercent,
+        secondsLeft: Math.max(0, Math.ceil(remainingMs / 1000)),
+      })
+
+      if (remainingMs > 0) {
         rafRef.current = requestAnimationFrame(tick)
       }
     }
@@ -857,82 +923,7 @@ function useTimerPercent(timerStart: number | null, duration: number): number {
     return () => cancelAnimationFrame(rafRef.current)
   }, [duration, timerStart])
 
-  return percent
-}
-
-function WinnersOverlay({
-  winners,
-  players,
-  yourId,
-  handNumber,
-  bounty,
-}: {
-  winners: Array<{ playerId: string; amount: number; handDescription?: string }>
-  players: SeatPlayer[]
-  yourId: string
-  handNumber: number
-  bounty?: {
-    active: boolean
-    amount: number
-    contributors: string[]
-    recipientPlayerIds: string[]
-    reason: string
-  }
-}) {
-  const totalAwarded = winners.reduce((sum, winner) => sum + winner.amount, 0)
-  const heroWon = winners.some(winner => winner.playerId === yourId)
-  const title =
-    winners.length === 1
-      ? heroWon
-        ? 'You scoop the pot'
-        : 'Hand complete'
-      : heroWon
-        ? 'You share the pot'
-        : 'Split pot'
-
-  return (
-    <div className="winners-overlay">
-      <div className="winners-card">
-        <div className="winners-kicker">Hand #{handNumber} complete</div>
-        <div className="winners-title">{title}</div>
-        <div className="winners-total">{formatAmount(totalAwarded)} awarded</div>
-
-        <div className="winners-list">
-          {winners.map(winner => {
-            const player = players.find(playerEntry => playerEntry.id === winner.playerId)
-            const isHero = winner.playerId === yourId
-
-            return (
-              <div
-                key={winner.playerId}
-                className={`winner-row ${isHero ? 'is-hero' : ''}`}
-              >
-                <div>
-                  <div className="winner-name">
-                    {isHero ? 'You' : player?.nickname ?? 'Unknown player'}
-                  </div>
-                  {winner.handDescription && (
-                    <div className="winner-hand">{winner.handDescription}</div>
-                  )}
-                </div>
-                <div className="winner-amount">{formatAmount(winner.amount)}</div>
-              </div>
-            )
-          })}
-        </div>
-
-        {bounty?.active && bounty.reason ? (
-          <div className="winners-footnote">
-            {bounty.reason}
-          </div>
-        ) : null}
-
-        <div className="winners-footnote">
-          Host can adjust blinds or deal again when everyone is ready.
-        </div>
-      </div>
-    </div>
-  )
+  return timer
 }
 
 function SettingsModal({
@@ -1043,7 +1034,6 @@ function SettingsModal({
       sevenTwoRuleEnabled: draft.sevenTwoRuleEnabled,
       sevenTwoBountyPercent,
     })
-    onFeedback('Updated table settings for upcoming action.', 'success')
   }
 
   return (
@@ -1216,7 +1206,7 @@ function SettingsModal({
                     </div>
                   )}
                   <div className="settings-section-copy">
-                    When active, each eligible opponent pays this percent of the table starting stack to any winning 7/2 hand.
+                    When active, every other player who was dealt into the hand pays this percent of the table starting stack to any winning 7/2 hand.
                   </div>
                 </div>
 
@@ -1271,7 +1261,7 @@ function SettingsModal({
                       {player.id === yourId ? `${player.nickname} (you)` : player.nickname}
                     </div>
                     <div className="host-player-meta">
-                      {formatAmount(player.stack)} {'\u00b7'} {player.status.replace('_', ' ')}
+                      {formatAmount(player.stack)} {'\u00b7'} {getLobbyStatusLabel(state, player)}
                     </div>
                   </div>
                   <div className="settings-player-actions">
@@ -1297,10 +1287,7 @@ function SettingsModal({
                       type="button"
                       className="btn-subtle"
                       disabled={!isConnected}
-                      onClick={() => {
-                        onAdjustPlayerStack(player.id, manageAmount)
-                        onFeedback(`Added ${formatAmount(manageAmount)} to ${player.nickname}.`, 'info')
-                      }}
+                      onClick={() => onAdjustPlayerStack(player.id, manageAmount)}
                     >
                       Add
                     </button>
@@ -1308,10 +1295,7 @@ function SettingsModal({
                       type="button"
                       className="btn-subtle"
                       disabled={!isConnected}
-                      onClick={() => {
-                        onAdjustPlayerStack(player.id, -manageAmount)
-                        onFeedback(`Removed ${formatAmount(manageAmount)} from ${player.nickname}.`, 'info')
-                      }}
+                      onClick={() => onAdjustPlayerStack(player.id, -manageAmount)}
                     >
                       Remove
                     </button>
@@ -1319,29 +1303,18 @@ function SettingsModal({
                       type="button"
                       className="btn-subtle"
                       disabled={!isConnected}
-                      onClick={() => {
-                        onSetPlayerSpectator(player.id, !player.isSpectator)
-                        onFeedback(
-                          player.isSpectator
-                            ? `Moved ${player.nickname} back toward a seat.`
-                            : `Moved ${player.nickname} to spectator mode.`,
-                          'info'
-                        )
-                      }}
+                      onClick={() => onSetPlayerSpectator(player.id, !player.isSpectator)}
                     >
-                      {player.isSpectator ? 'Seat back' : 'Spectate'}
+                      {player.isSpectator ? 'Seat back' : state.phase === 'in_hand' ? 'Spectate now' : 'Spectate'}
                     </button>
                     {player.id !== yourId ? (
                       <button
                         type="button"
                         className="btn-subtle btn-subtle-danger"
                         disabled={!isConnected}
-                        onClick={() => {
-                          onRemovePlayer(player.id)
-                          onFeedback(`Requested removal for ${player.nickname}.`, 'info')
-                        }}
+                        onClick={() => onRemovePlayer(player.id)}
                       >
-                        Kick
+                        {state.phase === 'in_hand' ? 'Kick now' : 'Kick'}
                       </button>
                     ) : (
                       <span className="table-chip">Host</span>
@@ -1400,10 +1373,7 @@ function HostControls({
           type="button"
           className="btn-subtle btn-subtle-gold"
           disabled={!isConnected || seatedCount >= 8}
-          onClick={() => {
-            onAddBots(1)
-            onFeedback('Added 1 local bot.', 'info')
-          }}
+          onClick={() => onAddBots(1)}
         >
           Add bot
         </button>
@@ -1411,10 +1381,7 @@ function HostControls({
           type="button"
           className="btn-subtle btn-subtle-gold"
           disabled={!isConnected || seatedCount >= 8}
-          onClick={() => {
-            onAddBots(8 - seatedCount)
-            onFeedback('Added local bots for testing.', 'info')
-          }}
+          onClick={() => onAddBots(8 - seatedCount)}
         >
           Fill with bots
         </button>
@@ -1531,7 +1498,6 @@ function RebuyPanel({
     }
 
     onRebuy(amount)
-    onFeedback(`Requested a ${formatAmount(amount)} rebuy.`, 'info')
   }
 
   return (

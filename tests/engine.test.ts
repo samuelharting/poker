@@ -312,6 +312,43 @@ describe('bounty payouts', () => {
     expect(resolved.bounty?.contributors).toEqual([activeContributor.id])
   })
 
+  it('charges folded players who were dealt into the hand', () => {
+    const state = startHand(setup3Players())
+    const winner = state.players[0]!
+    const foldedLoser = state.players[1]!
+    const liveLoser = state.players[2]!
+
+    winner.holeCards = handCards('7', 'spades', '2', 'hearts')
+    foldedLoser.holeCards = handCards('A', 'spades', 'K', 'hearts')
+    liveLoser.holeCards = handCards('Q', 'spades', 'J', 'hearts')
+    foldedLoser.status = 'folded'
+
+    state.communityCards = [
+      { rank: '7', suit: 'diamonds' },
+      { rank: '5', suit: 'clubs' },
+      { rank: '8', suit: 'hearts' },
+      { rank: '2', suit: 'clubs' },
+      { rank: '9', suit: 'spades' },
+    ]
+    state.round = 'showdown'
+
+    const before = Object.fromEntries(state.players.map(p => [p.id, p.stack] as const))
+    const resolved = resolveShowdown(state)
+
+    expect(resolved.bounty?.active).toBe(true)
+    expect(resolved.bounty?.amount).toBe(40)
+    expect(new Set(resolved.bounty?.contributors ?? [])).toEqual(
+      new Set([foldedLoser.id, liveLoser.id])
+    )
+    expect(resolved.players.find(p => p.id === winner.id)?.stack).toBe(before[winner.id]! + 70)
+    expect(resolved.players.find(p => p.id === foldedLoser.id)?.stack).toBe(
+      before[foldedLoser.id]! - 20
+    )
+    expect(resolved.players.find(p => p.id === liveLoser.id)?.stack).toBe(
+      before[liveLoser.id]! - 20
+    )
+  })
+
   it('works with a side pot and still applies 7-2 bounty', () => {
     const state = startHand(setup3Players())
     const winner = state.players[0]!
@@ -375,6 +412,22 @@ describe('toTableState', () => {
     const p2InView2 = view2.players.find(p => p.id === p2.id)!
     expect(p2InView2.holeCards).toHaveLength(2)
     expect(p1InView2.holeCards).toBeUndefined()
+  })
+
+  it('reveals every hand to a spectator view during a live hand', () => {
+    const state = startHand(setup2Players())
+    const [p1, p2] = state.players
+
+    const spectatorView = toTableState(state, 'spectator-1', {
+      revealAllHoleCards: true,
+    })
+    const p1InSpectatorView = spectatorView.players.find(player => player.id === p1!.id)!
+    const p2InSpectatorView = spectatorView.players.find(player => player.id === p2!.id)!
+
+    expect(p1InSpectatorView.holeCards).toHaveLength(2)
+    expect(p2InSpectatorView.holeCards).toHaveLength(2)
+    expect(p1InSpectatorView.showCards).toBe('both')
+    expect(p2InSpectatorView.showCards).toBe('both')
   })
 
   it('reveals folded cards when a player opts to show them', () => {

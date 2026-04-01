@@ -45,24 +45,26 @@ export function RoomHud({
         <div className="room-hud-label">Room</div>
         <div className="room-hud-code-row">
           <span className="room-code">{roomCode}</span>
-          <button type="button" className="hud-button" onClick={onCopyRoom}>
-            Copy
-          </button>
-          <button
-            type="button"
-            className="hud-button"
-            onClick={onShareRoom}
-            disabled={!canShare}
-          >
-            Share
-          </button>
-          <button
-            type="button"
-            className="hud-button"
-            onClick={onToggleSettings}
-          >
-            {settingsOpen ? 'Close settings' : 'Settings'}
-          </button>
+          <div className="room-hud-actions">
+            <button type="button" className="hud-button" onClick={onCopyRoom}>
+              Copy
+            </button>
+            <button
+              type="button"
+              className="hud-button"
+              onClick={onShareRoom}
+              disabled={!canShare}
+            >
+              Share
+            </button>
+            <button
+              type="button"
+              className="hud-button"
+              onClick={onToggleSettings}
+            >
+              {settingsOpen ? 'Close settings' : 'Settings'}
+            </button>
+          </div>
         </div>
       </div>
 

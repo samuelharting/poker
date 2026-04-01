@@ -70,17 +70,25 @@ function isSevenTwoBountyHand(holeCards: InternalPlayer['holeCards']): boolean {
   return ranks.has('7') && ranks.has('2')
 }
 
-function isActiveBountyPayer(player: InternalPlayer, recipientIds: Set<string>): boolean {
+function isEligibleBountyPayer(player: InternalPlayer, recipientIds: Set<string>): boolean {
   if (recipientIds.has(player.id)) return false
   if (player.stack <= 0) return false
 
-  // Exclusion rule:
-  // Players already dead to action (folded, removed, or waiting/sitting out) do not pay bounty.
-  if (player.status === 'folded' || player.status === 'disconnected' || player.status === 'waiting' || player.status === 'sitting_out') {
+  // Only players who were actually dealt into the hand should pay the bounty.
+  // This includes players who later folded, but excludes players who were never in the hand.
+  if (player.holeCards.length !== 2) {
     return false
   }
 
-  return player.status === 'active' || player.status === 'all_in'
+  if (
+    player.status === 'disconnected' ||
+    player.status === 'waiting' ||
+    player.status === 'sitting_out'
+  ) {
+    return false
+  }
+
+  return true
 }
 
 function revealCardsForNextHand(state: InternalGameState): void {
@@ -162,7 +170,7 @@ function applyBountyPayout(
   }
 
   const recipientSet = new Set(recipientPlayerIds)
-  const contributors = state.players.filter(player => isActiveBountyPayer(player, recipientSet))
+  const contributors = state.players.filter(player => isEligibleBountyPayer(player, recipientSet))
   if (contributors.length === 0) {
     return {
       active: false,
@@ -880,10 +888,23 @@ export function prepareNextHand(state: InternalGameState): InternalGameState {
  */
 export function toTableState(
   state: InternalGameState,
-  viewerPlayerId: string
+  viewerPlayerId: string,
+  options: {
+    revealAllHoleCards?: boolean
+  } = {}
 ): TableState {
+  const revealAllHoleCards = options.revealAllHoleCards === true
+
   const revealCards = (player: InternalPlayer): Card[] | undefined => {
-    if (state.phase === 'in_hand' || player.holeCards.length === 0) {
+    if (player.holeCards.length === 0) {
+      return undefined
+    }
+
+    if (revealAllHoleCards) {
+      return player.holeCards
+    }
+
+    if (state.phase === 'in_hand') {
       return undefined
     }
 
@@ -919,7 +940,7 @@ export function toTableState(
       isBB: p.isBB,
       holeCards: p.id === viewerPlayerId ? p.holeCards : revealCards(p),
       hasCards: p.holeCards.length > 0,
-      showCards: p.showCards,
+      showCards: revealAllHoleCards && p.holeCards.length > 0 ? 'both' : p.showCards,
       isConnected: p.isConnected,
       lastAction: p.lastAction,
       seatIndex: p.seatIndex,

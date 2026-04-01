@@ -309,6 +309,65 @@ describe('PokerRoom timer handling', () => {
     const lobbyGuest = snapshot?.state.lobbyPlayers.find(player => player.id === guest.playerId)
     expect(lobbyGuest?.isSpectator).toBe(true)
   })
+
+  it('shows every hand to a player once they are moved into spectator mode', () => {
+    const { room, server } = createHarness()
+
+    const host = joinPlayer(server, room, 'host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+
+    const guest = joinPlayer(server, room, 'guest', 'Bob')
+    seatPlayer(server, guest.connection, 1)
+
+    send(server, host.connection, { type: 'start_game' })
+    send(server, host.connection, { type: 'set_player_spectator', targetId: guest.playerId, spectator: true })
+
+    const spectatorSnapshot = lastMessage(guest.connection, 'room_snapshot')
+    const hostSeatForSpectator = spectatorSnapshot?.state.players.find(player => player.id === host.playerId)
+    const guestSeatForSpectator = spectatorSnapshot?.state.players.find(player => player.id === guest.playerId)
+
+    expect(hostSeatForSpectator?.holeCards).toHaveLength(2)
+    expect(guestSeatForSpectator?.holeCards).toHaveLength(2)
+    expect(hostSeatForSpectator?.showCards).toBe('both')
+    expect(guestSeatForSpectator?.showCards).toBe('both')
+    expect(hostSeatForSpectator?.equityPercent).toBeUndefined()
+    expect(guestSeatForSpectator?.equityPercent).toBeUndefined()
+
+    const hostSnapshot = lastMessage(host.connection, 'room_snapshot')
+    const guestSeatForHost = hostSnapshot?.state.players.find(player => player.id === guest.playerId)
+    expect(guestSeatForHost?.holeCards).toBeUndefined()
+    expect(guestSeatForHost?.equityPercent).toBeUndefined()
+  })
+
+  it('adds live odds for true spectators while the hand is still contested', () => {
+    const { room, server } = createHarness()
+
+    const host = joinPlayer(server, room, 'host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+
+    const guest = joinPlayer(server, room, 'guest', 'Bob')
+    seatPlayer(server, guest.connection, 1)
+
+    const rail = joinPlayer(server, room, 'rail', 'Charlie')
+    send(server, host.connection, { type: 'set_player_spectator', targetId: rail.playerId, spectator: true })
+
+    send(server, host.connection, { type: 'start_game' })
+
+    const spectatorSnapshot = lastMessage(rail.connection, 'room_snapshot')
+    const hostSeatForRail = spectatorSnapshot?.state.players.find(player => player.id === host.playerId)
+    const guestSeatForRail = spectatorSnapshot?.state.players.find(player => player.id === guest.playerId)
+
+    expect(hostSeatForRail?.holeCards).toHaveLength(2)
+    expect(guestSeatForRail?.holeCards).toHaveLength(2)
+    expect(typeof hostSeatForRail?.equityPercent).toBe('number')
+    expect(typeof guestSeatForRail?.equityPercent).toBe('number')
+
+    const hostSnapshot = lastMessage(host.connection, 'room_snapshot')
+    const guestSeatForHost = hostSnapshot?.state.players.find(player => player.id === guest.playerId)
+
+    expect(guestSeatForHost?.holeCards).toBeUndefined()
+    expect(guestSeatForHost?.equityPercent).toBeUndefined()
+  })
 })
 
 describe('PokerRoom auto-start lifecycle', () => {
@@ -628,6 +687,41 @@ describe('PokerRoom social protocol', () => {
     expect(aliceSocial?.social.active.some(entry =>
       entry.playerId === alice.playerId &&
       entry.message === 'Welcome to the table!'
+    )).toBe(true)
+  })
+
+  it('broadcasts live emotes and keeps target metadata for targeted emotes', () => {
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice', 'Alice')
+    seatPlayer(server, alice.connection, 0)
+
+    const bob = joinPlayer(server, room, 'bob', 'Bob')
+    seatPlayer(server, bob.connection, 1)
+
+    send(server, alice.connection, { type: 'table_emote', emote: '👋' })
+
+    let social = lastMessage(bob.connection, 'social_snapshot')
+    const selfEmote = social?.social.active.find(entry =>
+      entry.playerId === alice.playerId &&
+      entry.emote === '👋'
+    )
+
+    expect(selfEmote?.targetPlayerId).toBeUndefined()
+    expect(typeof selfEmote?.emoteExpiresAt).toBe('number')
+
+    send(server, alice.connection, { type: 'table_emote', emote: '😂', targetId: bob.playerId })
+
+    social = lastMessage(bob.connection, 'social_snapshot')
+    const targetedEmote = social?.social.active.find(entry =>
+      entry.playerId === alice.playerId &&
+      entry.emote === '😂'
+    )
+
+    expect(targetedEmote?.targetPlayerId).toBe(bob.playerId)
+    expect(social?.social.chatLog.some(entry =>
+      entry.playerId === alice.playerId &&
+      entry.message === 'to Bob: 😂'
     )).toBe(true)
   })
 

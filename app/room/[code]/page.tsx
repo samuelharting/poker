@@ -95,6 +95,7 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
   const [suitColorMode, setSuitColorMode] = useState<'two' | 'four'>('two')
   const toastIdRef = useRef(0)
   const connectionStateRef = useRef<boolean | null>(null)
+  const hasEstablishedConnectionRef = useRef(false)
 
   const dismissToast = useCallback((id: number) => {
     setToasts(current => current.filter(toast => toast.id !== id))
@@ -140,19 +141,29 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
   useEffect(() => {
     if (connectionStateRef.current === null) {
       connectionStateRef.current = isConnected
+      if (isConnected) {
+        hasEstablishedConnectionRef.current = true
+      }
       return
     }
 
     if (connectionStateRef.current !== isConnected) {
-      pushToast(
-        isConnected
-          ? 'Back at the table.'
-          : 'Connection lost. Trying to rejoin your seat...',
-        isConnected ? 'success' : 'error'
-      )
+      if (isConnected) {
+        if (hasEstablishedConnectionRef.current) {
+          pushToast('Back at the table.', 'success')
+        }
+        hasEstablishedConnectionRef.current = true
+      } else if (hasEstablishedConnectionRef.current) {
+        pushToast('Connection lost. Trying to rejoin your seat...', 'error')
+      }
       connectionStateRef.current = isConnected
     }
   }, [isConnected, pushToast])
+
+  const canShareRoom = typeof navigator !== 'undefined' && (
+    typeof navigator.share === 'function' ||
+    typeof navigator.clipboard?.writeText === 'function'
+  )
 
   const rememberStartingStack = useCallback((value: number) => {
     setStartingStackSetting(value)
@@ -241,7 +252,7 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
         onCopyRoom={handleCopyRoom}
         onShareRoom={handleShareRoom}
         onToggleSettings={() => setSettingsOpen(current => !current)}
-        canShare={typeof navigator !== 'undefined' && typeof navigator.share === 'function'}
+        canShare={canShareRoom}
       />
 
       {!isConnected && tableState && (

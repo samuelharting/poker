@@ -72,7 +72,7 @@ export function sanitizeText(raw: string, maxLength = MAX_CHAT_LENGTH): string {
     .slice(0, maxLength)
 }
 
-function sanitizeEmote(raw: string, maxLength = 16): string {
+export function sanitizeEmote(raw: string, maxLength = 16): string {
   const value = raw
     .replace(FORBIDDEN_CONTROL_RE, '')
     .trim()
