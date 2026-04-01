@@ -247,6 +247,8 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
         isConnected={isConnected}
         isHost={isHost}
         playerCount={tableState?.players.length ?? 0}
+        smallBlind={tableState?.smallBlind ?? 10}
+        bigBlind={tableState?.bigBlind ?? 20}
         phase={tableState?.phase ?? null}
         settingsOpen={settingsOpen}
         onCopyRoom={handleCopyRoom}
@@ -277,7 +279,6 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
           autoStartEnabled={tableState.autoStartEnabled ?? true}
           onSetAutoStart={enabled => sendMessage({ type: 'set_auto_start', enabled })}
           onUpdateSettings={handleUpdateSettings}
-          onRebuy={(amount: number) => sendMessage({ type: 'rebuy', amount })}
           onRemovePlayer={(targetId: string) => sendMessage({ type: 'remove_player', targetId })}
           onAdjustPlayerStack={(targetId: string, amount: number) =>
             sendMessage({ type: 'adjust_player_stack', targetId, amount })}

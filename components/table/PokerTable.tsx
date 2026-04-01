@@ -37,7 +37,6 @@ interface PokerTableProps {
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
   }) => void
-  onRebuy: (amount: number) => void
   onRemovePlayer: (targetId: string) => void
   onAdjustPlayerStack: (targetId: string, amount: number) => void
   onSetPlayerSpectator: (targetId: string, spectator: boolean) => void
@@ -128,7 +127,6 @@ export function PokerTable({
   autoStartEnabled,
   onSetAutoStart,
   onUpdateSettings,
-  onRebuy,
   onRemovePlayer,
   onAdjustPlayerStack,
   onSetPlayerSpectator,
@@ -170,6 +168,27 @@ export function PokerTable({
       }))
       .sort((a, b) => a.visualSeat - b.visualSeat)
   }, [isSpectator, me, state.players, yourId])
+
+  const occupiedVisualSeats = useMemo(() => {
+    const occupied = new Set<number>()
+
+    orderedOpponents.forEach(player => occupied.add(player.visualSeat))
+
+    if (me && !isSpectator) {
+      occupied.add(0)
+    }
+
+    return occupied
+  }, [isSpectator, me, orderedOpponents])
+
+  const emptyVisualSeats = useMemo(() => {
+    return SEAT_LAYOUTS
+      .map((layout, visualSeat) => ({
+        ...layout,
+        visualSeat,
+      }))
+      .filter(layout => !occupiedVisualSeats.has(layout.visualSeat))
+  }, [occupiedVisualSeats])
 
   const toCall = me ? Math.min(state.currentBet - me.bet, me.stack) : 0
   const canCheck = me ? me.bet >= state.currentBet : false
@@ -331,6 +350,14 @@ export function PokerTable({
 
   const latestChat = useMemo(() => socialState.chatLog.slice(-20), [socialState.chatLog])
 
+  const tableWaitingCopy = !isConnected
+    ? 'Restoring the room snapshot and reconnecting your seat.'
+    : state.players.length < 2
+      ? 'Share the room code and fill the open seats to kick off the next hand.'
+      : isHost
+        ? 'The table is ready. Use the host dock below when you want to deal.'
+        : 'Everyone is seated. Waiting for the host to deal the next hand.'
+
   const handleTargetedEmote = useCallback((emote: string) => {
     if (!targetedPlayer) {
       onFeedback('Select a player before sending a targeted emote.', 'error')
@@ -354,56 +381,81 @@ export function PokerTable({
       data-suit-colors={suitColorMode}
       data-tray-open={hasActionTray ? 'true' : 'false'}
     >
-      <div className="table-wrapper">
-        <div className="table-surface">
-          <CommunityCards cards={state.communityCards} round={state.round} />
-
-          <PotDisplay
-            totalPot={state.totalPot}
-            pots={state.pots}
-            currentBet={state.currentBet}
-            toCall={isMyTurn ? Math.max(0, toCall) : 0}
-          />
-
-          {orderedOpponents.map(player => {
-            const layout = SEAT_LAYOUTS[player.visualSeat] ?? SEAT_LAYOUTS[1]
-            const seatSocial = activeSocialByPlayer.get(player.id) ?? {}
-            return (
+      <div className="table-stage">
+        <div className="table-wrapper">
+          <div className="table-seat-ring">
+            {emptyVisualSeats.map(layout => (
               <div
-                key={player.id}
-                className={`seat-position ${layout.cssClass}`}
+                key={`open-seat-${layout.visualSeat}`}
+                className={`seat-position table-seat-placeholder ${layout.cssClass}`}
               >
-                <PlayerSeat
-                  player={player}
-                  isActing={state.actingPlayerId === player.id}
-                  isWinner={betweenHands && winnerAmounts.has(player.id)}
-                  winnerAmount={winnerAmounts.get(player.id)}
-                  depthClass={layout.depthClass}
-                  opacityValue={layout.opacity}
-                  socialMessage={seatSocial.message}
-                  socialMessageExpiresAt={seatSocial.messageExpiresAt}
-                  socialEmote={seatSocial.emote}
-                  socialEmoteExpiresAt={seatSocial.emoteExpiresAt}
-                  socialEmoteTargeted={seatSocial.emoteTargeted}
-                  onNameClick={playerId => {
-                    setTargetEmotePlayerId(playerId)
-                    setTargetEmotePickerOpen(false)
-                  }}
-                />
+                <div className="table-seat-placeholder-card">
+                  <span className="table-seat-placeholder-kicker">Open seat</span>
+                  <span className="table-seat-placeholder-label">
+                    {state.phase === 'in_hand' ? 'Wait' : 'Sit'}
+                  </span>
+                </div>
               </div>
-            )
-          })}
+            ))}
 
+            {orderedOpponents.map(player => {
+              const layout = SEAT_LAYOUTS[player.visualSeat] ?? SEAT_LAYOUTS[1]
+              const seatSocial = activeSocialByPlayer.get(player.id) ?? {}
+              return (
+                <div
+                  key={player.id}
+                  className={`seat-position ${layout.cssClass}`}
+                >
+                  <PlayerSeat
+                    player={player}
+                    isActing={state.actingPlayerId === player.id}
+                    isWinner={betweenHands && winnerAmounts.has(player.id)}
+                    winnerAmount={winnerAmounts.get(player.id)}
+                    depthClass={layout.depthClass}
+                    opacityValue={layout.opacity}
+                    socialMessage={seatSocial.message}
+                    socialMessageExpiresAt={seatSocial.messageExpiresAt}
+                    socialEmote={seatSocial.emote}
+                    socialEmoteExpiresAt={seatSocial.emoteExpiresAt}
+                    socialEmoteTargeted={seatSocial.emoteTargeted}
+                    onNameClick={playerId => {
+                      setTargetEmotePlayerId(playerId)
+                      setTargetEmotePickerOpen(false)
+                    }}
+                  />
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="table-surface">
+            <CommunityCards cards={state.communityCards} round={state.round} />
+
+            <PotDisplay
+              totalPot={state.totalPot}
+              pots={state.pots}
+              currentBet={state.currentBet}
+              toCall={isMyTurn ? Math.max(0, toCall) : 0}
+            />
+
+            {betweenHands && (
+              <TableWaitingBanner
+                playerCount={state.players.length}
+                isConnected={isConnected}
+                copy={tableWaitingCopy}
+              />
+            )}
+          </div>
+
+          {me && !isSpectator && me.holeCards && me.holeCards.length > 0 && (
+            <OwnHand
+              cards={me.holeCards}
+              bet={me.bet}
+              isActing={isMyTurn}
+              isWinner={betweenHands && myWinnerAmount > 0}
+            />
+          )}
         </div>
-
-        {me && !isSpectator && me.holeCards && me.holeCards.length > 0 && (
-          <OwnHand
-            cards={me.holeCards}
-            bet={me.bet}
-            isActing={isMyTurn}
-            isWinner={betweenHands && myWinnerAmount > 0}
-          />
-        )}
 
         {me && !isSpectator && (
           <div className="hero-inline-status">
@@ -589,16 +641,6 @@ export function PokerTable({
             />
           )}
 
-              {me && (
-                <RebuyPanel
-                  me={me}
-                  bigBlind={state.bigBlind}
-                  startingStackSetting={startingStackSetting}
-              canInteract={isConnected}
-              onRebuy={onRebuy}
-              onFeedback={onFeedback}
-                />
-              )}
             </div>
           )}
 
@@ -661,7 +703,7 @@ function ChatPanel({
   emotes: readonly { id: EmoteId; glyph: string; label: string }[]
 }) {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false)
-  const [isExpanded, setIsExpanded] = useState(false)
+  const [isExpanded, setIsExpanded] = useState(true)
   const hasInput = chatInput.trim().length > 0
   const latestEntry = entries[entries.length - 1]
   const messageCountLabel = entries.length === 1 ? '1 message' : `${entries.length} messages`
@@ -1454,107 +1496,25 @@ function WaitingPanel({
   )
 }
 
-function RebuyPanel({
-  me,
-  bigBlind,
-  startingStackSetting,
-  canInteract,
-  onRebuy,
-  onFeedback,
+function TableWaitingBanner({
+  playerCount,
+  isConnected,
+  copy,
 }: {
-  me: SeatPlayer
-  bigBlind: number
-  startingStackSetting: number
-  canInteract: boolean
-  onRebuy: (amount: number) => void
-  onFeedback: (message: string, tone?: FeedbackTone) => void
+  playerCount: number
+  isConnected: boolean
+  copy: string
 }) {
-  const recommended = Math.max(bigBlind, startingStackSetting - me.stack)
-  const quickAmounts = Array.from(
-    new Set(
-      [recommended, bigBlind * 25, bigBlind * 50]
-        .map(amount => Math.max(bigBlind, Math.floor(amount)))
-        .filter(amount => amount > 0)
-    )
-  ).slice(0, 3)
-
-  const [rebuyAmount, setRebuyAmount] = useState(Math.max(bigBlind, recommended))
-
-  useEffect(() => {
-    setRebuyAmount(Math.max(bigBlind, recommended))
-  }, [bigBlind, recommended])
-
-  const handleRebuy = () => {
-    const amount = Math.max(bigBlind, Math.floor(rebuyAmount))
-
-    if (!Number.isFinite(amount) || amount <= 0) {
-      onFeedback('Enter a valid rebuy amount first.', 'error')
-      return
-    }
-
-    if (!canInteract) {
-      onFeedback('Rebuy is disabled while the table reconnects.', 'error')
-      return
-    }
-
-    onRebuy(amount)
-  }
-
   return (
-    <div className="table-panel rebuy-panel">
-      <div className="table-panel-header">
-        <div>
-          <div className="table-panel-kicker">Your stack</div>
-          <div className="table-panel-title">{formatAmount(me.stack)}</div>
-        </div>
-        {(me.status === 'sitting_out' || me.stack === 0) && (
-          <div className="table-chip chip-warning">Needs chips</div>
-        )}
+    <div className="table-waiting-banner">
+      <div className="table-waiting-title">
+        {isConnected ? 'Waiting for others' : 'Reconnecting'}
       </div>
-
-      <div className="table-panel-note">
-        Add chips between hands. Recommended top-up: {formatAmount(Math.max(bigBlind, recommended))}.
-      </div>
-
-      <div className="raise-quick-btns rebuy-quick-row">
-        {quickAmounts.map(amount => (
-          <button
-            key={amount}
-            type="button"
-            className="btn-quick"
-            onClick={() => setRebuyAmount(amount)}
-          >
-            {formatAmount(amount)}
-          </button>
-        ))}
-      </div>
-
-      <div className="rebuy-input-row">
-        <input
-          type="number"
-          min={bigBlind}
-          step={Math.max(bigBlind, 1)}
-          className="raise-input"
-          value={rebuyAmount}
-          onChange={event => {
-            const value = Number(event.target.value)
-            if (!Number.isFinite(value)) {
-              return
-            }
-            setRebuyAmount(Math.max(bigBlind, value))
-          }}
-        />
-
-        <button
-          type="button"
-          className="btn-subtle btn-subtle-gold"
-          disabled={!canInteract}
-          onClick={handleRebuy}
-        >
-          Rebuy
-        </button>
+      <div className="table-waiting-copy">{copy}</div>
+      <div className="table-waiting-meta">
+        <span>{playerCount} seated</span>
+        <span>8 max</span>
       </div>
     </div>
   )
 }
-
