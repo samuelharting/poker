@@ -28,6 +28,7 @@ interface TableSettings {
   maxPlayers: number
   actionTimerDuration: number
   autoStartDelay: number
+  rabbitHuntingEnabled: boolean
   sevenTwoRuleEnabled: boolean
   sevenTwoBountyPercent: number
 }
@@ -71,6 +72,7 @@ const DEFAULT_SETTINGS: TableSettings = {
   maxPlayers: 8,
   actionTimerDuration: 35000,
   autoStartDelay: 3000,
+  rabbitHuntingEnabled: false,
   sevenTwoRuleEnabled: true,
   sevenTwoBountyPercent: 2,
 }
@@ -494,6 +496,9 @@ export default class PokerRoom implements PartyServer {
         Math.max(1000, Math.floor(msg.autoStartDelay))
       )
     }
+    if (msg.rabbitHuntingEnabled !== undefined) {
+      this.data.tableSettings.rabbitHuntingEnabled = msg.rabbitHuntingEnabled
+    }
     if (msg.sevenTwoRuleEnabled !== undefined) {
       this.data.tableSettings.sevenTwoRuleEnabled = msg.sevenTwoRuleEnabled
     }
@@ -508,6 +513,7 @@ export default class PokerRoom implements PartyServer {
     this.data.gameState.bigBlind = this.data.tableSettings.bigBlind
     this.data.gameState.startingStack = this.data.tableSettings.startingStack
     this.data.gameState.actionTimerDuration = this.data.tableSettings.actionTimerDuration
+    this.data.gameState.rabbitHuntingEnabled = this.data.tableSettings.rabbitHuntingEnabled
     this.data.gameState.sevenTwoRuleEnabled = this.data.tableSettings.sevenTwoRuleEnabled
     this.data.gameState.sevenTwoBountyPercent = this.data.tableSettings.sevenTwoBountyPercent
 
@@ -574,7 +580,17 @@ export default class PokerRoom implements PartyServer {
       this.getPlayer(targetId)?.nickname ??
       this.data.playerNicknames[targetId] ??
       'That player'
-    const removedMidHand = this.data.gameState.phase === 'in_hand' && Boolean(this.getPlayer(targetId))
+    const seatedPlayer = this.getPlayer(targetId)
+    const removedMidHand = this.data.gameState.phase === 'in_hand' && Boolean(seatedPlayer)
+
+    if (this.data.gameState.phase === 'in_hand' && !seatedPlayer) {
+      this.removeSessionMetadata(targetId)
+      delete this.data.pendingRemovals[targetId]
+      this.sendActionResult(conn, `Kicked ${targetName} from the table.`)
+      this.finalizeState()
+      this.broadcastState()
+      return
+    }
 
     this.evictPlayer(targetId)
     this.sendActionResult(
@@ -624,13 +640,19 @@ export default class PokerRoom implements PartyServer {
             }
 
             const refreshedPlayer = this.getPlayer(targetId)
-            if (refreshedPlayer && refreshedPlayer.stack === 0 && refreshedPlayer.status === 'active') {
+            if (
+              refreshedPlayer &&
+              refreshedPlayer.stack === 0 &&
+              refreshedPlayer.status === 'active'
+            ) {
               refreshedPlayer.status = 'all_in'
               refreshedPlayer.lastAction = 'All-in'
+              refreshedPlayer.hasActedThisRound = true
             }
           } else {
             player.status = 'all_in'
             player.lastAction = 'All-in'
+            player.hasActedThisRound = true
           }
         }
       } else {
@@ -725,8 +747,8 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
-    if (this.data.gameState.phase === 'in_hand') {
-      this.sendActionFailed(conn, 'You can only set card visibility after the hand.')
+    if (this.data.gameState.phase === 'in_hand' && player.status !== 'folded') {
+      this.sendActionFailed(conn, 'You can only show cards after folding or after the hand.')
       return
     }
 
@@ -1053,7 +1075,11 @@ export default class PokerRoom implements PartyServer {
     return Array.from(knownIds)
       .map(id => {
         const seatedPlayer = this.getPlayer(id)
-        const isSpectator = Boolean(this.data.spectatorIds[id] || this.data.pendingSpectators[id])
+        const isSpectator = Boolean(
+          this.data.spectatorIds[id]
+          || this.data.pendingSpectators[id]
+          || this.data.pendingRemovals[id]
+        )
         const isSeated = Boolean(seatedPlayer)
         const isConnected = Boolean(
           seatedPlayer?.isConnected ?? this.data.playerToConnection[id]

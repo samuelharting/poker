@@ -284,6 +284,29 @@ describe('PokerRoom timer handling', () => {
     expect(roomState.autoFoldTimeout).not.toBeNull()
   })
 
+  it('marks a removed in-hand player as a spectator in lobby state', () => {
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice', 'Alice')
+    seatPlayer(server, alice.connection, 0)
+
+    const bob = joinPlayer(server, room, 'bob', 'Bob')
+    seatPlayer(server, bob.connection, 1)
+
+    const carol = joinPlayer(server, room, 'carol', 'Carol')
+    seatPlayer(server, carol.connection, 2)
+
+    send(server, alice.connection, { type: 'start_game' })
+
+    send(server, alice.connection, { type: 'remove_player', targetId: carol.playerId })
+
+    const snapshot = lastMessage(alice.connection, 'room_snapshot')
+    const lobbyCarol = snapshot?.state.lobbyPlayers.find(player => player.id === carol.playerId)
+
+    expect(lobbyCarol?.isSpectator).toBe(true)
+    expect(lobbyCarol?.status).toBe('spectating')
+  })
+
   it('allows hosts to change chips and move players to spectator mode during a live hand', () => {
     const { room, server } = createHarness()
 
@@ -762,6 +785,141 @@ describe('PokerRoom social protocol', () => {
 
     expect(foldedSeat?.showCards).toBe('both')
     expect(foldedSeat?.holeCards).toHaveLength(2)
+  })
+
+  it('lets a folded player show cards while a multi-way hand is still live', () => {
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice', 'Alice')
+    seatPlayer(server, alice.connection, 0)
+
+    const bob = joinPlayer(server, room, 'bob', 'Bob')
+    seatPlayer(server, bob.connection, 1)
+
+    const carol = joinPlayer(server, room, 'carol', 'Carol')
+    seatPlayer(server, carol.connection, 2)
+
+    send(server, alice.connection, { type: 'start_game' })
+
+    const snapshot = lastMessage(alice.connection, 'room_snapshot')
+    const actingPlayerId = snapshot?.state.actingPlayerId
+    const players = [alice, bob, carol]
+    const folder = players.find(player => player.playerId === actingPlayerId)!
+    const observer = players.find(player => player.playerId !== folder.playerId)!
+
+    send(server, folder.connection, { type: 'player_action', action: 'fold' })
+    send(server, folder.connection, { type: 'set_show_cards', mode: 'both' })
+
+    const folderResult = lastMessage(folder.connection, 'action_result')
+    expect(folderResult?.message).toBeUndefined()
+
+    const observerSnapshot = lastMessage(observer.connection, 'room_snapshot')
+    const foldedSeat = observerSnapshot?.state.players.find(player => player.id === folder.playerId)
+
+    expect(observerSnapshot?.state.phase).toBe('in_hand')
+    expect(foldedSeat?.status).toBe('folded')
+    expect(foldedSeat?.showCards).toBe('both')
+    expect(foldedSeat?.holeCards).toHaveLength(2)
+  })
+
+  it('keeps active players from showing cards mid-hand before they fold', () => {
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice', 'Alice')
+    seatPlayer(server, alice.connection, 0)
+
+    const bob = joinPlayer(server, room, 'bob', 'Bob')
+    seatPlayer(server, bob.connection, 1)
+
+    const carol = joinPlayer(server, room, 'carol', 'Carol')
+    seatPlayer(server, carol.connection, 2)
+
+    send(server, alice.connection, { type: 'start_game' })
+
+    const snapshot = lastMessage(alice.connection, 'room_snapshot')
+    const actingPlayerId = snapshot?.state.actingPlayerId
+    const activePlayer = [alice, bob, carol].find(player => player.playerId === actingPlayerId)!
+
+    send(server, activePlayer.connection, { type: 'set_show_cards', mode: 'both' })
+
+    expect(lastMessage(activePlayer.connection, 'action_failed')?.message)
+      .toContain('after folding or after the hand')
+  })
+})
+
+describe('PokerRoom rabbit hunting', () => {
+  it('syncs the rabbit hunting setting through host updates and rejects non-host changes', () => {
+    const { room, server } = createHarness()
+
+    const host = joinPlayer(server, room, 'host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+
+    const guest = joinPlayer(server, room, 'guest', 'Bob')
+    seatPlayer(server, guest.connection, 1)
+
+    const initialSnapshot = lastMessage(host.connection, 'room_snapshot')
+    expect(initialSnapshot?.state.rabbitHuntingEnabled).toBe(false)
+
+    send(server, guest.connection, { type: 'update_table_settings', rabbitHuntingEnabled: true })
+    expect(lastMessage(guest.connection, 'action_failed')?.message).toContain('Only the host')
+
+    send(server, host.connection, { type: 'update_table_settings', rabbitHuntingEnabled: true })
+    expect(lastMessage(host.connection, 'action_result')?.message).toBe('Updated table settings.')
+
+    const hostSnapshot = lastMessage(host.connection, 'room_snapshot')
+    const guestSnapshot = lastMessage(guest.connection, 'room_snapshot')
+
+    expect(hostSnapshot?.state.rabbitHuntingEnabled).toBe(true)
+    expect(guestSnapshot?.state.rabbitHuntingEnabled).toBe(true)
+  })
+
+  it('shows the rabbit-hunted board in room snapshots after a fold-ended hand', () => {
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice-rabbit', 'Alice')
+    seatPlayer(server, alice.connection, 0)
+
+    const bob = joinPlayer(server, room, 'bob-rabbit', 'Bob')
+    seatPlayer(server, bob.connection, 1)
+
+    send(server, alice.connection, { type: 'update_table_settings', rabbitHuntingEnabled: true })
+    send(server, alice.connection, { type: 'start_game' })
+
+    const serverAny = server as unknown as {
+      data: {
+        gameState: {
+          deck: Array<{ rank: string; suit: string }>
+        }
+      }
+    }
+    serverAny.data.gameState.deck = [
+      { rank: '3', suit: 'spades' },
+      { rank: 'A', suit: 'spades' },
+      { rank: 'K', suit: 'hearts' },
+      { rank: 'Q', suit: 'clubs' },
+      { rank: '4', suit: 'diamonds' },
+      { rank: 'J', suit: 'spades' },
+      { rank: '5', suit: 'clubs' },
+      { rank: '9', suit: 'hearts' },
+    ]
+
+    const liveSnapshot = lastMessage(alice.connection, 'room_snapshot')
+    const actingPlayerId = liveSnapshot?.state.actingPlayerId
+    const folder = actingPlayerId === alice.playerId ? alice : bob
+
+    send(server, folder.connection, { type: 'player_action', action: 'fold' })
+
+    const finalSnapshot = lastMessage(alice.connection, 'room_snapshot')
+    expect(finalSnapshot?.state.phase).toBe('between_hands')
+    expect(finalSnapshot?.state.rabbitHuntingEnabled).toBe(true)
+    expect(finalSnapshot?.state.communityCards).toEqual([
+      { rank: 'A', suit: 'spades' },
+      { rank: 'K', suit: 'hearts' },
+      { rank: 'Q', suit: 'clubs' },
+      { rank: 'J', suit: 'spades' },
+      { rank: '9', suit: 'hearts' },
+    ])
+    expect(finalSnapshot?.state.recentActions[0]).toContain('Rabbit hunt:')
   })
 })
 

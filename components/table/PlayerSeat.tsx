@@ -104,7 +104,15 @@ export function PlayerSeat({
 
   return (
     <div
-      className={clsx('player-seat', depthClass, isFolded && 'is-folded', isWinner && 'is-winner')}
+      className={clsx(
+        'player-seat',
+        depthClass,
+        isFolded && 'is-folded',
+        isWinner && 'is-winner',
+        isActing && 'is-acting',
+        isActing && 'is-current-turn',
+        isDisconnected && 'is-disconnected'
+      )}
       style={{ opacity: isFolded ? opacityValue * 0.5 : opacityValue }}
     >
       {(socialMessage || socialEmote) && (
@@ -139,7 +147,7 @@ export function PlayerSeat({
             <>
               {visibleLeftCard ? (
                 <div className="player-card-face player-card-face-left">
-                  <PlayingCard card={visibleLeftCard} size="sm" highlighted={isWinner} />
+                  <PlayingCard card={visibleLeftCard} size="xs" highlighted={isWinner} />
                 </div>
               ) : (
                 <div className="player-card-back player-card-back-left" />
@@ -147,7 +155,7 @@ export function PlayerSeat({
 
               {visibleRightCard ? (
                 <div className="player-card-face player-card-face-right">
-                  <PlayingCard card={visibleRightCard} size="sm" highlighted={isWinner} />
+                  <PlayingCard card={visibleRightCard} size="xs" highlighted={isWinner} />
                 </div>
               ) : (
                 <div className="player-card-back player-card-back-right" />
@@ -165,7 +173,7 @@ export function PlayerSeat({
       {player.bet > 0 && (
         <div key={`${player.id}-${player.bet}`} className="player-bet-stack-anchor">
           <div className="player-bet-stack">
-            <ChipStack amount={player.bet} compact showAmount={false} />
+            <ChipStack amount={player.bet} compact />
           </div>
         </div>
       )}
@@ -197,8 +205,6 @@ export function PlayerSeat({
           ${player.stack.toLocaleString()}
         </div>
       )}
-
-      {player.bet > 0 && <div className="player-bet">Bet ${player.bet.toLocaleString()}</div>}
 
       {isWinner && typeof winnerAmount === 'number' && winnerAmount > 0 && (
         <div className="winner-payout-chip">Won ${winnerAmount.toLocaleString()}</div>

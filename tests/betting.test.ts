@@ -23,7 +23,7 @@ function makePlayer(
     isSB: false,
     isBB: false,
     holeCards: [],
-    showCards: false,
+    showCards: 'none',
     isConnected: true,
     seatIndex: 0,
     hasActedThisRound: false,

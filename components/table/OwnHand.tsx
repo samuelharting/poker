@@ -23,7 +23,7 @@ export function OwnHand({ cards, bet, isActing, isWinner = false }: OwnHandProps
         {bet > 0 && (
           <div className="own-hand-bet-stack-anchor">
             <div className="own-hand-bet-stack">
-              <ChipStack amount={bet} compact showAmount={false} />
+              <ChipStack amount={bet} compact />
             </div>
           </div>
         )}
@@ -36,7 +36,7 @@ export function OwnHand({ cards, bet, isActing, isWinner = false }: OwnHandProps
               index === 0 ? 'own-card-slot-left' : 'own-card-slot-right'
             )}
           >
-            <PlayingCard card={card} size="md" animateIn highlighted={isWinner} />
+            <PlayingCard card={card} size="xl" animateIn highlighted={isWinner} />
           </div>
         ))}
       </div>

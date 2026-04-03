@@ -97,6 +97,7 @@ export interface TableState {
   startingStack: number
   actionTimerStart: number | null
   actionTimerDuration: number
+  rabbitHuntingEnabled: boolean
   sevenTwoRuleEnabled: boolean
   sevenTwoBountyPercent: number
   handNumber: number
@@ -132,6 +133,7 @@ export interface InternalGameState {
   startingStack: number
   actionTimerStart: number | null
   actionTimerDuration: number
+  rabbitHuntingEnabled: boolean
   sevenTwoRuleEnabled: boolean
   sevenTwoBountyPercent: number
   handNumber: number

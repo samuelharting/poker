@@ -99,6 +99,54 @@ function revealCardsForNextHand(state: InternalGameState): void {
   }
 }
 
+function formatBoardCards(cards: Card[]): string {
+  return cards.map(card => `${card.rank}${card.suit[0]}`).join(' ')
+}
+
+function applyRabbitHuntRunout(state: InternalGameState): void {
+  if (!state.rabbitHuntingEnabled || state.communityCards.length >= 5) {
+    return
+  }
+
+  const reveals: string[] = []
+  let currentRound = state.round
+
+  while (state.communityCards.length < 5) {
+    switch (currentRound) {
+      case 'preflop': {
+        dealCards(state.deck, 1)
+        const flop = dealCards(state.deck, 3)
+        state.communityCards = [...state.communityCards, ...flop]
+        reveals.push(`flop ${formatBoardCards(flop)}`)
+        currentRound = 'flop'
+        break
+      }
+      case 'flop': {
+        dealCards(state.deck, 1)
+        const turn = dealCards(state.deck, 1)
+        state.communityCards = [...state.communityCards, ...turn]
+        reveals.push(`turn ${formatBoardCards(turn)}`)
+        currentRound = 'turn'
+        break
+      }
+      case 'turn': {
+        dealCards(state.deck, 1)
+        const river = dealCards(state.deck, 1)
+        state.communityCards = [...state.communityCards, ...river]
+        reveals.push(`river ${formatBoardCards(river)}`)
+        currentRound = 'river'
+        break
+      }
+      default:
+        return
+    }
+  }
+
+  if (reveals.length > 0) {
+    addAction(state, `Rabbit hunt: ${reveals.join(' | ')}`)
+  }
+}
+
 function splitAmountByWeight(
   amount: number,
   recipients: string[],
@@ -299,6 +347,7 @@ export function createInitialGameState(
     startingStack,
     actionTimerStart: null,
     actionTimerDuration,
+    rabbitHuntingEnabled: false,
     sevenTwoRuleEnabled: true,
     sevenTwoBountyPercent: 2,
     handNumber: 0,
@@ -734,13 +783,13 @@ function awardLastPlayer(
     winnerDescriptions.set(winnerId, result.description)
   }
   applyHandPayouts(s, winnerTotals, winnerDescriptions)
+  addAction(s, `${winner.nickname} wins $${s.totalPot}`)
+  applyRabbitHuntRunout(s)
   revealCardsForNextHand(s)
   s.phase = 'between_hands'
   s.round = null
   s.actingPlayerId = null
   s.actingPlayerIndex = -1
-
-  addAction(s, `${winner.nickname} wins $${s.totalPot}`)
   return s
 }
 
@@ -904,7 +953,7 @@ export function toTableState(
       return player.holeCards
     }
 
-    if (state.phase === 'in_hand') {
+    if (state.phase === 'in_hand' && player.status !== 'folded') {
       return undefined
     }
 
@@ -958,6 +1007,7 @@ export function toTableState(
     startingStack: state.startingStack,
     actionTimerStart: state.actionTimerStart,
     actionTimerDuration: state.actionTimerDuration,
+    rabbitHuntingEnabled: state.rabbitHuntingEnabled,
     sevenTwoRuleEnabled: state.sevenTwoRuleEnabled,
     sevenTwoBountyPercent: state.sevenTwoBountyPercent,
     handNumber: state.handNumber,

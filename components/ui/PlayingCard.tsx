@@ -6,7 +6,7 @@ import clsx from 'clsx'
 interface PlayingCardProps {
   card?: Card
   faceDown?: boolean
-  size?: 'sm' | 'md' | 'lg' | 'xl'
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'
   className?: string
   animateIn?: boolean
   highlighted?: boolean
@@ -50,6 +50,7 @@ export function PlayingCard({
           'card',
           size === 'xl' && 'card-xl',
           size === 'lg' && 'card-lg',
+          size === 'xs' && 'card-xs',
           size === 'sm' && 'card-sm',
           showFaceDown && 'face-down',
           animateIn && 'card-deal-anim',

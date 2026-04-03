@@ -1,10 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import { PokerTable } from '@/components/table/PokerTable'
 import { RoomHud } from '@/components/ui/RoomHud'
-import { ToastStack, type ToastItem, type ToastTone } from '@/components/ui/ToastStack'
 import { useRoom } from '@/hooks/useRoom'
 import { isAllowedEmote, sanitizeText } from '@/shared/protocol'
 import type { ShowCardsMode } from '@/lib/poker/types'
@@ -88,33 +87,14 @@ export default function RoomPage() {
 }
 
 function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }) {
-  const [toasts, setToasts] = useState<ToastItem[]>([])
   const [shareUrl, setShareUrl] = useState('')
   const [startingStackSetting, setStartingStackSetting] = useState(1000)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [suitColorMode, setSuitColorMode] = useState<'two' | 'four'>('two')
-  const toastIdRef = useRef(0)
-  const connectionStateRef = useRef<boolean | null>(null)
-  const hasEstablishedConnectionRef = useRef(false)
-
-  const dismissToast = useCallback((id: number) => {
-    setToasts(current => current.filter(toast => toast.id !== id))
-  }, [])
-
-  const pushToast = useCallback((message: string, tone: ToastTone = 'info') => {
-    const id = ++toastIdRef.current
-    setToasts(current => [...current, { id, message, tone }])
-    window.setTimeout(() => {
-      setToasts(current => current.filter(toast => toast.id !== id))
-    }, 4200)
-  }, [])
 
   const { tableState, socialState, yourId, isHost, sendAction, sendMessage, isConnected } = useRoom(
     roomCode,
-    nickname,
-    {
-      onSystemMessage: pushToast,
-    }
+    nickname
   )
 
   useEffect(() => {
@@ -138,28 +118,6 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
     }
   }, [])
 
-  useEffect(() => {
-    if (connectionStateRef.current === null) {
-      connectionStateRef.current = isConnected
-      if (isConnected) {
-        hasEstablishedConnectionRef.current = true
-      }
-      return
-    }
-
-    if (connectionStateRef.current !== isConnected) {
-      if (isConnected) {
-        if (hasEstablishedConnectionRef.current) {
-          pushToast('Back at the table.', 'success')
-        }
-        hasEstablishedConnectionRef.current = true
-      } else if (hasEstablishedConnectionRef.current) {
-        pushToast('Connection lost. Trying to rejoin your seat...', 'error')
-      }
-      connectionStateRef.current = isConnected
-    }
-  }, [isConnected, pushToast])
-
   const canShareRoom = typeof navigator !== 'undefined' && (
     typeof navigator.share === 'function' ||
     typeof navigator.clipboard?.writeText === 'function'
@@ -178,15 +136,13 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
   const handleCopyRoom = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(roomCode)
-      pushToast(`Room code ${roomCode} copied.`, 'success')
     } catch {
-      pushToast('Copy failed. You can still share the room code manually.', 'error')
+      // Notification toasts removed.
     }
-  }, [pushToast, roomCode])
+  }, [roomCode])
 
   const handleShareRoom = useCallback(async () => {
     if (!shareUrl) {
-      pushToast('Share link is still loading.', 'info')
       return
     }
 
@@ -197,16 +153,14 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
           text: `Join my poker table in room ${roomCode}.`,
           url: shareUrl,
         })
-        pushToast('Room invite shared.', 'success')
         return
       }
 
       await navigator.clipboard.writeText(shareUrl)
-      pushToast('Room link copied for sharing.', 'success')
     } catch {
-      pushToast('Share was cancelled.', 'info')
+      // Notification toasts removed.
     }
-  }, [pushToast, roomCode, shareUrl])
+  }, [roomCode, shareUrl])
 
   const handleUpdateSettings = useCallback((settings: {
     smallBlind?: number
@@ -214,6 +168,7 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
     startingStack?: number
     actionTimerDuration?: number
     autoStartDelay?: number
+    rabbitHuntingEnabled?: boolean
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
   }) => {
@@ -226,19 +181,17 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
   const handleSendChat = useCallback((message: string) => {
     const sanitized = sanitizeText(message)
     if (!sanitized) {
-      pushToast('Type a message before sending.', 'error')
       return
     }
     sendMessage({ type: 'table_chat', message: sanitized })
-  }, [pushToast, sendMessage])
+  }, [sendMessage])
 
   const handleSendEmote = useCallback((emote: string) => {
     if (!isAllowedEmote(emote)) {
-      pushToast('This emote is not available right now.', 'error')
       return
     }
     sendMessage({ type: 'table_emote', emote })
-  }, [pushToast, sendMessage])
+  }, [sendMessage])
 
   return (
     <div className="room-shell">
@@ -251,10 +204,7 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
         bigBlind={tableState?.bigBlind ?? 20}
         phase={tableState?.phase ?? null}
         settingsOpen={settingsOpen}
-        onCopyRoom={handleCopyRoom}
-        onShareRoom={handleShareRoom}
         onToggleSettings={() => setSettingsOpen(current => !current)}
-        canShare={canShareRoom}
       />
 
       {!isConnected && tableState && (
@@ -273,6 +223,8 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
           startingStackSetting={startingStackSetting}
           settingsOpen={settingsOpen}
           suitColorMode={suitColorMode}
+          roomCode={roomCode}
+          canShareRoom={canShareRoom}
           onAction={sendAction}
           onStartGame={() => sendMessage({ type: 'start_game' })}
           onAddBots={(count: number) => sendMessage({ type: 'add_bots', count })}
@@ -287,16 +239,16 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
           onSetShowCards={(mode: ShowCardsMode) => sendMessage({ type: 'set_show_cards', mode })}
           onSetSuitColorMode={handleSuitColorMode}
           onCloseSettings={() => setSettingsOpen(false)}
-          onSendChat={handleSendChat}
+          onCopyRoom={handleCopyRoom}
+          onShareRoom={handleShareRoom}
           onSendEmote={handleSendEmote}
           onSendTargetEmote={(targetId: string, emote: string) => {
             if (!isAllowedEmote(emote)) {
-              pushToast('This emote is not available right now.', 'error')
               return
             }
             sendMessage({ type: 'table_emote', targetId, emote })
           }}
-          onFeedback={pushToast}
+          onFeedback={() => {}}
         />
       ) : (
         <div className="room-loading-state">
@@ -312,7 +264,6 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
         </div>
       )}
 
-      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
   )
 }

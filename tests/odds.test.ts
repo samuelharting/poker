@@ -41,6 +41,7 @@ function makeState(players: SeatPlayer[], communityCards: Card[]): TableState {
     startingStack: 1000,
     actionTimerStart: null,
     actionTimerDuration: 30000,
+    rabbitHuntingEnabled: false,
     sevenTwoRuleEnabled: true,
     sevenTwoBountyPercent: 2,
     handNumber: 1,

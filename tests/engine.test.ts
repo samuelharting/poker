@@ -186,6 +186,127 @@ describe('full hand flow', () => {
   })
 })
 
+describe('rabbit hunting', () => {
+  it('keeps fold-ended hands unchanged when rabbit hunting is off', () => {
+    const state = startHand(setup2Players())
+    state.rabbitHuntingEnabled = false
+    state.deck = [
+      card('A', 'spades'),
+      card('K', 'hearts'),
+      card('Q', 'clubs'),
+      card('J', 'diamonds'),
+      card('9', 'spades'),
+      card('8', 'hearts'),
+      card('7', 'clubs'),
+      card('6', 'diamonds'),
+    ]
+
+    const result = processAction(state, state.actingPlayerId!, 'fold')
+
+    expect(result.communityCards).toEqual([])
+    expect(result.recentActions.some(action => action.startsWith('Rabbit hunt:'))).toBe(false)
+  })
+
+  it('runs out the full board after a preflop fold without changing payouts', () => {
+    const state = startHand(setup2Players())
+    state.rabbitHuntingEnabled = true
+
+    const actingId = state.actingPlayerId!
+    const folder = state.players.find(player => player.id === actingId)!
+    const winner = state.players.find(player => player.id !== actingId)!
+    const expectedBoard = [
+      card('A', 'spades'),
+      card('K', 'hearts'),
+      card('Q', 'clubs'),
+      card('J', 'diamonds'),
+      card('9', 'spades'),
+    ]
+
+    winner.holeCards = handCards('7', 'spades', '2', 'hearts')
+    folder.holeCards = handCards('A', 'clubs', 'K', 'clubs')
+    state.deck = [
+      card('3', 'spades'),
+      expectedBoard[0]!,
+      expectedBoard[1]!,
+      expectedBoard[2]!,
+      card('4', 'hearts'),
+      expectedBoard[3]!,
+      card('5', 'clubs'),
+      expectedBoard[4]!,
+    ]
+
+    const result = processAction(state, actingId, 'fold')
+
+    expect(result.communityCards).toEqual(expectedBoard)
+    expect(result.winners).toHaveLength(1)
+    expect(result.winners?.[0]).toMatchObject({
+      playerId: winner.id,
+      amount: 30,
+      handDescription: undefined,
+    })
+    expect(result.bounty?.active).toBe(true)
+    expect(result.bounty?.amount).toBe(20)
+    expect(result.bounty?.contributors).toEqual([folder.id])
+    expect(result.recentActions[0]).toContain('Rabbit hunt:')
+  })
+
+  it('runs out turn and river after a flop fold', () => {
+    const state = startHand(setup2Players())
+    state.rabbitHuntingEnabled = true
+    state.round = 'flop'
+    state.communityCards = [
+      card('A', 'spades'),
+      card('K', 'hearts'),
+      card('Q', 'clubs'),
+    ]
+    state.deck = [
+      card('2', 'diamonds'),
+      card('J', 'spades'),
+      card('3', 'clubs'),
+      card('9', 'hearts'),
+    ]
+
+    const result = processAction(state, state.actingPlayerId!, 'fold')
+
+    expect(result.communityCards).toEqual([
+      card('A', 'spades'),
+      card('K', 'hearts'),
+      card('Q', 'clubs'),
+      card('J', 'spades'),
+      card('9', 'hearts'),
+    ])
+    expect(result.recentActions[0]).toContain('turn Js')
+    expect(result.recentActions[0]).toContain('river 9h')
+  })
+
+  it('runs out only the river after a turn fold', () => {
+    const state = startHand(setup2Players())
+    state.rabbitHuntingEnabled = true
+    state.round = 'turn'
+    state.communityCards = [
+      card('A', 'spades'),
+      card('K', 'hearts'),
+      card('Q', 'clubs'),
+      card('J', 'diamonds'),
+    ]
+    state.deck = [
+      card('2', 'clubs'),
+      card('9', 'spades'),
+    ]
+
+    const result = processAction(state, state.actingPlayerId!, 'fold')
+
+    expect(result.communityCards).toEqual([
+      card('A', 'spades'),
+      card('K', 'hearts'),
+      card('Q', 'clubs'),
+      card('J', 'diamonds'),
+      card('9', 'spades'),
+    ])
+    expect(result.recentActions[0]).toContain('Rabbit hunt: river 9s')
+  })
+})
+
 describe('bounty payouts', () => {
   it('applies a 7-2 bounty on an outright showdown win', () => {
     const state = startHand(setup3Players())
@@ -444,6 +565,26 @@ describe('toTableState', () => {
 
     expect(p2View.holeCards).toHaveLength(2)
     expect(p2View.showCards).toBe('both')
+  })
+
+  it('reveals folded cards during a live hand when a player opts to show them', () => {
+    const state = startHand(setup3Players())
+    const actingPlayerId = state.actingPlayerId!
+    const finishedTurn = processAction(state, actingPlayerId, 'fold')
+    const foldedPlayer = finishedTurn.players.find(player => player.id === actingPlayerId)!
+    const observer = finishedTurn.players.find(
+      player => player.id !== actingPlayerId && player.status === 'active'
+    )!
+
+    expect(finishedTurn.phase).toBe('in_hand')
+
+    foldedPlayer.showCards = 'both'
+
+    const view = toTableState(finishedTurn, observer.id)
+    const foldedView = view.players.find(player => player.id === foldedPlayer.id)!
+
+    expect(foldedView.holeCards).toHaveLength(2)
+    expect(foldedView.showCards).toBe('both')
   })
 
   it('reveals only selected cards for a folded player', () => {

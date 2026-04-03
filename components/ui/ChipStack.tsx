@@ -52,24 +52,18 @@ export function ChipStack({
   if (amount <= 0) return null
 
   const chips = buildChipStack(amount, compact ? 5 : 8)
+  const displayLabel = label ?? formatAmount(amount)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+    <div className={`chip-stack-display${compact ? ' is-compact' : ''}`}>
       <div className="chip-stack" style={{ height: compact ? 28 : 48 }}>
         {chips.map((cls, i) => (
           <div key={i} className={cls} />
         ))}
       </div>
       {showAmount && (
-        <span
-          style={{
-            fontSize: compact ? '10px' : '11px',
-            fontWeight: 700,
-            color: '#a8d8a8',
-            fontFamily: 'monospace',
-          }}
-        >
-          {label ?? formatAmount(amount)}
+        <span className={`chip-stack-amount${compact ? ' is-compact' : ''}`}>
+          {displayLabel}
         </span>
       )}
     </div>

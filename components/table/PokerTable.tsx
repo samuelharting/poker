@@ -20,6 +20,8 @@ interface PokerTableProps {
   startingStackSetting: number
   settingsOpen: boolean
   suitColorMode: 'two' | 'four'
+  roomCode: string
+  canShareRoom: boolean
   onAction: (
     action: 'fold' | 'check' | 'call' | 'raise' | 'all_in',
     amount?: number
@@ -34,6 +36,7 @@ interface PokerTableProps {
     startingStack?: number
     actionTimerDuration?: number
     autoStartDelay?: number
+    rabbitHuntingEnabled?: boolean
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
   }) => void
@@ -43,7 +46,8 @@ interface PokerTableProps {
   onSetShowCards: (mode: ShowCardsMode) => void
   onSetSuitColorMode: (mode: 'two' | 'four') => void
   onCloseSettings: () => void
-  onSendChat: (message: string) => void
+  onCopyRoom: () => void
+  onShareRoom: () => void
   onSendEmote: (emote: string) => void
   onSendTargetEmote: (targetId: string, emote: string) => void
   onFeedback: (message: string, tone?: FeedbackTone) => void
@@ -75,6 +79,7 @@ const EMOTE_OPTIONS = [
   { id: 'thumbs_up', glyph: '\uD83D\uDC4D', label: 'Thumbs up' },
   { id: 'laugh', glyph: '\uD83D\uDE02', label: 'Laugh' },
   { id: 'middle_finger', glyph: '\uD83D\uDD95', label: 'Middle finger' },
+  { id: 'israel_flag', glyph: '\uD83C\uDDEE\uD83C\uDDF1', label: 'Israel flag' },
 ] as const
 
 type EmoteId = (typeof EMOTE_OPTIONS)[number]['id']
@@ -121,6 +126,8 @@ export function PokerTable({
   startingStackSetting,
   settingsOpen,
   suitColorMode,
+  roomCode,
+  canShareRoom,
   onAction,
   onStartGame,
   onAddBots,
@@ -133,7 +140,8 @@ export function PokerTable({
   onSetShowCards,
   onSetSuitColorMode,
   onCloseSettings,
-  onSendChat,
+  onCopyRoom,
+  onShareRoom,
   onSendEmote,
   onSendTargetEmote,
   onFeedback,
@@ -144,8 +152,8 @@ export function PokerTable({
   const isInHand = state.phase === 'in_hand'
   const betweenHands = !isInHand
   const isSpectator = Boolean(lobbyMe?.isSpectator)
+  const canAdjustShownCards = Boolean(me?.holeCards?.length) && (betweenHands || me?.status === 'folded')
   const [socialTick, setSocialTick] = useState(() => Date.now())
-  const [chatInput, setChatInput] = useState('')
   const [targetEmotePlayerId, setTargetEmotePlayerId] = useState<string | null>(null)
   const [targetEmotePickerOpen, setTargetEmotePickerOpen] = useState(false)
 
@@ -161,7 +169,6 @@ export function PokerTable({
 
     const mySeat = me.seatIndex
     return state.players
-      .filter(player => player.id !== yourId)
       .map(player => ({
         ...player,
         visualSeat: (player.seatIndex - mySeat + 8) % 8,
@@ -303,42 +310,33 @@ export function PokerTable({
       }
 
       if (entry.emote && entry.emoteExpiresAt && entry.emoteExpiresAt > socialTick) {
-        const targetSeatId = entry.targetPlayerId?.trim() || entry.playerId
-        const current = entries.get(targetSeatId) ?? {}
-        entries.set(targetSeatId, {
-          ...current,
-          emote: getEmoteGlyph(entry.emote),
+        const senderId = entry.playerId
+        const targetSeatId = entry.targetPlayerId?.trim() ?? ''
+        const emote = getEmoteGlyph(entry.emote)
+
+        const senderCurrent = entries.get(senderId) ?? {}
+        entries.set(senderId, {
+          ...senderCurrent,
+          emote,
           emoteExpiresAt: entry.emoteExpiresAt,
-          emoteTargeted: targetSeatId !== entry.playerId,
+          emoteTargeted: false,
         })
+
+        if (targetSeatId && targetSeatId !== senderId) {
+          const targetCurrent = entries.get(targetSeatId) ?? {}
+          entries.set(targetSeatId, {
+            ...targetCurrent,
+            emote,
+            emoteExpiresAt: entry.emoteExpiresAt,
+            emoteTargeted: true,
+          })
+        }
       }
     }
 
     return entries
   }, [socialState.active, socialTick])
 
-  const mySocial = useMemo(() => {
-    return socialState.active.reduce<{
-      message?: string
-      emote?: string
-    } | undefined>((current, entry) => {
-      if (entry.playerId !== yourId) {
-        return current
-      }
-
-      const next = current ? { ...current } : {}
-
-      if (entry.message && entry.messageExpiresAt && entry.messageExpiresAt > socialTick) {
-        next.message = entry.message
-      }
-
-      if (entry.emote && entry.emoteExpiresAt && entry.emoteExpiresAt > socialTick) {
-        next.emote = getEmoteGlyph(entry.emote)
-      }
-
-      return next.message || next.emote ? next : current
-    }, undefined)
-  }, [socialState.active, socialTick, yourId])
   const targetedPlayer = targetEmotePlayerId
     ? state.players.find(player => player.id === targetEmotePlayerId)
     : null
@@ -348,7 +346,78 @@ export function PokerTable({
   )
   const myWinnerAmount = winnerAmounts.get(yourId) ?? 0
 
-  const latestChat = useMemo(() => socialState.chatLog.slice(-20), [socialState.chatLog])
+  const tableCenterLabel = isHost
+    ? 'HOST VIEW'
+    : me
+      ? me.nickname.toUpperCase()
+      : 'TABLE VIEW'
+  const mobileHeroStatus = !isConnected
+    ? 'Reconnecting'
+    : betweenHands
+      ? myWinnerAmount > 0
+        ? `Won ${formatAmount(myWinnerAmount)}`
+        : 'Waiting for next hand'
+      : isMyTurn
+        ? toCall > 0
+          ? `To call ${formatAmount(toCall)}`
+          : 'Your turn'
+        : 'In hand'
+
+  const actionButtons = useMemo(() => {
+    const buttons: Array<{
+      key: 'call' | 'check' | 'raise' | 'all_in' | 'fold'
+      label: string
+      className: string
+      onClick: () => void
+    }> = []
+
+    if (legalActions.includes('call')) {
+      buttons.push({
+        key: 'call',
+        label: `Call ${formatAmount(toCall)}`,
+        className: 'btn-call',
+        onClick: () => onAction('call'),
+      })
+    }
+
+    if (legalActions.includes('check')) {
+      buttons.push({
+        key: 'check',
+        label: 'Check',
+        className: 'btn-check',
+        onClick: () => onAction('check'),
+      })
+    }
+
+    if (legalActions.includes('raise')) {
+      buttons.push({
+        key: 'raise',
+        label: `Raise ${formatAmount(raiseAmount)}`,
+        className: 'btn-raise',
+        onClick: handleRaise,
+      })
+    }
+
+    if (legalActions.includes('all_in') && me) {
+      buttons.push({
+        key: 'all_in',
+        label: `All-in ${formatAmount(me.stack + me.bet)}`,
+        className: 'btn-raise',
+        onClick: () => onAction('all_in'),
+      })
+    }
+
+    if (legalActions.includes('fold')) {
+      buttons.push({
+        key: 'fold',
+        label: 'Fold',
+        className: 'btn-fold',
+        onClick: () => onAction('fold'),
+      })
+    }
+
+    return buttons
+  }, [handleRaise, legalActions, me, onAction, raiseAmount, toCall])
 
   const tableWaitingCopy = !isConnected
     ? 'Restoring the room snapshot and reconnecting your seat.'
@@ -429,7 +498,7 @@ export function PokerTable({
           </div>
 
           <div className="table-surface">
-            <CommunityCards cards={state.communityCards} round={state.round} />
+            <CommunityCards cards={state.communityCards} />
 
             <PotDisplay
               totalPot={state.totalPot}
@@ -437,6 +506,13 @@ export function PokerTable({
               currentBet={state.currentBet}
               toCall={isMyTurn ? Math.max(0, toCall) : 0}
             />
+
+            <div className="table-surface-center-copy" aria-hidden="true">
+              <span className="table-surface-center-owner">{tableCenterLabel}</span>
+              <span className="table-surface-center-stakes">
+                NLH - {state.smallBlind} / {state.bigBlind}
+              </span>
+            </div>
 
             {betweenHands && (
               <TableWaitingBanner
@@ -448,12 +524,24 @@ export function PokerTable({
           </div>
 
           {me && !isSpectator && me.holeCards && me.holeCards.length > 0 && (
-            <OwnHand
-              cards={me.holeCards}
-              bet={me.bet}
-              isActing={isMyTurn}
-              isWinner={betweenHands && myWinnerAmount > 0}
-            />
+            <>
+              <OwnHand
+                cards={me.holeCards}
+                bet={me.bet}
+                isActing={isMyTurn}
+                isWinner={betweenHands && myWinnerAmount > 0}
+              />
+
+              <div
+                className={`mobile-hero-summary ${isMyTurn ? 'is-acting' : ''} ${betweenHands && myWinnerAmount > 0 ? 'is-winner' : ''}`}
+              >
+                <div className="mobile-hero-summary-card">
+                  <span className="mobile-hero-summary-name">{me.nickname}</span>
+                  <span className="mobile-hero-summary-stack">{formatAmount(me.stack)}</span>
+                </div>
+                <div className="mobile-hero-summary-status">{mobileHeroStatus}</div>
+              </div>
+            </>
           )}
         </div>
 
@@ -473,7 +561,7 @@ export function PokerTable({
             {me.isBB && <span className="table-chip">BB</span>}
             {isMyTurn && <span className="table-chip table-chip-soft">Your action</span>}
             {!isConnected && <span className="table-chip chip-warning">Reconnecting</span>}
-            {!isInHand && me.holeCards && me.holeCards.length > 0 && (
+            {canAdjustShownCards && (
               <ShowCardsControl
                 mode={me.showCards}
                 isConnected={isConnected}
@@ -491,18 +579,29 @@ export function PokerTable({
           isHost={isHost}
           isConnected={isConnected}
           suitColorMode={suitColorMode}
+          roomCode={roomCode}
+          canShareRoom={canShareRoom}
           onClose={onCloseSettings}
           onSetSuitColorMode={onSetSuitColorMode}
           onUpdateSettings={onUpdateSettings}
           onRemovePlayer={onRemovePlayer}
           onAdjustPlayerStack={onAdjustPlayerStack}
           onSetPlayerSpectator={onSetPlayerSpectator}
+          onCopyRoom={onCopyRoom}
+          onShareRoom={onShareRoom}
           onFeedback={onFeedback}
         />
       )}
 
       {hasActionTray && me && (
         <div className="betting-tray">
+          <div className="betting-tray-header">
+            <span className="betting-tray-kicker">
+              {toCall > 0 ? `To call ${formatAmount(toCall)}` : 'Action live'}
+            </span>
+            <span className="betting-tray-turn">Your turn</span>
+          </div>
+
           <div className="timer-bar-shell">
             <div className="timer-bar-header">
               <span>Fold timer</span>
@@ -566,56 +665,17 @@ export function PokerTable({
             </div>
           )}
 
-          <div className="bet-action-row">
-            {legalActions.includes('fold') && (
+          <div className="bet-action-row" data-count={actionButtons.length}>
+            {actionButtons.map(actionButton => (
               <button
+                key={actionButton.key}
                 type="button"
-                className="btn-action btn-fold"
-                onClick={() => onAction('fold')}
+                className={`btn-action ${actionButton.className}`}
+                onClick={actionButton.onClick}
               >
-                Fold
+                {actionButton.label}
               </button>
-            )}
-
-            {legalActions.includes('check') && (
-              <button
-                type="button"
-                className="btn-action btn-check"
-                onClick={() => onAction('check')}
-              >
-                Check
-              </button>
-            )}
-
-            {legalActions.includes('call') && (
-              <button
-                type="button"
-                className="btn-action btn-call"
-                onClick={() => onAction('call')}
-              >
-                Call {formatAmount(toCall)}
-              </button>
-            )}
-
-            {legalActions.includes('raise') && (
-              <button
-                type="button"
-                className="btn-action btn-raise"
-                onClick={handleRaise}
-              >
-                Raise {formatAmount(raiseAmount)}
-              </button>
-            )}
-
-            {legalActions.includes('all_in') && (
-              <button
-                type="button"
-                className="btn-action btn-raise"
-                onClick={() => onAction('all_in')}
-              >
-                All-in {formatAmount(me.stack + me.bet)}
-              </button>
-            )}
+            ))}
           </div>
         </div>
       )}
@@ -645,26 +705,6 @@ export function PokerTable({
           )}
 
           <div className="table-side-panels chat-dock">
-            <ChatPanel
-              entries={latestChat}
-              chatInput={chatInput}
-              isConnected={isConnected}
-              mySeatId={yourId}
-              mySocial={mySocial}
-              onSubmit={value => {
-                const trimmed = value.trim()
-                if (!trimmed) {
-                  onFeedback('Type a message before sending.', 'error')
-                  return
-                }
-                onSendChat(trimmed)
-                setChatInput('')
-              }}
-              onChange={setChatInput}
-              onSendEmote={onSendEmote}
-              emotes={EMOTE_OPTIONS}
-            />
-
             {targetedPlayer && (
               <TargetedEmotePanel
                 target={targetedPlayer}
@@ -678,160 +718,6 @@ export function PokerTable({
             )}
           </div>
     </div>
-  )
-}
-
-function ChatPanel({
-  entries,
-  chatInput,
-  mySeatId,
-  isConnected,
-  mySocial,
-  onSubmit,
-  onChange,
-  onSendEmote,
-  emotes,
-}: {
-  entries: Array<{ id: string; playerId: string; nickname: string; message: string; createdAt: number }>
-  chatInput: string
-  mySeatId: string
-  isConnected: boolean
-  mySocial?: { message?: string; emote?: string }
-  onSubmit: (value: string) => void
-  onChange: (value: string) => void
-  onSendEmote: (emote: string) => void
-  emotes: readonly { id: EmoteId; glyph: string; label: string }[]
-}) {
-  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false)
-  const [isExpanded, setIsExpanded] = useState(true)
-  const hasInput = chatInput.trim().length > 0
-  const latestEntry = entries[entries.length - 1]
-  const messageCountLabel = entries.length === 1 ? '1 message' : `${entries.length} messages`
-  const latestEntryLabel = latestEntry
-    ? `${latestEntry.playerId === mySeatId ? 'You' : latestEntry.nickname}: ${latestEntry.message}`
-    : 'Open messages and emoji reactions.'
-
-  if (!isExpanded) {
-    return (
-      <aside className="table-panel chat-panel is-collapsed">
-        <button
-          type="button"
-          className="chat-panel-toggle"
-          aria-expanded={false}
-          aria-label="Open table chat"
-          onClick={() => setIsExpanded(true)}
-        >
-          <span className="chat-panel-toggle-row">
-            <span>
-              <span className="table-panel-kicker">Table chat</span>
-              <span className="chat-panel-toggle-title">Social</span>
-            </span>
-            <span className="table-chip table-chip-soft">{messageCountLabel}</span>
-          </span>
-          <span className="chat-panel-toggle-preview">{latestEntryLabel}</span>
-        </button>
-      </aside>
-    )
-  }
-
-  return (
-    <aside className="table-panel chat-panel is-expanded">
-      <div className="table-panel-header">
-        <div>
-          <div className="table-panel-kicker">Table chat</div>
-          <div className="table-panel-title">Social</div>
-        </div>
-        <div className="chat-panel-header-actions">
-          {mySocial?.message || mySocial?.emote ? (
-            <span className="table-chip table-chip-soft">
-              {mySocial.message ? 'Your message is visible overhead' : 'Your emoji is live at the table'}
-            </span>
-          ) : null}
-          <button
-            type="button"
-            className="btn-subtle chat-panel-collapse"
-            aria-expanded={true}
-            aria-label="Collapse table chat"
-            onClick={() => {
-              setEmojiPickerOpen(false)
-              setIsExpanded(false)
-            }}
-          >
-            Hide
-          </button>
-        </div>
-      </div>
-
-      <div className="chat-log">
-        {entries.length === 0 && <div className="chat-empty">No messages yet.</div>}
-        {entries.map(entry => (
-          <div key={entry.id} className="chat-entry">
-            <div className="chat-entry-name">
-              {entry.playerId === mySeatId ? 'You' : entry.nickname}
-            </div>
-            <div className="chat-entry-body">{entry.message}</div>
-          </div>
-        ))}
-      </div>
-
-      <form
-        className="chat-compose"
-        onSubmit={event => {
-          event.preventDefault()
-          onSubmit(chatInput)
-        }}
-      >
-        <input
-          type="text"
-          value={chatInput}
-          maxLength={140}
-          placeholder={isConnected ? 'Send a table chat...' : 'Reconnecting...'}
-          onChange={event => onChange(event.target.value)}
-          disabled={!isConnected}
-        />
-        <button
-          type="submit"
-          className="btn-subtle btn-subtle-gold"
-          disabled={!isConnected || !hasInput}
-        >
-          Send
-        </button>
-      </form>
-
-      <div className="chat-emotes">
-        {emotes.map(item => (
-          <button
-            key={item.id}
-            type="button"
-            className="emote-button"
-            title={item.label}
-            onClick={() => onSendEmote(item.glyph)}
-            disabled={!isConnected}
-          >
-            {item.glyph}
-          </button>
-        ))}
-        <button
-          type="button"
-          className={`emote-picker-toggle ${emojiPickerOpen ? 'is-open' : ''}`}
-          disabled={!isConnected}
-          onClick={() => setEmojiPickerOpen(current => !current)}
-        >
-          {emojiPickerOpen ? 'Hide picker' : 'Search all emojis'}
-        </button>
-      </div>
-
-      {emojiPickerOpen && (
-        <SearchableEmojiPicker
-          isConnected={isConnected}
-          searchPlaceholder="Search all emojis"
-          onSelect={emoji => {
-            onSendEmote(emoji)
-            setEmojiPickerOpen(false)
-          }}
-        />
-      )}
-    </aside>
   )
 }
 
@@ -974,12 +860,16 @@ function SettingsModal({
   isHost,
   isConnected,
   suitColorMode,
+  roomCode,
+  canShareRoom,
   onClose,
   onSetSuitColorMode,
   onUpdateSettings,
   onRemovePlayer,
   onAdjustPlayerStack,
   onSetPlayerSpectator,
+  onCopyRoom,
+  onShareRoom,
   onFeedback,
 }: {
   state: TableState
@@ -987,6 +877,8 @@ function SettingsModal({
   isHost: boolean
   isConnected: boolean
   suitColorMode: 'two' | 'four'
+  roomCode: string
+  canShareRoom: boolean
   onClose: () => void
   onSetSuitColorMode: (mode: 'two' | 'four') => void
   onUpdateSettings: (settings: {
@@ -995,12 +887,15 @@ function SettingsModal({
     startingStack?: number
     actionTimerDuration?: number
     autoStartDelay?: number
+    rabbitHuntingEnabled?: boolean
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
   }) => void
   onRemovePlayer: (targetId: string) => void
   onAdjustPlayerStack: (targetId: string, amount: number) => void
   onSetPlayerSpectator: (targetId: string, spectator: boolean) => void
+  onCopyRoom: () => void
+  onShareRoom: () => void
   onFeedback: (message: string, tone?: FeedbackTone) => void
 }) {
   const [activeTab, setActiveTab] = useState<'general' | 'players'>(isHost ? 'general' : 'general')
@@ -1012,6 +907,7 @@ function SettingsModal({
     startingStack: state.startingStack,
     actionTimerSeconds: Math.max(1, Math.floor(state.actionTimerDuration / 1000)),
     autoStartDelaySeconds: Math.max(1, Math.floor((state.autoStartDelay ?? 5000) / 1000)),
+    rabbitHuntingEnabled: state.rabbitHuntingEnabled,
     sevenTwoRuleEnabled: state.sevenTwoRuleEnabled,
     sevenTwoBountyPercent: state.sevenTwoBountyPercent,
   }))
@@ -1023,6 +919,7 @@ function SettingsModal({
       startingStack: state.startingStack,
       actionTimerSeconds: Math.max(1, Math.floor(state.actionTimerDuration / 1000)),
       autoStartDelaySeconds: Math.max(1, Math.floor((state.autoStartDelay ?? 5000) / 1000)),
+      rabbitHuntingEnabled: state.rabbitHuntingEnabled,
       sevenTwoRuleEnabled: state.sevenTwoRuleEnabled,
       sevenTwoBountyPercent: state.sevenTwoBountyPercent,
     })
@@ -1030,6 +927,7 @@ function SettingsModal({
     state.actionTimerDuration,
     state.autoStartDelay,
     state.bigBlind,
+    state.rabbitHuntingEnabled,
     state.sevenTwoBountyPercent,
     state.sevenTwoRuleEnabled,
     state.smallBlind,
@@ -1042,6 +940,7 @@ function SettingsModal({
     draft.startingStack !== state.startingStack ||
     draft.actionTimerSeconds * 1000 !== state.actionTimerDuration ||
     draft.autoStartDelaySeconds * 1000 !== (state.autoStartDelay ?? 5000) ||
+    draft.rabbitHuntingEnabled !== state.rabbitHuntingEnabled ||
     draft.sevenTwoRuleEnabled !== state.sevenTwoRuleEnabled ||
     draft.sevenTwoBountyPercent !== state.sevenTwoBountyPercent
 
@@ -1073,6 +972,7 @@ function SettingsModal({
       startingStack,
       actionTimerDuration,
       autoStartDelay,
+      rabbitHuntingEnabled: draft.rabbitHuntingEnabled,
       sevenTwoRuleEnabled: draft.sevenTwoRuleEnabled,
       sevenTwoBountyPercent,
     })
@@ -1112,6 +1012,27 @@ function SettingsModal({
 
         {activeTab === 'general' && (
           <div className="settings-modal-body">
+            <div className="settings-section">
+              <div className="settings-section-title">Room actions</div>
+              <div className="settings-section-copy">
+                Keep invites and room sharing tucked in here instead of on the table.
+              </div>
+              <div className="settings-room-code">Room code: {roomCode}</div>
+              <div className="settings-inline-controls">
+                <button type="button" className="btn-subtle" onClick={onCopyRoom}>
+                  Copy code
+                </button>
+                <button
+                  type="button"
+                  className="btn-subtle"
+                  onClick={onShareRoom}
+                  disabled={!canShareRoom}
+                >
+                  Share link
+                </button>
+              </div>
+            </div>
+
             <div className="settings-section">
               <div className="settings-section-title">Cards</div>
               <div className="settings-section-copy">
@@ -1205,6 +1126,29 @@ function SettingsModal({
                 </div>
 
                 <div className="settings-section">
+                  <div className="settings-section-title">Rabbit hunting</div>
+                  <div className="settings-toggle-row">
+                    <button
+                      type="button"
+                      className={`settings-pill ${draft.rabbitHuntingEnabled ? 'is-active' : ''}`}
+                      onClick={() => setDraft(current => ({ ...current, rabbitHuntingEnabled: true }))}
+                    >
+                      On
+                    </button>
+                    <button
+                      type="button"
+                      className={`settings-pill ${!draft.rabbitHuntingEnabled ? 'is-active' : ''}`}
+                      onClick={() => setDraft(current => ({ ...current, rabbitHuntingEnabled: false }))}
+                    >
+                      Off
+                    </button>
+                  </div>
+                  <div className="settings-section-copy">
+                    When active, hands that end before showdown automatically run out the rest of the board for a rabbit-hunt reveal without changing the winner.
+                  </div>
+                </div>
+
+                <div className="settings-section">
                   <div className="settings-section-title">7 / 2 rule</div>
                   <div className="settings-toggle-row">
                     <button
@@ -1263,6 +1207,7 @@ function SettingsModal({
                       startingStack: state.startingStack,
                       actionTimerSeconds: Math.max(1, Math.floor(state.actionTimerDuration / 1000)),
                       autoStartDelaySeconds: Math.max(1, Math.floor((state.autoStartDelay ?? 5000) / 1000)),
+                      rabbitHuntingEnabled: state.rabbitHuntingEnabled,
                       sevenTwoRuleEnabled: state.sevenTwoRuleEnabled,
                       sevenTwoBountyPercent: state.sevenTwoBountyPercent,
                     })}

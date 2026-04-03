@@ -38,6 +38,7 @@ export type C2SMessage =
     startingStack?: number
     actionTimerDuration?: number
     autoStartDelay?: number
+    rabbitHuntingEnabled?: boolean
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
   }
@@ -179,6 +180,9 @@ export function parseC2S(raw: string): C2SMessage | null {
         }
         if (typeof parsed.autoStartDelay === 'number') {
           next.autoStartDelay = Math.max(1000, Math.floor(parsed.autoStartDelay))
+        }
+        if (typeof parsed.rabbitHuntingEnabled === 'boolean') {
+          next.rabbitHuntingEnabled = parsed.rabbitHuntingEnabled
         }
         if (typeof parsed.sevenTwoRuleEnabled === 'boolean') {
           next.sevenTwoRuleEnabled = parsed.sevenTwoRuleEnabled
@@ -368,6 +372,7 @@ export interface RoomStorageState {
     maxPlayers: number
     actionTimerDuration?: number
     autoStartDelay?: number
+    rabbitHuntingEnabled?: boolean
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
   }
