@@ -1,15 +1,21 @@
 'use client'
 
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import { type CSSProperties, useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import type { TableState, SeatPlayer, LobbyPlayer, ShowCardsMode } from '@/lib/poker/types'
 import type { SocialSnapshot } from '@/shared/protocol'
 import { PlayerSeat } from './PlayerSeat'
 import { CommunityCards } from './CommunityCards'
 import { OwnHand } from './OwnHand'
 import { PotDisplay } from './PotDisplay'
+import { ChipStack } from '@/components/ui/ChipStack'
 import { SearchableEmojiPicker } from '@/components/ui/SearchableEmojiPicker'
 
 type FeedbackTone = 'info' | 'success' | 'error'
+type WinnerChipTrailStyle = CSSProperties & {
+  '--winner-chip-x': string | number
+  '--winner-chip-y': string | number
+  '--winner-chip-delay': string
+}
 
 interface PokerTableProps {
   state: TableState
@@ -84,11 +90,34 @@ const EMOTE_OPTIONS = [
 
 type EmoteId = (typeof EMOTE_OPTIONS)[number]['id']
 
-const SHOW_CARD_OPTIONS: Array<{ mode: ShowCardsMode; label: string }> = [
-  { mode: 'none', label: 'Hide' },
-  { mode: 'left', label: 'Show left' },
-  { mode: 'right', label: 'Show right' },
-  { mode: 'both', label: 'Show both' },
+type WinnerDisplay = {
+  playerId: string
+  nickname: string
+  amount: number
+  targetX: string
+  targetY: string
+  delayMs: number
+}
+
+const WINNER_SEAT_TARGETS: Record<number, { x: string; y: string }> = {
+  0: { x: '52%', y: '88.2%' },
+  1: { x: '17%', y: '78%' },
+  2: { x: '8%', y: '50.5%' },
+  3: { x: '19%', y: '22.5%' },
+  4: { x: '50%', y: '8%' },
+  5: { x: '81%', y: '22.5%' },
+  6: { x: '92.5%', y: '50.5%' },
+  7: { x: '84.5%', y: '78%' },
+}
+
+const SHOW_CARD_OPTIONS: Array<{
+  mode: Exclude<ShowCardsMode, 'none'>
+  label: string
+  shortLabel: string
+}> = [
+  { mode: 'left', label: 'left card', shortLabel: 'L' },
+  { mode: 'right', label: 'right card', shortLabel: 'R' },
+  { mode: 'both', label: 'both cards', shortLabel: 'Both' },
 ]
 
 function getEmoteGlyph(emote?: string): string | undefined {
@@ -115,6 +144,30 @@ function getLobbyStatusLabel(state: TableState, player: LobbyPlayer): string {
   }
 
   return player.status.replace('_', ' ')
+}
+
+function getWaitingStatusText(
+  state: TableState,
+  lobbyPlayer: LobbyPlayer | undefined,
+  isConnected: boolean
+): string {
+  if (!isConnected) {
+    return 'Rejoining your seat and waiting for the table snapshot.'
+  }
+
+  if (lobbyPlayer?.isSpectator) {
+    return 'You are in spectator mode and watching the table.'
+  }
+
+  if (state.players.length < 2) {
+    return 'Waiting for at least one more player to sit down.'
+  }
+
+  if (state.winners && state.winners.length > 0) {
+    return 'Host is setting up the next hand after showdown.'
+  }
+
+  return 'Waiting for the host to deal the next hand.'
 }
 
 export function PokerTable({
@@ -153,6 +206,15 @@ export function PokerTable({
   const betweenHands = !isInHand
   const isSpectator = Boolean(lobbyMe?.isSpectator)
   const canAdjustShownCards = Boolean(me?.holeCards?.length) && (betweenHands || me?.status === 'folded')
+  const visibleOwnPlayer = (
+    !isSpectator &&
+    me &&
+    me.holeCards &&
+    me.holeCards.length > 0 &&
+    me.status !== 'folded'
+  ) ? me : null
+  const shouldShowOwnHand = visibleOwnPlayer !== null
+  const ownHandCards = visibleOwnPlayer?.holeCards ?? []
   const [socialTick, setSocialTick] = useState(() => Date.now())
   const [targetEmotePlayerId, setTargetEmotePlayerId] = useState<string | null>(null)
   const [targetEmotePickerOpen, setTargetEmotePickerOpen] = useState(false)
@@ -268,7 +330,8 @@ export function PokerTable({
 
   const turnTimer = useTurnTimer(
     state.actionTimerStart,
-    state.actionTimerDuration
+    state.actionTimerDuration,
+    state.serverNow
   )
 
   useEffect(() => {
@@ -345,6 +408,36 @@ export function PokerTable({
     [state.winners]
   )
   const myWinnerAmount = winnerAmounts.get(yourId) ?? 0
+  const winnerSeatMap = useMemo(() => new Map(orderedOpponents.map(player => [player.id, player.visualSeat])), [orderedOpponents])
+  const winnerDisplays = useMemo<WinnerDisplay[]>(() => {
+    if (!betweenHands || !state.winners?.length) {
+      return []
+    }
+
+    const playerById = new Map(state.players.map(player => [player.id, player]))
+
+    return state.winners
+      .map((winner, index) => {
+        const player = playerById.get(winner.playerId)
+        if (!player) {
+          return null
+        }
+
+        const visualSeat = winnerSeatMap.get(winner.playerId) ?? player.seatIndex
+        const safeVisualSeat = Math.min(7, Math.max(0, visualSeat))
+        const target = WINNER_SEAT_TARGETS[safeVisualSeat]
+
+        return {
+          playerId: winner.playerId,
+          nickname: player.nickname,
+          amount: winner.amount,
+          targetX: target?.x ?? WINNER_SEAT_TARGETS[0]!.x,
+          targetY: target?.y ?? WINNER_SEAT_TARGETS[0]!.y,
+          delayMs: index * 180,
+        }
+      })
+      .filter((winner): winner is WinnerDisplay => winner !== null)
+  }, [betweenHands, state.winners, state.players, winnerSeatMap])
 
   const tableCenterLabel = isHost
     ? 'HOST VIEW'
@@ -424,8 +517,16 @@ export function PokerTable({
     : state.players.length < 2
       ? 'Share the room code and fill the open seats to kick off the next hand.'
       : isHost
-        ? 'The table is ready. Use the host dock below when you want to deal.'
+        ? 'The table is ready. Deal whenever everyone looks settled.'
         : 'Everyone is seated. Waiting for the host to deal the next hand.'
+  const waitingStatusText = getWaitingStatusText(state, lobbyMe, isConnected)
+  const bettingTrayHeader = isMyTurn
+    ? toCall > 0
+      ? `Your turn · Call ${formatAmount(toCall)}`
+      : 'Your turn'
+    : toCall > 0
+      ? `To call ${formatAmount(toCall)}`
+      : 'Action live'
 
   const handleTargetedEmote = useCallback((emote: string) => {
     if (!targetedPlayer) {
@@ -447,6 +548,7 @@ export function PokerTable({
     <div
       className="table-scene"
       data-phase={state.phase}
+      data-hero-seat={shouldShowOwnHand ? 'true' : 'false'}
       data-suit-colors={suitColorMode}
       data-tray-open={hasActionTray ? 'true' : 'false'}
     >
@@ -473,7 +575,7 @@ export function PokerTable({
               return (
                 <div
                   key={player.id}
-                  className={`seat-position ${layout.cssClass}`}
+                  className={`seat-position ${layout.cssClass} ${shouldShowOwnHand && !isSpectator && player.id === yourId ? 'hero-seat-position' : ''}`}
                 >
                   <PlayerSeat
                     player={player}
@@ -514,20 +616,50 @@ export function PokerTable({
               </span>
             </div>
 
-            {betweenHands && (
-              <TableWaitingBanner
-                playerCount={state.players.length}
-                isConnected={isConnected}
-                copy={tableWaitingCopy}
-              />
-            )}
+            {betweenHands && winnerDisplays.length > 0 ? (
+              <div className="table-center-winner-announcement" role="status" aria-live="polite">
+                <div className="table-center-winner-title">
+                  {winnerDisplays.length === 1 ? 'Hand Winner' : 'Hand Winners'}
+                </div>
+
+                <div className="table-center-winner-list">
+                  {winnerDisplays.map(winner => (
+                    <div key={winner.playerId} className="table-center-winner-line">
+                      <span className="table-center-winner-name">{winner.nickname}</span>
+                      <span className="table-center-winner-amount">Won {formatAmount(winner.amount)}</span>
+                      <ChipStack amount={winner.amount} compact />
+                    </div>
+                  ))}
+                </div>
+
+                <div className="table-center-winner-chip-trails" aria-hidden="true">
+                  {winnerDisplays.map(winner => {
+                    const trailStyle: WinnerChipTrailStyle = {
+                      ['--winner-chip-x']: winner.targetX,
+                      ['--winner-chip-y']: winner.targetY,
+                      ['--winner-chip-delay']: `${winner.delayMs}ms`,
+                    }
+
+                    return (
+                      <div
+                        key={`${winner.playerId}-trail`}
+                        className="table-center-winner-chip-trail"
+                        style={trailStyle}
+                      >
+                        <ChipStack amount={winner.amount} compact showAmount={false} />
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : null}
           </div>
 
-          {me && !isSpectator && me.holeCards && me.holeCards.length > 0 && (
+          {shouldShowOwnHand && visibleOwnPlayer && (
             <>
               <OwnHand
-                cards={me.holeCards}
-                bet={me.bet}
+                cards={ownHandCards}
+                bet={visibleOwnPlayer.bet}
                 isActing={isMyTurn}
                 isWinner={betweenHands && myWinnerAmount > 0}
               />
@@ -536,14 +668,24 @@ export function PokerTable({
                 className={`mobile-hero-summary ${isMyTurn ? 'is-acting' : ''} ${betweenHands && myWinnerAmount > 0 ? 'is-winner' : ''}`}
               >
                 <div className="mobile-hero-summary-card">
-                  <span className="mobile-hero-summary-name">{me.nickname}</span>
-                  <span className="mobile-hero-summary-stack">{formatAmount(me.stack)}</span>
+                  <span className="mobile-hero-summary-name">{visibleOwnPlayer.nickname}</span>
+                  <span className="mobile-hero-summary-stack">{formatAmount(visibleOwnPlayer.stack)}</span>
                 </div>
                 <div className="mobile-hero-summary-status">{mobileHeroStatus}</div>
               </div>
             </>
           )}
         </div>
+
+        {canAdjustShownCards && me && !isSpectator && !settingsOpen && (
+          <div className="table-show-cards-panel">
+            <ShowCardsControl
+              mode={me.showCards}
+              isConnected={isConnected}
+              onChangeMode={onSetShowCards}
+            />
+          </div>
+        )}
 
         {me && !isSpectator && (
           <div className="hero-inline-status">
@@ -561,13 +703,6 @@ export function PokerTable({
             {me.isBB && <span className="table-chip">BB</span>}
             {isMyTurn && <span className="table-chip table-chip-soft">Your action</span>}
             {!isConnected && <span className="table-chip chip-warning">Reconnecting</span>}
-            {canAdjustShownCards && (
-              <ShowCardsControl
-                mode={me.showCards}
-                isConnected={isConnected}
-                onChangeMode={onSetShowCards}
-              />
-            )}
           </div>
         )}
       </div>
@@ -593,13 +728,26 @@ export function PokerTable({
         />
       )}
 
+      {betweenHands && !settingsOpen && (
+        <MobileBetweenHandsDock
+          state={state}
+          me={me}
+          lobbyMe={lobbyMe}
+          isHost={isHost}
+          isConnected={isConnected}
+          copy={isHost ? tableWaitingCopy : waitingStatusText}
+          onStartGame={onStartGame}
+          onAddBots={onAddBots}
+          onFeedback={onFeedback}
+        />
+      )}
+
       {hasActionTray && me && (
         <div className="betting-tray">
           <div className="betting-tray-header">
             <span className="betting-tray-kicker">
-              {toCall > 0 ? `To call ${formatAmount(toCall)}` : 'Action live'}
+              {bettingTrayHeader}
             </span>
-            <span className="betting-tray-turn">Your turn</span>
           </div>
 
           <div className="timer-bar-shell">
@@ -682,24 +830,16 @@ export function PokerTable({
 
           {betweenHands && (
             <div className="table-side-panels">
-              {isHost ? (
-                <HostControls
-                  state={state}
-                  yourId={yourId}
-                  isConnected={isConnected}
-                  startingStackSetting={startingStackSetting}
-                  onStartGame={onStartGame}
-                  onAddBots={onAddBots}
-                  onFeedback={onFeedback}
-                />
-              ) : (
-            <WaitingPanel
-              state={state}
-              me={me}
-              lobbyMe={lobbyMe}
-              isConnected={isConnected}
-            />
-          )}
+              <WaitingPanel
+                state={state}
+                me={me}
+                lobbyMe={lobbyMe}
+                isHost={isHost}
+                isConnected={isConnected}
+                onStartGame={onStartGame}
+                onAddBots={onAddBots}
+                onFeedback={onFeedback}
+              />
 
             </div>
           )}
@@ -731,18 +871,24 @@ function ShowCardsControl({
   onChangeMode: (mode: ShowCardsMode) => void
 }) {
   return (
-    <div className="hero-card-toggle" role="radiogroup" aria-label="Select card visibility">
-      {SHOW_CARD_OPTIONS.map(option => (
-        <button
-          key={option.mode}
-          type="button"
-          className={`hero-inline-button ${mode === option.mode ? 'btn-subtle-gold' : 'btn-subtle'}`}
-          onClick={() => onChangeMode(option.mode)}
-          disabled={!isConnected}
-        >
-          {option.label}
-        </button>
-      ))}
+    <div className="show-cards-toggle" role="group" aria-label="Show folded cards">
+      {SHOW_CARD_OPTIONS.map(option => {
+        const isActive = mode === option.mode
+
+        return (
+          <button
+            key={option.mode}
+            type="button"
+            className={`show-cards-toggle-button${isActive ? ' is-active' : ''}`}
+            onClick={() => onChangeMode(isActive ? 'none' : option.mode)}
+            disabled={!isConnected}
+            aria-pressed={isActive}
+            title={isActive ? `Hide ${option.label}` : `Show ${option.label}`}
+          >
+            {option.shortLabel}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -816,12 +962,16 @@ function TargetedEmotePanel({
   )
 }
 
-function useTurnTimer(timerStart: number | null, duration: number): { percent: number; secondsLeft: number } {
+function useTurnTimer(
+  timerStart: number | null,
+  duration: number,
+  serverNow: number
+): { percent: number; secondsLeft: number } {
   const [timer, setTimer] = useState({
     percent: 100,
     secondsLeft: Math.max(0, Math.ceil(duration / 1000)),
   })
-  const rafRef = useRef<number>(0)
+  const intervalRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!timerStart) {
@@ -832,9 +982,10 @@ function useTurnTimer(timerStart: number | null, duration: number): { percent: n
       return
     }
 
+    const deadline = Date.now() + Math.max(0, timerStart + duration - serverNow)
+
     const tick = () => {
-      const elapsed = Date.now() - timerStart
-      const remainingMs = Math.max(0, duration - elapsed)
+      const remainingMs = Math.max(0, deadline - Date.now())
       const remainingPercent = duration > 0 ? (remainingMs / duration) * 100 : 0
 
       setTimer({
@@ -842,14 +993,22 @@ function useTurnTimer(timerStart: number | null, duration: number): { percent: n
         secondsLeft: Math.max(0, Math.ceil(remainingMs / 1000)),
       })
 
-      if (remainingMs > 0) {
-        rafRef.current = requestAnimationFrame(tick)
+      if (remainingMs <= 0 && intervalRef.current !== null) {
+        window.clearInterval(intervalRef.current)
+        intervalRef.current = null
       }
     }
 
-    rafRef.current = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(rafRef.current)
-  }, [duration, timerStart])
+    tick()
+    intervalRef.current = window.setInterval(tick, 100)
+
+    return () => {
+      if (intervalRef.current !== null) {
+        window.clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+    }
+  }, [duration, serverNow, timerStart])
 
   return timer
 }
@@ -1317,118 +1476,34 @@ function SettingsModal({
   )
 }
 
-function HostControls({
+function WaitingPanel({
   state,
-  yourId,
+  me,
+  lobbyMe,
+  isHost,
   isConnected,
-  startingStackSetting,
   onStartGame,
   onAddBots,
   onFeedback,
 }: {
   state: TableState
-  yourId: string
+  me?: SeatPlayer
+  lobbyMe?: LobbyPlayer
+  isHost: boolean
   isConnected: boolean
-  startingStackSetting: number
   onStartGame: () => void
   onAddBots: (count: number) => void
   onFeedback: (message: string, tone?: FeedbackTone) => void
 }) {
+  const statusText = getWaitingStatusText(state, lobbyMe, isConnected)
   const seatedCount = state.players.length
   const canStart = seatedCount >= 2 && isConnected
-
-  return (
-    <div className="table-panel host-panel">
-      <div className="table-panel-header">
-        <div>
-          <div className="table-panel-kicker">Host controls</div>
-          <div className="table-panel-title">Table flow</div>
-        </div>
-        <div className="table-chip">{seatedCount} seated</div>
-      </div>
-
-      <div className="table-panel-note">
-        Auto-deal is always on now. Use Settings for blinds, player management, 7/2 rules, suit colors, and timers.
-      </div>
-
-      <div className="table-panel-note">
-        Current buy-in baseline: {formatAmount(startingStackSetting)}. Auto-deal restarts once at least two seated players have chips.
-      </div>
-
-      <div className="table-panel-actions">
-        <button
-          type="button"
-          className="btn-subtle btn-subtle-gold"
-          disabled={!isConnected || seatedCount >= 8}
-          onClick={() => onAddBots(1)}
-        >
-          Add bot
-        </button>
-        <button
-          type="button"
-          className="btn-subtle btn-subtle-gold"
-          disabled={!isConnected || seatedCount >= 8}
-          onClick={() => onAddBots(8 - seatedCount)}
-        >
-          Fill with bots
-        </button>
-      </div>
-
-      <button
-        type="button"
-        className="btn-gold host-start-button"
-        disabled={!canStart}
-        onClick={() => {
-          if (!canStart) {
-            onFeedback('You need at least two connected players with chips to deal.', 'error')
-            return
-          }
-          onStartGame()
-        }}
-      >
-        {state.phase === 'between_hands' ? 'Deal next hand' : 'Start game'}
-      </button>
-
-      <div className="table-panel-note">
-        Host controls stay in between-hands mode.
-      </div>
-
-      <div className="table-panel-note">
-        {canStart
-          ? 'Table is ready when you are.'
-          : isConnected
-            ? `Waiting for ${Math.max(0, 2 - seatedCount)} more seated player${seatedCount === 1 ? '' : 's'}.`
-            : 'Controls unlock once the table reconnects.'}
-      </div>
-    </div>
-  )
-}
-
-function WaitingPanel({
-  state,
-  me,
-  lobbyMe,
-  isConnected,
-}: {
-  state: TableState
-  me?: SeatPlayer
-  lobbyMe?: LobbyPlayer
-  isConnected: boolean
-}) {
-  const hasEnoughPlayers = state.players.length >= 2
-  const statusText = !isConnected
-    ? 'Rejoining your seat and waiting for the table snapshot.'
-    : lobbyMe?.isSpectator
-      ? 'You are in spectator mode and watching the table.'
-    : !hasEnoughPlayers
-      ? 'Waiting for at least one more player to sit down.'
-      : state.winners && state.winners.length > 0
-        ? 'Host is setting up the next hand after showdown.'
-        : 'Waiting for the host to deal the next hand.'
+  const canAddBots = isConnected && seatedCount < 8
+  const openSeats = Math.max(0, 8 - seatedCount)
 
   return (
     <div className="table-panel status-panel">
-      <div className="table-panel-kicker">Table status</div>
+      <div className="table-panel-kicker">{isHost ? 'Host controls' : 'Table status'}</div>
       <div className="table-panel-title">{statusText}</div>
       <div className="table-panel-note">
         {lobbyMe?.isSpectator
@@ -1436,6 +1511,142 @@ function WaitingPanel({
           : me
           ? `You are seated with ${formatAmount(me.stack)} and blinds are ${formatAmount(state.smallBlind)}/${formatAmount(state.bigBlind)}.`
           : 'Seat assignment is being restored.'}
+      </div>
+      {isHost && (
+        <div className="table-panel-actions status-panel-actions">
+          {canAddBots && (
+            <>
+              <button
+                type="button"
+                className="btn-subtle"
+                onClick={() => onAddBots(1)}
+              >
+                Add bot
+              </button>
+              {openSeats > 1 && (
+                <button
+                  type="button"
+                  className="btn-subtle"
+                  onClick={() => onAddBots(openSeats)}
+                >
+                  Fill seats
+                </button>
+              )}
+            </>
+          )}
+          <button
+            type="button"
+            className="btn-gold"
+            disabled={!canStart}
+            onClick={() => {
+              if (!canStart) {
+                onFeedback('You need at least two connected players with chips to deal.', 'error')
+                return
+              }
+
+              onStartGame()
+            }}
+          >
+            {state.phase === 'between_hands' ? 'Deal next hand' : 'Start game'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MobileBetweenHandsDock({
+  state,
+  me,
+  lobbyMe,
+  isHost,
+  isConnected,
+  copy,
+  onStartGame,
+  onAddBots,
+  onFeedback,
+}: {
+  state: TableState
+  me?: SeatPlayer
+  lobbyMe?: LobbyPlayer
+  isHost: boolean
+  isConnected: boolean
+  copy: string
+  onStartGame: () => void
+  onAddBots: (count: number) => void
+  onFeedback: (message: string, tone?: FeedbackTone) => void
+}) {
+  const seatedCount = state.players.length
+  const canStart = seatedCount >= 2 && isConnected
+  const canAddBots = isConnected && seatedCount < 8
+  const openSeats = Math.max(0, 8 - seatedCount)
+  const infoChip = lobbyMe?.isSpectator
+      ? 'Watching only'
+      : me
+        ? `Stack ${formatAmount(me.stack)}`
+        : 'Restoring seat'
+
+  return (
+    <div className="mobile-between-hands-dock">
+      <div className="mobile-between-hands-card">
+        {isHost ? (
+          <>
+            {canAddBots && (
+              <div className="mobile-between-hands-actions">
+                <button
+                  type="button"
+                  className="mobile-between-hands-btn mobile-between-hands-btn-secondary"
+                  onClick={() => onAddBots(1)}
+                >
+                  Add bot
+                </button>
+                {openSeats > 1 && (
+                  <button
+                    type="button"
+                    className="mobile-between-hands-btn mobile-between-hands-btn-secondary"
+                    onClick={() => onAddBots(openSeats)}
+                  >
+                    Fill seats
+                  </button>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="mobile-between-hands-btn mobile-between-hands-btn-primary"
+              disabled={!canStart}
+              onClick={() => {
+                if (!canStart) {
+                  onFeedback('You need at least two connected players with chips to deal.', 'error')
+                  return
+                }
+
+                onStartGame()
+              }}
+            >
+              {state.phase === 'between_hands' ? 'Deal next hand' : 'Start game'}
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="mobile-between-hands-copy">
+              <div className="mobile-between-hands-kicker">
+                {lobbyMe?.isSpectator ? 'Spectator rail' : 'Table status'}
+              </div>
+              <div className="mobile-between-hands-title">{copy}</div>
+              <div className="mobile-between-hands-meta">
+                <span>{seatedCount} seated</span>
+                <span>{infoChip}</span>
+              </div>
+            </div>
+            <div className="mobile-between-hands-note">
+              {lobbyMe?.isSpectator
+                ? 'Use the seat drawer when the host wants you back in.'
+                : 'The host can deal as soon as the table is ready.'}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

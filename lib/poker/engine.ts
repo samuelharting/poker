@@ -975,6 +975,7 @@ export function toTableState(
   return {
     roomCode: state.roomCode,
     phase: state.phase,
+    serverNow: Date.now(),
     round: state.round,
     players: state.players.map((p): SeatPlayer => ({
       id: p.id,

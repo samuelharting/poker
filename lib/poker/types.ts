@@ -81,6 +81,7 @@ export interface LobbyPlayer {
 export interface TableState {
   roomCode: string
   phase: GamePhase
+  serverNow: number
   autoStartEnabled?: boolean
   autoStartDelay?: number
   round: BettingRound | null

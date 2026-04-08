@@ -4,12 +4,12 @@ import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 
 function generateRoomCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // Exclude ambiguous chars
-  let code = ''
-  for (let i = 0; i < 6; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)]
-  }
-  return code
+  const storageKey = 'poker_room_counter'
+  const raw = typeof window === 'undefined' ? '' : window.localStorage.getItem(storageKey)
+  const current = raw ? parseInt(raw, 10) : 0
+  const next = Number.isFinite(current) && current > 0 ? current + 1 : 1
+  window.localStorage.setItem(storageKey, String(next))
+  return String(next)
 }
 
 export default function LandingPage() {
@@ -33,11 +33,11 @@ export default function LandingPage() {
   }, [nickname, router])
 
   const handleJoinTable = useCallback(() => {
-    const trimmedCode = joinCode.trim().toUpperCase()
+    const trimmedCode = joinCode.trim()
     const trimmedName = joinNickname.trim()
 
-    if (!trimmedCode || trimmedCode.length !== 6) {
-      setError('Please enter a valid 6-character room code')
+    if (!trimmedCode || !/^[0-9]+$/.test(trimmedCode)) {
+      setError('Please enter a valid room number')
       return
     }
     if (!trimmedName) {
@@ -98,6 +98,7 @@ export default function LandingPage() {
                 onKeyDown={e => e.key === 'Enter' && handleCreateTable()}
                 maxLength={20}
                 autoFocus
+                suppressHydrationWarning
               />
             </div>
 
@@ -129,11 +130,12 @@ export default function LandingPage() {
               <input
                 type="text"
                 className="input-dark text-center font-mono tracking-widest text-lg"
-                placeholder="XXXXXX"
+                placeholder="1"
                 value={joinCode}
-                onChange={e => setJoinCode(e.target.value.toUpperCase().slice(0, 6))}
-                maxLength={6}
+                onChange={e => setJoinCode(e.target.value.replace(/[^0-9]/g, ''))}
+                maxLength={20}
                 autoFocus
+                suppressHydrationWarning
               />
             </div>
 
@@ -149,6 +151,7 @@ export default function LandingPage() {
                 onChange={e => setJoinNickname(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleJoinTable()}
                 maxLength={20}
+                suppressHydrationWarning
               />
             </div>
 

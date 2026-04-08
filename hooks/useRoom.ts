@@ -18,6 +18,15 @@ import {
 // Local dev defaults to localhost:1999 so `npm run dev` continues working.
 const PARTYKIT_HOST = process.env.NEXT_PUBLIC_PARTYKIT_HOST ?? 'localhost:1999'
 const PARTY_NAME = process.env.NEXT_PUBLIC_PARTY_NAME ?? 'main'
+const LOCAL_PARTYKIT_HOST_PATTERN = /^(localhost|127\.0\.0\.1)(:\d+)?$/i
+
+function buildConnectionIssue(): string {
+  if (LOCAL_PARTYKIT_HOST_PATTERN.test(PARTYKIT_HOST)) {
+    return `Can't reach the local table server at ${PARTYKIT_HOST}. Start \`npm run dev\` or \`npm run dev:party\`, then retry.`
+  }
+
+  return `Can't reach the live table server at ${PARTYKIT_HOST}. Check that the PartyKit host is running and reachable, then retry.`
+}
 
 type SystemTone = 'info' | 'success' | 'error'
 
@@ -28,6 +37,7 @@ interface UseRoomOptions {
 interface RoomSocket {
   readyState: number
   close: () => void
+  reconnect: () => void
   send: (message: string) => void
   addEventListener: (
     type: string,
@@ -41,6 +51,7 @@ export interface RoomState {
   yourId: string
   isHost: boolean
   isConnected: boolean
+  connectionIssue: string | null
   sendAction: (
     action: 'fold' | 'check' | 'call' | 'raise' | 'all_in',
     amount?: number
@@ -56,12 +67,15 @@ export function useRoom(
   const socketRef = useRef<RoomSocket | null>(null)
   const reconnectTokenRef = useRef<string | null>(null)
   const hasSeated = useRef(false)
+  const hasEverConnectedRef = useRef(false)
+  const connectionIssueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const playerIdsRef = useRef<Set<string>>(new Set())
   const [tableState, setTableState] = useState<TableState | null>(null)
   const [socialState, setSocialState] = useState<SocialSnapshot>({ active: [], chatLog: [] })
   const [yourId, setYourId] = useState('')
   const [isHost, setIsHost] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
+  const [connectionIssue, setConnectionIssue] = useState<string | null>(null)
   const { onSystemMessage } = options
 
   const sendMessage = useCallback((msg: C2SMessage) => {
@@ -83,6 +97,18 @@ export function useRoom(
     }
 
     hasSeated.current = false
+    hasEverConnectedRef.current = false
+    setTableState(null)
+    setSocialState({ active: [], chatLog: [] })
+    setYourId('')
+    setIsHost(false)
+    setIsConnected(false)
+    setConnectionIssue(null)
+
+    if (connectionIssueTimerRef.current) {
+      clearTimeout(connectionIssueTimerRef.current)
+      connectionIssueTimerRef.current = null
+    }
 
     const tokenStorageKey = `poker_reconnect_${roomCode}`
     reconnectTokenRef.current = sessionStorage.getItem(tokenStorageKey)
@@ -100,12 +126,24 @@ export function useRoom(
           host: PARTYKIT_HOST,
           room: roomCode.toLowerCase(),
           party: PARTY_NAME,
+          startClosed: true,
         }) as unknown as RoomSocket
 
         socketRef.current = socket
+        connectionIssueTimerRef.current = setTimeout(() => {
+          if (active && !hasEverConnectedRef.current) {
+            setConnectionIssue(buildConnectionIssue())
+          }
+        }, 2500)
 
         socket.addEventListener('open', () => {
+          hasEverConnectedRef.current = true
+          if (connectionIssueTimerRef.current) {
+            clearTimeout(connectionIssueTimerRef.current)
+            connectionIssueTimerRef.current = null
+          }
           setIsConnected(true)
+          setConnectionIssue(null)
           const joinMsg: C2SMessage = {
             type: 'join_room',
             nickname,
@@ -172,14 +210,23 @@ export function useRoom(
 
         socket.addEventListener('close', () => {
           setIsConnected(false)
+          if (!hasEverConnectedRef.current) {
+            setConnectionIssue(buildConnectionIssue())
+          }
         })
 
         socket.addEventListener('error', () => {
           setIsConnected(false)
+          if (!hasEverConnectedRef.current) {
+            setConnectionIssue(buildConnectionIssue())
+          }
         })
+
+        socket.reconnect()
       } catch {
         if (active) {
           setIsConnected(false)
+          setConnectionIssue('Unable to load the live table connection.')
           onSystemMessage?.('Unable to load the live table connection.', 'error')
         }
       }
@@ -187,6 +234,10 @@ export function useRoom(
 
     return () => {
       active = false
+      if (connectionIssueTimerRef.current) {
+        clearTimeout(connectionIssueTimerRef.current)
+        connectionIssueTimerRef.current = null
+      }
       socketRef.current?.close()
       socketRef.current = null
     }
@@ -222,6 +273,7 @@ export function useRoom(
     yourId,
     isHost,
     isConnected,
+    connectionIssue,
     sendAction,
     sendMessage,
   }

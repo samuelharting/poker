@@ -71,6 +71,7 @@ export default function RoomPage() {
                 onKeyDown={e => e.key === 'Enter' && handleSetNickname()}
                 maxLength={20}
                 autoFocus
+                suppressHydrationWarning
               />
             </div>
 
@@ -92,7 +93,7 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [suitColorMode, setSuitColorMode] = useState<'two' | 'four'>('two')
 
-  const { tableState, socialState, yourId, isHost, sendAction, sendMessage, isConnected } = useRoom(
+  const { tableState, socialState, yourId, isHost, sendAction, sendMessage, isConnected, connectionIssue } = useRoom(
     roomCode,
     nickname
   )
@@ -254,13 +255,28 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
         <div className="room-loading-state">
           <div className="room-loading-orb" />
           <div className="room-loading-copy">
-            {isConnected ? 'Loading table...' : 'Connecting...'}
+            {connectionIssue
+              ? 'Live table unavailable'
+              : isConnected
+                ? 'Loading table...'
+                : 'Connecting...'}
           </div>
           <div className="room-loading-subcopy">
-            {isConnected
-              ? 'Pulling the latest room snapshot.'
-              : 'Opening a seat and restoring your last state.'}
+            {connectionIssue
+              ? connectionIssue
+              : isConnected
+                ? 'Pulling the latest room snapshot.'
+                : 'Opening a seat and restoring your last state.'}
           </div>
+          {connectionIssue && (
+            <button
+              className="btn-gold"
+              style={{ marginTop: '1.5rem' }}
+              onClick={() => window.location.reload()}
+            >
+              Retry Connection
+            </button>
+          )}
         </div>
       )}
 

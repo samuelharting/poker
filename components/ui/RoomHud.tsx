@@ -26,37 +26,6 @@ function getPhaseLabel(phase: GamePhase | null): string {
   }
 }
 
-function MenuGlyph({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M4 7h16" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-      <path d="M4 12h16" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-      <path d="M4 17h16" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function LockGlyph({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-hidden="true"
-    >
-      <rect x="6.5" y="10" width="11" height="8.5" rx="2.2" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M9 10V8.2a3 3 0 0 1 6 0V10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
-  )
-}
-
 function SettingsGlyph({ className }: { className?: string }) {
   return (
     <svg
@@ -93,7 +62,7 @@ export function RoomHud({
   return (
     <div className="room-hud">
       <div className="room-hud-mobile-bar">
-        <div className="room-hud-mobile-browser">
+        <div className="room-hud-mobile-topline">
           <button
             type="button"
             className={`room-hud-mobile-settings ${settingsOpen ? 'is-open' : ''}`}
@@ -101,18 +70,21 @@ export function RoomHud({
             onClick={onToggleSettings}
           >
             <span className="room-hud-mobile-settings-icon-wrap" aria-hidden="true">
-              <MenuGlyph className="room-hud-mobile-settings-icon" />
+              <SettingsGlyph className="room-hud-mobile-settings-icon" />
             </span>
-            <span className="room-hud-mobile-settings-label">Options</span>
+            <span className="room-hud-mobile-settings-label">
+              {settingsOpen ? 'Close' : 'Options'}
+            </span>
           </button>
 
-          <div className="room-hud-mobile-address">
-            <span className="room-hud-mobile-address-lock" aria-hidden="true">
-              <LockGlyph className="room-hud-mobile-address-lock-icon" />
-            </span>
-            <div className="room-hud-mobile-address-copy">
-              <div className="room-hud-mobile-address-site">pokernight.app</div>
-              <div className="room-hud-mobile-room">{roomCode}</div>
+          <div className="room-hud-mobile-identity">
+            <div className="room-hud-mobile-title-row">
+              <span className="room-hud-mobile-brand">Poker Night</span>
+              <span className="room-hud-mobile-seated">{playerCount} seated</span>
+            </div>
+            <div className="room-hud-mobile-room-row">
+              <span className="room-hud-mobile-room-label">Room</span>
+              <span className="room-hud-mobile-room-code">{roomCode}</span>
             </div>
           </div>
 
@@ -123,11 +95,10 @@ export function RoomHud({
         </div>
 
         <div className="room-hud-mobile-toolbar">
-          <span className="room-hud-mobile-pill">{isHost ? 'Host view' : 'Player view'}</span>
-          <span className="room-hud-mobile-pill">{playerCount} seated</span>
+          <span className="room-hud-mobile-pill">{isHost ? 'Host' : 'Player'}</span>
           <span className="room-hud-mobile-pill">{getPhaseLabel(phase)}</span>
           <span className="room-hud-mobile-pill room-hud-mobile-pill-strong">
-            NLH {smallBlind}/{bigBlind}
+            Blinds {smallBlind}/{bigBlind}
           </span>
         </div>
       </div>

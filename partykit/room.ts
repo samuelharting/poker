@@ -100,6 +100,7 @@ export default class PokerRoom implements PartyServer {
   private data: RoomData
   private autoFoldTimeout: ReturnType<typeof setTimeout> | null = null
   private autoFoldPlayerId: string | null = null
+  private autoFoldDeadline: number | null = null
   private autoStartTimeout: ReturnType<typeof setTimeout> | null = null
   private botActionTimeout: ReturnType<typeof setTimeout> | null = null
   private botActionPlayerId: string | null = null
@@ -220,6 +221,32 @@ export default class PokerRoom implements PartyServer {
     this.finalizeState()
     this.syncActionTimer(this.data.gameState.actingPlayerId === playerId)
     this.broadcastState()
+  }
+
+  onAlarm() {
+    const gameState = this.data.gameState
+    const actingPlayerId = gameState.actingPlayerId
+    if (
+      gameState.phase !== 'in_hand' ||
+      !actingPlayerId ||
+      this.isBotPlayer(actingPlayerId)
+    ) {
+      return
+    }
+
+    const timerStart = gameState.actionTimerStart
+    if (!timerStart) {
+      return
+    }
+
+    const deadline = timerStart + gameState.actionTimerDuration
+    const remainingMs = deadline - Date.now()
+    if (remainingMs > 25) {
+      void this.room.storage.setAlarm(deadline)
+      return
+    }
+
+    this.runAutoFold(actingPlayerId)
   }
 
   private handleJoinRoom(conn: Connection, nickname: string, reconnectToken?: string) {
@@ -1175,7 +1202,13 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
-    if (!resetCurrentTimer && this.autoFoldTimeout && this.autoFoldPlayerId === actingPlayerId) {
+    if (
+      !resetCurrentTimer &&
+      this.autoFoldPlayerId === actingPlayerId &&
+      this.autoFoldDeadline &&
+      this.autoFoldDeadline > Date.now()
+    ) {
+      void this.room.storage.setAlarm(this.autoFoldDeadline)
       return
     }
 
@@ -1184,39 +1217,48 @@ export default class PokerRoom implements PartyServer {
 
   private scheduleAutoFold(playerId: string) {
     this.clearBotAction()
-    this.clearAutoFold()
+    this.clearAutoFold(false)
     this.autoFoldPlayerId = playerId
     this.data.gameState.actionTimerStart = Date.now()
+    this.autoFoldDeadline = this.data.gameState.actionTimerStart + this.data.gameState.actionTimerDuration
+    void this.room.storage.setAlarm(this.autoFoldDeadline)
 
     this.autoFoldTimeout = setTimeout(() => {
-      this.autoFoldTimeout = null
-      this.autoFoldPlayerId = null
-
-      const gameState = this.data.gameState
-      if (gameState.phase !== 'in_hand' || gameState.actingPlayerId !== playerId) {
-        return
-      }
-
-      try {
-        const actingPlayer = this.getPlayer(playerId)
-        const shouldCheck = actingPlayer ? actingPlayer.bet >= gameState.currentBet : false
-        this.data.gameState = processAction(gameState, playerId, shouldCheck ? 'check' : 'fold')
-        this.finalizeState()
-        this.syncActionTimer()
-        this.broadcastState()
-      } catch {
-        this.finalizeState()
-      }
+      this.runAutoFold(playerId)
     }, this.data.gameState.actionTimerDuration)
   }
 
-  private clearAutoFold() {
+  private runAutoFold(playerId: string) {
+    this.clearAutoFold()
+
+    const gameState = this.data.gameState
+    if (gameState.phase !== 'in_hand' || gameState.actingPlayerId !== playerId) {
+      return
+    }
+
+    try {
+      const actingPlayer = this.getPlayer(playerId)
+      const shouldCheck = actingPlayer ? actingPlayer.bet >= gameState.currentBet : false
+      this.data.gameState = processAction(gameState, playerId, shouldCheck ? 'check' : 'fold')
+      this.finalizeState()
+      this.syncActionTimer()
+      this.broadcastState()
+    } catch {
+      this.finalizeState()
+    }
+  }
+
+  private clearAutoFold(clearAlarm = true) {
     if (this.autoFoldTimeout) {
       clearTimeout(this.autoFoldTimeout)
     }
 
     this.autoFoldTimeout = null
     this.autoFoldPlayerId = null
+    this.autoFoldDeadline = null
+    if (clearAlarm) {
+      void this.room.storage.deleteAlarm()
+    }
   }
 
   private scheduleBotAction(playerId: string) {
