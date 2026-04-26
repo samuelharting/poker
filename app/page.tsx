@@ -1,7 +1,13 @@
 ﻿'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import {
+  loadStoredPlayerProfile,
+  saveStoredPlayerProfile,
+  validatePlayerProfile,
+  type PlayerProfile,
+} from '@/lib/profile'
 
 function generateRoomCode(): string {
   const storageKey = 'poker_room_counter'
@@ -15,165 +21,241 @@ function generateRoomCode(): string {
 export default function LandingPage() {
   const router = useRouter()
   const [joinCode, setJoinCode] = useState('')
-  const [nickname, setNickname] = useState('')
-  const [joinNickname, setJoinNickname] = useState('')
+  const [createProfile, setCreateProfile] = useState<PlayerProfile>({
+    nickname: '',
+    email: '',
+    venmoUsername: '',
+  })
+  const [joinProfile, setJoinProfile] = useState<PlayerProfile>({
+    nickname: '',
+    email: '',
+    venmoUsername: '',
+  })
   const [showJoinForm, setShowJoinForm] = useState(false)
   const [error, setError] = useState('')
 
+  useEffect(() => {
+    const stored = loadStoredPlayerProfile()
+    if (stored) {
+      setCreateProfile(stored)
+      setJoinProfile(stored)
+    }
+  }, [])
+
   const handleCreateTable = useCallback(() => {
-    const trimmed = nickname.trim()
-    if (!trimmed) {
-      setError('Please enter your nickname')
+    const result = validatePlayerProfile(createProfile)
+    if (!result.ok) {
+      setError(result.error)
       return
     }
     setError('')
     const code = generateRoomCode()
-    sessionStorage.setItem('poker_nickname', trimmed)
+    saveStoredPlayerProfile(result.profile)
+    sessionStorage.setItem('poker_nickname', result.profile.nickname)
     router.push(`/room/${code}`)
-  }, [nickname, router])
+  }, [createProfile, router])
 
   const handleJoinTable = useCallback(() => {
     const trimmedCode = joinCode.trim()
-    const trimmedName = joinNickname.trim()
+    const result = validatePlayerProfile(joinProfile)
 
     if (!trimmedCode || !/^[0-9]+$/.test(trimmedCode)) {
       setError('Please enter a valid room number')
       return
     }
-    if (!trimmedName) {
-      setError('Please enter your nickname')
+    if (!result.ok) {
+      setError(result.error)
       return
     }
     setError('')
-    sessionStorage.setItem('poker_nickname', trimmedName)
+    saveStoredPlayerProfile(result.profile)
+    sessionStorage.setItem('poker_nickname', result.profile.nickname)
     router.push(`/room/${trimmedCode}`)
-  }, [joinCode, joinNickname, router])
+  }, [joinCode, joinProfile, router])
 
   return (
     <div className="landing-bg">
-      <div className="w-full max-w-md px-4">
-        {/* Header */}
-        <div className="text-center mb-12">
-          {/* Decorative card suits */}
-          <div className="flex justify-center gap-4 mb-6 text-3xl opacity-50">
-            <span style={{ color: '#e74c3c' }}>&#x2665;</span>
-            <span style={{ color: '#e8e8e8' }}>&#x2660;</span>
-            <span style={{ color: '#e74c3c' }}>&#x2666;</span>
-            <span style={{ color: '#e8e8e8' }}>&#x2663;</span>
+      <div className="landing-frame">
+        <div className="landing-copy">
+          <div className="landing-suits" aria-hidden="true">
+            <span className="suit-red">&#x2665;</span>
+            <span>&#x2660;</span>
+            <span className="suit-red">&#x2666;</span>
+            <span>&#x2663;</span>
           </div>
-
-          <h1 className="text-5xl font-bold mb-3 gold-text" style={{ fontFamily: 'Georgia, serif' }}>
-            Poker Night
-          </h1>
-          <p className="text-base" style={{ color: 'rgba(255,255,255,0.4)' }}>
-            Texas Hold'em · Multiplayer · Real-time
+          <div className="landing-kicker">Private Texas Hold'em</div>
+          <h1 className="landing-title gold-text">Poker Night</h1>
+          <p className="landing-subtitle">
+            Start a polished table for friends, then share the room code when seats are ready.
           </p>
+          <div className="landing-status-strip" aria-label="Table defaults">
+            <span>8 max</span>
+            <span>10 / 20 blinds</span>
+            <span>Live table</span>
+          </div>
+          <div className="landing-table-preview" aria-hidden="true">
+            <div className="landing-preview-table">
+              <span className="landing-preview-pot">$240</span>
+              <span className="landing-preview-card landing-preview-card-a" />
+              <span className="landing-preview-card landing-preview-card-b" />
+              <span className="landing-preview-card landing-preview-card-c" />
+              <span className="landing-preview-seat landing-preview-seat-one" />
+              <span className="landing-preview-seat landing-preview-seat-two" />
+              <span className="landing-preview-seat landing-preview-seat-three" />
+            </div>
+          </div>
         </div>
 
-        {/* Error */}
-        {error && (
-          <div className="mb-4 p-3 rounded-lg text-sm text-center"
-            style={{ background: 'rgba(192, 57, 43, 0.2)', border: '1px solid rgba(192,57,43,0.4)', color: '#ff8080' }}>
-            {error}
-          </div>
-        )}
-
-        {!showJoinForm ? (
-          /* Create Table Panel */
-          <div className="card-panel p-8 space-y-5">
-            <h2 className="text-xl font-bold text-center" style={{ color: 'rgba(255,255,255,0.85)' }}>
-              Start a New Table
-            </h2>
-
-            <div className="space-y-3">
-              <label className="block text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                Your Nickname
-              </label>
-              <input
-                type="text"
-                className="input-dark"
-                placeholder="e.g. PhilIvey"
-                value={nickname}
-                onChange={e => setNickname(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleCreateTable()}
-                maxLength={20}
-                autoFocus
-                suppressHydrationWarning
-              />
-            </div>
-
-            <button className="btn-gold" onClick={handleCreateTable}>
-              Create Table
+        <div className="landing-panel-wrap">
+          <div className="landing-mode-toggle" role="tablist" aria-label="Table entry mode">
+            <button
+              type="button"
+              className={!showJoinForm ? 'is-active' : ''}
+              onClick={() => { setShowJoinForm(false); setError('') }}
+            >
+              Create
             </button>
+            <button
+              type="button"
+              className={showJoinForm ? 'is-active' : ''}
+              onClick={() => { setShowJoinForm(true); setError('') }}
+            >
+              Join
+            </button>
+          </div>
 
-            <div className="text-center pt-2">
-              <button
-                className="text-sm transition-colors"
-                style={{ color: 'rgba(255,255,255,0.35)', background: 'none', border: 'none', cursor: 'pointer' }}
-                onClick={() => { setShowJoinForm(true); setError('') }}
-              >
-                Have a room code? Join instead →
+          {error && (
+            <div className="entry-error" role="alert">
+              {error}
+            </div>
+          )}
+
+          {!showJoinForm ? (
+            <div className="card-panel entry-panel">
+              <div className="entry-panel-header">
+                <span className="entry-panel-kicker">New table</span>
+                <h2>Start a private table</h2>
+              </div>
+
+              <label className="entry-field">
+                <span>Your nickname</span>
+                <input
+                  type="text"
+                  className="input-dark"
+                  placeholder="e.g. PhilIvey"
+                  value={createProfile.nickname}
+                  onChange={e => setCreateProfile(current => ({ ...current, nickname: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && handleCreateTable()}
+                  maxLength={20}
+                  autoComplete="nickname"
+                  autoFocus
+                  suppressHydrationWarning
+                />
+              </label>
+
+              <label className="entry-field">
+                <span>Email</span>
+                <input
+                  type="email"
+                  className="input-dark"
+                  placeholder="you@example.com"
+                  value={createProfile.email}
+                  onChange={e => setCreateProfile(current => ({ ...current, email: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && handleCreateTable()}
+                  autoComplete="email"
+                  suppressHydrationWarning
+                />
+              </label>
+
+              <label className="entry-field">
+                <span>Venmo username</span>
+                <input
+                  type="text"
+                  className="input-dark"
+                  placeholder="@samvenmo"
+                  value={createProfile.venmoUsername}
+                  onChange={e => setCreateProfile(current => ({ ...current, venmoUsername: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && handleCreateTable()}
+                  maxLength={31}
+                  autoComplete="username"
+                  suppressHydrationWarning
+                />
+              </label>
+
+              <button className="btn-gold" onClick={handleCreateTable}>
+                Create Table
               </button>
             </div>
-          </div>
-        ) : (
-          /* Join Table Panel */
-          <div className="card-panel p-8 space-y-5">
-            <h2 className="text-xl font-bold text-center" style={{ color: 'rgba(255,255,255,0.85)' }}>
-              Join a Table
-            </h2>
+          ) : (
+            <div className="card-panel entry-panel">
+              <div className="entry-panel-header">
+                <span className="entry-panel-kicker">Existing room</span>
+                <h2>Join a table</h2>
+              </div>
 
-            <div className="space-y-3">
-              <label className="block text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                Room Code
+              <label className="entry-field">
+                <span>Room code</span>
+                <input
+                  type="text"
+                  className="input-dark input-room-code"
+                  placeholder="1"
+                  value={joinCode}
+                  onChange={e => setJoinCode(e.target.value.replace(/[^0-9]/g, ''))}
+                  maxLength={20}
+                  autoFocus
+                  suppressHydrationWarning
+                />
               </label>
-              <input
-                type="text"
-                className="input-dark text-center font-mono tracking-widest text-lg"
-                placeholder="1"
-                value={joinCode}
-                onChange={e => setJoinCode(e.target.value.replace(/[^0-9]/g, ''))}
-                maxLength={20}
-                autoFocus
-                suppressHydrationWarning
-              />
-            </div>
 
-            <div className="space-y-3">
-              <label className="block text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                Your Nickname
+              <label className="entry-field">
+                <span>Your nickname</span>
+                <input
+                  type="text"
+                  className="input-dark"
+                  placeholder="e.g. DanielN"
+                  value={joinProfile.nickname}
+                  onChange={e => setJoinProfile(current => ({ ...current, nickname: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && handleJoinTable()}
+                  maxLength={20}
+                  autoComplete="nickname"
+                  suppressHydrationWarning
+                />
               </label>
-              <input
-                type="text"
-                className="input-dark"
-                placeholder="e.g. DanielN"
-                value={joinNickname}
-                onChange={e => setJoinNickname(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleJoinTable()}
-                maxLength={20}
-                suppressHydrationWarning
-              />
-            </div>
 
-            <button className="btn-gold" onClick={handleJoinTable}>
-              Join Table
-            </button>
+              <label className="entry-field">
+                <span>Email</span>
+                <input
+                  type="email"
+                  className="input-dark"
+                  placeholder="you@example.com"
+                  value={joinProfile.email}
+                  onChange={e => setJoinProfile(current => ({ ...current, email: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && handleJoinTable()}
+                  autoComplete="email"
+                  suppressHydrationWarning
+                />
+              </label>
 
-            <div className="text-center pt-2">
-              <button
-                className="text-sm transition-colors"
-                style={{ color: 'rgba(255,255,255,0.35)', background: 'none', border: 'none', cursor: 'pointer' }}
-                onClick={() => { setShowJoinForm(false); setError('') }}
-              >
-                ← Create a new table instead
+              <label className="entry-field">
+                <span>Venmo username</span>
+                <input
+                  type="text"
+                  className="input-dark"
+                  placeholder="@samvenmo"
+                  value={joinProfile.venmoUsername}
+                  onChange={e => setJoinProfile(current => ({ ...current, venmoUsername: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && handleJoinTable()}
+                  maxLength={31}
+                  autoComplete="username"
+                  suppressHydrationWarning
+                />
+              </label>
+
+              <button className="btn-gold" onClick={handleJoinTable}>
+                Join Table
               </button>
             </div>
-          </div>
-        )}
-
-        {/* Footer */}
-        <div className="text-center mt-8 text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>
-          Share the room code with friends to play together
+          )}
         </div>
       </div>
     </div>

@@ -1,20 +1,30 @@
 'use client'
 
-import { type CSSProperties, useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import dynamic from 'next/dynamic'
+import React, { type CSSProperties, useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import type { TableState, SeatPlayer, LobbyPlayer, ShowCardsMode } from '@/lib/poker/types'
 import type { SocialSnapshot } from '@/shared/protocol'
-import { PlayerSeat } from './PlayerSeat'
+import { PlayerSeat, formatWinnerPaymentLabel } from './PlayerSeat'
 import { CommunityCards } from './CommunityCards'
 import { OwnHand } from './OwnHand'
 import { PotDisplay } from './PotDisplay'
 import { ChipStack } from '@/components/ui/ChipStack'
 import { SearchableEmojiPicker } from '@/components/ui/SearchableEmojiPicker'
+import { createThreeTableViewModel, type ThreeTableViewModel } from '@/components/three/tableViewModel'
 
 type FeedbackTone = 'info' | 'success' | 'error'
+type PokerAction = 'fold' | 'check' | 'call' | 'raise' | 'all_in'
 type WinnerChipTrailStyle = CSSProperties & {
   '--winner-chip-x': string | number
   '--winner-chip-y': string | number
   '--winner-chip-delay': string
+}
+
+export interface PokerActionButtonDescriptor {
+  key: PokerAction
+  label: string
+  amountLabel?: string
+  className: string
 }
 
 interface PokerTableProps {
@@ -93,21 +103,42 @@ type EmoteId = (typeof EMOTE_OPTIONS)[number]['id']
 type WinnerDisplay = {
   playerId: string
   nickname: string
+  venmoUsername?: string
   amount: number
   targetX: string
   targetY: string
   delayMs: number
 }
 
+interface DesktopPokerRoom3DProps {
+  view: ThreeTableViewModel
+}
+
+const DesktopPokerRoom3D = dynamic<DesktopPokerRoom3DProps>(
+  () => import('@/components/three/DesktopPokerRoom3D').then(module => module.DesktopPokerRoom3D),
+  { ssr: false }
+)
+
 const WINNER_SEAT_TARGETS: Record<number, { x: string; y: string }> = {
-  0: { x: '52%', y: '88.2%' },
-  1: { x: '17%', y: '78%' },
-  2: { x: '8%', y: '50.5%' },
-  3: { x: '19%', y: '22.5%' },
-  4: { x: '50%', y: '8%' },
-  5: { x: '81%', y: '22.5%' },
-  6: { x: '92.5%', y: '50.5%' },
-  7: { x: '84.5%', y: '78%' },
+  0: { x: '50.5%', y: '88.2%' },
+  1: { x: '19.5%', y: '78.5%' },
+  2: { x: '11%', y: '53%' },
+  3: { x: '18.8%', y: '23.5%' },
+  4: { x: '50%', y: '11.5%' },
+  5: { x: '81.2%', y: '23.5%' },
+  6: { x: '89%', y: '53%' },
+  7: { x: '80.5%', y: '78.5%' },
+}
+
+const MOBILE_WINNER_SEAT_TARGETS: Record<number, { x: string; y: string }> = {
+  0: { x: '50%', y: '85%' },
+  1: { x: '19%', y: '76%' },
+  2: { x: '12%', y: '57%' },
+  3: { x: '20%', y: '29%' },
+  4: { x: '50%', y: '11%' },
+  5: { x: '80%', y: '29%' },
+  6: { x: '88%', y: '57%' },
+  7: { x: '81%', y: '76%' },
 }
 
 const SHOW_CARD_OPTIONS: Array<{
@@ -128,8 +159,100 @@ function formatAmount(amount: number): string {
   return `$${amount.toLocaleString()}`
 }
 
+export function buildActionButtonDescriptors({
+  legalActions,
+  toCall,
+  raiseAmount,
+  allInAmount,
+}: {
+  legalActions: PokerAction[]
+  toCall: number
+  raiseAmount: number
+  allInAmount?: number
+}): PokerActionButtonDescriptor[] {
+  const buttons: PokerActionButtonDescriptor[] = []
+
+  if (legalActions.includes('call')) {
+    buttons.push({
+      key: 'call',
+      label: 'Call',
+      amountLabel: formatAmount(toCall),
+      className: 'btn-call',
+    })
+  }
+
+  if (legalActions.includes('check')) {
+    buttons.push({
+      key: 'check',
+      label: 'Check',
+      className: 'btn-check',
+    })
+  }
+
+  if (legalActions.includes('raise')) {
+    buttons.push({
+      key: 'raise',
+      label: 'Raise to',
+      amountLabel: formatAmount(raiseAmount),
+      className: 'btn-raise',
+    })
+  }
+
+  if (legalActions.includes('all_in') && typeof allInAmount === 'number') {
+    buttons.push({
+      key: 'all_in',
+      label: 'All-in',
+      amountLabel: formatAmount(allInAmount),
+      className: 'btn-all-in',
+    })
+  }
+
+  if (legalActions.includes('fold')) {
+    buttons.push({
+      key: 'fold',
+      label: 'Fold',
+      className: 'btn-fold',
+    })
+  }
+
+  return buttons
+}
+
 function formatEquityPercent(value: number): string {
   return `${value.toFixed(1)}%`
+}
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === 'undefined') {
+      return false
+    }
+
+    return window.matchMedia(query).matches
+  })
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const mediaQuery = window.matchMedia(query)
+    const handleChange = (event: MediaQueryListEvent) => {
+      setMatches(event.matches)
+    }
+
+    setMatches(mediaQuery.matches)
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', handleChange)
+      return () => mediaQuery.removeEventListener('change', handleChange)
+    }
+
+    mediaQuery.addListener(handleChange)
+    return () => mediaQuery.removeListener(handleChange)
+  }, [query])
+
+  return matches
 }
 
 function getLobbyStatusLabel(state: TableState, player: LobbyPlayer): string {
@@ -199,8 +322,15 @@ export function PokerTable({
   onSendTargetEmote,
   onFeedback,
 }: PokerTableProps) {
+  const isMobileViewport = useMediaQuery('(max-width: 768px)')
+  const shouldRenderDesktopThree = useMediaQuery('(min-width: 1100px)')
+  const threeTableView = useMemo(
+    () => shouldRenderDesktopThree ? createThreeTableViewModel(state, yourId) : null,
+    [shouldRenderDesktopThree, state, yourId]
+  )
   const me = state.players.find(player => player.id === yourId)
   const lobbyMe = state.lobbyPlayers.find(player => player.id === yourId)
+  const actingPlayer = state.players.find(player => player.id === state.actingPlayerId)
   const isMyTurn = state.actingPlayerId === yourId
   const isInHand = state.phase === 'in_hand'
   const betweenHands = !isInHand
@@ -407,8 +537,13 @@ export function PokerTable({
     () => new Map((state.winners ?? []).map(winner => [winner.playerId, winner.amount])),
     [state.winners]
   )
+  const winnerVenmoUsernames = useMemo(
+    () => new Map((state.winners ?? []).map(winner => [winner.playerId, winner.venmoUsername])),
+    [state.winners]
+  )
   const myWinnerAmount = winnerAmounts.get(yourId) ?? 0
   const winnerSeatMap = useMemo(() => new Map(orderedOpponents.map(player => [player.id, player.visualSeat])), [orderedOpponents])
+  const winnerSeatTargets = isMobileViewport ? MOBILE_WINNER_SEAT_TARGETS : WINNER_SEAT_TARGETS
   const winnerDisplays = useMemo<WinnerDisplay[]>(() => {
     if (!betweenHands || !state.winners?.length) {
       return []
@@ -416,28 +551,30 @@ export function PokerTable({
 
     const playerById = new Map(state.players.map(player => [player.id, player]))
 
-    return state.winners
-      .map((winner, index) => {
+    return state.winners.reduce<WinnerDisplay[]>((acc, winner, index) => {
         const player = playerById.get(winner.playerId)
         if (!player) {
-          return null
+          return acc
         }
 
         const visualSeat = winnerSeatMap.get(winner.playerId) ?? player.seatIndex
         const safeVisualSeat = Math.min(7, Math.max(0, visualSeat))
-        const target = WINNER_SEAT_TARGETS[safeVisualSeat]
+        const target = winnerSeatTargets[safeVisualSeat]
 
-        return {
+        acc.push({
           playerId: winner.playerId,
           nickname: player.nickname,
+          venmoUsername: winner.venmoUsername ?? player.venmoUsername,
           amount: winner.amount,
-          targetX: target?.x ?? WINNER_SEAT_TARGETS[0]!.x,
-          targetY: target?.y ?? WINNER_SEAT_TARGETS[0]!.y,
+          targetX: target?.x ?? winnerSeatTargets[0]!.x,
+          targetY: target?.y ?? winnerSeatTargets[0]!.y,
           delayMs: index * 180,
-        }
-      })
-      .filter((winner): winner is WinnerDisplay => winner !== null)
-  }, [betweenHands, state.winners, state.players, winnerSeatMap])
+        })
+
+        return acc
+      }, [])
+  }, [betweenHands, state.winners, state.players, winnerSeatMap, winnerSeatTargets])
+  const showDesktopWaitingBanner = betweenHands && !isMobileViewport && winnerDisplays.length === 0
 
   const tableCenterLabel = isHost
     ? 'HOST VIEW'
@@ -454,63 +591,32 @@ export function PokerTable({
         ? toCall > 0
           ? `To call ${formatAmount(toCall)}`
           : 'Your turn'
-        : 'In hand'
+        : actingPlayer
+          ? `${actingPlayer.nickname}'s turn`
+          : 'In hand'
+
+  const actionButtonDescriptors = useMemo(
+    () => buildActionButtonDescriptors({
+      legalActions,
+      toCall,
+      raiseAmount,
+      allInAmount: me ? me.stack + me.bet : undefined,
+    }),
+    [legalActions, me, raiseAmount, toCall]
+  )
 
   const actionButtons = useMemo(() => {
-    const buttons: Array<{
-      key: 'call' | 'check' | 'raise' | 'all_in' | 'fold'
-      label: string
-      className: string
-      onClick: () => void
-    }> = []
+    return actionButtonDescriptors.map(actionButton => {
+      const onClick = actionButton.key === 'raise'
+        ? handleRaise
+        : () => onAction(actionButton.key)
 
-    if (legalActions.includes('call')) {
-      buttons.push({
-        key: 'call',
-        label: `Call ${formatAmount(toCall)}`,
-        className: 'btn-call',
-        onClick: () => onAction('call'),
-      })
-    }
-
-    if (legalActions.includes('check')) {
-      buttons.push({
-        key: 'check',
-        label: 'Check',
-        className: 'btn-check',
-        onClick: () => onAction('check'),
-      })
-    }
-
-    if (legalActions.includes('raise')) {
-      buttons.push({
-        key: 'raise',
-        label: `Raise ${formatAmount(raiseAmount)}`,
-        className: 'btn-raise',
-        onClick: handleRaise,
-      })
-    }
-
-    if (legalActions.includes('all_in') && me) {
-      buttons.push({
-        key: 'all_in',
-        label: `All-in ${formatAmount(me.stack + me.bet)}`,
-        className: 'btn-raise',
-        onClick: () => onAction('all_in'),
-      })
-    }
-
-    if (legalActions.includes('fold')) {
-      buttons.push({
-        key: 'fold',
-        label: 'Fold',
-        className: 'btn-fold',
-        onClick: () => onAction('fold'),
-      })
-    }
-
-    return buttons
-  }, [handleRaise, legalActions, me, onAction, raiseAmount, toCall])
+      return {
+        ...actionButton,
+        onClick,
+      }
+    })
+  }, [actionButtonDescriptors, handleRaise, onAction])
 
   const tableWaitingCopy = !isConnected
     ? 'Restoring the room snapshot and reconnecting your seat.'
@@ -520,13 +626,28 @@ export function PokerTable({
         ? 'The table is ready. Deal whenever everyone looks settled.'
         : 'Everyone is seated. Waiting for the host to deal the next hand.'
   const waitingStatusText = getWaitingStatusText(state, lobbyMe, isConnected)
+  const desktopWaitingBannerTitle = !isConnected
+    ? 'Reconnecting'
+    : state.players.length < 2
+      ? 'Waiting for players'
+      : isHost
+        ? 'Ready for the next hand'
+        : 'Waiting on the host'
+  const desktopWaitingBannerCopy = isHost ? tableWaitingCopy : waitingStatusText
   const bettingTrayHeader = isMyTurn
     ? toCall > 0
-      ? `Your turn · Call ${formatAmount(toCall)}`
+      ? `Your turn - Call ${formatAmount(toCall)}`
       : 'Your turn'
     : toCall > 0
       ? `To call ${formatAmount(toCall)}`
       : 'Action live'
+  const turnFocusDetail = isMyTurn
+    ? toCall > 0
+      ? `Call ${formatAmount(toCall)} to continue`
+      : 'Check or raise'
+    : actingPlayer
+      ? `${turnTimer.secondsLeft}s left`
+      : 'Hand live'
 
   const handleTargetedEmote = useCallback((emote: string) => {
     if (!targetedPlayer) {
@@ -549,9 +670,27 @@ export function PokerTable({
       className="table-scene"
       data-phase={state.phase}
       data-hero-seat={shouldShowOwnHand ? 'true' : 'false'}
+      data-player-count={state.players.length}
+      data-show-cards={canAdjustShownCards && !settingsOpen ? 'true' : 'false'}
       data-suit-colors={suitColorMode}
       data-tray-open={hasActionTray ? 'true' : 'false'}
     >
+      {threeTableView ? <DesktopPokerRoom3D view={threeTableView} /> : null}
+      {isInHand && actingPlayer && (
+        <div
+          className={`turn-focus-banner ${isMyTurn ? 'is-hero-turn' : 'is-opponent-turn'}`}
+          role="status"
+          aria-live={isMyTurn ? 'assertive' : 'polite'}
+        >
+          <span className="turn-focus-kicker">
+            {isMyTurn ? 'Your turn' : 'Turn'}
+          </span>
+          <span className="turn-focus-name">
+            {isMyTurn ? 'You are up' : `${actingPlayer.nickname} is up`}
+          </span>
+          <span className="turn-focus-detail">{turnFocusDetail}</span>
+        </div>
+      )}
       <div className="table-stage">
         <div className="table-wrapper">
           <div className="table-seat-ring">
@@ -582,6 +721,7 @@ export function PokerTable({
                     isActing={state.actingPlayerId === player.id}
                     isWinner={betweenHands && winnerAmounts.has(player.id)}
                     winnerAmount={winnerAmounts.get(player.id)}
+                    winnerVenmoUsername={winnerVenmoUsernames.get(player.id) ?? player.venmoUsername}
                     depthClass={layout.depthClass}
                     opacityValue={layout.opacity}
                     socialMessage={seatSocial.message}
@@ -609,12 +749,20 @@ export function PokerTable({
               toCall={isMyTurn ? Math.max(0, toCall) : 0}
             />
 
-            <div className="table-surface-center-copy" aria-hidden="true">
-              <span className="table-surface-center-owner">{tableCenterLabel}</span>
-              <span className="table-surface-center-stakes">
-                NLH - {state.smallBlind} / {state.bigBlind}
-              </span>
-            </div>
+            {showDesktopWaitingBanner ? (
+              <TableWaitingBanner
+                title={desktopWaitingBannerTitle}
+                playerCount={state.players.length}
+                copy={desktopWaitingBannerCopy}
+              />
+            ) : (
+              <div className="table-surface-center-copy" aria-hidden="true">
+                <span className="table-surface-center-owner">{tableCenterLabel}</span>
+                <span className="table-surface-center-stakes">
+                  NLH - {state.smallBlind} / {state.bigBlind}
+                </span>
+              </div>
+            )}
 
             {betweenHands && winnerDisplays.length > 0 ? (
               <div className="table-center-winner-announcement" role="status" aria-live="polite">
@@ -625,7 +773,9 @@ export function PokerTable({
                 <div className="table-center-winner-list">
                   {winnerDisplays.map(winner => (
                     <div key={winner.playerId} className="table-center-winner-line">
-                      <span className="table-center-winner-name">{winner.nickname}</span>
+                      <span className="table-center-winner-name">
+                        {formatWinnerPaymentLabel(winner.nickname, winner.venmoUsername)}
+                      </span>
                       <span className="table-center-winner-amount">Won {formatAmount(winner.amount)}</span>
                       <ChipStack amount={winner.amount} compact />
                     </div>
@@ -696,7 +846,10 @@ export function PokerTable({
               </span>
             )}
             {betweenHands && myWinnerAmount > 0 && (
-              <span className="table-chip winner-chip">Won {formatAmount(myWinnerAmount)}</span>
+              <span className="table-chip winner-chip">
+                Won {formatAmount(myWinnerAmount)}
+                {me?.venmoUsername ? ` ${me.venmoUsername}` : ''}
+              </span>
             )}
             {me.isDealer && <span className="table-chip">Dealer</span>}
             {me.isSB && <span className="table-chip">SB</span>}
@@ -748,6 +901,11 @@ export function PokerTable({
             <span className="betting-tray-kicker">
               {bettingTrayHeader}
             </span>
+            {isMyTurn && (
+              <span className="betting-tray-turn">
+                Your turn
+              </span>
+            )}
           </div>
 
           <div className="timer-bar-shell">
@@ -819,9 +977,18 @@ export function PokerTable({
                 key={actionButton.key}
                 type="button"
                 className={`btn-action ${actionButton.className}`}
+                data-action={actionButton.key}
+                aria-label={
+                  actionButton.amountLabel
+                    ? `${actionButton.label} ${actionButton.amountLabel}`
+                    : actionButton.label
+                }
                 onClick={actionButton.onClick}
               >
-                {actionButton.label}
+                <span className="btn-action-main">{actionButton.label}</span>
+                {actionButton.amountLabel && (
+                  <span className="btn-action-sub">{actionButton.amountLabel}</span>
+                )}
               </button>
             ))}
           </div>
@@ -1503,8 +1670,21 @@ function WaitingPanel({
 
   return (
     <div className="table-panel status-panel">
-      <div className="table-panel-kicker">{isHost ? 'Host controls' : 'Table status'}</div>
-      <div className="table-panel-title">{statusText}</div>
+      <div className="table-panel-header">
+        <div>
+          <div className="table-panel-kicker">{isHost ? 'Host controls' : 'Table status'}</div>
+          <div className="table-panel-title">{statusText}</div>
+        </div>
+        <div className="status-panel-header-pills">
+          <span className="table-chip table-chip-soft">{seatedCount} seated</span>
+          <span className="table-chip">{openSeats} open</span>
+        </div>
+      </div>
+      <div className="status-panel-stats">
+        <span className="table-chip">Blinds {formatAmount(state.smallBlind)}/{formatAmount(state.bigBlind)}</span>
+        <span className="table-chip">Buy-in {formatAmount(state.startingStack)}</span>
+        {lobbyMe?.isSpectator && <span className="table-chip chip-warning">Spectating</span>}
+      </div>
       <div className="table-panel-note">
         {lobbyMe?.isSpectator
           ? 'Open Settings if the host wants to seat you back into the game.'
@@ -1653,19 +1833,17 @@ function MobileBetweenHandsDock({
 }
 
 function TableWaitingBanner({
+  title,
   playerCount,
-  isConnected,
   copy,
 }: {
+  title: string
   playerCount: number
-  isConnected: boolean
   copy: string
 }) {
   return (
     <div className="table-waiting-banner">
-      <div className="table-waiting-title">
-        {isConnected ? 'Waiting for others' : 'Reconnecting'}
-      </div>
+      <div className="table-waiting-title">{title}</div>
       <div className="table-waiting-copy">{copy}</div>
       <div className="table-waiting-meta">
         <span>{playerCount} seated</span>

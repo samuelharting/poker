@@ -1,5 +1,8 @@
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { getVisibleSeatCards } from '@/components/table/PlayerSeat'
+import { formatWinnerPaymentLabel, getVisibleSeatCards } from '@/components/table/PlayerSeat'
+import { PlayerSeat } from '@/components/table/PlayerSeat'
 import type { Card, SeatPlayer } from '@/lib/poker/types'
 
 function makeSeatPlayer(overrides: Partial<SeatPlayer> = {}): SeatPlayer {
@@ -68,5 +71,31 @@ describe('PlayerSeat card reveals', () => {
 
     expect(visible.left).toEqual(cards[0])
     expect(visible.right).toEqual(cards[1])
+  })
+})
+
+describe('winner payment labels', () => {
+  it('adds Venmo when the winner has a handle', () => {
+    expect(formatWinnerPaymentLabel('Sam', '@samvenmo')).toBe('Sam @samvenmo')
+  })
+
+  it('falls back to nickname only without Venmo', () => {
+    expect(formatWinnerPaymentLabel('Sam')).toBe('Sam')
+  })
+})
+
+describe('PlayerSeat turn label', () => {
+  it('uses a direct turn label for the acting player', () => {
+    const markup = renderToStaticMarkup(
+      <PlayerSeat
+        player={makeSeatPlayer({ status: 'active' })}
+        isActing={true}
+        depthClass="seat-depth-mid"
+        opacityValue={1}
+      />
+    )
+
+    expect(markup).toContain('Turn')
+    expect(markup).not.toContain('Acting')
   })
 })

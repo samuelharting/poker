@@ -41,10 +41,20 @@ export interface BountyMetadata {
   reason: string
 }
 
+export interface PlayerStats {
+  handsPlayed: number
+  folds: number
+  wins: number
+  totalWon: number
+  foldRate: number
+}
+
 export interface SeatPlayer {
   id: string
   nickname: string
   isBot?: boolean
+  venmoUsername?: string
+  stats?: PlayerStats
   stack: number
   bet: number          // current bet this round
   totalInPot: number   // total committed this hand
@@ -57,6 +67,7 @@ export interface SeatPlayer {
   showCards: ShowCardsMode
   isConnected: boolean
   lastAction?: string
+  lastActionId?: string
   seatIndex: number    // 0-7
   hasActedThisRound: boolean
   equityPercent?: number
@@ -70,6 +81,8 @@ export interface Pot {
 export interface LobbyPlayer {
   id: string
   nickname: string
+  venmoUsername?: string
+  stats?: PlayerStats
   stack: number
   status: PlayerStatus | 'spectating'
   isConnected: boolean
@@ -102,9 +115,10 @@ export interface TableState {
   sevenTwoRuleEnabled: boolean
   sevenTwoBountyPercent: number
   handNumber: number
+  actionSequence?: number
   recentActions: string[]
   lobbyPlayers: LobbyPlayer[]
-  winners?: Array<{ playerId: string; amount: number; handDescription?: string }>
+  winners?: Array<{ playerId: string; amount: number; handDescription?: string; venmoUsername?: string }>
   bounty?: BountyMetadata
 }
 
@@ -138,7 +152,8 @@ export interface InternalGameState {
   sevenTwoRuleEnabled: boolean
   sevenTwoBountyPercent: number
   handNumber: number
+  actionSequence?: number
   recentActions: string[]
-  winners?: Array<{ playerId: string; amount: number; handDescription?: string }>
+  winners?: Array<{ playerId: string; amount: number; handDescription?: string; venmoUsername?: string }>
   bounty?: BountyMetadata
 }

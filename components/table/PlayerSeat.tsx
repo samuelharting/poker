@@ -1,5 +1,6 @@
 'use client'
 
+import React from 'react'
 import type { Card, SeatPlayer } from '@/lib/poker/types'
 import clsx from 'clsx'
 import { PlayingCard } from '@/components/ui/PlayingCard'
@@ -10,6 +11,7 @@ interface PlayerSeatProps {
   isActing: boolean
   isWinner?: boolean
   winnerAmount?: number
+  winnerVenmoUsername?: string
   depthClass: 'seat-depth-near' | 'seat-depth-mid' | 'seat-depth-far' | 'seat-depth-top'
   opacityValue: number
   socialMessage?: string
@@ -29,6 +31,10 @@ const STATUS_LABELS: Record<string, string> = {
 
 function formatEquityPercent(value: number): string {
   return `${value.toFixed(1)}%`
+}
+
+export function formatWinnerPaymentLabel(nickname: string, venmoUsername?: string): string {
+  return venmoUsername ? `${nickname} ${venmoUsername}` : nickname
 }
 
 export function getVisibleSeatCards(
@@ -70,6 +76,7 @@ export function PlayerSeat({
   isActing,
   isWinner = false,
   winnerAmount,
+  winnerVenmoUsername,
   depthClass,
   opacityValue,
   socialMessage,
@@ -207,7 +214,9 @@ export function PlayerSeat({
       )}
 
       {isWinner && typeof winnerAmount === 'number' && winnerAmount > 0 && (
-        <div className="winner-payout-chip">Won ${winnerAmount.toLocaleString()}</div>
+        <div className="winner-payout-chip">
+          Won ${winnerAmount.toLocaleString()}{winnerVenmoUsername ? ` ${winnerVenmoUsername}` : ''}
+        </div>
       )}
 
       {showEquity && (
@@ -230,7 +239,7 @@ export function PlayerSeat({
         </div>
       )}
 
-      {isActing && <div className="player-acting-label">Acting</div>}
+      {isActing && <div className="player-acting-label">Turn</div>}
     </div>
   )
 }

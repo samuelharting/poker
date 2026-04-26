@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TableState } from '@/lib/poker/types'
+import type { PlayerProfile } from '@/lib/profile'
 import {
   MAX_CHAT_LENGTH,
   parseS2C,
@@ -61,7 +62,7 @@ export interface RoomState {
 
 export function useRoom(
   roomCode: string,
-  nickname: string,
+  profile: PlayerProfile,
   options: UseRoomOptions = {}
 ): RoomState {
   const socketRef = useRef<RoomSocket | null>(null)
@@ -92,7 +93,7 @@ export function useRoom(
   )
 
   useEffect(() => {
-    if (!roomCode || !nickname) {
+    if (!roomCode || !profile.nickname || !profile.email || !profile.venmoUsername) {
       return
     }
 
@@ -146,7 +147,9 @@ export function useRoom(
           setConnectionIssue(null)
           const joinMsg: C2SMessage = {
             type: 'join_room',
-            nickname,
+            nickname: profile.nickname,
+            email: profile.email,
+            venmoUsername: profile.venmoUsername,
             reconnectToken: reconnectTokenRef.current ?? undefined,
           }
           socket.send(JSON.stringify(joinMsg))
@@ -241,7 +244,7 @@ export function useRoom(
       socketRef.current?.close()
       socketRef.current = null
     }
-  }, [nickname, onSystemMessage, roomCode])
+  }, [onSystemMessage, profile.email, profile.nickname, profile.venmoUsername, roomCode])
 
   useEffect(() => {
     if (!yourId || !tableState || !isConnected) {

@@ -30,6 +30,16 @@ function addAction(state: InternalGameState, message: string): void {
   state.recentActions = [message, ...state.recentActions].slice(0, 20)
 }
 
+function setPlayerLastAction(
+  state: InternalGameState,
+  player: InternalPlayer,
+  action: string
+): void {
+  state.actionSequence = (state.actionSequence ?? 0) + 1
+  player.lastAction = action
+  player.lastActionId = `${state.handNumber}:${state.actionSequence}`
+}
+
 function getSeatedPlayers(state: InternalGameState): InternalPlayer[] {
   return state.players.filter(
     p => p.status !== 'waiting' && p.status !== 'sitting_out'
@@ -351,6 +361,7 @@ export function createInitialGameState(
     sevenTwoRuleEnabled: true,
     sevenTwoBountyPercent: 2,
     handNumber: 0,
+    actionSequence: 0,
     recentActions: [],
   }
 }
@@ -390,6 +401,7 @@ export function startHand(state: InternalGameState): InternalGameState {
     player.holeCards = []
     player.hasActedThisRound = false
     player.lastAction = undefined
+    player.lastActionId = undefined
     player.isDealer = false
     player.isSB = false
     player.isBB = false
@@ -510,11 +522,12 @@ export function processAction(
 
   player.hasActedThisRound = true
   player.lastAction = undefined
+  player.lastActionId = undefined
 
   switch (action) {
     case 'fold': {
       player.status = 'folded'
-      player.lastAction = 'Folded'
+      setPlayerLastAction(s, player, 'Folded')
       addAction(s, `${player.nickname} folds`)
 
       // Check if everyone else folded
@@ -532,7 +545,7 @@ export function processAction(
           `Cannot check, must call $${s.currentBet - player.bet} or fold`
         )
       }
-      player.lastAction = 'Checked'
+      setPlayerLastAction(s, player, 'Checked')
       addAction(s, `${player.nickname} checks`)
       break
     }
@@ -544,10 +557,10 @@ export function processAction(
       player.stack -= callAmount
       if (player.stack === 0) {
         player.status = 'all_in'
-        player.lastAction = 'All-in'
+        setPlayerLastAction(s, player, 'All-in')
         addAction(s, `${player.nickname} calls all-in $${player.totalInPot}`)
       } else {
-        player.lastAction = `Called $${callAmount}`
+        setPlayerLastAction(s, player, `Called $${callAmount}`)
         addAction(s, `${player.nickname} calls $${callAmount}`)
       }
       break
@@ -572,9 +585,9 @@ export function processAction(
       player.totalInPot += raiseExtra
       if (player.stack === 0) {
         player.status = 'all_in'
-        player.lastAction = `All-in $${amount}`
+        setPlayerLastAction(s, player, `All-in $${amount}`)
       } else {
-        player.lastAction = `Raised $${amount}`
+        setPlayerLastAction(s, player, `Raised $${amount}`)
       }
       // Reset other players' hasActedThisRound so they can re-act
       for (const p of s.players) {
@@ -594,7 +607,7 @@ export function processAction(
       player.bet = allInAmount
       player.stack = 0
       player.status = 'all_in'
-      player.lastAction = `All-in $${allInAmount}`
+      setPlayerLastAction(s, player, `All-in $${allInAmount}`)
 
       // If this all-in constitutes a raise, update current bet
       if (allInAmount > oldCurrentBet) {
@@ -918,6 +931,7 @@ export function prepareNextHand(state: InternalGameState): InternalGameState {
     player.hasActedThisRound = false
     player.showCards = 'none'
     player.lastAction = undefined
+    player.lastActionId = undefined
     player.isDealer = false
     player.isSB = false
     player.isBB = false
@@ -993,6 +1007,7 @@ export function toTableState(
       showCards: revealAllHoleCards && p.holeCards.length > 0 ? 'both' : p.showCards,
       isConnected: p.isConnected,
       lastAction: p.lastAction,
+      lastActionId: p.lastActionId,
       seatIndex: p.seatIndex,
       hasActedThisRound: p.hasActedThisRound,
     })),
@@ -1012,6 +1027,7 @@ export function toTableState(
     sevenTwoRuleEnabled: state.sevenTwoRuleEnabled,
     sevenTwoBountyPercent: state.sevenTwoBountyPercent,
     handNumber: state.handNumber,
+    actionSequence: state.actionSequence ?? 0,
     recentActions: state.recentActions,
     lobbyPlayers: [],
     winners: state.winners,

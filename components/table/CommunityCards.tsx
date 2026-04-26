@@ -68,7 +68,7 @@ export function CommunityCards({ cards }: CommunityCardsProps) {
   }, [visibleCount])
 
   return (
-    <div className="community-cards">
+    <div className="community-cards" aria-label="Board cards">
       {Array.from({ length: 5 }, (_, i) => {
         const card = cards[i]
         const isBoardCard = i < visibleCount && card !== undefined

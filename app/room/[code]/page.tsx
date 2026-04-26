@@ -6,76 +6,125 @@ import { PokerTable } from '@/components/table/PokerTable'
 import { RoomHud } from '@/components/ui/RoomHud'
 import { useRoom } from '@/hooks/useRoom'
 import { isAllowedEmote, sanitizeText } from '@/shared/protocol'
+import {
+  loadStoredPlayerProfile,
+  saveStoredPlayerProfile,
+  validatePlayerProfile,
+  type PlayerProfile,
+} from '@/lib/profile'
 import type { ShowCardsMode } from '@/lib/poker/types'
 
 export default function RoomPage() {
   const params = useParams()
   const code = (typeof params.code === 'string' ? params.code : '').toUpperCase()
 
-  const [nickname, setNickname] = useState<string | null>(null)
-  const [nicknameInput, setNicknameInput] = useState('')
-  const [nicknameError, setNicknameError] = useState('')
+  const [profile, setProfile] = useState<PlayerProfile | null>(null)
+  const [profileInput, setProfileInput] = useState<PlayerProfile>({
+    nickname: '',
+    email: '',
+    venmoUsername: '',
+  })
+  const [profileError, setProfileError] = useState('')
 
-  // Load nickname from sessionStorage on mount
   useEffect(() => {
+    const storedProfile = loadStoredPlayerProfile()
+    if (storedProfile) {
+      setProfile(storedProfile)
+      setProfileInput(storedProfile)
+      return
+    }
+
     const stored = sessionStorage.getItem('poker_nickname')
     if (stored) {
-      setNickname(stored)
+      setProfileInput(current => ({ ...current, nickname: stored }))
     }
   }, [])
 
-  const handleSetNickname = useCallback(() => {
-    const trimmed = nicknameInput.trim()
-    if (!trimmed) {
-      setNicknameError('Please enter a nickname')
+  const handleSetProfile = useCallback(() => {
+    const result = validatePlayerProfile(profileInput)
+    if (!result.ok) {
+      setProfileError(result.error)
       return
     }
-    sessionStorage.setItem('poker_nickname', trimmed)
-    setNickname(trimmed)
-  }, [nicknameInput])
+
+    saveStoredPlayerProfile(result.profile)
+    sessionStorage.setItem('poker_nickname', result.profile.nickname)
+    setProfile(result.profile)
+  }, [profileInput])
 
   if (!code) {
     return (
-      <div className="landing-bg" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <p style={{ color: 'rgba(255,255,255,0.5)' }}>Invalid room code</p>
+      <div className="landing-bg">
+        <div className="card-panel entry-panel entry-panel-compact">
+          <div className="entry-panel-header">
+            <span className="entry-panel-kicker">Room unavailable</span>
+            <h2>Invalid room code</h2>
+          </div>
+        </div>
       </div>
     )
   }
 
-  if (!nickname) {
+  if (!profile) {
     return (
       <div className="landing-bg">
-        <div className="w-full max-w-sm px-4">
-          <div className="card-panel p-8 space-y-5">
-            <h2 className="text-xl font-bold text-center" style={{ color: 'rgba(255,255,255,0.85)' }}>
-              Enter Room
-            </h2>
-            <p className="text-center text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
-              Room: <span className="room-code">{code}</span>
-            </p>
+        <div className="landing-panel-wrap entry-panel-compact">
+          <div className="card-panel entry-panel">
+            <div className="entry-panel-header">
+              <span className="entry-panel-kicker">Room {code}</span>
+              <h2>Take your seat</h2>
+            </div>
 
-            {nicknameError && (
-              <p className="text-sm text-center" style={{ color: '#ff8080' }}>{nicknameError}</p>
+            {profileError && (
+              <div className="entry-error" role="alert">{profileError}</div>
             )}
 
-            <div className="space-y-2">
-              <label className="block text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                Your Nickname
-              </label>
+            <label className="entry-field">
+              <span>Your nickname</span>
               <input
                 type="text"
                 className="input-dark"
                 placeholder="e.g. PhilIvey"
-                value={nicknameInput}
-                onChange={e => setNicknameInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSetNickname()}
+                value={profileInput.nickname}
+                onChange={e => setProfileInput(current => ({ ...current, nickname: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && handleSetProfile()}
                 maxLength={20}
+                autoComplete="nickname"
                 autoFocus
                 suppressHydrationWarning
               />
-            </div>
+            </label>
 
-            <button className="btn-gold" onClick={handleSetNickname}>
+            <label className="entry-field">
+              <span>Email</span>
+              <input
+                type="email"
+                className="input-dark"
+                placeholder="you@example.com"
+                value={profileInput.email}
+                onChange={e => setProfileInput(current => ({ ...current, email: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && handleSetProfile()}
+                autoComplete="email"
+                suppressHydrationWarning
+              />
+            </label>
+
+            <label className="entry-field">
+              <span>Venmo username</span>
+              <input
+                type="text"
+                className="input-dark"
+                placeholder="@samvenmo"
+                value={profileInput.venmoUsername}
+                onChange={e => setProfileInput(current => ({ ...current, venmoUsername: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && handleSetProfile()}
+                maxLength={31}
+                autoComplete="username"
+                suppressHydrationWarning
+              />
+            </label>
+
+            <button className="btn-gold" onClick={handleSetProfile}>
               Enter Room
             </button>
           </div>
@@ -84,10 +133,10 @@ export default function RoomPage() {
     )
   }
 
-  return <GameRoom roomCode={code} nickname={nickname} />
+  return <GameRoom roomCode={code} profile={profile} />
 }
 
-function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }) {
+function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProfile }) {
   const [shareUrl, setShareUrl] = useState('')
   const [startingStackSetting, setStartingStackSetting] = useState(1000)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -95,7 +144,7 @@ function GameRoom({ roomCode, nickname }: { roomCode: string; nickname: string }
 
   const { tableState, socialState, yourId, isHost, sendAction, sendMessage, isConnected, connectionIssue } = useRoom(
     roomCode,
-    nickname
+    profile
   )
 
   useEffect(() => {

@@ -9,5 +9,11 @@ export default defineConfig({
   },
   test: {
     globals: true,
+    exclude: [
+      '**/node_modules/**',
+      '**/.git/**',
+      '**/.next/**',
+      '**/.claude/worktrees/**',
+    ],
   },
 })

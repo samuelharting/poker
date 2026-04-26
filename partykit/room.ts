@@ -11,7 +11,7 @@ import type {
   TableChatEntry,
 } from '../shared/protocol'
 import type { ShowCardsMode } from '../lib/poker/types'
-import type { InternalGameState, InternalPlayer, LobbyPlayer } from '../lib/poker/types'
+import type { InternalGameState, InternalPlayer, LobbyPlayer, PlayerStats, SeatPlayer } from '../lib/poker/types'
 import {
   createInitialGameState,
   processAction,
@@ -33,6 +33,18 @@ interface TableSettings {
   sevenTwoBountyPercent: number
 }
 
+interface PlayerProfileRecord {
+  email: string
+  venmoUsername: string
+}
+
+interface TrackedPlayerStats {
+  handsPlayed: number
+  folds: number
+  wins: number
+  totalWon: number
+}
+
 interface RoomData {
   gameState: InternalGameState
   hostId: string | null
@@ -40,6 +52,11 @@ interface RoomData {
   playerToConnection: Record<string, string>
   reconnectTokens: Record<string, string>
   playerNicknames: Record<string, string>
+  playerProfiles: Record<string, PlayerProfileRecord>
+  statsByEmail: Record<string, TrackedPlayerStats>
+  countedHandPlayers: Record<string, true>
+  countedFolds: Record<string, true>
+  countedWinHands: Record<number, true>
   spectatorIds: Record<string, true>
   spectatorStacks: Record<string, number>
   pendingRemovals: Record<string, true>
@@ -120,6 +137,11 @@ export default class PokerRoom implements PartyServer {
       playerToConnection: {},
       reconnectTokens: {},
       playerNicknames: {},
+      playerProfiles: {},
+      statsByEmail: {},
+      countedHandPlayers: {},
+      countedFolds: {},
+      countedWinHands: {},
       spectatorIds: {},
       spectatorStacks: {},
       pendingRemovals: {},
@@ -148,7 +170,7 @@ export default class PokerRoom implements PartyServer {
     try {
       switch (msg.type) {
         case 'join_room':
-          this.handleJoinRoom(sender, msg.nickname, msg.reconnectToken)
+          this.handleJoinRoom(sender, msg.nickname, msg.email, msg.venmoUsername, msg.reconnectToken)
           break
         case 'seat_me':
           this.handleSeatMe(sender, msg.seatIndex)
@@ -249,7 +271,13 @@ export default class PokerRoom implements PartyServer {
     this.runAutoFold(actingPlayerId)
   }
 
-  private handleJoinRoom(conn: Connection, nickname: string, reconnectToken?: string) {
+  private handleJoinRoom(
+    conn: Connection,
+    nickname: string,
+    email: string,
+    venmoUsername: string,
+    reconnectToken?: string
+  ) {
     const trimmed = nickname.trim().slice(0, 20)
     if (!trimmed) {
       this.sendActionFailed(conn, 'Nickname cannot be empty')
@@ -263,6 +291,10 @@ export default class PokerRoom implements PartyServer {
     if (reconnectPlayerId) {
       this.bindConnection(conn, reconnectPlayerId)
       this.data.reconnectTokens[reconnectPlayerId] = generateReconnectToken()
+      if (!this.data.playerProfiles[reconnectPlayerId]) {
+        this.data.playerProfiles[reconnectPlayerId] = { email, venmoUsername }
+      }
+      this.ensureStats(email)
 
       const player = this.getPlayer(reconnectPlayerId)
       if (player) {
@@ -282,6 +314,8 @@ export default class PokerRoom implements PartyServer {
     this.bindConnection(conn, playerId)
     this.data.reconnectTokens[playerId] = generateReconnectToken()
     this.data.playerNicknames[playerId] = trimmed
+    this.data.playerProfiles[playerId] = { email, venmoUsername }
+    this.ensureStats(email)
 
     if (!this.data.hostId) {
       this.data.hostId = playerId
@@ -388,6 +422,7 @@ export default class PokerRoom implements PartyServer {
     try {
       this.clearAutoStart()
       this.data.gameState = startHand(this.data.gameState)
+      this.recordHandsPlayedForCurrentHand()
       this.syncActionTimer(true)
       this.sendActionResult(conn, this.data.gameState.handNumber > 1 ? 'Dealing next hand.' : 'Dealing the first hand.')
       this.broadcastState()
@@ -482,6 +517,10 @@ export default class PokerRoom implements PartyServer {
     try {
       this.clearAutoFold()
       this.data.gameState = processAction(this.data.gameState, playerId, action, amount)
+      if (action === 'fold') {
+        this.recordFold(playerId)
+      }
+      this.recordCompletedHandStats()
       this.finalizeState()
       this.syncActionTimer()
       this.sendActionResult(conn)
@@ -656,14 +695,16 @@ export default class PokerRoom implements PartyServer {
           if (player.id === this.data.gameState.actingPlayerId) {
             try {
               this.clearAutoFold()
-              this.data.gameState = processAction(
-                this.data.gameState,
-                targetId,
-                player.bet >= this.data.gameState.currentBet ? 'check' : 'fold'
-              )
+              const forcedAction = player.bet >= this.data.gameState.currentBet ? 'check' : 'fold'
+              this.data.gameState = processAction(this.data.gameState, targetId, forcedAction)
+              if (forcedAction === 'fold') {
+                this.recordFold(targetId)
+              }
+              this.recordCompletedHandStats()
             } catch {
               player.status = 'folded'
               player.lastAction = 'Folded'
+              this.recordFold(targetId)
             }
 
             const refreshedPlayer = this.getPlayer(targetId)
@@ -730,12 +771,16 @@ export default class PokerRoom implements PartyServer {
           try {
             this.clearAutoFold()
             this.data.gameState = processAction(this.data.gameState, targetId, 'fold')
+            this.recordFold(targetId)
+            this.recordCompletedHandStats()
           } catch {
             seatedPlayer.status = 'folded'
+            this.recordFold(targetId)
           }
         } else if (seatedPlayer.status === 'active') {
           seatedPlayer.status = 'folded'
           seatedPlayer.lastAction = 'Folded'
+          this.recordFold(targetId)
         }
         this.finalizeState()
         this.syncActionTimer(wasActingPlayer)
@@ -887,6 +932,8 @@ export default class PokerRoom implements PartyServer {
         try {
           this.clearAutoFold()
           this.data.gameState = processAction(this.data.gameState, playerId, 'fold')
+          this.recordFold(playerId)
+          this.recordCompletedHandStats()
         } catch {
           // Ignore impossible forced-fold transitions.
         }
@@ -1078,11 +1125,17 @@ export default class PokerRoom implements PartyServer {
         revealAllHoleCards: spectatorCanSeeAllHands,
       })
     )
+    const winners = publicState.winners?.map(winner => ({
+      ...winner,
+      venmoUsername: this.data.playerProfiles[winner.playerId]?.venmoUsername,
+    }))
 
     return {
       type: 'room_snapshot',
       state: {
         ...publicState,
+        players: publicState.players.map(player => this.withPublicPlayerMetadata(player)),
+        winners,
         autoStartEnabled: true,
         autoStartDelay: this.data.tableSettings.autoStartDelay,
         lobbyPlayers: this.buildLobbyPlayers(),
@@ -1115,6 +1168,8 @@ export default class PokerRoom implements PartyServer {
         return {
           id,
           nickname: seatedPlayer?.nickname ?? this.data.playerNicknames[id] ?? 'Player',
+          venmoUsername: this.data.playerProfiles[id]?.venmoUsername,
+          stats: this.getPublicStats(id),
           stack: seatedPlayer?.stack ?? this.data.spectatorStacks[id] ?? 0,
           status: isSpectator ? 'spectating' : seatedPlayer?.status ?? 'waiting',
           isConnected,
@@ -1146,6 +1201,113 @@ export default class PokerRoom implements PartyServer {
       reconnectToken,
       isHost: this.data.hostId === playerId,
     }
+  }
+
+  private withPublicPlayerMetadata(player: SeatPlayer): SeatPlayer {
+    return {
+      ...player,
+      venmoUsername: this.data.playerProfiles[player.id]?.venmoUsername,
+      stats: this.getPublicStats(player.id),
+    }
+  }
+
+  private ensureStats(email: string): TrackedPlayerStats {
+    this.data.statsByEmail[email] ??= {
+      handsPlayed: 0,
+      folds: 0,
+      wins: 0,
+      totalWon: 0,
+    }
+
+    return this.data.statsByEmail[email]!
+  }
+
+  private getPublicStats(playerId: string): PlayerStats | undefined {
+    const profile = this.data.playerProfiles[playerId]
+    if (!profile) {
+      return undefined
+    }
+
+    const stats = this.ensureStats(profile.email)
+    return {
+      ...stats,
+      foldRate: stats.handsPlayed > 0 ? stats.folds / stats.handsPlayed : 0,
+    }
+  }
+
+  private recordHandsPlayedForCurrentHand() {
+    const handNumber = this.data.gameState.handNumber
+    if (handNumber <= 0) {
+      return
+    }
+
+    for (const player of this.data.gameState.players) {
+      if (this.isBotPlayer(player.id) || player.holeCards.length !== 2) {
+        continue
+      }
+
+      const profile = this.data.playerProfiles[player.id]
+      if (!profile) {
+        continue
+      }
+
+      const key = `${handNumber}:${player.id}`
+      if (this.data.countedHandPlayers[key]) {
+        continue
+      }
+
+      this.data.countedHandPlayers[key] = true
+      this.ensureStats(profile.email).handsPlayed += 1
+    }
+  }
+
+  private recordFold(playerId: string) {
+    if (this.isBotPlayer(playerId)) {
+      return
+    }
+
+    const profile = this.data.playerProfiles[playerId]
+    const handNumber = this.data.gameState.handNumber
+    if (!profile || handNumber <= 0) {
+      return
+    }
+
+    const key = `${handNumber}:${playerId}`
+    if (this.data.countedFolds[key]) {
+      return
+    }
+
+    this.data.countedFolds[key] = true
+    this.ensureStats(profile.email).folds += 1
+  }
+
+  private recordCompletedHandStats() {
+    const handNumber = this.data.gameState.handNumber
+    if (
+      handNumber <= 0 ||
+      this.data.gameState.phase !== 'between_hands' ||
+      !this.data.gameState.winners?.length ||
+      this.data.countedWinHands[handNumber]
+    ) {
+      return
+    }
+
+    this.data.countedWinHands[handNumber] = true
+    this.data.gameState.winners = this.data.gameState.winners.map(winner => {
+      const profile = this.data.playerProfiles[winner.playerId]
+      if (!profile) {
+        return winner
+      }
+
+      const stats = this.ensureStats(profile.email)
+      stats.wins += 1
+      stats.totalWon += winner.amount
+
+      return {
+        ...winner,
+        venmoUsername: profile.venmoUsername,
+      }
+    })
   }
 
   private buildSocialSnapshot(): SocialSnapshot {
@@ -1239,7 +1401,12 @@ export default class PokerRoom implements PartyServer {
     try {
       const actingPlayer = this.getPlayer(playerId)
       const shouldCheck = actingPlayer ? actingPlayer.bet >= gameState.currentBet : false
-      this.data.gameState = processAction(gameState, playerId, shouldCheck ? 'check' : 'fold')
+      const action = shouldCheck ? 'check' : 'fold'
+      this.data.gameState = processAction(gameState, playerId, action)
+      if (action === 'fold') {
+        this.recordFold(playerId)
+      }
+      this.recordCompletedHandStats()
       this.finalizeState()
       this.syncActionTimer()
       this.broadcastState()
@@ -1286,12 +1453,18 @@ export default class PokerRoom implements PartyServer {
           botAction.action,
           botAction.amount
         )
+        if (botAction.action === 'fold') {
+          this.recordFold(playerId)
+        }
+        this.recordCompletedHandStats()
         this.finalizeState()
         this.syncActionTimer()
         this.broadcastState()
       } catch {
         try {
           this.data.gameState = processAction(this.data.gameState, playerId, 'fold')
+          this.recordFold(playerId)
+          this.recordCompletedHandStats()
           this.finalizeState()
           this.syncActionTimer()
           this.broadcastState()
@@ -1410,6 +1583,7 @@ export default class PokerRoom implements PartyServer {
 
       try {
         this.data.gameState = startHand(this.data.gameState)
+        this.recordHandsPlayedForCurrentHand()
         this.clearAutoFold()
         this.syncActionTimer(true)
         this.broadcastState()

@@ -60,7 +60,7 @@ export function RoomHud({
   onToggleSettings,
 }: RoomHudProps) {
   return (
-    <div className="room-hud">
+    <div className="room-hud" data-phase={phase ?? 'waiting'}>
       <div className="room-hud-mobile-bar">
         <div className="room-hud-mobile-topline">
           <button
@@ -106,7 +106,10 @@ export function RoomHud({
       <div className="room-hud-main room-hud-share-panel">
         <div className="room-hud-code-row">
           <span className="room-brand-wordmark">Poker Night</span>
-          <span className="room-code">{roomCode}</span>
+          <div className="room-hud-room-pill">
+            <span className="room-hud-room-label">Room</span>
+            <span className="room-code">{roomCode}</span>
+          </div>
         </div>
         <div className="room-hud-label">Table controls</div>
         <button

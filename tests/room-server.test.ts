@@ -46,7 +46,10 @@ class MockRoom {
   readonly internalID = 'internal-test'
   readonly name = 'main'
   readonly env = {}
-  readonly storage = {} as Room['storage']
+  readonly storage = {
+    setAlarm: vi.fn(),
+    deleteAlarm: vi.fn(),
+  } as unknown as Room['storage']
   readonly blockConcurrencyWhile = async <T>(callback: () => Promise<T> | T) => await callback()
   readonly context = {
     parties: {},
@@ -118,10 +121,17 @@ function joinPlayer(
   room: MockRoom,
   connectionId: string,
   nickname: string,
-  reconnectToken?: string
+  reconnectToken?: string,
+  profile?: Partial<{ email: string; venmoUsername: string }>
 ) {
   const connection = connect(server, room, connectionId)
-  send(server, connection, { type: 'join_room', nickname, reconnectToken })
+  send(server, connection, {
+    type: 'join_room',
+    nickname,
+    email: profile?.email ?? `${connectionId}@example.com`,
+    venmoUsername: profile?.venmoUsername ?? `@${connectionId}`,
+    reconnectToken,
+  })
 
   const session = lastMessage(connection, 'private_session')
   if (!session) {
@@ -192,6 +202,60 @@ describe('PokerRoom reconnect and session handling', () => {
 
     const hostId = (server as unknown as { data: { hostId: string | null } }).data.hostId
     expect(hostId).toBe(bob.playerId)
+  })
+})
+
+describe('PokerRoom player profiles and stats', () => {
+  it('exposes Venmo and room stats while keeping email private', () => {
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice', 'Alice', undefined, {
+      email: 'ALICE@example.com',
+      venmoUsername: 'alicepay',
+    })
+    seatPlayer(server, alice.connection, 0)
+
+    const bob = joinPlayer(server, room, 'bob', 'Bob', undefined, {
+      email: 'bob@example.com',
+      venmoUsername: '@bobpay',
+    })
+    seatPlayer(server, bob.connection, 1)
+
+    send(server, alice.connection, { type: 'start_game' })
+
+    const liveSnapshot = lastMessage(alice.connection, 'room_snapshot')
+    const actingPlayerId = liveSnapshot?.state.actingPlayerId
+    expect(actingPlayerId).toBeTruthy()
+
+    const folder = actingPlayerId === alice.playerId ? alice : bob
+    send(server, folder.connection, { type: 'player_action', action: 'fold' })
+
+    const snapshot = lastMessage(alice.connection, 'room_snapshot')
+    expect(snapshot?.state.phase).toBe('between_hands')
+    expect(JSON.stringify(snapshot?.state)).not.toContain('alice@example.com')
+    expect(JSON.stringify(snapshot?.state)).not.toContain('bob@example.com')
+
+    const winner = snapshot?.state.winners?.[0]
+    expect(winner).toBeDefined()
+    expect(winner?.venmoUsername).toMatch(/^@(alicepay|bobpay)$/)
+
+    const winnerSeat = snapshot?.state.players.find(player => player.id === winner?.playerId)
+    const foldedSeat = snapshot?.state.players.find(player => player.id === folder.playerId)
+
+    expect(winnerSeat?.venmoUsername).toBe(winner?.venmoUsername)
+    expect(winnerSeat?.stats?.handsPlayed).toBe(1)
+    expect(winnerSeat?.stats?.wins).toBe(1)
+    expect(winnerSeat?.stats?.totalWon).toBeGreaterThan(0)
+    expect(winnerSeat?.stats?.foldRate).toBe(0)
+
+    expect(foldedSeat?.stats?.handsPlayed).toBe(1)
+    expect(foldedSeat?.stats?.folds).toBe(1)
+    expect(foldedSeat?.stats?.wins).toBe(0)
+    expect(foldedSeat?.stats?.foldRate).toBe(1)
+
+    const lobbyWinner = snapshot?.state.lobbyPlayers.find(player => player.id === winner?.playerId)
+    expect(lobbyWinner?.venmoUsername).toBe(winner?.venmoUsername)
+    expect(lobbyWinner?.stats?.wins).toBe(1)
   })
 })
 

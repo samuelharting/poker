@@ -18,7 +18,11 @@ export function OwnHand({ cards, bet, isActing, isWinner = false }: OwnHandProps
   }
 
   return (
-    <div className={clsx('own-hand-area', isActing && 'is-acting', isWinner && 'is-winner')}>
+    <div
+      className={clsx('own-hand-area', isActing && 'is-acting', isWinner && 'is-winner')}
+      aria-label="Your hand"
+    >
+      {isActing && <div className="own-hand-turn-chip">Your turn</div>}
       <div className={clsx('own-card-row', isWinner && 'is-winner')}>
         {bet > 0 && (
           <div className="own-hand-bet-stack-anchor">

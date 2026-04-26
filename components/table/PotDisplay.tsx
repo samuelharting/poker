@@ -41,7 +41,8 @@ export function PotDisplay({ totalPot, pots, currentBet, toCall }: PotDisplayPro
 
       {toCall > 0 && (
         <div className="pot-to-call">
-          To call: {formatAmount(toCall)}
+          <span className="pot-to-call-label">To call</span>
+          <span className="pot-to-call-value">{formatAmount(toCall)}</span>
         </div>
       )}
     </div>

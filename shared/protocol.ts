@@ -1,5 +1,10 @@
 import type { TableState } from '../lib/poker/types'
 import type { ShowCardsMode } from '../lib/poker/types'
+import {
+  normalizeEmail,
+  normalizeVenmoUsername,
+  validatePlayerProfile,
+} from '../lib/profile'
 
 export interface TableChatEntry {
   id: string
@@ -25,7 +30,13 @@ export interface SocialSnapshot {
 
 // Client -> Server messages
 export type C2SMessage =
-  | { type: 'join_room'; nickname: string; reconnectToken?: string }
+  | {
+    type: 'join_room'
+    nickname: string
+    email: string
+    venmoUsername: string
+    reconnectToken?: string
+  }
   | { type: 'seat_me'; seatIndex?: number }
   | { type: 'start_game' }
   | { type: 'add_bots'; count: number }
@@ -117,11 +128,23 @@ export function parseC2S(raw: string): C2SMessage | null {
     switch (type) {
       case 'join_room': {
         const nickname = typeof parsed.nickname === 'string' ? parsed.nickname : ''
+        const email = typeof parsed.email === 'string' ? normalizeEmail(parsed.email) : ''
+        const venmoUsername =
+          typeof parsed.venmoUsername === 'string' ? normalizeVenmoUsername(parsed.venmoUsername) : ''
         const reconnectToken =
           parsed.reconnectToken === undefined || typeof parsed.reconnectToken === 'string'
             ? parsed.reconnectToken
             : undefined
-        return nickname ? { type, nickname, reconnectToken } : null
+        const profile = validatePlayerProfile({ nickname, email, venmoUsername })
+        return profile.ok
+          ? {
+            type,
+            nickname,
+            email: profile.profile.email,
+            venmoUsername: profile.profile.venmoUsername,
+            reconnectToken,
+          }
+          : null
       }
 
       case 'seat_me': {
