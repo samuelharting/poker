@@ -224,6 +224,9 @@ describe('createThreeTableViewModel', () => {
     expect(['oval', 'round', 'square']).toContain(firstSam?.avatarProfile.faceShape)
     expect(['low', 'medium', 'high']).toContain(firstSam?.avatarProfile.browWeight)
     expect(['none', 'glasses', 'mustache']).toContain(firstSam?.avatarProfile.accessory)
+    expect(typeof firstSam?.avatarProfile.modelKey).toBe('string')
+    expect(firstSam?.avatarProfile.modelKey).toBe(reorderedSam?.avatarProfile.modelKey)
+    expect(firstSam?.avatarProfile.modelKey).not.toBe(firstMaya?.avatarProfile.modelKey)
     expect(firstSam?.avatarProfile).not.toEqual(firstMaya?.avatarProfile)
   })
 

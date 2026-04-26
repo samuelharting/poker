@@ -1,4 +1,5 @@
 import type { Card, SeatPlayer, TableState } from '@/lib/poker/types'
+import { REALISTIC_AVATAR_MODEL_KEYS, type RealisticAvatarModelKey } from './avatarModelCatalog'
 
 export type ThreeActionCue = 'ready' | 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'all_in'
 
@@ -17,6 +18,7 @@ export type ThreeAvatarFaceShape = 'oval' | 'round' | 'square'
 export type ThreeAvatarBrowWeight = 'low' | 'medium' | 'high'
 
 export interface ThreeAvatarProfile {
+  modelKey: RealisticAvatarModelKey
   accentColor: string
   skinColor: string
   hairColor: string
@@ -199,6 +201,7 @@ function createAvatarProfile(player: SeatPlayer): ThreeAvatarProfile {
   const shirt = pickSeeded(AVATAR_SHIRT_COLORS, seed + 11)
 
   return {
+    modelKey: pickSeeded(REALISTIC_AVATAR_MODEL_KEYS, seed + 43),
     accentColor: pickSeeded(AVATAR_ACCENT_COLORS, seed),
     skinColor: pickSeeded(AVATAR_SKIN_COLORS, seed + 3),
     hairColor: pickSeeded(AVATAR_HAIR_COLORS, seed + 5),

@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic'
 import React, { type CSSProperties, useState, useMemo, useCallback, useEffect, useRef } from 'react'
-import type { TableState, SeatPlayer, LobbyPlayer, ShowCardsMode } from '@/lib/poker/types'
+import type { Card, TableState, SeatPlayer, LobbyPlayer, ShowCardsMode } from '@/lib/poker/types'
 import type { SocialSnapshot } from '@/shared/protocol'
 import { PlayerSeat, formatWinnerPaymentLabel } from './PlayerSeat'
 import { CommunityCards } from './CommunityCards'
@@ -10,6 +10,7 @@ import { OwnHand } from './OwnHand'
 import { PotDisplay } from './PotDisplay'
 import { ChipStack } from '@/components/ui/ChipStack'
 import { SearchableEmojiPicker } from '@/components/ui/SearchableEmojiPicker'
+import { evaluateHand } from '@/lib/poker/evaluator'
 import { createThreeTableViewModel, type ThreeTableViewModel } from '@/components/three/tableViewModel'
 
 type FeedbackTone = 'info' | 'success' | 'error'
@@ -222,6 +223,74 @@ function formatEquityPercent(value: number): string {
   return `${value.toFixed(1)}%`
 }
 
+const RANK_NAMES: Record<Card['rank'], string> = {
+  '2': 'Two',
+  '3': 'Three',
+  '4': 'Four',
+  '5': 'Five',
+  '6': 'Six',
+  '7': 'Seven',
+  '8': 'Eight',
+  '9': 'Nine',
+  T: 'Ten',
+  J: 'Jack',
+  Q: 'Queen',
+  K: 'King',
+  A: 'Ace',
+}
+
+const RANK_ORDER: Record<Card['rank'], number> = {
+  '2': 2,
+  '3': 3,
+  '4': 4,
+  '5': 5,
+  '6': 6,
+  '7': 7,
+  '8': 8,
+  '9': 9,
+  T: 10,
+  J: 11,
+  Q: 12,
+  K: 13,
+  A: 14,
+}
+
+function pluralRankName(rank: Card['rank']): string {
+  const name = RANK_NAMES[rank]
+  return name.endsWith('x') ? `${name}es` : `${name}s`
+}
+
+function describePreflopHand(holeCards: Card[]): string | null {
+  if (holeCards.length < 2) {
+    return null
+  }
+
+  const [first, second] = holeCards
+  if (first!.rank === second!.rank) {
+    return `Pair of ${pluralRankName(first!.rank)}`
+  }
+
+  const highCard = [...holeCards].sort((a, b) => RANK_ORDER[b.rank] - RANK_ORDER[a.rank])[0]!
+  return `${RANK_NAMES[highCard.rank]}-high`
+}
+
+export function getVisibleOwnHandDescription(
+  holeCards: Card[],
+  communityCards: Card[]
+): string | null {
+  const visibleCards = [...holeCards, ...communityCards]
+
+  if (holeCards.length === 0) {
+    return null
+  }
+
+  if (visibleCards.length < 5) {
+    return describePreflopHand(holeCards)
+  }
+
+  return evaluateHand(visibleCards).description
+}
+
 function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(() => {
     if (typeof window === 'undefined') {
@@ -345,6 +414,10 @@ export function PokerTable({
   ) ? me : null
   const shouldShowOwnHand = visibleOwnPlayer !== null
   const ownHandCards = visibleOwnPlayer?.holeCards ?? []
+  const ownHandDescription = useMemo(
+    () => getVisibleOwnHandDescription(ownHandCards, state.communityCards),
+    [ownHandCards, state.communityCards]
+  )
   const [socialTick, setSocialTick] = useState(() => Date.now())
   const [targetEmotePlayerId, setTargetEmotePlayerId] = useState<string | null>(null)
   const [targetEmotePickerOpen, setTargetEmotePickerOpen] = useState(false)
@@ -812,6 +885,7 @@ export function PokerTable({
                 bet={visibleOwnPlayer.bet}
                 isActing={isMyTurn}
                 isWinner={betweenHands && myWinnerAmount > 0}
+                handDescription={ownHandDescription}
               />
 
               <div

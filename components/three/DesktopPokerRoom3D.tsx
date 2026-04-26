@@ -1,8 +1,8 @@
 'use client'
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { ContactShadows, RoundedBox, Text } from '@react-three/drei'
-import { useLayoutEffect, useMemo, useRef } from 'react'
+import { Clone, ContactShadows, RoundedBox, Text, useAnimations, useGLTF } from '@react-three/drei'
+import { Component, Suspense, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import { Vector3, type Group } from 'three'
 import {
   getHeroCardActionPose,
@@ -18,6 +18,7 @@ import {
 } from './actionPlayback'
 import type { ThreeActionCue, ThreePlayerView, ThreeTableViewModel } from './tableViewModel'
 import { getAvatarHeadTurn, getTurnCameraPose } from './turnFocus'
+import { getAvatarModelConfig, REALISTIC_AVATAR_MODEL_KEYS } from './avatarModelCatalog'
 
 type Vec3 = [number, number, number]
 
@@ -27,6 +28,10 @@ interface DesktopPokerRoom3DProps {
 
 const tableTopY = 1.02
 const heroCardBasePosition: Vec3 = [-0.26, tableTopY + 0.105, 1.14]
+
+REALISTIC_AVATAR_MODEL_KEYS.forEach(key => {
+  useGLTF.preload(getAvatarModelConfig(key).path)
+})
 
 interface SeatLayout {
   position: Vec3
@@ -434,209 +439,68 @@ function TableLegs() {
 }
 
 function TableDetails() {
-  const cupSlots = Array.from({ length: 8 }, (_, index) => {
-    const angle = (index / 8) * Math.PI * 2
-    return {
-      key: `cup-${index}`,
-      x: Math.sin(angle) * 2.72,
-      z: Math.cos(angle) * 1.52,
-    }
-  })
-
-  const railLights = Array.from({ length: 24 }, (_, index) => {
-    const angle = (index / 24) * Math.PI * 2
-    return {
-      key: `rail-light-${index}`,
-      angle,
-      x: Math.sin(angle) * 2.88,
-      z: Math.cos(angle) * 1.67,
-    }
-  })
-
   return (
     <group>
-      <mesh position={[0, tableTopY + 0.121, 0]} rotation={[-Math.PI / 2, 0, 0]} scale={[2.34, 1.34, 1]}>
+      <mesh position={[0, tableTopY + 0.121, 0]} rotation={[-Math.PI / 2, 0, 0]} scale={[2.24, 1.28, 1]}>
         <ringGeometry args={[0.88, 0.895, 160]} />
         <meshStandardMaterial
           color="#efc778"
           emissive="#5a3513"
-          emissiveIntensity={0.12}
+          emissiveIntensity={0.06}
           roughness={0.22}
           metalness={0.7}
+          transparent
+          opacity={0.62}
         />
       </mesh>
-      <mesh position={[0, tableTopY + 0.126, 0]} rotation={[-Math.PI / 2, 0, 0]} scale={[1.55, 0.86, 1]}>
-        <ringGeometry args={[0.96, 0.968, 160]} />
-        <meshStandardMaterial color="#63cca0" emissive="#124633" emissiveIntensity={0.16} roughness={0.64} />
-      </mesh>
-
-      {cupSlots.map(slot => (
-        <group key={slot.key} position={[slot.x, tableTopY + 0.147, slot.z]}>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-            <cylinderGeometry args={[0.18, 0.18, 0.018, 36]} />
-            <meshStandardMaterial color="#11100f" roughness={0.38} metalness={0.18} />
-          </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]}>
-            <ringGeometry args={[0.13, 0.18, 36]} />
-            <meshStandardMaterial color="#d0a55f" roughness={0.28} metalness={0.66} />
-          </mesh>
-        </group>
-      ))}
-
-      {railLights.map(light => (
-        <mesh
-          key={light.key}
-          position={[light.x, tableTopY + 0.17, light.z]}
-          rotation={[-Math.PI / 2, 0, -light.angle]}
-          scale={[1.7, 0.62, 1]}
-        >
-          <boxGeometry args={[0.075, 0.011, 0.018]} />
-          <meshStandardMaterial
-            color="#f1d38a"
-            emissive="#9c6120"
-            emissiveIntensity={0.18}
-            roughness={0.34}
-            metalness={0.42}
-          />
-        </mesh>
-      ))}
-
-      <ChipRack position={[-1.82, tableTopY + 0.17, 1.1]} rotation={0.12} />
-      <ChipRack position={[1.82, tableTopY + 0.17, 1.1]} rotation={-0.12} />
-      <ChipRack position={[-1.78, tableTopY + 0.17, -1.1]} rotation={-0.14} />
-      <ChipRack position={[1.78, tableTopY + 0.17, -1.1]} rotation={0.14} />
     </group>
   )
 }
 
 function FeltDetails() {
-  const cardSlots = [-0.88, -0.44, 0, 0.44, 0.88]
-  const feltThreads = [-1.72, -1.18, -0.64, 0.64, 1.18, 1.72]
+  const feltThreads = [-1.32, 0, 1.32]
 
   return (
     <group>
       {feltThreads.map(x => (
         <mesh key={`felt-thread-x-${x}`} position={[x, tableTopY + 0.137, -0.08]}>
           <boxGeometry args={[0.012, 0.008, 2.08]} />
-          <meshStandardMaterial color="#7ed1aa" roughness={0.9} transparent opacity={0.28} />
+          <meshStandardMaterial color="#7ed1aa" roughness={0.9} transparent opacity={0.12} />
         </mesh>
       ))}
-      {[-0.78, -0.28, 0.28, 0.78].map(z => (
+      {[-0.55, 0.55].map(z => (
         <mesh key={`felt-thread-z-${z}`} position={[0, tableTopY + 0.139, z]}>
           <boxGeometry args={[2.78, 0.008, 0.01]} />
-          <meshStandardMaterial color="#0b6a53" roughness={0.9} transparent opacity={0.38} />
+          <meshStandardMaterial color="#0b6a53" roughness={0.9} transparent opacity={0.14} />
         </mesh>
       ))}
 
-      {cardSlots.map((x, index) => (
-        <RoundedBox
-          key={`board-slot-${index}`}
-          args={[0.36, 0.014, 0.52]}
-          radius={0.03}
-          smoothness={4}
-          position={[x, tableTopY + 0.156, -0.34]}
-          castShadow
-          receiveShadow
-        >
-          <meshStandardMaterial
-            color="#103c31"
-            emissive="#0b3a2e"
-            emissiveIntensity={0.12}
-            roughness={0.7}
-            metalness={0.04}
-            transparent
-            opacity={0.78}
-          />
-        </RoundedBox>
-      ))}
-
-      <mesh position={[0, tableTopY + 0.165, 0.48]} rotation={[-Math.PI / 2, 0, 0]} scale={[1.2, 0.54, 1]}>
+      <mesh position={[0, tableTopY + 0.165, 0.42]} rotation={[-Math.PI / 2, 0, 0]} scale={[0.88, 0.38, 1]}>
         <ringGeometry args={[0.42, 0.435, 96]} />
-        <meshStandardMaterial color="#e7c174" emissive="#5a3513" emissiveIntensity={0.16} roughness={0.24} metalness={0.66} />
+        <meshStandardMaterial
+          color="#e7c174"
+          emissive="#5a3513"
+          emissiveIntensity={0.06}
+          roughness={0.24}
+          metalness={0.66}
+          transparent
+          opacity={0.36}
+        />
       </mesh>
-      <Text
-        position={[0, tableTopY + 0.172, 0.48]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        fontSize={0.095}
-        letterSpacing={0}
-        anchorX="center"
-        anchorY="middle"
-        color="#f0d89e"
-      >
-        POKER NIGHT
-      </Text>
-      {Array.from({ length: 16 }).map((_, index) => {
-        const angle = (index / 16) * Math.PI * 2
-        return (
-          <mesh
-            key={`felt-stitch-${index}`}
-            position={[Math.sin(angle) * 2.34, tableTopY + 0.166, Math.cos(angle) * 1.32]}
-            rotation={[-Math.PI / 2, 0, -angle]}
-          >
-            <boxGeometry args={[0.09, 0.006, 0.014]} />
-            <meshStandardMaterial color="#f2d48a" roughness={0.38} metalness={0.34} />
-          </mesh>
-        )
-      })}
-      <FeltInlays />
-    </group>
-  )
-}
-
-function FeltInlays() {
-  const pips = Array.from({ length: 32 }, (_, index) => {
-    const angle = (index / 32) * Math.PI * 2
-    return {
-      key: `felt-pip-${index}`,
-      angle,
-      x: Math.sin(angle) * 2.02,
-      z: Math.cos(angle) * 1.12,
-      color: index % 4 === 0 ? '#efc778' : '#0e4b3e',
-    }
-  })
-
-  return (
-    <group>
-      {pips.map(pip => (
-        <mesh
-          key={pip.key}
-          position={[pip.x, tableTopY + 0.171, pip.z]}
-          rotation={[-Math.PI / 2, 0, -pip.angle]}
-          scale={[1.5, 0.58, 1]}
-        >
-          <boxGeometry args={[0.035, 0.005, 0.012]} />
-          <meshStandardMaterial color={pip.color} emissive={pip.color} emissiveIntensity={0.08} roughness={0.48} metalness={0.18} />
-        </mesh>
-      ))}
-    </group>
-  )
-}
-
-function ChipRack({ position, rotation }: { position: Vec3; rotation: number }) {
-  return (
-    <group position={position} rotation={[0, rotation, 0]}>
-      <RoundedBox args={[0.58, 0.045, 0.18]} radius={0.035} smoothness={4} castShadow receiveShadow>
-        <meshStandardMaterial color="#1b1714" roughness={0.44} metalness={0.16} />
-      </RoundedBox>
-      {[-0.18, 0, 0.18].map((x, index) => (
-        <mesh key={x} position={[x, 0.038, 0]} rotation={[-Math.PI / 2, 0, 0]} castShadow>
-          <cylinderGeometry args={[0.052, 0.052, 0.016, 28]} />
-          <meshStandardMaterial
-            color={index === 0 ? '#d9b56d' : index === 1 ? '#f3eee0' : '#7a1f34'}
-            roughness={0.34}
-            metalness={0.2}
-          />
-        </mesh>
-      ))}
     </group>
   )
 }
 
 function DealerChipArea({ pot, currentBet }: { pot: number; currentBet: number }) {
+  const visibleChipCount = Math.min(5, getChipCount(Math.max(pot, currentBet)))
+
+  if (visibleChipCount === 0) {
+    return null
+  }
+
   return (
-    <group position={[0, tableTopY + 0.088, -0.42]}>
-      <ChipStack position={[-0.95, 0.08, -0.05]} colors={['#d9b56d', '#151515']} count={getChipCount(pot)} />
-      <ChipStack position={[0.95, 0.08, -0.05]} colors={['#7a1f34', '#f3eee0']} count={getChipCount(currentBet)} />
+    <group position={[0, tableTopY + 0.088, -0.24]}>
+      <ChipStack position={[0, 0.06, 0]} colors={['#d9b56d', '#151515']} count={visibleChipCount} />
     </group>
   )
 }
@@ -864,13 +728,13 @@ function HeroChips({
   betAmount: number
   getPlayback: GetActionPlayback
 }) {
-  const liveStackCount = Math.max(5, getChipCount(betAmount) + 3)
+  const liveStackCount = Math.min(5, getChipCount(betAmount))
 
   return (
-    <group position={[1.72, tableTopY + 0.03, 0.98]}>
-      <ChipStack position={[0, 0.04, 0]} colors={['#101318', '#f3eee0']} count={liveStackCount} />
-      <ChipStack position={[0.22, 0.04, -0.13]} colors={['#7a1f34', '#f3eee0']} count={5} />
-      <ChipStack position={[-0.22, 0.04, -0.1]} colors={['#d7ad5f', '#1c1713']} count={4} />
+    <group position={[1.56, tableTopY + 0.03, 0.98]}>
+      {liveStackCount > 0 && (
+        <ChipStack position={[0, 0.04, 0]} colors={['#101318', '#f3eee0']} count={liveStackCount} />
+      )}
       <CommittedWagerChips getPlayback={getPlayback} />
     </group>
   )
@@ -985,46 +849,29 @@ function PlayerStation({
 function TurnBeacon({ isHero }: { isHero: boolean }) {
   return (
     <group position={[0, isHero ? 0.98 : 1.58, -0.42]}>
-      <pointLight position={[0, 0.18, 0]} intensity={1.45} color="#f0d89e" distance={1.5} />
+      <pointLight position={[0, 0.18, 0]} intensity={0.95} color="#f0d89e" distance={1.25} />
       <mesh rotation={[Math.PI / 2, 0, 0]} scale={[1.42, 0.72, 1]}>
-        <torusGeometry args={[0.34, 0.018, 12, 64]} />
-        <meshStandardMaterial color="#f0d89e" emissive="#d9b56d" emissiveIntensity={0.62} roughness={0.28} />
+        <torusGeometry args={[0.28, 0.012, 10, 56]} />
+        <meshStandardMaterial
+          color="#f0d89e"
+          emissive="#d9b56d"
+          emissiveIntensity={0.34}
+          roughness={0.28}
+          transparent
+          opacity={0.72}
+        />
       </mesh>
-      <Text
-        position={[0, 0.28, 0.03]}
-        rotation={[0, Math.PI, 0]}
-        fontSize={0.12}
-        maxWidth={0.58}
-        textAlign="center"
-        anchorX="center"
-        anchorY="middle"
-        color="#f7e7ad"
-      >
-        TURN
-      </Text>
     </group>
   )
 }
 
 function OpponentHoleCards({ isActing }: { isActing: boolean }) {
   return (
-    <group position={[0, tableTopY + 0.09, -0.78]}>
-      <CardBack3D position={[-0.13, 0, 0]} rotation={[0.02, 0.05, -0.12]} isActing={isActing} />
-      <CardBack3D position={[0.13, 0.004, 0]} rotation={[0.02, -0.05, 0.12]} isActing={isActing} />
+    <group position={[0, tableTopY + 0.086, -0.88]} scale={[0.82, 0.82, 0.82]}>
+      <CardBack3D position={[-0.105, 0, 0]} rotation={[0.02, 0.05, -0.08]} isActing={isActing} />
+      <CardBack3D position={[0.105, 0.004, 0]} rotation={[0.02, -0.05, 0.08]} isActing={isActing} />
     </group>
   )
-}
-
-function getPlayerLabel(player: ThreePlayerView) {
-  if (player.isWinner) {
-    return 'Winner'
-  }
-
-  if (player.isActing) {
-    return 'Thinking'
-  }
-
-  return player.lastAction ?? player.status.replace('_', ' ')
 }
 
 function Chair({
@@ -1138,42 +985,46 @@ function Chair({
 }
 
 function SeatPlaque({ player }: { player: ThreePlayerView }) {
-  const status = getPlayerLabel(player)
+  const detail = player.isWinner ? 'Winner' : player.isActing ? 'Thinking' : player.bet > 0 ? `$${player.bet}` : null
   const labelColor = player.isActing ? '#f0d89e' : '#d7e6df'
 
   return (
-    <group position={[0, tableTopY + 0.08, -1.08]}>
-      <RoundedBox args={[0.78, 0.035, 0.24]} radius={0.035} smoothness={4} castShadow receiveShadow>
+    <group position={[0, tableTopY + 0.078, -1.1]}>
+      <RoundedBox args={[0.64, 0.03, 0.18]} radius={0.032} smoothness={4} castShadow receiveShadow>
         <meshStandardMaterial
           color={player.isActing ? '#2f2818' : '#111815'}
           roughness={0.58}
           metalness={0.08}
+          transparent
+          opacity={0.9}
         />
       </RoundedBox>
       <Text
-        position={[0, 0.029, -0.042]}
+        position={[0, 0.025, detail ? -0.034 : 0]}
         rotation={[-Math.PI / 2, 0, 0]}
-        fontSize={0.075}
-        maxWidth={0.66}
+        fontSize={0.058}
+        maxWidth={0.52}
         textAlign="center"
         anchorX="center"
         anchorY="middle"
         color={labelColor}
       >
-        {truncateLabel(player.nickname, 14)}
+        {truncateLabel(player.nickname, 12)}
       </Text>
-      <Text
-        position={[0, 0.031, 0.065]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        fontSize={0.043}
-        maxWidth={0.66}
-        textAlign="center"
-        anchorX="center"
-        anchorY="middle"
-        color="#d0b889"
-      >
-        {`${truncateLabel(status, 13)}  $${player.stack}`}
-      </Text>
+      {detail && (
+        <Text
+          position={[0, 0.027, 0.052]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          fontSize={0.038}
+          maxWidth={0.52}
+          textAlign="center"
+          anchorX="center"
+          anchorY="middle"
+          color="#d0b889"
+        >
+          {truncateLabel(detail, 11)}
+        </Text>
+      )}
     </group>
   )
 }
@@ -1199,13 +1050,127 @@ function DealerButton3D({ position }: { position: Vec3 }) {
   )
 }
 
-function Avatar({
-  player,
-  actingVisualSeat,
-}: {
+interface AvatarProps {
   player: ThreePlayerView
   actingVisualSeat: number | null
-}) {
+}
+
+class AvatarAssetBoundary extends Component<
+  { children: ReactNode; fallback: ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false }
+
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback
+    }
+
+    return this.props.children
+  }
+}
+
+function Avatar(props: AvatarProps) {
+  const fallback = <ProceduralAvatarFallback {...props} />
+
+  return (
+    <AvatarAssetBoundary key={props.player.avatarProfile.modelKey} fallback={fallback}>
+      <Suspense fallback={fallback}>
+        <RealisticAvatar {...props} />
+      </Suspense>
+    </AvatarAssetBoundary>
+  )
+}
+
+function RealisticAvatar({ player, actingVisualSeat }: AvatarProps) {
+  const avatarRef = useRef<Group>(null)
+  const modelRef = useRef<Group>(null)
+  const profile = player.avatarProfile
+  const model = getAvatarModelConfig(profile.modelKey)
+  const gltf = useGLTF(model.path)
+  const { actions } = useAnimations(gltf.animations, modelRef)
+  const getPlayback = useActionPlayback(player.actionKey, player.actionCue)
+  const headTurn = useMemo(
+    () => getAvatarHeadTurn(player.visualSeat, actingVisualSeat),
+    [actingVisualSeat, player.visualSeat]
+  )
+  const isSubdued = player.status === 'folded' || player.status === 'disconnected'
+
+  useEffect(() => {
+    const idleAction = actions['CharacterArmature|Idle'] ?? Object.values(actions).find(Boolean)
+
+    idleAction?.reset().fadeIn(0.18).play()
+
+    return () => {
+      idleAction?.fadeOut(0.18)
+    }
+  }, [actions])
+
+  useFrame(({ clock }) => {
+    const time = clock.elapsedTime + player.visualSeat * 0.37
+    const breath = Math.sin(time * 1.2)
+    const alertLift = player.isActing ? Math.sin(time * 2.7) * 0.01 : 0
+    const trackingNoise = player.isActing ? Math.sin(time * 0.68) * 0.018 : Math.sin(time * 0.42) * 0.024
+    const playback = getPlayback(clock.elapsedTime * 1000)
+    const actionPose = getSeatedAvatarActionPose(playback.cue, playback.elapsedMs)
+
+    if (avatarRef.current) {
+      avatarRef.current.position.set(
+        actionPose.bodyPosition[0],
+        breath * 0.012 + alertLift + (player.isWinner ? 0.018 : 0) + actionPose.bodyPosition[1],
+        actionPose.bodyPosition[2]
+      )
+      avatarRef.current.rotation.x = breath * 0.005 + (player.isActing ? -0.012 : 0) + (isSubdued ? 0.035 : 0) + actionPose.bodyRotation[0] * 0.45
+      avatarRef.current.rotation.y = actionPose.bodyRotation[1] * 0.35
+      avatarRef.current.rotation.z = Math.sin(time * 0.72) * 0.006 + actionPose.bodyRotation[2] * 0.35
+    }
+
+    if (modelRef.current) {
+      modelRef.current.rotation.set(
+        model.rotation[0] + headTurn.pitch * 0.24 + actionPose.headRotation[0] * 0.18,
+        model.rotation[1] + headTurn.yaw * 0.18 + trackingNoise + actionPose.headRotation[1] * 0.16,
+        model.rotation[2] + (player.isActing ? Math.sin(time * 1.1) * 0.006 : 0) + actionPose.headRotation[2] * 0.16
+      )
+    }
+  })
+
+  return (
+    <group ref={avatarRef}>
+      <mesh position={[0, 0.52, -0.42]} rotation={[Math.PI / 2, 0, 0]} scale={[1.02, 0.62, 1]}>
+        <torusGeometry args={[0.3, 0.009, 10, 72]} />
+        <meshStandardMaterial
+          color={player.isWinner ? '#f3df97' : player.isActing ? '#d9b56d' : profile.accentColor}
+          emissive={player.isWinner ? '#f3df97' : player.isActing ? '#d9b56d' : profile.accentColor}
+          emissiveIntensity={player.isWinner ? 0.56 : player.isActing ? 0.46 : 0.12}
+          roughness={0.32}
+          metalness={0.28}
+          transparent
+          opacity={isSubdued ? 0.42 : 0.78}
+        />
+      </mesh>
+      {player.isWinner && (
+        <pointLight position={[0, 1.45, -0.12]} intensity={1.1} color="#f3df97" distance={1.4} />
+      )}
+      <group
+        ref={modelRef}
+        position={model.position}
+        rotation={model.rotation}
+        scale={[model.scale, model.scale, model.scale]}
+      >
+        <Clone object={gltf.scene} castShadow receiveShadow />
+      </group>
+    </group>
+  )
+}
+
+function ProceduralAvatarFallback({
+  player,
+  actingVisualSeat,
+}: AvatarProps) {
   const avatarRef = useRef<Group>(null)
   const headRef = useRef<Group>(null)
   const armRef = useRef<Group>(null)
@@ -1840,16 +1805,18 @@ function CardBack3D({
 }) {
   return (
     <group position={position} rotation={rotation}>
-      <RoundedBox args={[0.19, 0.016, 0.275]} radius={0.018} smoothness={4} castShadow>
+      <RoundedBox args={[0.17, 0.014, 0.245]} radius={0.016} smoothness={4} castShadow>
         <meshStandardMaterial
           color={isActing ? '#7b2233' : '#263044'}
           roughness={0.38}
           metalness={0.08}
+          transparent
+          opacity={0.88}
         />
       </RoundedBox>
       <mesh position={[0, 0.011, 0]} rotation={[-Math.PI / 2, 0, 0]} scale={[0.62, 0.88, 1]}>
         <ringGeometry args={[0.085, 0.093, 28]} />
-        <meshStandardMaterial color="#d9b56d" roughness={0.34} metalness={0.38} />
+        <meshStandardMaterial color="#d9b56d" roughness={0.34} metalness={0.38} transparent opacity={0.7} />
       </mesh>
     </group>
   )

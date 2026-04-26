@@ -17,6 +17,7 @@ test-results/
 *.pid
 .codex-tmp/
 tmp.*.png
+tmp.edge-*/
 
 # Environment files
 .env

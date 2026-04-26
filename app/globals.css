@@ -1158,6 +1158,47 @@ input {
   filter: drop-shadow(0 0 24px rgba(232, 201, 109, 0.42));
 }
 
+.own-hand-area.has-strength .own-hand-turn-chip {
+  bottom: calc(100% + 54px);
+}
+
+.own-hand-strength {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 12px);
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 5px 12px;
+  border: 1px solid rgba(242, 222, 161, 0.32);
+  border-radius: 999px;
+  background: rgba(10, 11, 11, 0.9);
+  color: var(--hl-text);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.own-hand-strength-kicker {
+  color: var(--hl-gold-soft);
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.own-hand-strength-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 950;
+}
+
 .own-card-row {
   position: relative;
   display: flex;
@@ -10591,5 +10632,97 @@ body {
 
   .player-seat-marker::after {
     bottom: 4px;
+  }
+}
+
+/* Room layering guardrails: shared stack order for cards, controls, and hand results. */
+.room-shell {
+  --room-layer-table: 6;
+  --room-layer-board-cards: 90;
+  --room-layer-own-hand: 118;
+  --room-layer-own-hand-resting: 72;
+  --room-layer-pot: 132;
+  --room-layer-turn: 150;
+  --room-layer-side-panel: 165;
+  --room-layer-between-dock: 210;
+  --room-layer-show-cards: 214;
+  --room-layer-action-tray: 220;
+  --room-layer-winner: 232;
+  --room-layer-winner-trail: 233;
+  --room-layer-hud: 240;
+  --room-layer-modal: 300;
+}
+
+.room-hud {
+  z-index: var(--room-layer-hud);
+}
+
+.settings-modal-overlay {
+  z-index: var(--room-layer-modal);
+}
+
+.table-stage {
+  z-index: var(--room-layer-table);
+}
+
+.community-cards {
+  z-index: var(--room-layer-board-cards);
+}
+
+.own-hand-area {
+  z-index: var(--room-layer-own-hand);
+  pointer-events: none;
+}
+
+.table-scene[data-phase='between_hands'] .own-hand-area {
+  z-index: var(--room-layer-own-hand-resting);
+  opacity: 0.58;
+  filter: saturate(0.85) brightness(0.9) drop-shadow(0 14px 22px rgba(0, 0, 0, 0.38));
+}
+
+.table-scene[data-phase='between_hands'] .own-card-row {
+  transform: translateY(10px) scale(0.9);
+}
+
+.pot-display {
+  z-index: var(--room-layer-pot);
+}
+
+.turn-focus-banner {
+  z-index: var(--room-layer-turn);
+}
+
+.table-side-panels,
+.table-side-panels.chat-dock {
+  z-index: var(--room-layer-side-panel);
+}
+
+.mobile-between-hands-dock {
+  z-index: var(--room-layer-between-dock);
+}
+
+.table-show-cards-panel {
+  z-index: var(--room-layer-show-cards);
+}
+
+.betting-tray {
+  z-index: var(--room-layer-action-tray);
+}
+
+.table-center-winner-announcement {
+  z-index: var(--room-layer-winner);
+}
+
+.table-center-winner-chip-trail {
+  z-index: var(--room-layer-winner-trail);
+}
+
+@media (max-width: 768px) {
+  .table-scene[data-phase='between_hands'] .own-hand-area {
+    opacity: 0.48;
+  }
+
+  .table-scene[data-phase='between_hands'] .own-card-row {
+    transform: translateY(14px) scale(0.82);
   }
 }
