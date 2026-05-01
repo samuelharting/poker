@@ -1,0 +1,26 @@
+# Dependencies and build output
+node_modules/
+.next/
+out/
+build/
+.partykit/
+
+# Local environment and platform metadata
+.env
+*.env
+.vercel/
+
+# Local verification artifacts
+.codex-run/
+.codex-tmp/
+.superpowers/
+test-results/
+*.log
+*.pid
+*.tsbuildinfo
+tmp.*
+tmp-*
+
+# Editor and OS clutter
+.DS_Store
+Thumbs.db

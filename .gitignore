@@ -16,7 +16,10 @@ dev-*.log
 test-results/
 *.pid
 .codex-tmp/
+.codex-run/
 tmp.*.png
+tmp-*.png
+tmp.board-chrome-profile/
 tmp.edge-*/
 
 # Environment files
