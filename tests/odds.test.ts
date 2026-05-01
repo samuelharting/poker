@@ -27,6 +27,7 @@ function makeState(players: SeatPlayer[], communityCards: Card[]): TableState {
   return {
     roomCode: 'TEST',
     phase: 'in_hand',
+    serverNow: 1,
     round: communityCards.length === 5 ? 'river' : 'turn',
     players,
     communityCards,

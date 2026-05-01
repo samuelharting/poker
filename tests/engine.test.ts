@@ -551,7 +551,7 @@ describe('toTableState', () => {
     expect(p2InSpectatorView.showCards).toBe('both')
   })
 
-  it('reveals folded cards when a player opts to show them', () => {
+  it('reveals folded cards when a player opts to show them after a winner is recorded', () => {
     const state = startHand(setup2Players())
     const p1 = state.players[0]!
     const p2 = state.players[1]!
@@ -559,6 +559,7 @@ describe('toTableState', () => {
     p2.status = 'folded'
     p2.showCards = 'both'
     state.phase = 'between_hands'
+    state.winners = [{ playerId: p1.id, amount: 30 }]
 
     const view = toTableState(state, p1.id)
     const p2View = view.players.find(player => player.id === p2.id)!
@@ -567,7 +568,7 @@ describe('toTableState', () => {
     expect(p2View.showCards).toBe('both')
   })
 
-  it('reveals folded cards during a live hand when a player opts to show them', () => {
+  it('keeps folded opt-in cards hidden until the live hand has a winner', () => {
     const state = startHand(setup3Players())
     const actingPlayerId = state.actingPlayerId!
     const finishedTurn = processAction(state, actingPlayerId, 'fold')
@@ -583,8 +584,17 @@ describe('toTableState', () => {
     const view = toTableState(finishedTurn, observer.id)
     const foldedView = view.players.find(player => player.id === foldedPlayer.id)!
 
-    expect(foldedView.holeCards).toHaveLength(2)
-    expect(foldedView.showCards).toBe('both')
+    expect(foldedView.holeCards).toBeUndefined()
+    expect(foldedView.showCards).toBe('none')
+
+    finishedTurn.phase = 'between_hands'
+    finishedTurn.winners = [{ playerId: observer.id, amount: 30 }]
+
+    const completedView = toTableState(finishedTurn, observer.id)
+    const completedFoldedView = completedView.players.find(player => player.id === foldedPlayer.id)!
+
+    expect(completedFoldedView.holeCards).toHaveLength(2)
+    expect(completedFoldedView.showCards).toBe('both')
   })
 
   it('reveals only selected cards for a folded player', () => {
@@ -598,6 +608,7 @@ describe('toTableState', () => {
       { rank: 'K', suit: 'hearts' },
     ]
     state.phase = 'between_hands'
+    state.winners = [{ playerId: p1.id, amount: 30 }]
 
     p2.showCards = 'left'
     const viewLeft = toTableState(state, p1.id)
@@ -622,7 +633,7 @@ describe('toTableState', () => {
     expect(p2ViewBoth.holeCards?.[1]).toEqual({ rank: 'K', suit: 'hearts' })
   })
 
-  it('reveals surviving hands automatically after the hand is over', () => {
+  it('keeps surviving opponent cards hidden until they explicitly show them', () => {
     const state = startHand(setup2Players())
     const hero = state.players[0]!
 
@@ -634,7 +645,16 @@ describe('toTableState', () => {
     const view = toTableState(finished, hero.id)
     const villainView = view.players.find(player => player.id === villain.id)!
 
-    expect(villainView.holeCards).toHaveLength(2)
+    expect(villainView.showCards).toBe('none')
+    expect(villainView.holeCards).toBeUndefined()
+
+    villain.showCards = 'both'
+
+    const shownView = toTableState(finished, hero.id)
+    const shownVillainView = shownView.players.find(player => player.id === villain.id)!
+
+    expect(shownVillainView.showCards).toBe('both')
+    expect(shownVillainView.holeCards).toHaveLength(2)
   })
 })
 

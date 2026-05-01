@@ -41,6 +41,7 @@ export type C2SMessage =
   | { type: 'start_game' }
   | { type: 'add_bots'; count: number }
   | { type: 'set_auto_start'; enabled: boolean }
+  | { type: 'rabbit_hunt' }
   | { type: 'player_action'; action: 'fold' | 'check' | 'call' | 'raise' | 'all_in'; amount?: number }
   | {
     type: 'update_table_settings'
@@ -166,6 +167,9 @@ export function parseC2S(raw: string): C2SMessage | null {
       case 'set_auto_start': {
         return typeof parsed.enabled === 'boolean' ? { type, enabled: parsed.enabled } : null
       }
+
+      case 'rabbit_hunt':
+        return { type }
 
       case 'player_action': {
         const action = parsed.action

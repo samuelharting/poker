@@ -11,29 +11,29 @@ export interface AvatarHeadTurn {
 }
 
 const defaultCameraPose: TurnCameraPose = {
-  position: [0, 3.58, 5.72],
-  lookAt: [0, 1.12, 0.08],
+  position: [0, 2.45, 5.62],
+  lookAt: [0, 1.06, 0.18],
 }
 
 const seatHorizontalPan: Record<number, number> = {
   0: 0,
-  1: -0.72,
-  2: -1.12,
-  3: -0.86,
+  1: -0.24,
+  2: -0.38,
+  3: -0.3,
   4: 0,
-  5: 0.86,
-  6: 1.12,
-  7: 0.72,
+  5: 0.3,
+  6: 0.38,
+  7: 0.24,
 }
 
 const seatDepthFocus: Record<number, { cameraX: number; cameraY: number; cameraZ: number; lookAtY: number; lookAtZ: number }> = {
-  1: { cameraX: -0.14, cameraY: 3.5, cameraZ: 5.62, lookAtY: 1.18, lookAtZ: 0.02 },
-  2: { cameraX: -0.3, cameraY: 3.44, cameraZ: 5.42, lookAtY: 1.22, lookAtZ: -0.06 },
-  3: { cameraX: -0.2, cameraY: 3.36, cameraZ: 5.34, lookAtY: 1.26, lookAtZ: -0.2 },
-  4: { cameraX: 0, cameraY: 3.34, cameraZ: 5.32, lookAtY: 1.28, lookAtZ: -0.3 },
-  5: { cameraX: 0.2, cameraY: 3.36, cameraZ: 5.34, lookAtY: 1.26, lookAtZ: -0.2 },
-  6: { cameraX: 0.3, cameraY: 3.44, cameraZ: 5.42, lookAtY: 1.22, lookAtZ: -0.06 },
-  7: { cameraX: 0.14, cameraY: 3.5, cameraZ: 5.62, lookAtY: 1.18, lookAtZ: 0.02 },
+  1: { cameraX: -0.04, cameraY: 2.46, cameraZ: 5.66, lookAtY: 1.07, lookAtZ: 0.16 },
+  2: { cameraX: -0.09, cameraY: 2.45, cameraZ: 5.6, lookAtY: 1.08, lookAtZ: 0.12 },
+  3: { cameraX: -0.07, cameraY: 2.43, cameraZ: 5.56, lookAtY: 1.09, lookAtZ: 0.06 },
+  4: { cameraX: 0, cameraY: 2.42, cameraZ: 5.54, lookAtY: 1.1, lookAtZ: 0.02 },
+  5: { cameraX: 0.07, cameraY: 2.43, cameraZ: 5.56, lookAtY: 1.09, lookAtZ: 0.06 },
+  6: { cameraX: 0.09, cameraY: 2.45, cameraZ: 5.6, lookAtY: 1.08, lookAtZ: 0.12 },
+  7: { cameraX: 0.04, cameraY: 2.46, cameraZ: 5.66, lookAtY: 1.07, lookAtZ: 0.16 },
 }
 
 export function getTurnCameraPose(actingVisualSeat: number | null): TurnCameraPose {

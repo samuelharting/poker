@@ -99,3 +99,38 @@ describe('PlayerSeat turn label', () => {
     expect(markup).not.toContain('Acting')
   })
 })
+
+describe('PlayerSeat folded presentation', () => {
+  it('marks folded seats with a status hook and stronger inactive opacity', () => {
+    const markup = renderToStaticMarkup(
+      <PlayerSeat
+        player={makeSeatPlayer({ status: 'folded', lastAction: 'Folded' })}
+        isActing={false}
+        depthClass="seat-depth-mid"
+        opacityValue={1}
+      />
+    )
+
+    expect(markup).toContain('is-folded')
+    expect(markup).toContain('data-player-status="folded"')
+    expect(markup).toContain('opacity:0.34')
+    expect(markup).toContain('Folded')
+  })
+})
+
+describe('PlayerSeat target controls', () => {
+  it('lets the avatar marker target a player for emojis', () => {
+    const markup = renderToStaticMarkup(
+      <PlayerSeat
+        player={makeSeatPlayer({ id: 'villain', nickname: 'Villain' })}
+        isActing={false}
+        depthClass="seat-depth-mid"
+        opacityValue={1}
+        onNameClick={() => {}}
+      />
+    )
+
+    expect(markup).toContain('data-player-target-trigger="avatar"')
+    expect(markup).toContain('Target Villain for emojis')
+  })
+})

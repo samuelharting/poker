@@ -1,7 +1,9 @@
 import type { Card, SeatPlayer, TableState } from '@/lib/poker/types'
+import type { SocialSnapshot } from '@/shared/protocol'
 import { REALISTIC_AVATAR_MODEL_KEYS, type RealisticAvatarModelKey } from './avatarModelCatalog'
 
 export type ThreeActionCue = 'ready' | 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'all_in'
+export type ThreeBlindRole = 'small' | 'big' | null
 
 export interface ThreeCardView {
   id: string
@@ -44,8 +46,11 @@ export interface ThreePlayerView {
   status: SeatPlayer['status']
   isActing: boolean
   isWinner: boolean
+  isOutOfHand: boolean
   isDealer: boolean
+  blindRole: ThreeBlindRole
   hasCards: boolean
+  visibleCards: ThreeCardView[]
   accentColor: string
   avatarColor: string
   hairColor: string
@@ -54,6 +59,15 @@ export interface ThreePlayerView {
   actionKey: string
   lastAction?: string
   lastActionId?: string
+}
+
+export interface ThreeAllInAnnouncement {
+  actionKey: string
+  playerId: string
+  nickname: string
+  visualSeat: number
+  amountLabel: string | null
+  isHero: boolean
 }
 
 export interface ThreeTableViewModel {
@@ -74,6 +88,16 @@ export interface ThreeTableViewModel {
   actionCue: ThreeActionCue
   actionKey: string
   lastAction: string
+  allInAnnouncement: ThreeAllInAnnouncement | null
+}
+
+export interface ThreeEmoteReaction {
+  id: string
+  senderId: string
+  targetId: string
+  emote: string
+  expiresAt: number
+  targeted: boolean
 }
 
 const AVATAR_ACCENT_COLORS = [
@@ -145,6 +169,11 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
     .map((player): ThreePlayerView => {
       const avatarProfile = createAvatarProfile(player)
       const actionCue = player.lastAction ? getActionCue(player.lastAction) : 'ready'
+      const isOutOfHand = state.phase === 'in_hand' && (
+        player.status === 'folded' ||
+        player.status === 'sitting_out' ||
+        player.status === 'disconnected'
+      )
 
       return {
         id: player.id,
@@ -155,8 +184,13 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
         status: player.status,
         isActing: state.actingPlayerId === player.id,
         isWinner: winnerIds.has(player.id),
+        isOutOfHand,
         isDealer: player.isDealer,
+        blindRole: getBlindRole(player),
         hasCards: player.hasCards,
+        visibleCards: (player.holeCards ?? []).map((card, index) => (
+          toThreeCard(card, `${player.id}-card-${index}`, true)
+        )),
         accentColor: avatarProfile.accentColor,
         avatarColor: avatarProfile.skinColor,
         hairColor: avatarProfile.hairColor,
@@ -174,6 +208,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
   const lastAction = heroPlayer?.lastAction ?? state.recentActions[0] ?? getPhaseActionLabel(state)
   const actionCue = hero?.actionCue ?? 'ready'
   const actionKey = hero?.actionKey ?? ''
+  const allInAnnouncement = createAllInAnnouncement(players)
 
   return {
     roomCode: state.roomCode,
@@ -193,7 +228,49 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
     actionCue,
     actionKey,
     lastAction,
+    allInAnnouncement,
   }
+}
+
+export function createThreeEmoteReactions(
+  socialState: Pick<SocialSnapshot, 'active'>,
+  playerIds: Iterable<string>,
+  now = Date.now(),
+  mapEmote: (emote: string) => string | undefined = emote => emote
+): ThreeEmoteReaction[] {
+  const knownPlayerIds = new Set(playerIds)
+
+  return socialState.active.reduce<ThreeEmoteReaction[]>((acc, entry) => {
+    if (
+      !entry.emote ||
+      !entry.emoteExpiresAt ||
+      entry.emoteExpiresAt <= now ||
+      !knownPlayerIds.has(entry.playerId)
+    ) {
+      return acc
+    }
+
+    const targetId = entry.targetPlayerId?.trim() || entry.playerId
+    if (!knownPlayerIds.has(targetId)) {
+      return acc
+    }
+
+    const emote = mapEmote(entry.emote)
+    if (!emote) {
+      return acc
+    }
+
+    acc.push({
+      id: `${entry.playerId}:${targetId}:${emote}:${entry.emoteExpiresAt}`,
+      senderId: entry.playerId,
+      targetId,
+      emote,
+      expiresAt: entry.emoteExpiresAt,
+      targeted: targetId !== entry.playerId,
+    })
+
+    return acc
+  }, [])
 }
 
 function createAvatarProfile(player: SeatPlayer): ThreeAvatarProfile {
@@ -254,6 +331,72 @@ function getPlayerAnimationKey(
   return `${player.id}:legacy:${state.handNumber}:${state.round ?? 'none'}:${player.lastAction}:${player.bet}:${player.status}`
 }
 
+function createAllInAnnouncement(players: ThreePlayerView[]): ThreeAllInAnnouncement | null {
+  const latestPlayer = players.reduce<ThreePlayerView | null>((latest, player) => {
+    if (player.actionCue !== 'all_in' || !player.actionKey) {
+      return latest
+    }
+
+    if (!latest) {
+      return player
+    }
+
+    return getActionOrderScore(player) >= getActionOrderScore(latest) ? player : latest
+  }, null)
+
+  if (!latestPlayer) {
+    return null
+  }
+
+  return {
+    actionKey: latestPlayer.actionKey,
+    playerId: latestPlayer.id,
+    nickname: latestPlayer.nickname,
+    visualSeat: latestPlayer.visualSeat,
+    amountLabel: getAllInAmountLabel(latestPlayer),
+    isHero: latestPlayer.visualSeat === 0,
+  }
+}
+
+function getActionOrderScore(player: ThreePlayerView): number {
+  const source = player.lastActionId || player.actionKey
+  const numericParts = source.match(/\d+/g)
+
+  if (!numericParts?.length) {
+    return 0
+  }
+
+  return numericParts
+    .slice(-3)
+    .reduce((score, part) => score * 1000 + Number(part), 0)
+}
+
+function getAllInAmountLabel(player: ThreePlayerView): string | null {
+  const amountMatch = player.lastAction?.match(/\$([0-9][0-9,]*)/)
+
+  if (amountMatch?.[1]) {
+    return `$${amountMatch[1]}`
+  }
+
+  if (player.bet > 0) {
+    return `$${player.bet.toLocaleString()}`
+  }
+
+  return null
+}
+
+function getBlindRole(player: SeatPlayer): ThreeBlindRole {
+  if (player.isBB) {
+    return 'big'
+  }
+
+  if (player.isSB) {
+    return 'small'
+  }
+
+  return null
+}
+
 function getVisualSeat(playerSeatIndex: number, heroSeatIndex: number): number {
   return (playerSeatIndex - heroSeatIndex + 8) % 8
 }
@@ -278,12 +421,12 @@ function getActionCue(lastAction: string): ThreeActionCue {
     return 'check'
   }
 
-  if (normalized.includes('call')) {
-    return 'call'
-  }
-
   if (normalized.includes('all-in') || normalized.includes('all in')) {
     return 'all_in'
+  }
+
+  if (normalized.includes('call')) {
+    return 'call'
   }
 
   if (normalized.includes('raise')) {

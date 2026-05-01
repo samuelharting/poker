@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { buildActionButtonDescriptors, getVisibleOwnHandDescription } from '@/components/table/PokerTable'
-import type { Card } from '@/lib/poker/types'
+import {
+  buildActionButtonDescriptors,
+  buildPlayerManagementTags,
+  canSaveTableSettings,
+  formatPlayerStatsSummary,
+  getSpectatorRailState,
+  getVisibleOwnHandDescription,
+} from '@/components/table/PokerTable'
+import type { Card, LobbyPlayer } from '@/lib/poker/types'
 
 function cards(...specs: string[]): Card[] {
   return specs.map(s => {
@@ -68,5 +75,113 @@ describe('getVisibleOwnHandDescription', () => {
       cards('As', 'Qh'),
       cards('Kd', 'Kc', '8h', '8s', '3d')
     )).toBe('Two Pair, Kings and Eights')
+  })
+})
+
+function makeLobbyPlayer(overrides: Partial<LobbyPlayer> = {}): LobbyPlayer {
+  return {
+    id: 'p1',
+    nickname: 'Alice',
+    stack: 1000,
+    status: 'waiting',
+    isConnected: true,
+    isSeated: true,
+    isSpectator: false,
+    ...overrides,
+  }
+}
+
+describe('settings and player management helpers', () => {
+  it('labels roster rows with operational tags', () => {
+    expect(buildPlayerManagementTags(makeLobbyPlayer({ id: 'host' }), {
+      yourId: 'host',
+    })).toEqual(['You', 'Seated'])
+
+    expect(buildPlayerManagementTags(makeLobbyPlayer({
+      id: 'bot_1',
+      isBot: true,
+      isConnected: false,
+      status: 'disconnected',
+    }), {
+      yourId: 'host',
+    })).toEqual(['Bot', 'Seated', 'Away'])
+
+    expect(buildPlayerManagementTags(makeLobbyPlayer({
+      isSeated: false,
+      isSpectator: true,
+      status: 'spectating',
+    }), {
+      yourId: 'host',
+    })).toEqual(['Spectator'])
+  })
+
+  it('requires chips before a spectator can take a seat', () => {
+    expect(getSpectatorRailState(makeLobbyPlayer({
+      stack: 0,
+      isSeated: false,
+      isSpectator: true,
+      status: 'spectating',
+    }), true)).toEqual({
+      canTakeSeat: false,
+      actionLabel: undefined,
+      message: 'Add chips from the Players tab before you take a seat.',
+    })
+
+    expect(getSpectatorRailState(makeLobbyPlayer({
+      stack: 500,
+      isSeated: false,
+      isSpectator: true,
+      status: 'spectating',
+    }), true)).toEqual({
+      canTakeSeat: true,
+      actionLabel: 'Take seat',
+      message: 'You have chips again and can take the next open seat.',
+    })
+  })
+
+  it('allows any connected player to save table settings between hands', () => {
+    expect(canSaveTableSettings({
+      isConnected: true,
+      hasSettingsChanges: true,
+      phase: 'between_hands',
+    })).toBe(true)
+  })
+
+  it('allows table-setting saves during live hands', () => {
+    expect(canSaveTableSettings({
+      isConnected: true,
+      hasSettingsChanges: true,
+      phase: 'in_hand',
+    })).toBe(true)
+
+    expect(canSaveTableSettings({
+      isConnected: true,
+      hasSettingsChanges: true,
+      phase: 'between_hands',
+    })).toBe(true)
+  })
+})
+
+describe('player stats summary', () => {
+  it('formats fold percentage, games played, and games won for the opponent panel', () => {
+    expect(formatPlayerStatsSummary({
+      handsPlayed: 12,
+      folds: 3,
+      wins: 5,
+      totalWon: 1400,
+      foldRate: 0.25,
+    })).toEqual([
+      { label: 'Fold', value: '25%' },
+      { label: 'Games', value: '12' },
+      { label: 'Won', value: '5' },
+    ])
+  })
+
+  it('uses zeroed public stats when a player has not played yet', () => {
+    expect(formatPlayerStatsSummary(undefined)).toEqual([
+      { label: 'Fold', value: '0%' },
+      { label: 'Games', value: '0' },
+      { label: 'Won', value: '0' },
+    ])
   })
 })

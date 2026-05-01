@@ -15,9 +15,11 @@ import type { InternalGameState, InternalPlayer, LobbyPlayer, PlayerStats, SeatP
 import {
   createInitialGameState,
   processAction,
+  runRabbitHunt,
   startHand,
   toTableState,
 } from '../lib/poker/engine'
+import { calculateMinRaise } from '../lib/poker/betting'
 import { withVisibleHandOdds } from '../lib/poker/odds'
 import { MAX_CHAT_LENGTH, parseC2S } from '../shared/protocol'
 
@@ -184,6 +186,9 @@ export default class PokerRoom implements PartyServer {
         case 'set_auto_start':
           this.handleSetAutoStart(sender, msg.enabled)
           break
+        case 'rabbit_hunt':
+          this.handleRabbitHunt(sender)
+          break
         case 'player_action':
           this.handlePlayerAction(sender, msg.action, msg.amount)
           break
@@ -336,8 +341,13 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
-    if (this.data.spectatorIds[playerId]) {
-      delete this.data.spectatorIds[playerId]
+    const wasSpectator = Boolean(this.data.spectatorIds[playerId])
+    if (wasSpectator) {
+      const spectatorStack = Math.max(0, Math.floor(this.data.spectatorStacks[playerId] ?? 0))
+      if (spectatorStack <= 0) {
+        this.sendActionFailed(conn, 'Add chips before taking a seat')
+        return
+      }
     }
 
     const occupiedSeats = new Set(this.data.gameState.players.map(player => player.seatIndex))
@@ -390,6 +400,9 @@ export default class PokerRoom implements PartyServer {
 
     this.data.gameState.players.push(newPlayer)
     this.data.gameState.players.sort((a, b) => a.seatIndex - b.seatIndex)
+    if (wasSpectator) {
+      delete this.data.spectatorIds[playerId]
+    }
     delete this.data.spectatorStacks[playerId]
     delete this.data.pendingSpectators[playerId]
 
@@ -399,8 +412,8 @@ export default class PokerRoom implements PartyServer {
 
   private handleStartGame(conn: Connection) {
     const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId || this.data.hostId !== playerId) {
-      this.sendActionFailed(conn, 'Only the host can start the game')
+    if (!playerId) {
+      this.sendActionFailed(conn, 'Join the room before starting the game')
       return
     }
 
@@ -434,8 +447,8 @@ export default class PokerRoom implements PartyServer {
 
   private handleAddBots(conn: Connection, count: number) {
     const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId || this.data.hostId !== playerId) {
-      this.sendActionFailed(conn, 'Only the host can add bots')
+    if (!playerId) {
+      this.sendActionFailed(conn, 'Join the room before adding bots')
       return
     }
 
@@ -488,8 +501,8 @@ export default class PokerRoom implements PartyServer {
 
   private handleSetAutoStart(conn: Connection, enabled: boolean) {
     const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId || this.data.hostId !== playerId) {
-      this.sendActionFailed(conn, 'Only the host can change auto-start settings')
+    if (!playerId) {
+      this.sendActionFailed(conn, 'Join the room before changing auto-start settings')
       return
     }
 
@@ -536,13 +549,8 @@ export default class PokerRoom implements PartyServer {
     msg: Extract<C2SMessage, { type: 'update_table_settings' }>
   ) {
     const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId || this.data.hostId !== playerId) {
-      this.sendActionFailed(conn, 'Only the host can change settings')
-      return
-    }
-
-    if (this.data.gameState.phase === 'in_hand') {
-      this.sendActionFailed(conn, 'Cannot change settings during a hand')
+    if (!playerId) {
+      this.sendActionFailed(conn, 'Join the room before changing settings')
       return
     }
 
@@ -583,8 +591,39 @@ export default class PokerRoom implements PartyServer {
     this.data.gameState.sevenTwoRuleEnabled = this.data.tableSettings.sevenTwoRuleEnabled
     this.data.gameState.sevenTwoBountyPercent = this.data.tableSettings.sevenTwoBountyPercent
 
+    if (this.data.gameState.phase === 'in_hand') {
+      this.data.gameState.minRaise = calculateMinRaise(
+        this.data.gameState.currentBet,
+        this.data.gameState.lastRaiseSize,
+        this.data.gameState.bigBlind
+      )
+
+      if (msg.actionTimerDuration !== undefined) {
+        this.syncActionTimer(true)
+      }
+    }
+
     this.sendActionResult(conn, 'Updated table settings.')
     this.broadcastState()
+  }
+
+  private handleRabbitHunt(conn: Connection) {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    if (!playerId) {
+      this.sendActionFailed(conn, 'Join the room before rabbit hunting')
+      return
+    }
+
+    try {
+      this.data.gameState = runRabbitHunt(this.data.gameState)
+      this.sendActionResult(conn, 'Rabbit hunt revealed the board.')
+      this.broadcastState()
+    } catch (err) {
+      const message = err instanceof Error
+        ? err.message
+        : 'Rabbit hunt is available after a folded hand before the river'
+      this.sendActionFailed(conn, message)
+    }
   }
 
   private handleLeave(conn: Connection) {
@@ -627,8 +666,8 @@ export default class PokerRoom implements PartyServer {
 
   private handleRemovePlayer(conn: Connection, targetId: string) {
     const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId || this.data.hostId !== playerId) {
-      this.sendActionFailed(conn, 'Only the host can remove players')
+    if (!playerId) {
+      this.sendActionFailed(conn, 'Join the room before removing players')
       return
     }
 
@@ -670,8 +709,8 @@ export default class PokerRoom implements PartyServer {
 
   private handleAdjustPlayerStack(conn: Connection, targetId: string, amount: number) {
     const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId || this.data.hostId !== playerId) {
-      this.sendActionFailed(conn, 'Only the host can change player chips')
+    if (!playerId) {
+      this.sendActionFailed(conn, 'Join the room before changing player chips')
       return
     }
 
@@ -750,8 +789,8 @@ export default class PokerRoom implements PartyServer {
 
   private handleSetPlayerSpectator(conn: Connection, targetId: string, spectator: boolean) {
     const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId || this.data.hostId !== playerId) {
-      this.sendActionFailed(conn, 'Only the host can change spectator mode')
+    if (!playerId) {
+      this.sendActionFailed(conn, 'Join the room before changing spectator mode')
       return
     }
 
@@ -819,8 +858,8 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
-    if (this.data.gameState.phase === 'in_hand' && player.status !== 'folded') {
-      this.sendActionFailed(conn, 'You can only show cards after folding or after the hand.')
+    if (this.data.gameState.phase !== 'between_hands' || !this.data.gameState.winners?.length) {
+      this.sendActionFailed(conn, 'You can only show cards after the hand has a winner.')
       return
     }
 
@@ -1050,6 +1089,7 @@ export default class PokerRoom implements PartyServer {
       this.data.gameState.actionTimerStart = null
       this.flushPendingRemovals()
       this.flushPendingSpectators()
+      this.moveZeroStackPlayersToSpectators()
 
       for (const player of this.data.gameState.players) {
         if (!player.isConnected) {
@@ -1065,6 +1105,23 @@ export default class PokerRoom implements PartyServer {
     }
 
     this.syncAutoStart()
+  }
+
+  private moveZeroStackPlayersToSpectators() {
+    const bustedPlayers = this.data.gameState.players.filter(player => player.stack <= 0)
+    if (bustedPlayers.length === 0) {
+      return
+    }
+
+    const bustedIds = new Set(bustedPlayers.map(player => player.id))
+    for (const player of bustedPlayers) {
+      this.data.spectatorIds[player.id] = true
+      this.data.spectatorStacks[player.id] = 0
+      delete this.data.pendingSpectators[player.id]
+      delete this.data.pendingRemovals[player.id]
+    }
+
+    this.data.gameState.players = this.data.gameState.players.filter(player => !bustedIds.has(player.id))
   }
 
   private flushPendingRemovals() {
@@ -1211,26 +1268,41 @@ export default class PokerRoom implements PartyServer {
     }
   }
 
-  private ensureStats(email: string): TrackedPlayerStats {
-    this.data.statsByEmail[email] ??= {
+  private ensureStats(statsKey: string): TrackedPlayerStats {
+    this.data.statsByEmail[statsKey] ??= {
       handsPlayed: 0,
       folds: 0,
       wins: 0,
       totalWon: 0,
     }
 
-    return this.data.statsByEmail[email]!
+    return this.data.statsByEmail[statsKey]!
+  }
+
+  private getPlayerStatsKey(playerId: string): string | undefined {
+    if (this.isBotPlayer(playerId)) {
+      return `bot:${playerId}`
+    }
+
+    return this.data.playerProfiles[playerId]?.email
+  }
+
+  private ensurePlayerStats(playerId: string): TrackedPlayerStats | undefined {
+    const statsKey = this.getPlayerStatsKey(playerId)
+    return statsKey ? this.ensureStats(statsKey) : undefined
   }
 
   private getPublicStats(playerId: string): PlayerStats | undefined {
-    const profile = this.data.playerProfiles[playerId]
-    if (!profile) {
+    const stats = this.ensurePlayerStats(playerId)
+    if (!stats) {
       return undefined
     }
 
-    const stats = this.ensureStats(profile.email)
     return {
-      ...stats,
+      handsPlayed: stats.handsPlayed,
+      folds: stats.folds,
+      wins: stats.wins,
+      totalWon: stats.totalWon,
       foldRate: stats.handsPlayed > 0 ? stats.folds / stats.handsPlayed : 0,
     }
   }
@@ -1242,12 +1314,12 @@ export default class PokerRoom implements PartyServer {
     }
 
     for (const player of this.data.gameState.players) {
-      if (this.isBotPlayer(player.id) || player.holeCards.length !== 2) {
+      if (player.holeCards.length !== 2) {
         continue
       }
 
-      const profile = this.data.playerProfiles[player.id]
-      if (!profile) {
+      const stats = this.ensurePlayerStats(player.id)
+      if (!stats) {
         continue
       }
 
@@ -1257,18 +1329,14 @@ export default class PokerRoom implements PartyServer {
       }
 
       this.data.countedHandPlayers[key] = true
-      this.ensureStats(profile.email).handsPlayed += 1
+      stats.handsPlayed += 1
     }
   }
 
   private recordFold(playerId: string) {
-    if (this.isBotPlayer(playerId)) {
-      return
-    }
-
-    const profile = this.data.playerProfiles[playerId]
     const handNumber = this.data.gameState.handNumber
-    if (!profile || handNumber <= 0) {
+    const stats = this.ensurePlayerStats(playerId)
+    if (!stats || handNumber <= 0) {
       return
     }
 
@@ -1278,7 +1346,7 @@ export default class PokerRoom implements PartyServer {
     }
 
     this.data.countedFolds[key] = true
-    this.ensureStats(profile.email).folds += 1
+    stats.folds += 1
   }
 
   private recordCompletedHandStats() {
@@ -1293,15 +1361,33 @@ export default class PokerRoom implements PartyServer {
     }
 
     this.data.countedWinHands[handNumber] = true
+    const winnerAmounts = new Map<string, number>()
+    for (const winner of this.data.gameState.winners) {
+      winnerAmounts.set(winner.playerId, (winnerAmounts.get(winner.playerId) ?? 0) + winner.amount)
+    }
+
+    for (const player of this.data.gameState.players) {
+      if (player.holeCards.length !== 2) {
+        continue
+      }
+
+      const stats = this.ensurePlayerStats(player.id)
+      if (!stats) {
+        continue
+      }
+
+      const wonAmount = winnerAmounts.get(player.id) ?? 0
+      if (wonAmount > 0) {
+        stats.wins += 1
+        stats.totalWon += wonAmount
+      }
+    }
+
     this.data.gameState.winners = this.data.gameState.winners.map(winner => {
       const profile = this.data.playerProfiles[winner.playerId]
       if (!profile) {
         return winner
       }
-
-      const stats = this.ensureStats(profile.email)
-      stats.wins += 1
-      stats.totalWon += winner.amount
 
       return {
         ...winner,

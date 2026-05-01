@@ -57,6 +57,7 @@ export interface RoomState {
     action: 'fold' | 'check' | 'call' | 'raise' | 'all_in',
     amount?: number
   ) => void
+  seatMe: () => void
   sendMessage: (msg: C2SMessage) => void
 }
 
@@ -91,6 +92,10 @@ export function useRoom(
     },
     [sendMessage]
   )
+
+  const seatMe = useCallback(() => {
+    sendMessage({ type: 'seat_me' })
+  }, [sendMessage])
 
   useEffect(() => {
     if (!roomCode || !profile.nickname || !profile.email || !profile.venmoUsername) {
@@ -278,6 +283,7 @@ export function useRoom(
     isConnected,
     connectionIssue,
     sendAction,
+    seatMe,
     sendMessage,
   }
 }

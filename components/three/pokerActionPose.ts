@@ -24,6 +24,18 @@ export interface SeatedAvatarActionPose {
   headRotation: Vec3
 }
 
+export interface OpponentTableHandPose {
+  position: Vec3
+  rotation: Vec3
+  fingerCurl: number
+}
+
+export interface OpponentTableActionPose {
+  hand: OpponentTableHandPose
+  cards: PropActionPose
+  chipPush: PropActionPose
+}
+
 export const ACTION_ANIMATION_DURATION_MS = 980
 
 const restHandPose: HeroHandActionPose = {
@@ -45,6 +57,19 @@ const restAvatarPose: SeatedAvatarActionPose = {
   armPosition: [0, 0, 0],
   armRotation: [0, 0, 0],
   headRotation: [0, 0, 0],
+}
+
+const restOpponentHandPose: OpponentTableHandPose = {
+  position: [0, 0, 0],
+  rotation: [0, 0, 0],
+  fingerCurl: 0.18,
+}
+
+const visibleOpponentCardsPose: PropActionPose = {
+  visible: true,
+  position: [0, 0, 0],
+  rotation: [0, 0, 0],
+  opacity: 1,
 }
 
 export function getHeroHandActionPose(
@@ -232,15 +257,143 @@ export function getSeatedAvatarActionPose(
       const activePush = push * settle
 
       return {
-        bodyPosition: [0, 0.012 * gather * settle, -0.04 * activePush * reachScale],
+        bodyPosition: [0, 0.012 * gather * settle, -0.048 * activePush * reachScale],
         bodyRotation: [0.1 * activePush * reachScale * postureScale, -0.035 * activePush * postureScale, 0.028 * activePush],
-        armPosition: [0, 0.03 * gather * settle, -0.12 * activePush * reachScale],
+        armPosition: [0, 0.03 * gather * settle, -0.15 * activePush * reachScale],
         armRotation: [0.28 * activePush * reachScale, -0.048 * activePush * postureScale, -0.14 * activePush],
         headRotation: [-0.032 * activePush * postureScale, 0.024 * activePush, 0.014 * activePush],
       }
     }
     default:
       return restAvatarPose
+  }
+}
+
+export function getOpponentTableActionPose(
+  cue: ThreeActionCue,
+  elapsedMs: number
+): OpponentTableActionPose {
+  const progress = getProgress(elapsedMs)
+
+  if (cue === 'fold' && progress >= 1) {
+    return {
+      hand: restOpponentHandPose,
+      cards: hiddenPropPose,
+      chipPush: hiddenPropPose,
+    }
+  }
+
+  if (progress >= 1 || cue === 'ready') {
+    return {
+      hand: restOpponentHandPose,
+      cards: visibleOpponentCardsPose,
+      chipPush: hiddenPropPose,
+    }
+  }
+
+  switch (cue) {
+    case 'fold': {
+      const reach = easeOutCubic(clamp01(progress / 0.32))
+      const slide = easeInOut(clamp01((progress - 0.18) / 0.56))
+      const fade = easeInOut(clamp01((progress - 0.52) / 0.36))
+      const recoil = 1 - easeOutCubic(clamp01((progress - 0.78) / 0.18))
+      const lift = Math.sin(clamp01(progress / 0.74) * Math.PI)
+
+      return {
+        hand: {
+          position: [
+            -0.06 * reach * recoil - 0.12 * slide,
+            0.05 * reach + 0.038 * lift - 0.02 * slide,
+            -0.34 * reach + 0.12 * slide,
+          ],
+          rotation: [
+            0.2 * reach - 0.06 * slide,
+            -0.04 * reach - 0.06 * slide,
+            -0.12 * reach - 0.16 * slide,
+          ],
+          fingerCurl: 0.86 * reach * (1 - 0.36 * slide) * Math.max(0.22, recoil),
+        },
+        cards: {
+          visible: progress < 0.94,
+          position: [
+            -0.18 * slide,
+            0.054 * lift - 0.022 * fade,
+            -0.96 * slide,
+          ],
+          rotation: [0.05 * reach, -0.06 * slide, -0.18 * slide],
+          opacity: Math.max(0, 1 - fade),
+        },
+        chipPush: hiddenPropPose,
+      }
+    }
+    case 'check': {
+      const windup = easeOutCubic(clamp01(progress / 0.15))
+      const tap = Math.sin(clamp01((progress - 0.14) / 0.22) * Math.PI)
+      const rebound = Math.sin(clamp01((progress - 0.34) / 0.22) * Math.PI)
+      const settle = 1 - easeOutCubic(clamp01((progress - 0.52) / 0.28))
+      const active = Math.max(tap, rebound * 0.5, windup * settle)
+
+      return {
+        hand: {
+          position: [
+            -0.012 * tap,
+            0.054 * windup - 0.11 * tap + 0.024 * rebound,
+            -0.035 * tap,
+          ],
+          rotation: [
+            0.32 * tap - 0.06 * rebound,
+            -0.028 * tap,
+            -0.08 * tap,
+          ],
+          fingerCurl: 0.24 + 0.52 * active,
+        },
+        cards: visibleOpponentCardsPose,
+        chipPush: hiddenPropPose,
+      }
+    }
+    case 'call':
+    case 'bet':
+    case 'raise':
+    case 'all_in': {
+      const gather = easeOutCubic(clamp01(progress / 0.18))
+      const push = easeInOut(clamp01((progress - 0.14) / 0.58))
+      const fade = easeInOut(clamp01((progress - 0.78) / 0.16))
+      const lift = Math.sin(clamp01((progress - 0.08) / 0.7) * Math.PI)
+      const reachScale = cue === 'all_in' ? 1.5 : cue === 'raise' ? 1.2 : cue === 'bet' ? 1.08 : 1
+
+      return {
+        hand: {
+          position: [
+            0.06 * gather,
+            0.04 * gather + 0.034 * lift,
+            -0.4 * push * reachScale,
+          ],
+          rotation: [
+            0.1 * gather + 0.22 * push * reachScale,
+            -0.04 * push,
+            -0.18 * push * reachScale,
+          ],
+          fingerCurl: 0.28 + 0.46 * gather * (1 - 0.55 * fade),
+        },
+        cards: visibleOpponentCardsPose,
+        chipPush: {
+          visible: progress < 0.94,
+          position: [
+            0.02 * gather,
+            0.06 * lift - 0.02 * fade,
+            -0.66 * push * reachScale,
+          ],
+          rotation: [0, progress * Math.PI * 2.4, 0.08 * lift],
+          opacity: Math.max(0, 1 - fade * 0.72),
+        },
+      }
+    }
+    default:
+      return {
+        hand: restOpponentHandPose,
+        cards: visibleOpponentCardsPose,
+        chipPush: hiddenPropPose,
+      }
   }
 }
 

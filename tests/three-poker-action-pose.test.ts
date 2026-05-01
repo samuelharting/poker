@@ -4,6 +4,7 @@ import {
   getHeroCardActionPose,
   getHeroChipActionPose,
   getHeroHandActionPose,
+  getOpponentTableActionPose,
   getSeatedAvatarActionPose,
 } from '@/components/three/pokerActionPose'
 
@@ -114,4 +115,56 @@ describe('desktop 3D poker action pose animation', () => {
     expect(Math.abs(tap.bodyRotation[2])).toBeGreaterThan(0.02)
     expect(idle.armPosition).toEqual([0, 0, 0])
   })
+
+  it('keeps seated avatar wager reaches readable with the slimmer body calibration', () => {
+    const call = getSeatedAvatarActionPose('call', 620)
+    const raise = getSeatedAvatarActionPose('raise', 620)
+    const allIn = getSeatedAvatarActionPose('all_in', 620)
+
+    expect(call.bodyPosition[2]).toBeLessThan(-0.04)
+    expect(call.armPosition[2]).toBeLessThan(-0.1)
+    expect(raise.armPosition[2]).toBeLessThan(call.armPosition[2] - 0.02)
+    expect(allIn.armPosition[2]).toBeLessThan(raise.armPosition[2] - 0.04)
+  })
+
+  it('moves opponent table props through a fold without revealing card faces', () => {
+    const reaching = getOpponentTableActionPose('fold', 320)
+    const sliding = getOpponentTableActionPose('fold', 640)
+    const finished = getOpponentTableActionPose('fold', ACTION_ANIMATION_DURATION_MS)
+
+    expect(reaching.cards.visible).toBe(true)
+    expect(reaching.hand.position[2]).toBeLessThan(-0.12)
+    expect(reaching.hand.fingerCurl).toBeGreaterThan(0.45)
+    expect(sliding.cards.position[0]).toBeLessThan(-0.1)
+    expect(sliding.cards.position[2]).toBeLessThan(-0.55)
+    expect(sliding.cards.opacity).toBeLessThan(0.8)
+    expect(finished.cards.visible).toBe(false)
+    expect(finished.cards.opacity).toBe(0)
+  })
+
+  it('turns opponent check actions into a small table tap', () => {
+    const windup = getOpponentTableActionPose('check', 120)
+    const tap = getOpponentTableActionPose('check', 260)
+    const rest = getOpponentTableActionPose('check', ACTION_ANIMATION_DURATION_MS)
+
+    expect(windup.hand.position[1]).toBeGreaterThan(0.015)
+    expect(tap.hand.position[1]).toBeLessThan(-0.035)
+    expect(tap.hand.rotation[0]).toBeGreaterThan(0.18)
+    expect(tap.cards.visible).toBe(true)
+    expect(rest.hand.position).toEqual([0, 0, 0])
+    expect(rest.hand.rotation).toEqual([0, 0, 0])
+  })
+
+  it('pushes opponent wager props forward, with all-in larger than call', () => {
+    const call = getOpponentTableActionPose('call', 620)
+    const allIn = getOpponentTableActionPose('all_in', 620)
+
+    expect(call.hand.position[2]).toBeLessThan(-0.16)
+    expect(call.chipPush.visible).toBe(true)
+    expect(call.chipPush.position[2]).toBeLessThan(-0.22)
+    expect(allIn.hand.position[2]).toBeLessThan(call.hand.position[2] - 0.08)
+    expect(allIn.chipPush.position[2]).toBeLessThan(call.chipPush.position[2] - 0.12)
+    expect(allIn.chipPush.opacity).toBeGreaterThanOrEqual(call.chipPush.opacity)
+  })
+
 })

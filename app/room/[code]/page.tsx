@@ -142,7 +142,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [suitColorMode, setSuitColorMode] = useState<'two' | 'four'>('two')
 
-  const { tableState, socialState, yourId, isHost, sendAction, sendMessage, isConnected, connectionIssue } = useRoom(
+  const { tableState, socialState, yourId, isHost, sendAction, seatMe, sendMessage, isConnected, connectionIssue } = useRoom(
     roomCode,
     profile
   )
@@ -278,6 +278,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           onAction={sendAction}
           onStartGame={() => sendMessage({ type: 'start_game' })}
           onAddBots={(count: number) => sendMessage({ type: 'add_bots', count })}
+          onRabbitHunt={() => sendMessage({ type: 'rabbit_hunt' })}
           autoStartEnabled={tableState.autoStartEnabled ?? true}
           onSetAutoStart={enabled => sendMessage({ type: 'set_auto_start', enabled })}
           onUpdateSettings={handleUpdateSettings}
@@ -286,6 +287,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
             sendMessage({ type: 'adjust_player_stack', targetId, amount })}
           onSetPlayerSpectator={(targetId: string, spectator: boolean) =>
             sendMessage({ type: 'set_player_spectator', targetId, spectator })}
+          onSeatMe={seatMe}
           onSetShowCards={(mode: ShowCardsMode) => sendMessage({ type: 'set_show_cards', mode })}
           onSetSuitColorMode={handleSuitColorMode}
           onCloseSettings={() => setSettingsOpen(false)}

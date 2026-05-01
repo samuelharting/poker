@@ -33,3 +33,13 @@ describe('join_room profile protocol', () => {
     }))).toBeNull()
   })
 })
+
+describe('table action protocol', () => {
+  it('accepts a manual rabbit hunt request', () => {
+    expect(parseC2S(JSON.stringify({
+      type: 'rabbit_hunt',
+    }))).toEqual({
+      type: 'rabbit_hunt',
+    })
+  })
+})

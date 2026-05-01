@@ -108,6 +108,15 @@ export function PlayerSeat({
     .join('')
     .slice(0, 2)
     .toUpperCase()
+  const targetTitle = `Target ${player.nickname} for emojis`
+  const markerContent = (
+    <>
+      <span className="player-seat-initials">{initials}</span>
+      {player.isDealer && <span className="dealer-button">D</span>}
+      {player.isSB && !player.isDealer && <span className="blind-badge sb">SB</span>}
+      {player.isBB && <span className="blind-badge bb">BB</span>}
+    </>
+  )
 
   return (
     <div
@@ -120,7 +129,8 @@ export function PlayerSeat({
         isActing && 'is-current-turn',
         isDisconnected && 'is-disconnected'
       )}
-      style={{ opacity: isFolded ? opacityValue * 0.5 : opacityValue }}
+      style={{ opacity: isFolded ? opacityValue * 0.34 : opacityValue }}
+      data-player-status={player.status}
     >
       {(socialMessage || socialEmote) && (
         <div className="player-social-stack">
@@ -185,12 +195,22 @@ export function PlayerSeat({
         </div>
       )}
 
-      <div className={clsx('player-seat-marker', isActing && 'is-acting', isDisconnected && 'is-disconnected', isWinner && 'is-winner')}>
-        <span>{initials}</span>
-        {player.isDealer && <div className="dealer-button">D</div>}
-        {player.isSB && !player.isDealer && <div className="blind-badge sb">SB</div>}
-        {player.isBB && <div className="blind-badge bb">BB</div>}
-      </div>
+      {onNameClick ? (
+        <button
+          type="button"
+          className={clsx('player-seat-marker', isActing && 'is-acting', isDisconnected && 'is-disconnected', isWinner && 'is-winner')}
+          onClick={() => onNameClick(player.id)}
+          title={targetTitle}
+          aria-label={targetTitle}
+          data-player-target-trigger="avatar"
+        >
+          {markerContent}
+        </button>
+      ) : (
+        <div className={clsx('player-seat-marker', isActing && 'is-acting', isDisconnected && 'is-disconnected', isWinner && 'is-winner')}>
+          {markerContent}
+        </div>
+      )}
 
       <div className="player-name-container">
         {onNameClick ? (
@@ -198,7 +218,8 @@ export function PlayerSeat({
             type="button"
             className="player-name player-name-clickable"
             onClick={() => onNameClick(player.id)}
-            title={`Send an emoji to ${player.nickname}`}
+            title={targetTitle}
+            data-player-target-trigger="username"
           >
             {player.nickname}
           </button>

@@ -3,8 +3,10 @@ import type {
   BountyMetadata,
   InternalGameState,
   InternalPlayer,
+  BettingRound,
   Pot,
   SeatPlayer,
+  ShowCardsMode,
   TableState,
 } from './types'
 import { freshShuffledDeck, dealCards } from './deck'
@@ -101,25 +103,40 @@ function isEligibleBountyPayer(player: InternalPlayer, recipientIds: Set<string>
   return true
 }
 
-function revealCardsForNextHand(state: InternalGameState): void {
-  for (const player of state.players) {
-    if (player.holeCards.length > 0) {
-      player.showCards = 'both'
-    }
-  }
-}
-
 function formatBoardCards(cards: Card[]): string {
   return cards.map(card => `${card.rank}${card.suit[0]}`).join(' ')
 }
 
-function applyRabbitHuntRunout(state: InternalGameState): void {
-  if (!state.rabbitHuntingEnabled || state.communityCards.length >= 5) {
-    return
+function getRabbitHuntStartRound(state: InternalGameState): BettingRound | null {
+  if (state.communityCards.length === 0) {
+    return 'preflop'
+  }
+  if (state.communityCards.length === 3) {
+    return 'flop'
+  }
+  if (state.communityCards.length === 4) {
+    return 'turn'
+  }
+
+  if (state.round === 'preflop' || state.round === 'flop' || state.round === 'turn') {
+    return state.round
+  }
+
+  return null
+}
+
+function applyRabbitHuntRunout(state: InternalGameState, force = false): boolean {
+  if ((!force && !state.rabbitHuntingEnabled) || state.communityCards.length >= 5) {
+    return false
+  }
+
+  const startRound = getRabbitHuntStartRound(state)
+  if (!startRound) {
+    return false
   }
 
   const reveals: string[] = []
-  let currentRound = state.round
+  let currentRound: BettingRound | null = startRound
 
   while (state.communityCards.length < 5) {
     switch (currentRound) {
@@ -148,13 +165,29 @@ function applyRabbitHuntRunout(state: InternalGameState): void {
         break
       }
       default:
-        return
+        return false
     }
   }
 
   if (reveals.length > 0) {
     addAction(state, `Rabbit hunt: ${reveals.join(' | ')}`)
   }
+
+  return reveals.length > 0
+}
+
+export function runRabbitHunt(state: InternalGameState): InternalGameState {
+  const s = cloneState(state)
+
+  if (s.phase !== 'between_hands' || !s.winners?.length || s.communityCards.length >= 5) {
+    throw new Error('Rabbit hunt is available after a folded hand before the river')
+  }
+
+  if (!applyRabbitHuntRunout(s, true)) {
+    throw new Error('Rabbit hunt is available after a folded hand before the river')
+  }
+
+  return s
 }
 
 function splitAmountByWeight(
@@ -798,7 +831,6 @@ function awardLastPlayer(
   applyHandPayouts(s, winnerTotals, winnerDescriptions)
   addAction(s, `${winner.nickname} wins $${s.totalPot}`)
   applyRabbitHuntRunout(s)
-  revealCardsForNextHand(s)
   s.phase = 'between_hands'
   s.round = null
   s.actingPlayerId = null
@@ -887,7 +919,6 @@ export function resolveShowdown(state: InternalGameState): InternalGameState {
   }
 
   applyHandPayouts(s, winnerTotals, winnerDescriptions)
-  revealCardsForNextHand(s)
 
   // Log results
   for (const w of s.winners ?? []) {
@@ -957,6 +988,7 @@ export function toTableState(
   } = {}
 ): TableState {
   const revealAllHoleCards = options.revealAllHoleCards === true
+  const canRevealOptInCards = state.phase === 'between_hands' && Boolean(state.winners?.length)
 
   const revealCards = (player: InternalPlayer): Card[] | undefined => {
     if (player.holeCards.length === 0) {
@@ -967,7 +999,7 @@ export function toTableState(
       return player.holeCards
     }
 
-    if (state.phase === 'in_hand' && player.status !== 'folded') {
+    if (!canRevealOptInCards) {
       return undefined
     }
 
@@ -984,6 +1016,14 @@ export function toTableState(
     }
 
     return undefined
+  }
+
+  const visibleShowCards = (player: InternalPlayer): ShowCardsMode => {
+    if (revealAllHoleCards && player.holeCards.length > 0) {
+      return 'both'
+    }
+
+    return canRevealOptInCards ? player.showCards : 'none'
   }
 
   return {
@@ -1004,7 +1044,7 @@ export function toTableState(
       isBB: p.isBB,
       holeCards: p.id === viewerPlayerId ? p.holeCards : revealCards(p),
       hasCards: p.holeCards.length > 0,
-      showCards: revealAllHoleCards && p.holeCards.length > 0 ? 'both' : p.showCards,
+      showCards: visibleShowCards(p),
       isConnected: p.isConnected,
       lastAction: p.lastAction,
       lastActionId: p.lastActionId,
