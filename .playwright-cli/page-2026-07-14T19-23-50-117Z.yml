@@ -1,0 +1,33 @@
+- generic [active] [ref=f1e1]:
+  - button "Open Next.js Dev Tools" [ref=f1e41] [cursor=pointer]
+  - alert [ref=f1e45]
+  - generic [ref=f1e46]:
+    - generic [ref=f1e48]:
+      - button "Open table menu" [ref=f1e49] [cursor=pointer]
+      - generic [ref=f1e52]:
+        - generic [ref=f1e53]: NL Hold'em
+        - generic [ref=f1e57]: $10 / $20
+      - button "Open settings" [ref=f1e58] [cursor=pointer]
+    - generic [ref=f1e66]:
+      - region "Mobile poker field" [ref=f1e68]:
+        - generic "Players":
+          - generic [ref=f1e70]:
+            - button "Target MobileQA for emojis" [ref=f1e71] [cursor=pointer]: "5"
+            - generic [ref=f1e72]:
+              - button "MobileQA" [ref=f1e73] [cursor=pointer]
+              - generic [ref=f1e74]: $1,000
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f1e75] [cursor=pointer]:
+          - generic [ref=f1e76]: ♣
+      - generic [ref=f1e77]:
+        - generic [ref=f1e78]:
+          - generic [ref=f1e79]: Table controls
+          - generic [ref=f1e80]: Share the room code and fill the open seats to kick off the next hand.
+          - generic [ref=f1e81]:
+            - generic [ref=f1e82]: 1 seated
+            - generic [ref=f1e83]: Stack $1,000
+        - generic [ref=f1e84]: Anyone at the table can deal as soon as the table is ready.
+        - generic [ref=f1e85]:
+          - button "Add bot" [ref=f1e86] [cursor=pointer]
+          - button "Fill seats" [ref=f1e87] [cursor=pointer]
+        - button "Start game" [disabled] [ref=f1e88]

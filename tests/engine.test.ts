@@ -551,6 +551,84 @@ describe('toTableState', () => {
     expect(p2InSpectatorView.showCards).toBe('both')
   })
 
+  it('reveals every live contender and the winning five cards after a true showdown', () => {
+    const state = startHand(setup2Players())
+    const [alice, bob] = state.players
+    alice!.holeCards = handCards('A', 'spades', 'A', 'hearts')
+    bob!.holeCards = handCards('K', 'spades', 'K', 'hearts')
+    state.communityCards = [
+      card('A', 'diamonds'),
+      card('7', 'clubs'),
+      card('5', 'hearts'),
+      card('3', 'spades'),
+      card('2', 'clubs'),
+    ]
+    state.round = 'showdown'
+    state.sevenTwoRuleEnabled = false
+
+    const beforeResolution = Date.now()
+    const resolved = resolveShowdown(state)
+    const disconnectedAlice = resolved.players.find(player => player.id === alice!.id)!
+    disconnectedAlice.status = 'disconnected'
+    disconnectedAlice.isConnected = false
+    const view = toTableState(resolved, bob!.id)
+    const aliceView = view.players.find(player => player.id === alice!.id)!
+
+    expect(resolved.phase).toBe('between_hands')
+    expect(resolved.round).toBe('showdown')
+    expect(resolved.showdownAt).toBeGreaterThanOrEqual(beforeResolution)
+    expect(aliceView.showCards).toBe('both')
+    expect(aliceView.holeCards).toEqual(alice!.holeCards)
+    expect(view.winners?.[0]?.winningCards).toHaveLength(5)
+    expect(view.winners?.[0]?.handDescription).toContain('Three of a Kind')
+  })
+
+  it('reveals every live hand only to the connected seated player who folded', () => {
+    const state = startHand(setup3Players())
+    const foldedState = processAction(state, state.actingPlayerId!, 'fold')
+    const folder = foldedState.players.find(player => player.status === 'folded')!
+    const activeOpponent = foldedState.players.find(player => player.status === 'active')!
+
+    expect(foldedState.phase).toBe('in_hand')
+
+    const folderView = toTableState(foldedState, folder.id)
+    expect(folderView.players.every(player => player.holeCards?.length === 2)).toBe(true)
+    expect(folderView.players.every(player => player.showCards === 'both')).toBe(true)
+
+    const activeView = toTableState(foldedState, activeOpponent.id)
+    expect(activeView.players.find(player => player.id === activeOpponent.id)?.holeCards).toHaveLength(2)
+    expect(
+      activeView.players
+        .filter(player => player.id !== activeOpponent.id)
+        .every(player => player.holeCards === undefined)
+    ).toBe(true)
+
+    folder.isConnected = false
+    const disconnectedView = toTableState(foldedState, folder.id)
+    expect(
+      disconnectedView.players
+        .filter(player => player.id !== folder.id)
+        .every(player => player.holeCards === undefined)
+    ).toBe(true)
+  })
+
+  it('removes folded-view access when the next hand starts', () => {
+    const state = startHand(setup3Players())
+    const foldedState = processAction(state, state.actingPlayerId!, 'fold')
+    const folder = foldedState.players.find(player => player.status === 'folded')!
+    const nextHand = startHand(prepareNextHand(foldedState))
+    const folderView = toTableState(nextHand, folder.id)
+
+    expect(folderView.phase).toBe('in_hand')
+    expect(folderView.players.find(player => player.id === folder.id)?.status).toBe('active')
+    expect(folderView.players.find(player => player.id === folder.id)?.holeCards).toHaveLength(2)
+    expect(
+      folderView.players
+        .filter(player => player.id !== folder.id)
+        .every(player => player.holeCards === undefined)
+    ).toBe(true)
+  })
+
   it('reveals folded cards when a player opts to show them after a winner is recorded', () => {
     const state = startHand(setup2Players())
     const p1 = state.players[0]!
@@ -666,6 +744,7 @@ describe('prepareNextHand', () => {
     expect(next.phase).toBe('between_hands')
     expect(next.communityCards).toHaveLength(0)
     expect(next.pots).toHaveLength(0)
+    expect(next.showdownAt).toBeUndefined()
     for (const p of next.players) {
       expect(p.holeCards).toHaveLength(0)
       expect(p.bet).toBe(0)

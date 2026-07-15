@@ -41,15 +41,18 @@ export interface ThreePlayerView {
   id: string
   nickname: string
   visualSeat: number
+  isHero: boolean
   stack: number
   bet: number
   status: SeatPlayer['status']
   isActing: boolean
   isWinner: boolean
+  winnerHandDescription?: string
   isOutOfHand: boolean
   isDealer: boolean
   blindRole: ThreeBlindRole
   hasCards: boolean
+  showCards: SeatPlayer['showCards']
   visibleCards: ThreeCardView[]
   accentColor: string
   avatarColor: string
@@ -59,6 +62,41 @@ export interface ThreePlayerView {
   actionKey: string
   lastAction?: string
   lastActionId?: string
+}
+
+export interface ThreeVisibleCardSlots {
+  left: ThreeCardView | null
+  right: ThreeCardView | null
+}
+
+export function getThreeVisibleCardSlots(
+  showCards: SeatPlayer['showCards'],
+  visibleCards: ThreeCardView[]
+): ThreeVisibleCardSlots {
+  if (showCards === 'both') {
+    return {
+      left: visibleCards[0] ?? null,
+      right: visibleCards[1] ?? null,
+    }
+  }
+
+  if (showCards === 'left') {
+    return {
+      left: visibleCards[0] ?? null,
+      right: null,
+    }
+  }
+
+  if (showCards === 'right') {
+    return {
+      left: null,
+      right: visibleCards.length === 1
+        ? visibleCards[0] ?? null
+        : visibleCards[1] ?? null,
+    }
+  }
+
+  return { left: null, right: null }
 }
 
 export interface ThreeAllInAnnouncement {
@@ -82,6 +120,7 @@ export interface ThreeTableViewModel {
   communityCards: ThreeCardView[]
   heroCards: ThreeCardView[]
   pot: number
+  collectedPot: number
   currentBet: number
   smallBlind: number
   bigBlind: number
@@ -96,6 +135,15 @@ export interface ThreeEmoteReaction {
   senderId: string
   targetId: string
   emote: string
+  expiresAt: number
+  targeted: boolean
+}
+
+export interface ThreeChatMessage {
+  id: string
+  senderId: string
+  targetId: string
+  message: string
   expiresAt: number
   targeted: boolean
 }
@@ -164,11 +212,14 @@ const AVATAR_BROW_WEIGHTS: ThreeAvatarBrowWeight[] = ['low', 'medium', 'high']
 export function createThreeTableViewModel(state: TableState, yourId: string): ThreeTableViewModel {
   const heroPlayer = state.players.find(player => player.id === yourId) ?? null
   const heroSeatIndex = heroPlayer?.seatIndex ?? 0
-  const winnerIds = new Set((state.winners ?? []).map(winner => winner.playerId))
+  const winnersByPlayerId = new Map(
+    (state.winners ?? []).map(winner => [winner.playerId, winner])
+  )
   const players = state.players
     .map((player): ThreePlayerView => {
       const avatarProfile = createAvatarProfile(player)
       const actionCue = player.lastAction ? getActionCue(player.lastAction) : 'ready'
+      const winner = winnersByPlayerId.get(player.id)
       const isOutOfHand = state.phase === 'in_hand' && (
         player.status === 'folded' ||
         player.status === 'sitting_out' ||
@@ -179,15 +230,18 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
         id: player.id,
         nickname: player.nickname,
         visualSeat: getVisualSeat(player.seatIndex, heroSeatIndex),
+        isHero: player.id === yourId,
         stack: player.stack,
         bet: player.bet,
         status: player.status,
         isActing: state.actingPlayerId === player.id,
-        isWinner: winnerIds.has(player.id),
+        isWinner: Boolean(winner),
+        winnerHandDescription: winner?.handDescription,
         isOutOfHand,
         isDealer: player.isDealer,
         blindRole: getBlindRole(player),
         hasCards: player.hasCards,
+        showCards: player.showCards,
         visibleCards: (player.holeCards ?? []).map((card, index) => (
           toThreeCard(card, `${player.id}-card-${index}`, true)
         )),
@@ -222,6 +276,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
     communityCards: state.communityCards.map((card, index) => toThreeCard(card, `board-${index}`, true)),
     heroCards: (heroPlayer?.holeCards ?? []).map((card, index) => toThreeCard(card, `hero-${index}`, true)),
     pot: state.totalPot,
+    collectedPot: state.pots.reduce((sum, pot) => sum + pot.amount, 0),
     currentBet: state.currentBet,
     smallBlind: state.smallBlind,
     bigBlind: state.bigBlind,
@@ -266,6 +321,41 @@ export function createThreeEmoteReactions(
       targetId,
       emote,
       expiresAt: entry.emoteExpiresAt,
+      targeted: targetId !== entry.playerId,
+    })
+
+    return acc
+  }, [])
+}
+
+export function createThreeChatMessages(
+  socialState: Pick<SocialSnapshot, 'active'>,
+  playerIds: Iterable<string>,
+  now = Date.now()
+): ThreeChatMessage[] {
+  const knownPlayerIds = new Set(playerIds)
+
+  return socialState.active.reduce<ThreeChatMessage[]>((acc, entry) => {
+    if (
+      !entry.message ||
+      !entry.messageExpiresAt ||
+      entry.messageExpiresAt <= now ||
+      !knownPlayerIds.has(entry.playerId)
+    ) {
+      return acc
+    }
+
+    const targetId = entry.messageTargetPlayerId?.trim() || entry.playerId
+    if (!knownPlayerIds.has(targetId)) {
+      return acc
+    }
+
+    acc.push({
+      id: `${entry.playerId}:${targetId}:${entry.messageExpiresAt}`,
+      senderId: entry.playerId,
+      targetId,
+      message: entry.message,
+      expiresAt: entry.messageExpiresAt,
       targeted: targetId !== entry.playerId,
     })
 
@@ -354,7 +444,7 @@ function createAllInAnnouncement(players: ThreePlayerView[]): ThreeAllInAnnounce
     nickname: latestPlayer.nickname,
     visualSeat: latestPlayer.visualSeat,
     amountLabel: getAllInAmountLabel(latestPlayer),
-    isHero: latestPlayer.visualSeat === 0,
+    isHero: latestPlayer.isHero,
   }
 }
 

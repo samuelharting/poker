@@ -32,7 +32,7 @@ function addAction(state: InternalGameState, message: string): void {
   state.recentActions = [message, ...state.recentActions].slice(0, 20)
 }
 
-function setPlayerLastAction(
+export function setPlayerLastAction(
   state: InternalGameState,
   player: InternalPlayer,
   action: string
@@ -327,7 +327,8 @@ function applyBountyPayout(
 function applyHandPayouts(
   state: InternalGameState,
   winnerTotals: Map<string, number>,
-  winnerDescriptions: Map<string, string>
+  winnerDescriptions: Map<string, string>,
+  winnerCards: Map<string, Card[]> = new Map()
 ): void {
   for (const [playerId, amount] of Array.from(winnerTotals.entries())) {
     const idx = findPlayerIndex(state.players, playerId)
@@ -345,6 +346,7 @@ function applyHandPayouts(
     playerId,
     amount,
     handDescription: winnerDescriptions.get(playerId),
+    winningCards: winnerCards.get(playerId),
   }))
 
   if (bounty.active) {
@@ -425,6 +427,7 @@ export function startHand(state: InternalGameState): InternalGameState {
   s.minRaise = s.bigBlind * 2
   s.winners = undefined
   s.bounty = undefined
+  s.showdownAt = undefined
   s.handNumber += 1
 
   // Reset all players
@@ -824,11 +827,13 @@ function awardLastPlayer(
   // Award everything
   const winnerTotals = new Map<string, number>([[winnerId, s.totalPot]])
   const winnerDescriptions = new Map<string, string>()
+  const winnerCards = new Map<string, Card[]>()
   if (winner.holeCards.length === 2 && s.communityCards.length >= 3) {
     const result = evaluateHand([...winner.holeCards, ...s.communityCards])
     winnerDescriptions.set(winnerId, result.description)
+    winnerCards.set(winnerId, result.cards)
   }
-  applyHandPayouts(s, winnerTotals, winnerDescriptions)
+  applyHandPayouts(s, winnerTotals, winnerDescriptions, winnerCards)
   addAction(s, `${winner.nickname} wins $${s.totalPot}`)
   applyRabbitHuntRunout(s)
   s.phase = 'between_hands'
@@ -879,6 +884,7 @@ export function resolveShowdown(state: InternalGameState): InternalGameState {
   // Award each pot
   const winnerTotals = new Map<string, number>()
   const winnerDescriptions = new Map<string, string>()
+  const winnerCards = new Map<string, Card[]>()
 
   for (const pot of s.pots) {
     const eligible = pot.eligiblePlayerIds.filter(id => handResults.has(id))
@@ -892,7 +898,10 @@ export function resolveShowdown(state: InternalGameState): InternalGameState {
       const id = eligible[0]!
       winnerTotals.set(id, (winnerTotals.get(id) ?? 0) + pot.amount)
       const result = handResults.get(id)
-      if (result) winnerDescriptions.set(id, result.description)
+      if (result) {
+        winnerDescriptions.set(id, result.description)
+        winnerCards.set(id, result.cards)
+      }
       continue
     }
 
@@ -915,10 +924,11 @@ export function resolveShowdown(state: InternalGameState): InternalGameState {
       const extra = i === 0 ? remainder : 0
       winnerTotals.set(id, (winnerTotals.get(id) ?? 0) + share + extra)
       winnerDescriptions.set(id, winners[i]!.result.description)
+      winnerCards.set(id, winners[i]!.result.cards)
     }
   }
 
-  applyHandPayouts(s, winnerTotals, winnerDescriptions)
+  applyHandPayouts(s, winnerTotals, winnerDescriptions, winnerCards)
 
   // Log results
   for (const w of s.winners ?? []) {
@@ -931,6 +941,7 @@ export function resolveShowdown(state: InternalGameState): InternalGameState {
     }
   }
 
+  s.showdownAt = Date.now()
   s.phase = 'between_hands'
   return s
 }
@@ -946,6 +957,7 @@ export function prepareNextHand(state: InternalGameState): InternalGameState {
   s.round = null
   s.communityCards = []
   s.winners = undefined
+  s.showdownAt = undefined
   s.actingPlayerId = null
   s.actingPlayerIndex = -1
 
@@ -978,7 +990,8 @@ export function prepareNextHand(state: InternalGameState): InternalGameState {
 
 /**
  * Convert internal game state to a public TableState for a specific viewer.
- * Sanitizes hole cards (only shows them to the owning player).
+ * Sanitizes hole cards for the owning player, formal spectators, and a seated
+ * player who has folded out of the current live hand.
  */
 export function toTableState(
   state: InternalGameState,
@@ -987,8 +1000,32 @@ export function toTableState(
     revealAllHoleCards?: boolean
   } = {}
 ): TableState {
-  const revealAllHoleCards = options.revealAllHoleCards === true
+  const viewer = state.players.find(player => player.id === viewerPlayerId)
+  const foldedViewerCanSeeAllHands = Boolean(
+    state.phase === 'in_hand' &&
+    viewer &&
+    !viewer.isBot &&
+    viewer.isConnected &&
+    viewer.status === 'folded' &&
+    viewer.holeCards.length === 2
+  )
+  const revealAllHoleCards = options.revealAllHoleCards === true || foldedViewerCanSeeAllHands
   const canRevealOptInCards = state.phase === 'between_hands' && Boolean(state.winners?.length)
+  const isShowdownReveal = canRevealOptInCards && state.round === 'showdown'
+  const showdownParticipantIds = new Set(
+    isShowdownReveal
+      ? state.pots.flatMap(pot => pot.eligiblePlayerIds)
+      : []
+  )
+  const isShowdownParticipant = (player: InternalPlayer): boolean => (
+    isShowdownReveal &&
+    player.holeCards.length > 0 &&
+    (
+      showdownParticipantIds.has(player.id) ||
+      player.status === 'active' ||
+      player.status === 'all_in'
+    )
+  )
 
   const revealCards = (player: InternalPlayer): Card[] | undefined => {
     if (player.holeCards.length === 0) {
@@ -996,6 +1033,10 @@ export function toTableState(
     }
 
     if (revealAllHoleCards) {
+      return player.holeCards
+    }
+
+    if (isShowdownParticipant(player)) {
       return player.holeCards
     }
 
@@ -1020,6 +1061,12 @@ export function toTableState(
 
   const visibleShowCards = (player: InternalPlayer): ShowCardsMode => {
     if (revealAllHoleCards && player.holeCards.length > 0) {
+      return 'both'
+    }
+
+    if (
+      isShowdownParticipant(player)
+    ) {
       return 'both'
     }
 
@@ -1068,6 +1115,7 @@ export function toTableState(
     sevenTwoBountyPercent: state.sevenTwoBountyPercent,
     handNumber: state.handNumber,
     actionSequence: state.actionSequence ?? 0,
+    showdownAt: state.showdownAt,
     recentActions: state.recentActions,
     lobbyPlayers: [],
     winners: state.winners,

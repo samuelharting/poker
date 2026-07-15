@@ -1,0 +1,104 @@
+- generic [active] [ref=f3e1]:
+  - button "Open Next.js Dev Tools" [ref=f3e72] [cursor=pointer]
+  - alert [ref=f3e76]
+  - generic [ref=f3e215]:
+    - generic [ref=f3e216]:
+      - generic [ref=f3e217]:
+        - generic [ref=f3e218]: Poker Night
+        - generic [ref=f3e219]: RoomGBVNHQ
+      - generic [ref=f3e220]:
+        - button "Unmute table sounds" [pressed] [ref=f3e221] [cursor=pointer]:
+          - generic [ref=f3e226]: Muted
+        - button "Open settings" [ref=f3e407] [cursor=pointer]:
+          - generic [ref=f3e235]: Settings
+    - generic [ref=f3e236]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [ref=f3e237] [cursor=pointer]:
+            - generic [ref=f3e244]:
+              - generic [ref=f3e245]:
+                - strong [ref=f3e246]: Bot Maverick
+                - emphasis [ref=f3e247]: SB
+              - generic [ref=f3e248]:
+                - generic [ref=f3e249]: $990
+                - generic [ref=f3e280]: Raised $20
+            - generic [ref=f3e378]: $20
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "K of hearts":
+                    - generic:
+                      - generic: K
+                      - generic: K
+              - generic:
+                - generic:
+                  - generic "7 of hearts":
+                    - generic:
+                      - generic: "7"
+                      - generic: "7"
+              - generic:
+                - generic:
+                  - generic "4 of hearts":
+                    - generic:
+                      - generic: "4"
+                      - generic: "4"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=f3e251]:
+              - generic [ref=f3e252]:
+                - generic [ref=f3e253]: Pot
+                - generic [ref=f3e254]: $60
+              - generic [ref=f3e379]: To call$20
+          - status "ShowdownQA, chips $950":
+            - generic: ShowdownQA
+            - generic: $950
+          - 'generic "Your hand: Pair of Queens"':
+            - generic: Your turn
+            - status:
+              - generic: Pair of Queens
+            - generic:
+              - generic:
+                - generic:
+                  - generic "Q of spades":
+                    - generic:
+                      - generic: Q
+                      - generic: Q
+              - generic:
+                - generic:
+                  - generic "Q of diamonds":
+                    - generic:
+                      - generic: Q
+                      - generic: Q
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f3e408] [cursor=pointer]:
+          - generic [ref=f3e409]: ♣
+          - strong [ref=f3e410]: Table talk
+      - generic [ref=f3e380]:
+        - generic [ref=f3e381]:
+          - generic [ref=f3e382]: Your turn - Call $20
+          - generic [ref=f3e383]: Your turn
+        - generic [ref=f3e385]:
+          - generic [ref=f3e386]: Fold timer
+          - generic [ref=f3e387]: 6s left
+        - generic [ref=f3e390]:
+          - generic [ref=f3e391]:
+            - button "Min" [ref=f3e392] [cursor=pointer]
+            - button "1/4 Pot" [ref=f3e393] [cursor=pointer]
+            - button "3/4 Pot" [ref=f3e394] [cursor=pointer]
+            - button "Pot" [ref=f3e395] [cursor=pointer]
+          - slider [ref=f3e396]: "40"
+          - spinbutton [ref=f3e397]: "40"
+        - generic [ref=f3e398]:
+          - button "Call $20" [ref=f3e399] [cursor=pointer]: Call$20
+          - button "Raise to $40" [ref=f3e400] [cursor=pointer]: Raise to$40
+          - button "All-in $950" [ref=f3e401] [cursor=pointer]: All-in$950
+          - button "Fold" [ref=f3e402] [cursor=pointer]

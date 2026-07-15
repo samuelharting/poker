@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { createThreeEmoteReactions, createThreeTableViewModel } from '@/components/three/tableViewModel'
+import {
+  createThreeChatMessages,
+  createThreeEmoteReactions,
+  createThreeTableViewModel,
+  getThreeVisibleCardSlots,
+} from '@/components/three/tableViewModel'
 import type { Card, SeatPlayer, TableState } from '@/lib/poker/types'
 import type { SocialSnapshot } from '@/shared/protocol'
 
@@ -88,6 +93,34 @@ describe('createThreeTableViewModel', () => {
     expect(view.players.find(player => player.id === 'button')?.blindRole).toBeNull()
   })
 
+  it('propagates the winning hand description to the matching 3D player view', () => {
+    const view = createThreeTableViewModel(
+      makeTable({
+        phase: 'between_hands',
+        round: 'showdown',
+        players: [
+          makePlayer({ id: 'hero', nickname: 'Hero', status: 'waiting' }),
+          makePlayer({ id: 'winner', nickname: 'Maya', seatIndex: 1, status: 'waiting' }),
+        ],
+        winners: [{
+          playerId: 'winner',
+          amount: 200,
+          handDescription: 'Full House, Aces over Kings',
+        }],
+      }),
+      'hero'
+    )
+
+    expect(view.players.find(player => player.id === 'winner')).toMatchObject({
+      isWinner: true,
+      winnerHandDescription: 'Full House, Aces over Kings',
+    })
+    expect(view.players.find(player => player.id === 'hero')).toMatchObject({
+      isWinner: false,
+      winnerHandDescription: undefined,
+    })
+  })
+
   it('maps table cards and hidden hero card state without changing poker card values', () => {
     const board: Card[] = [
       { rank: 'A', suit: 'spades' },
@@ -152,6 +185,12 @@ describe('createThreeTableViewModel', () => {
     const alice = view.players.find(player => player.id === 'alice')
     const bob = view.players.find(player => player.id === 'bob')
 
+    expect(view.hero).toBeNull()
+    expect(alice?.visualSeat).toBe(0)
+    expect(alice?.isHero).toBe(false)
+    expect(bob?.isHero).toBe(false)
+    expect(alice?.showCards).toBe('both')
+    expect(bob?.showCards).toBe('both')
     expect(alice?.visibleCards).toEqual([
       { id: 'alice-card-0-A-spades', rank: 'A', suit: 'spades', visible: true },
       { id: 'alice-card-1-K-hearts', rank: 'K', suit: 'hearts', visible: true },
@@ -160,6 +199,54 @@ describe('createThreeTableViewModel', () => {
       { id: 'bob-card-0-Q-clubs', rank: 'Q', suit: 'clubs', visible: true },
       { id: 'bob-card-1-J-diamonds', rank: 'J', suit: 'diamonds', visible: true },
     ])
+  })
+
+  it('preserves left and right reveal slots when only one public card is sent', () => {
+    const leftView = createThreeTableViewModel(makeTable({
+      players: [makePlayer({
+        id: 'left-player',
+        showCards: 'left',
+        holeCards: [{ rank: 'A', suit: 'spades' }],
+      })],
+    }), 'spectator')
+    const leftPlayer = leftView.players[0]!
+
+    expect(getThreeVisibleCardSlots(leftPlayer.showCards, leftPlayer.visibleCards)).toEqual({
+      left: { id: 'left-player-card-0-A-spades', rank: 'A', suit: 'spades', visible: true },
+      right: null,
+    })
+
+    const rightView = createThreeTableViewModel(makeTable({
+      players: [makePlayer({
+        id: 'right-player',
+        showCards: 'right',
+        holeCards: [{ rank: 'K', suit: 'hearts' }],
+      })],
+    }), 'spectator')
+    const rightPlayer = rightView.players[0]!
+
+    expect(getThreeVisibleCardSlots(rightPlayer.showCards, rightPlayer.visibleCards)).toEqual({
+      left: null,
+      right: { id: 'right-player-card-0-K-hearts', rank: 'K', suit: 'hearts', visible: true },
+    })
+  })
+
+  it('separates collected center-pot chips from current-street wagers', () => {
+    const view = createThreeTableViewModel(
+      makeTable({
+        totalPot: 100,
+        pots: [{ amount: 60, eligiblePlayerIds: ['hero', 'villain'] }],
+        players: [
+          makePlayer({ id: 'hero', bet: 20, totalInPot: 50 }),
+          makePlayer({ id: 'villain', seatIndex: 1, bet: 20, totalInPot: 50 }),
+        ],
+      }),
+      'hero'
+    )
+
+    expect(view.pot).toBe(100)
+    expect(view.collectedPot).toBe(60)
+    expect(view.players.reduce((sum, player) => sum + player.bet, 0)).toBe(40)
   })
 
   it('keeps hidden opponent cards out of the desktop 3D view model', () => {
@@ -584,6 +671,32 @@ describe('createThreeTableViewModel', () => {
         emote: '\uD83D\uDC4B',
         expiresAt: now + 900,
         targeted: false,
+      },
+    ])
+  })
+
+  it('places targeted chat above the recipient instead of the sender', () => {
+    const now = 8000
+    const socialState: SocialSnapshot = {
+      active: [
+        {
+          playerId: 'hero',
+          message: 'Nice hand',
+          messageExpiresAt: now + 1200,
+          messageTargetPlayerId: 'villain',
+        },
+      ],
+      chatLog: [],
+    }
+
+    expect(createThreeChatMessages(socialState, ['hero', 'villain'], now)).toEqual([
+      {
+        id: `hero:villain:${now + 1200}`,
+        senderId: 'hero',
+        targetId: 'villain',
+        message: 'Nice hand',
+        expiresAt: now + 1200,
+        targeted: true,
       },
     ])
   })

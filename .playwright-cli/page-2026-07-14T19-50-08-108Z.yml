@@ -1,0 +1,42 @@
+- generic [ref=f3e1]:
+  - generic [ref=f3e19]:
+    - generic [ref=f3e21]:
+      - button "Open table menu" [ref=f3e140] [cursor=pointer]
+      - generic [ref=f3e25]:
+        - generic [ref=f3e26]: NL Hold'em
+        - generic [ref=f3e30]: $10 / $20
+      - button "Open settings" [ref=f3e141] [cursor=pointer]
+    - generic "Table notifications":
+      - status [ref=f3e156]:
+        - generic [ref=f3e157]: Added 1 bot
+        - button "Dismiss notification" [ref=f3e158] [cursor=pointer]: x
+    - generic [ref=f3e39]:
+      - region "Mobile poker field" [ref=f3e41]:
+        - generic "Players":
+          - generic [ref=f3e43]:
+            - button "Target FinalHost for emojis" [ref=f3e44] [cursor=pointer]: "5"
+            - generic [ref=f3e45]:
+              - button "FinalHost" [ref=f3e46] [cursor=pointer]
+              - generic [ref=f3e47]: $1,000
+          - generic [ref=f3e160]:
+            - button "Target Bot Maverick for emojis" [ref=f3e161] [cursor=pointer]: "6"
+            - generic [ref=f3e162]:
+              - button "Maverick" [ref=f3e163] [cursor=pointer]
+              - generic [ref=f3e164]: $1,000
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f3e142] [cursor=pointer]:
+          - generic [ref=f3e143]: ♣
+      - generic [ref=f3e144]:
+        - generic [ref=f3e145]:
+          - generic [ref=f3e146]: Table controls
+          - generic [ref=f3e147]: The table is ready. Deal whenever everyone looks settled.
+          - generic [ref=f3e148]:
+            - generic [ref=f3e149]: 2 seated
+            - generic [ref=f3e150]: Stack $1,000
+        - generic [ref=f3e151]: Anyone at the table can deal as soon as the table is ready.
+        - generic [ref=f3e152]:
+          - button "Add bot" [active] [ref=f3e153] [cursor=pointer]
+          - button "Fill seats" [ref=f3e154] [cursor=pointer]
+        - button "Start game" [ref=f3e155] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f3e67] [cursor=pointer]
+  - alert [ref=f3e71]

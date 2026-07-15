@@ -1,0 +1,161 @@
+- generic [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e24] [cursor=pointer]
+  - alert [ref=e28]
+  - generic [ref=e29]:
+    - generic [ref=e210]:
+      - button "Open table menu" [ref=e211] [cursor=pointer]
+      - generic [ref=e214]:
+        - generic [ref=e215]: NL Hold'em
+        - generic [ref=e219]: $10 / $20
+      - button "Open settings" [ref=e220] [cursor=pointer]
+    - generic [ref=e45]:
+      - region "Mobile poker field" [ref=e229]:
+        - generic:
+          - generic:
+            - generic:
+              - generic: Pot
+              - generic: $110
+          - generic "Board cards":
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+        - generic "Players":
+          - generic [ref=e231]:
+            - button "Target Bot Maverick for emojis" [ref=e232] [cursor=pointer]: "7"
+            - generic [ref=e233]:
+              - generic "Hidden card" [ref=e234]
+              - generic "Hidden card" [ref=e235]
+            - generic [ref=e236]:
+              - button "Maverick" [ref=e237] [cursor=pointer]
+              - generic [ref=e238]: $900
+          - generic [ref=e240]:
+            - button "Target Bot River for emojis" [ref=e241] [cursor=pointer]: "8"
+            - generic [ref=e242]:
+              - generic "Hidden card" [ref=e243]
+              - generic "Hidden card" [ref=e244]
+            - generic [ref=e245]:
+              - button "River" [ref=e246] [cursor=pointer]
+              - generic [ref=e247]: $900
+          - generic [ref=e249]:
+            - button "Target Bot Bluff for emojis" [ref=e250] [cursor=pointer]: "1"
+            - generic [ref=e251]:
+              - generic "Hidden card" [ref=e252]
+              - generic "Hidden card" [ref=e253]
+            - generic [ref=e254]:
+              - button "Bluff" [ref=e255] [cursor=pointer]
+              - generic [ref=e256]: $890
+          - generic [ref=e258]:
+            - button "Target Bot Ace for emojis" [ref=e259] [cursor=pointer]: "2"
+            - generic [ref=e260]:
+              - generic "Hidden card" [ref=e261]
+              - generic "Hidden card" [ref=e262]
+            - generic [ref=e263]:
+              - button "Ace" [ref=e264] [cursor=pointer]
+              - generic [ref=e265]: $880
+          - generic [ref=e267]:
+            - button "Target Bot Nova for emojis" [ref=e268] [cursor=pointer]: "3"
+            - generic [ref=e269]:
+              - generic "Hidden card" [ref=e270]
+              - generic "Hidden card" [ref=e271]
+            - generic [ref=e272]:
+              - button "Nova" [ref=e273] [cursor=pointer]
+              - generic [ref=e274]: $1,580
+          - generic [ref=e276]:
+            - button "Target Bot Dealer Dan for emojis" [ref=e277] [cursor=pointer]: "6"
+            - generic [ref=e278]:
+              - generic "Hidden card" [ref=e279]
+              - generic "Hidden card" [ref=e280]
+            - generic [ref=e281]:
+              - button "Dealer Dan" [ref=e282] [cursor=pointer]
+              - generic [ref=e283]: $880
+          - generic [ref=e285]:
+            - button "Target Bot Pocket for emojis" [ref=e286] [cursor=pointer]: "4"
+            - generic [ref=e287]:
+              - generic "Hidden card" [ref=e288]
+              - generic "Hidden card" [ref=e289]
+            - generic [ref=e290]:
+              - button "Pocket" [ref=e291] [cursor=pointer]
+              - generic [ref=e292]: $860
+        - generic:
+          - generic:
+            - generic: "5"
+            - generic: You
+            - generic: $1,000
+          - 'generic "Your hand: King-high"':
+            - generic:
+              - generic:
+                - generic:
+                  - generic "2 of clubs":
+                    - generic:
+                      - generic: "2"
+                      - generic: "2"
+              - generic:
+                - generic:
+                  - generic "K of clubs":
+                    - generic:
+                      - generic: K
+                      - generic: K
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=e52] [cursor=pointer]:
+          - generic [ref=e53]: ♣
+      - generic [ref=e298]:
+        - generic [ref=e299]:
+          - generic [ref=e300]:
+            - button "1/4" [ref=e301] [cursor=pointer]
+            - button "1/2" [ref=e302] [cursor=pointer]
+          - generic [ref=e303]: $60
+          - generic [ref=e304]:
+            - button "Pot" [ref=e305] [cursor=pointer]
+            - button "All In" [ref=e306] [cursor=pointer]
+        - generic [ref=e307]:
+          - button "Decrease bet" [ref=e308] [cursor=pointer]: −
+          - generic [ref=e309]:
+            - slider [ref=e310]: "60"
+            - generic [ref=e311]: 3 BB
+          - button "Increase bet" [ref=e312] [cursor=pointer]: +
+        - generic [ref=e313]:
+          - button "FOLD" [ref=e314] [cursor=pointer]
+          - button "CHECK / CALL $40" [ref=e316] [cursor=pointer]:
+            - generic [ref=e317]: CHECK / CALL
+            - strong [ref=e318]: $40
+          - button "BET / RAISE $60" [ref=e319] [cursor=pointer]:
+            - generic [ref=e320]: BET / RAISE
+            - strong [ref=e321]: $60
+      - dialog "Emoji reactions for Bot Maverick" [ref=e322]:
+        - generic [ref=e323]:
+          - generic [ref=e324]:
+            - generic [ref=e325]: Opponent
+            - generic [ref=e326]: Send to Bot Maverick
+          - button "Close target emote panel" [active] [ref=e327] [cursor=pointer]: x
+        - generic "Bot Maverick stats" [ref=e328]:
+          - generic [ref=e329]:
+            - generic [ref=e330]: Fold
+            - strong [ref=e331]: 0%
+          - generic [ref=e332]:
+            - generic [ref=e333]: Games
+            - strong [ref=e334]: "2"
+          - generic [ref=e335]:
+            - generic [ref=e336]: Won
+            - strong [ref=e337]: "0"
+        - generic [ref=e338]:
+          - button "👋" [ref=e339] [cursor=pointer]
+          - button "👍" [ref=e340] [cursor=pointer]
+          - button "😂" [ref=e341] [cursor=pointer]
+          - button "😎" [ref=e342] [cursor=pointer]
+          - button "💀" [ref=e343] [cursor=pointer]
+          - button "😭" [ref=e344] [cursor=pointer]
+          - button "😡" [ref=e345] [cursor=pointer]
+          - button "🖕" [ref=e346] [cursor=pointer]
+          - button "Search all emojis" [ref=e347] [cursor=pointer]

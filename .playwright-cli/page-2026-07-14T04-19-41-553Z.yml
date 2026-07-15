@@ -1,0 +1,91 @@
+- generic [active] [ref=f7e1]:
+  - generic [ref=f7e19]:
+    - generic [ref=f7e20]:
+      - generic [ref=f7e21]:
+        - generic [ref=f7e22]: Poker Night
+        - generic [ref=f7e23]:
+          - generic [ref=f7e24]: Room
+          - generic [ref=f7e25]: E9QXF5
+      - button "Open settings" [ref=f7e26] [cursor=pointer]:
+        - generic [ref=f7e34]: Settings
+    - generic "Table notifications":
+      - status [ref=f7e72]:
+        - generic [ref=f7e73]: Added 7 bots
+        - button "Dismiss notification" [ref=f7e74] [cursor=pointer]: x
+    - generic [ref=f7e35]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [ref=f7e75] [cursor=pointer]:
+            - generic [ref=f7e79]:
+              - strong [ref=f7e81]: Bot Maverick
+              - generic [ref=f7e82]: $1,000
+          - button "Send a reaction to Bot River" [ref=f7e84] [cursor=pointer]:
+            - generic [ref=f7e88]:
+              - strong [ref=f7e90]: Bot River
+              - generic [ref=f7e91]: $1,000
+          - button "Send a reaction to Bot Bluff" [ref=f7e93] [cursor=pointer]:
+            - generic [ref=f7e97]:
+              - strong [ref=f7e99]: Bot Bluff
+              - generic [ref=f7e100]: $1,000
+          - button "Send a reaction to Bot Ace" [ref=f7e102] [cursor=pointer]:
+            - generic [ref=f7e106]:
+              - strong [ref=f7e108]: Bot Ace
+              - generic [ref=f7e109]: $1,000
+          - button "Send a reaction to Bot Nova" [ref=f7e111] [cursor=pointer]:
+            - generic [ref=f7e115]:
+              - strong [ref=f7e117]: Bot Nova
+              - generic [ref=f7e118]: $1,000
+          - button "Send a reaction to Bot Dealer Dan" [ref=f7e120] [cursor=pointer]:
+            - generic [ref=f7e124]:
+              - strong [ref=f7e126]: Bot Dealer Dan
+              - generic [ref=f7e127]: $1,000
+          - button "Send a reaction to Bot Pocket" [ref=f7e129] [cursor=pointer]:
+            - generic [ref=f7e133]:
+              - strong [ref=f7e135]: Bot Pocket
+              - generic [ref=f7e136]: $1,000
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=f7e36]:
+              - generic [ref=f7e37]: Ready for the next hand
+              - generic [ref=f7e38]: The table is ready. Deal whenever everyone looks settled.
+              - generic [ref=f7e39]:
+                - generic [ref=f7e40]: 8 seated
+                - generic [ref=f7e41]: 8 max
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f7e42] [cursor=pointer]:
+          - generic [ref=f7e43]: ♣
+          - strong [ref=f7e44]: Table talk
+      - generic [ref=f7e46]:
+        - generic [ref=f7e47]:
+          - generic [ref=f7e48]:
+            - generic [ref=f7e49]: Table controls
+            - generic [ref=f7e50]: Waiting for the next hand.
+          - generic [ref=f7e51]:
+            - generic [ref=f7e52]: 8 seated
+            - generic [ref=f7e53]: 0 open
+        - generic [ref=f7e54]:
+          - generic [ref=f7e55]: Blinds $10/$20
+          - generic [ref=f7e56]: Buy-in $1,000
+        - generic [ref=f7e57]: You are seated with $1,000 and blinds are $10/$20.
+        - button "Start game" [ref=f7e61] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f7e67] [cursor=pointer]
+  - alert [ref=f7e71]

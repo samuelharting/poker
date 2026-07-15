@@ -1,0 +1,120 @@
+- generic [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e50] [cursor=pointer]
+  - alert [ref=e54]
+  - generic [ref=e55]:
+    - generic [ref=e56]:
+      - generic [ref=e57]:
+        - generic [ref=e58]: Poker Night
+        - generic [ref=e59]:
+          - generic [ref=e60]: Room
+          - generic [ref=e61]: RF5JKT
+      - button "Close settings" [active] [ref=e98] [cursor=pointer]:
+        - generic [ref=e70]: Close
+    - generic [ref=e71]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players"
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=e72]:
+              - generic [ref=e73]: Waiting for players
+              - generic [ref=e74]: Share the room code and fill the open seats to kick off the next hand.
+              - generic [ref=e75]:
+                - generic [ref=e76]: 1 seated
+                - generic [ref=e77]: 8 max
+      - dialog "Table settings and roster" [ref=e100]:
+        - generic [ref=e101]:
+          - generic [ref=e102]:
+            - generic [ref=e103]: Table console
+            - generic [ref=e104]: Table settings and roster
+          - button "Close" [ref=e105] [cursor=pointer]
+        - generic [ref=e106]:
+          - button "Settings" [ref=e107] [cursor=pointer]
+          - button "Players (1)" [ref=e108] [cursor=pointer]
+        - generic [ref=e109]:
+          - generic [ref=e110]:
+            - generic [ref=e111]: Room actions
+            - generic [ref=e112]: "Room code: RF5JKT"
+            - generic [ref=e113]:
+              - button "Copy code" [ref=e114] [cursor=pointer]
+              - button "Share link" [ref=e115] [cursor=pointer]
+          - generic [ref=e116]:
+            - generic [ref=e117]: Cards
+            - generic [ref=e118]:
+              - button "2-color suits" [pressed] [ref=e119] [cursor=pointer]
+              - button "4-color suits" [ref=e120] [cursor=pointer]
+          - generic [ref=e121]:
+            - generic [ref=e122]: Game setup
+            - generic [ref=e123]:
+              - generic [ref=e124]:
+                - generic [ref=e125]: Small blind
+                - spinbutton "Small blind" [ref=e126]: "10"
+              - generic [ref=e127]:
+                - generic [ref=e128]: Big blind
+                - spinbutton "Big blind" [ref=e129]: "20"
+              - generic [ref=e130]:
+                - generic [ref=e131]: Starting stack
+                - spinbutton "Starting stack" [ref=e132]: "1000"
+          - generic [ref=e133]:
+            - generic [ref=e134]: Timing
+            - generic [ref=e135]:
+              - generic [ref=e136]:
+                - generic [ref=e137]: Action timer (seconds)
+                - spinbutton "Action timer (seconds)" [ref=e138]: "35"
+              - generic [ref=e139]:
+                - generic [ref=e140]: Next hand delay (seconds)
+                - spinbutton "Next hand delay (seconds)" [ref=e141]: "3"
+          - generic [ref=e142]:
+            - generic [ref=e143]: Rules
+            - generic [ref=e144]:
+              - generic [ref=e145]:
+                - generic [ref=e146]: Rabbit hunting
+                - generic [ref=e147]: Run out the board after fold-ended hands.
+              - generic [ref=e148]:
+                - button "On" [ref=e149] [cursor=pointer]
+                - button "Off" [pressed] [ref=e150] [cursor=pointer]
+            - generic [ref=e151]:
+              - generic [ref=e152]:
+                - generic [ref=e153]: 7 / 2 rule
+                - generic [ref=e154]: Winning 7-2 hands collect the configured bounty.
+              - generic [ref=e155]:
+                - button "On" [pressed] [ref=e156] [cursor=pointer]
+                - button "Off" [ref=e157] [cursor=pointer]
+                - button "Customize" [ref=e158] [cursor=pointer]
+          - generic [ref=e159]:
+            - button "Reset" [disabled] [ref=e160]
+            - button "Save table settings" [disabled] [ref=e161]
+      - generic [ref=e82]:
+        - generic [ref=e83]:
+          - generic [ref=e84]:
+            - generic [ref=e85]: Table controls
+            - generic [ref=e86]: Waiting for at least one more player to sit down.
+          - generic [ref=e87]:
+            - generic [ref=e88]: 1 seated
+            - generic [ref=e89]: 7 open
+        - generic [ref=e90]:
+          - generic [ref=e91]: Blinds $10/$20
+          - generic [ref=e92]: Buy-in $1,000
+        - generic [ref=e93]: You are seated with $1,000 and blinds are $10/$20.
+        - generic [ref=e94]:
+          - button "Add bot" [ref=e95] [cursor=pointer]
+          - button "Fill seats" [ref=e96] [cursor=pointer]
+          - button "Start game" [disabled] [ref=e97]

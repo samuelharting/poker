@@ -1,0 +1,95 @@
+- generic [active] [ref=f3e1]:
+  - button "Open Next.js Dev Tools" [ref=f3e72] [cursor=pointer]
+  - alert [ref=f3e76]
+  - generic [ref=f3e215]:
+    - generic [ref=f3e216]:
+      - generic [ref=f3e217]:
+        - generic [ref=f3e218]: Poker Night
+        - generic [ref=f3e219]: RoomGBVNHQ
+      - generic [ref=f3e220]:
+        - button "Unmute table sounds" [pressed] [ref=f3e221] [cursor=pointer]:
+          - generic [ref=f3e226]: Muted
+        - button "Open settings" [ref=f3e227] [cursor=pointer]:
+          - generic [ref=f3e235]: Settings
+    - generic [ref=f3e236]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [ref=f3e237] [cursor=pointer]:
+            - generic [ref=f3e244]:
+              - generic [ref=f3e245]:
+                - strong [ref=f3e246]: Bot Maverick
+                - emphasis [ref=f3e247]: BB
+              - generic [ref=f3e248]: $1,000
+            - generic [ref=f3e250]: $20
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=f3e251]:
+              - generic [ref=f3e252]:
+                - generic [ref=f3e253]: Pot
+                - generic [ref=f3e254]: $30
+              - generic [ref=f3e255]: To call$10
+            - status "Your table bet $10":
+              - generic:
+                - generic: Bet
+                - generic: $10
+          - status "ShowdownQA, chips $970":
+            - generic: ShowdownQA
+            - generic: $970
+          - 'generic "Your hand: Jack-high"':
+            - generic: Your turn
+            - status:
+              - generic: Jack-high
+            - generic:
+              - generic:
+                - generic:
+                  - generic "7 of spades":
+                    - generic:
+                      - generic: "7"
+                      - generic: "7"
+              - generic:
+                - generic:
+                  - generic "J of clubs":
+                    - generic:
+                      - generic: J
+                      - generic: J
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f3e256] [cursor=pointer]:
+          - generic [ref=f3e257]: ♣
+          - strong [ref=f3e258]: Table talk
+      - generic [ref=f3e259]:
+        - generic [ref=f3e260]:
+          - generic [ref=f3e261]: Your turn - Call $10
+          - generic [ref=f3e262]: Your turn
+        - generic [ref=f3e264]:
+          - generic [ref=f3e265]: Fold timer
+          - generic [ref=f3e266]: 35s left
+        - generic [ref=f3e269]:
+          - generic [ref=f3e270]:
+            - button "Min" [ref=f3e271] [cursor=pointer]
+            - button "1/4 Pot" [ref=f3e272] [cursor=pointer]
+          - slider [ref=f3e273]: "40"
+          - spinbutton [ref=f3e274]: "40"
+        - generic [ref=f3e275]:
+          - button "Call $10" [ref=f3e276] [cursor=pointer]: Call$10
+          - button "Raise to $40" [ref=f3e277] [cursor=pointer]: Raise to$40
+          - button "All-in $980" [ref=f3e278] [cursor=pointer]: All-in$980
+          - button "Fold" [ref=f3e279] [cursor=pointer]

@@ -1,0 +1,84 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e19]:
+    - generic [ref=f3e21]:
+      - button "Close table menu" [ref=f3e72] [cursor=pointer]
+      - generic [ref=f3e25]:
+        - generic [ref=f3e26]: NL Hold'em
+        - generic [ref=f3e30]: $10 / $20
+      - button "Close settings" [ref=f3e73] [cursor=pointer]
+    - generic "Table notifications":
+      - status [ref=f3e137]:
+        - generic [ref=f3e138]: Updated table settings.
+        - button "Dismiss notification" [ref=f3e139] [cursor=pointer]: x
+    - generic [ref=f3e39]:
+      - region "Mobile poker field" [ref=f3e41]:
+        - generic "Players":
+          - generic [ref=f3e43]:
+            - button "Target FinalHost for emojis" [ref=f3e44] [cursor=pointer]: "5"
+            - generic [ref=f3e45]:
+              - button "FinalHost" [ref=f3e46] [cursor=pointer]
+              - generic [ref=f3e47]: $1,000
+      - dialog "Table settings and roster" [ref=f3e75]:
+        - generic [ref=f3e76]:
+          - generic [ref=f3e77]:
+            - generic [ref=f3e78]: Table console
+            - generic [ref=f3e79]: Table settings and roster
+          - button "Close" [ref=f3e80] [cursor=pointer]
+        - generic [ref=f3e81]:
+          - button "Settings" [ref=f3e82] [cursor=pointer]
+          - button "Players (1)" [ref=f3e83] [cursor=pointer]
+        - generic [ref=f3e84]:
+          - generic [ref=f3e85]:
+            - generic [ref=f3e86]: Room actions
+            - generic [ref=f3e87]: "Room code: MOW742"
+            - generic [ref=f3e88]:
+              - button "Copy code" [ref=f3e89] [cursor=pointer]
+              - button "Share link" [ref=f3e90] [cursor=pointer]
+          - generic [ref=f3e91]:
+            - generic [ref=f3e92]: Cards
+            - generic [ref=f3e93]:
+              - button "2-color suits" [pressed] [ref=f3e94] [cursor=pointer]
+              - button "4-color suits" [ref=f3e95] [cursor=pointer]
+          - generic [ref=f3e96]:
+            - generic [ref=f3e97]: Game setup
+            - generic [ref=f3e98]:
+              - generic [ref=f3e99]:
+                - generic [ref=f3e100]: Small blind
+                - spinbutton "Small blind" [ref=f3e101]: "10"
+              - generic [ref=f3e102]:
+                - generic [ref=f3e103]: Big blind
+                - spinbutton "Big blind" [ref=f3e104]: "20"
+              - generic [ref=f3e105]:
+                - generic [ref=f3e106]: Starting stack
+                - spinbutton "Starting stack" [ref=f3e107]: "1000"
+          - generic [ref=f3e108]:
+            - generic [ref=f3e109]: Timing
+            - generic [ref=f3e110]:
+              - generic [ref=f3e111]:
+                - generic [ref=f3e112]: Action timer (seconds)
+                - spinbutton "Action timer (seconds)" [ref=f3e113]: "35"
+              - generic [ref=f3e114]:
+                - generic [ref=f3e115]: Next hand delay (seconds)
+                - spinbutton "Next hand delay (seconds)" [ref=f3e116]: "30"
+          - generic [ref=f3e117]:
+            - generic [ref=f3e118]: Rules
+            - generic [ref=f3e119]:
+              - generic [ref=f3e120]:
+                - generic [ref=f3e121]: Rabbit hunting
+                - generic [ref=f3e122]: Run out the board after fold-ended hands.
+              - generic [ref=f3e123]:
+                - button "On" [ref=f3e124] [cursor=pointer]
+                - button "Off" [pressed] [ref=f3e125] [cursor=pointer]
+            - generic [ref=f3e126]:
+              - generic [ref=f3e127]:
+                - generic [ref=f3e128]: 7 / 2 rule
+                - generic [ref=f3e129]: Winning 7-2 hands collect the configured bounty.
+              - generic [ref=f3e130]:
+                - button "On" [pressed] [ref=f3e131] [cursor=pointer]
+                - button "Off" [ref=f3e132] [cursor=pointer]
+                - button "Customize" [ref=f3e133] [cursor=pointer]
+          - generic [ref=f3e134]:
+            - button "Reset" [disabled] [ref=f3e135]
+            - button "Save table settings" [disabled] [ref=f3e136]
+  - button "Open Next.js Dev Tools" [ref=f3e67] [cursor=pointer]
+  - alert [ref=f3e71]

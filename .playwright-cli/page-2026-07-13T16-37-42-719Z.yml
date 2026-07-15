@@ -1,0 +1,39 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]: ♥
+        - generic [ref=e7]: ♠
+        - generic [ref=e8]: ♦
+        - generic [ref=e9]: ♣
+      - generic [ref=e10]: Private Texas Hold'em
+      - heading "Poker Night" [level=1] [ref=e11]
+      - paragraph [ref=e12]: Start a polished table for friends, then share the room code when seats are ready.
+      - generic "Table defaults" [ref=e13]:
+        - generic [ref=e14]: 8 max
+        - generic [ref=e15]: 10 / 20 blinds
+        - generic [ref=e16]: Live table
+      - generic [ref=e17]: $240
+    - generic [ref=e26]:
+      - tablist "Table entry mode" [ref=e27]:
+        - button "Create" [ref=e28] [cursor=pointer]
+        - button "Join" [ref=e29] [cursor=pointer]
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - generic [ref=e32]: New table
+          - heading "Start a private table" [level=2] [ref=e33]
+        - generic [ref=e34]:
+          - generic [ref=e35]: Your nickname
+          - textbox "Your nickname" [active] [ref=e36]:
+            - /placeholder: e.g. PhilIvey
+        - generic [ref=e37]:
+          - generic [ref=e38]: Email
+          - textbox "Email" [ref=e39]:
+            - /placeholder: you@example.com
+        - generic [ref=e40]:
+          - generic [ref=e41]: Venmo username
+          - textbox "Venmo username" [ref=e42]:
+            - /placeholder: "@samvenmo"
+        - button "Create Table" [ref=e43] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=e49] [cursor=pointer]
+  - alert [ref=e53]

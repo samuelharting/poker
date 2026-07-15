@@ -1,0 +1,115 @@
+- generic [ref=f3e1]:
+  - button "Open Next.js Dev Tools" [ref=f3e72] [cursor=pointer]
+  - alert [ref=f3e76]
+  - generic [ref=f3e215]:
+    - generic [ref=f3e575]:
+      - button "Close table menu" [ref=f3e651] [cursor=pointer]
+      - generic [ref=f3e579]:
+        - generic [ref=f3e580]: NL Hold'em
+        - generic [ref=f3e584]: $10 / $20
+      - generic [ref=f3e585]:
+        - button "Unmute table sounds" [pressed] [ref=f3e586] [cursor=pointer]
+        - button "Close settings" [active] [ref=f3e652] [cursor=pointer]
+    - generic [ref=f3e236]:
+      - region "Mobile poker field" [ref=f3e600]:
+        - generic:
+          - generic:
+            - generic:
+              - generic: Pot
+              - generic: $60
+        - generic "Players":
+          - generic [ref=f3e602]:
+            - button "Target Bot Maverick for emojis" [ref=f3e603] [cursor=pointer]: "1"
+            - generic [ref=f3e604]:
+              - generic "Hidden card" [ref=f3e605]
+              - generic "Hidden card" [ref=f3e606]
+            - generic [ref=f3e607]:
+              - button "Maverick" [ref=f3e608] [cursor=pointer]
+              - generic [ref=f3e609]: $1,010
+        - status [ref=f3e634]:
+          - generic [ref=f3e635]: Hand winner
+          - generic [ref=f3e636]:
+            - generic [ref=f3e637]: Bot Maverick
+            - strong [ref=f3e639]: Won $60
+        - generic:
+          - 'generic "Your hand: King-high"':
+            - generic:
+              - generic:
+                - generic:
+                  - generic "Q of clubs": Q
+              - generic:
+                - generic:
+                  - generic "K of clubs": K
+      - dialog "Table settings and roster" [ref=f3e654]:
+        - generic [ref=f3e655]:
+          - generic [ref=f3e656]:
+            - generic [ref=f3e657]: Table console
+            - generic [ref=f3e658]: Table settings and roster
+          - button "Close" [ref=f3e659] [cursor=pointer]
+        - generic [ref=f3e660]:
+          - button "Settings" [ref=f3e661] [cursor=pointer]
+          - button "Players (2)" [ref=f3e662] [cursor=pointer]
+        - generic [ref=f3e663]:
+          - generic [ref=f3e664]:
+            - generic [ref=f3e665]: Room actions
+            - generic [ref=f3e666]: "Room code: GBVNHQ"
+            - generic [ref=f3e667]:
+              - button "Copy code" [ref=f3e668] [cursor=pointer]
+              - button "Share link" [ref=f3e669] [cursor=pointer]
+          - generic [ref=f3e670]:
+            - generic [ref=f3e671]: Cards
+            - generic [ref=f3e672]:
+              - button "2-color suits" [pressed] [ref=f3e673] [cursor=pointer]
+              - button "4-color suits" [ref=f3e674] [cursor=pointer]
+          - generic [ref=f3e675]:
+            - generic [ref=f3e676]:
+              - generic [ref=f3e677]: Soundscape
+              - generic [ref=f3e678]: Card, chip, action, and showdown sounds play in both table views.
+            - generic [ref=f3e679]:
+              - generic [ref=f3e680]:
+                - button "Sound on" [ref=f3e681] [cursor=pointer]
+                - button "Muted" [pressed] [ref=f3e682] [cursor=pointer]
+              - generic [ref=f3e683]:
+                - generic [ref=f3e684]: Volume 65%
+                - slider "Table sound volume" [ref=f3e685] [cursor=pointer]: "65"
+          - generic [ref=f3e686]:
+            - generic [ref=f3e687]: Game setup
+            - generic [ref=f3e688]:
+              - generic [ref=f3e689]:
+                - generic [ref=f3e690]: Small blind
+                - spinbutton "Small blind" [ref=f3e691]: "10"
+              - generic [ref=f3e692]:
+                - generic [ref=f3e693]: Big blind
+                - spinbutton "Big blind" [ref=f3e694]: "20"
+              - generic [ref=f3e695]:
+                - generic [ref=f3e696]: Starting stack
+                - spinbutton "Starting stack" [ref=f3e697]: "1000"
+          - generic [ref=f3e698]:
+            - generic [ref=f3e699]: Timing
+            - generic [ref=f3e700]:
+              - generic [ref=f3e701]:
+                - generic [ref=f3e702]: Action timer (seconds)
+                - spinbutton "Action timer (seconds)" [ref=f3e703]: "35"
+              - generic [ref=f3e704]:
+                - generic [ref=f3e705]: Next hand delay (seconds)
+                - spinbutton "Next hand delay (seconds)" [ref=f3e706]: "30"
+          - generic [ref=f3e707]:
+            - generic [ref=f3e708]: Rules
+            - generic [ref=f3e709]:
+              - generic [ref=f3e710]:
+                - generic [ref=f3e711]: Rabbit hunting
+                - generic [ref=f3e712]: Run out the board after fold-ended hands.
+              - generic [ref=f3e713]:
+                - button "On" [ref=f3e714] [cursor=pointer]
+                - button "Off" [pressed] [ref=f3e715] [cursor=pointer]
+            - generic [ref=f3e716]:
+              - generic [ref=f3e717]:
+                - generic [ref=f3e718]: 7 / 2 rule
+                - generic [ref=f3e719]: Winning 7-2 hands collect the configured bounty.
+              - generic [ref=f3e720]:
+                - button "On" [pressed] [ref=f3e721] [cursor=pointer]
+                - button "Off" [ref=f3e722] [cursor=pointer]
+                - button "Customize" [ref=f3e723] [cursor=pointer]
+          - generic [ref=f3e724]:
+            - button "Reset" [disabled] [ref=f3e725]
+            - button "Save table settings" [disabled] [ref=f3e726]

@@ -1,0 +1,156 @@
+- generic [ref=f4e1]:
+  - generic [ref=f4e19]:
+    - generic [ref=f4e20]:
+      - generic [ref=f4e21]:
+        - generic [ref=f4e22]: Poker Night
+        - generic [ref=f4e23]: RoomE9QXF5
+      - button "Open settings" [ref=f4e24] [cursor=pointer]:
+        - generic [ref=f4e32]: Settings
+    - generic [ref=f4e33]:
+      - generic [ref=f4e34]:
+        - generic "Animated 3D poker room" [ref=f4e35]
+        - generic [ref=f4e36]: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [active] [ref=f4e79] [cursor=pointer]:
+            - generic [ref=f4e83]:
+              - strong [ref=f4e85]: Bot Maverick
+              - generic [ref=f4e86]: $1,000
+          - button "Send a reaction to Bot River" [ref=f4e88] [cursor=pointer]:
+            - generic [ref=f4e92]:
+              - generic [ref=f4e93]:
+                - strong [ref=f4e94]: Bot River
+                - emphasis [ref=f4e148]: SB
+              - generic [ref=f4e95]: $990
+            - generic [ref=f4e149]: $10
+          - button "Send a reaction to Bot Bluff" [ref=f4e97] [cursor=pointer]:
+            - generic [ref=f4e101]:
+              - generic [ref=f4e102]:
+                - strong [ref=f4e103]: Bot Bluff
+                - emphasis [ref=f4e153]: BB
+              - generic [ref=f4e104]: $980
+            - generic [ref=f4e154]: $20
+          - button "Send a reaction to Bot Ace" [ref=f4e106] [cursor=pointer]:
+            - generic [ref=f4e110]:
+              - strong [ref=f4e112]: Bot Ace
+              - generic [ref=f4e113]:
+                - generic [ref=f4e114]: $980
+                - generic [ref=f4e158]: Called $20
+            - generic [ref=f4e159]: $20
+          - button "Send a reaction to Bot Nova" [ref=f4e115] [cursor=pointer]:
+            - generic [ref=f4e119]:
+              - strong [ref=f4e121]: Bot Nova
+              - generic [ref=f4e122]:
+                - generic [ref=f4e123]: $980
+                - generic [ref=f4e163]: Called $20
+            - generic [ref=f4e164]: $20
+          - button "Send a reaction to Bot Dealer Dan" [ref=f4e124] [cursor=pointer]:
+            - generic [ref=f4e128]:
+              - strong [ref=f4e130]: Bot Dealer Dan
+              - generic [ref=f4e131]:
+                - generic [ref=f4e132]: $980
+                - generic [ref=f4e168]: Called $20
+            - generic [ref=f4e169]: $20
+          - button "Send a reaction to Bot Pocket" [ref=f4e133] [cursor=pointer]:
+            - generic [ref=f4e137]:
+              - strong [ref=f4e139]: Bot Pocket
+              - generic [ref=f4e140]:
+                - generic [ref=f4e141]: $980
+                - generic [ref=f4e173]: Called $20
+            - generic [ref=f4e174]: $20
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=f4e175]:
+              - generic [ref=f4e176]:
+                - generic [ref=f4e177]: Pot
+                - generic [ref=f4e178]: $110
+              - generic [ref=f4e179]: To call$20
+          - status "3D QA, chips $1,000":
+            - generic: 3D QA
+            - generic: $1,000
+          - 'generic "Your hand: Ace-high"':
+            - generic: Your turn
+            - status:
+              - generic: Ace-high
+            - generic:
+              - generic:
+                - generic:
+                  - generic "A of spades":
+                    - generic:
+                      - generic: A
+                      - generic: A
+              - generic:
+                - generic:
+                  - generic "8 of diamonds":
+                    - generic:
+                      - generic: "8"
+                      - generic: "8"
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f4e44] [cursor=pointer]:
+          - generic [ref=f4e45]: ♣
+          - strong [ref=f4e46]: Table talk
+      - generic [ref=f4e180]:
+        - generic [ref=f4e181]:
+          - generic [ref=f4e182]: Your turn - Call $20
+          - generic [ref=f4e183]: Your turn
+        - generic [ref=f4e185]:
+          - generic [ref=f4e186]: Fold timer
+          - generic [ref=f4e187]: 31s left
+        - generic [ref=f4e190]:
+          - generic [ref=f4e191]:
+            - button "Min" [ref=f4e192] [cursor=pointer]
+            - button "1/4 Pot" [ref=f4e193] [cursor=pointer]
+            - button "1/2 Pot" [ref=f4e194] [cursor=pointer]
+            - button "3/4 Pot" [ref=f4e195] [cursor=pointer]
+            - button "Pot" [ref=f4e196] [cursor=pointer]
+          - slider [ref=f4e197]: "40"
+          - spinbutton [ref=f4e198]: "40"
+        - generic [ref=f4e199]:
+          - button "Call $20" [ref=f4e200] [cursor=pointer]: Call$20
+          - button "Raise to $40" [ref=f4e201] [cursor=pointer]: Raise to$40
+          - button "All-in $1,000" [ref=f4e202] [cursor=pointer]: All-in$1,000
+          - button "Fold" [ref=f4e203] [cursor=pointer]
+      - complementary [ref=f4e204]:
+        - generic [ref=f4e205]:
+          - generic [ref=f4e206]:
+            - generic [ref=f4e207]: Opponent
+            - generic [ref=f4e208]: Send to Bot Maverick
+          - button "Close target emote panel" [ref=f4e209] [cursor=pointer]: x
+        - generic "Bot Maverick stats" [ref=f4e210]:
+          - generic [ref=f4e211]:
+            - generic [ref=f4e212]: Fold
+            - strong [ref=f4e213]: 0%
+          - generic [ref=f4e214]:
+            - generic [ref=f4e215]: Games
+            - strong [ref=f4e216]: "1"
+          - generic [ref=f4e217]:
+            - generic [ref=f4e218]: Won
+            - strong [ref=f4e219]: "0"
+        - generic [ref=f4e220]:
+          - button "👋" [ref=f4e221] [cursor=pointer]
+          - button "👍" [ref=f4e222] [cursor=pointer]
+          - button "😂" [ref=f4e223] [cursor=pointer]
+          - button "😎" [ref=f4e224] [cursor=pointer]
+          - button "💀" [ref=f4e225] [cursor=pointer]
+          - button "😭" [ref=f4e226] [cursor=pointer]
+          - button "😡" [ref=f4e227] [cursor=pointer]
+          - button "🖕" [ref=f4e228] [cursor=pointer]
+          - button "Search all emojis" [ref=f4e229] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f4e69] [cursor=pointer]
+  - alert [ref=f4e73]

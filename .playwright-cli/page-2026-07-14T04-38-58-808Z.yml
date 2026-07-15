@@ -1,0 +1,231 @@
+- generic [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e24] [cursor=pointer]
+  - alert [ref=e28]
+  - generic [ref=e29]:
+    - generic [ref=e210]:
+      - button "Open table menu" [ref=e211] [cursor=pointer]
+      - generic [ref=e214]:
+        - generic [ref=e215]: NL Hold'em
+        - generic [ref=e219]: $10 / $20
+      - button "Open settings" [ref=e220] [cursor=pointer]
+    - generic [ref=e45]:
+      - region "Mobile poker field" [ref=e229]:
+        - generic:
+          - generic:
+            - generic:
+              - generic: Pot
+              - generic: $240
+          - generic "Board cards":
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+        - generic "Players":
+          - generic [ref=e231]:
+            - button "Target Bot Maverick for emojis" [ref=e232] [cursor=pointer]: "7"
+            - generic [ref=e233]:
+              - generic "Hidden card" [ref=e234]
+              - generic "Hidden card" [ref=e235]
+            - generic [ref=e236]:
+              - button "Maverick" [ref=e237] [cursor=pointer]
+              - generic [ref=e238]: $860
+          - generic [ref=e240]:
+            - button "Target Bot River for emojis" [ref=e241] [cursor=pointer]: "8"
+            - generic [ref=e242]:
+              - generic "Hidden card" [ref=e243]
+              - generic "Hidden card" [ref=e244]
+            - generic [ref=e245]:
+              - button "River" [ref=e246] [cursor=pointer]
+              - generic [ref=e247]: $860
+          - generic [ref=e249]:
+            - button "Target Bot Bluff for emojis" [ref=e250] [cursor=pointer]: "1"
+            - generic [ref=e251]:
+              - generic "Hidden card" [ref=e252]
+              - generic "Hidden card" [ref=e253]
+            - generic [ref=e254]:
+              - button "Bluff" [ref=e255] [cursor=pointer]
+              - generic [ref=e256]: $860
+          - generic [ref=e258]:
+            - button "Target Bot Ace for emojis" [ref=e259] [cursor=pointer]: "2"
+            - generic [ref=e260]:
+              - generic "Hidden card" [ref=e261]
+              - generic "Hidden card" [ref=e262]
+            - generic [ref=e263]:
+              - button "Ace" [ref=e264] [cursor=pointer]
+              - generic [ref=e265]: $860
+          - generic [ref=e267]:
+            - button "Target Bot Nova for emojis" [ref=e268] [cursor=pointer]: "3"
+            - generic [ref=e269]:
+              - generic "Hidden card" [ref=e270]
+              - generic "Hidden card" [ref=e271]
+            - generic [ref=e272]:
+              - button "Nova" [ref=e273] [cursor=pointer]
+              - generic [ref=e274]: $1,580
+          - generic [ref=e276]:
+            - button "Target Bot Dealer Dan for emojis" [ref=e277] [cursor=pointer]: "6"
+            - generic [ref=e278]:
+              - generic "Hidden card" [ref=e279]
+              - generic "Hidden card" [ref=e280]
+            - generic [ref=e281]:
+              - button "Dealer Dan" [ref=e282] [cursor=pointer]
+              - generic [ref=e283]: $880
+          - generic [ref=e285]:
+            - button "Target Bot Pocket for emojis" [ref=e286] [cursor=pointer]: "4"
+            - generic [ref=e287]:
+              - generic "Hidden card" [ref=e288]
+              - generic "Hidden card" [ref=e289]
+            - generic [ref=e290]:
+              - button "Pocket" [ref=e291] [cursor=pointer]
+              - generic [ref=e292]: $860
+        - generic:
+          - generic:
+            - generic: "5"
+            - generic: You
+            - generic: $1,000
+          - generic "Your hand":
+            - generic:
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: "2"
+                      - generic: "2"
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: K
+                      - generic: K
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=e52] [cursor=pointer]:
+          - generic [ref=e53]: ♣
+      - dialog "Emoji reactions for Bot Maverick" [ref=e322]:
+        - generic [ref=e323]:
+          - generic [ref=e324]:
+            - generic [ref=e325]: Opponent
+            - generic [ref=e326]: Send to Bot Maverick
+          - button "Close target emote panel" [ref=e327] [cursor=pointer]: x
+        - button "Hide picker" [ref=e348] [cursor=pointer]
+        - complementary [ref=e350]:
+          - generic [ref=e351]:
+            - generic [ref=e352]:
+              - textbox "Type to search for an emoji" [active] [ref=e354]:
+                - /placeholder: Search emojis for Bot Maverick
+              - generic [ref=e357]:
+                - button "Skin tone NEUTRAL" [pressed] [ref=e358] [cursor=pointer]
+                - button "Skin tone LIGHT" [ref=e359] [cursor=pointer]
+                - button "Skin tone MEDIUM_LIGHT" [ref=e360] [cursor=pointer]
+                - button "Skin tone MEDIUM" [ref=e361] [cursor=pointer]
+                - button "Skin tone MEDIUM_DARK" [ref=e362] [cursor=pointer]
+                - button "Skin tone DARK" [ref=e363] [cursor=pointer]
+            - tablist "Category navigation" [ref=e364]:
+              - tab "Frequently Used" [ref=e365] [cursor=pointer]
+              - tab "Smileys & People" [selected] [ref=e366] [cursor=pointer]
+              - tab "Animals & Nature" [ref=e367] [cursor=pointer]
+              - tab "Food & Drink" [ref=e368] [cursor=pointer]
+              - tab "Travel & Places" [ref=e369] [cursor=pointer]
+              - tab "Activities" [ref=e370] [cursor=pointer]
+              - tab "Objects" [ref=e371] [cursor=pointer]
+              - tab "Symbols" [ref=e372] [cursor=pointer]
+              - tab "Flags" [ref=e373] [cursor=pointer]
+          - list [ref=e375]:
+            - listitem "Smileys & People" [ref=e376]:
+              - heading "Smileys & People" [level=2] [ref=e377]
+              - generic [ref=e378]:
+                - button "grinning face" [ref=e379] [cursor=pointer]:
+                  - generic [ref=e380]: 😀
+                - button "grinning face with big eyes" [ref=e381] [cursor=pointer]:
+                  - generic [ref=e382]: 😃
+                - button "grinning face with smiling eyes" [ref=e383] [cursor=pointer]:
+                  - generic [ref=e384]: 😄
+                - button "beaming face with smiling eyes" [ref=e385] [cursor=pointer]:
+                  - generic [ref=e386]: 😁
+                - button "grinning squinting face" [ref=e387] [cursor=pointer]:
+                  - generic [ref=e388]: 😆
+                - button "grinning face with sweat" [ref=e389] [cursor=pointer]:
+                  - generic [ref=e390]: 😅
+                - button "rolling on the floor laughing" [ref=e391] [cursor=pointer]:
+                  - generic [ref=e392]: 🤣
+                - button "face with tears of joy" [ref=e393] [cursor=pointer]:
+                  - generic [ref=e394]: 😂
+                - button "slightly smiling face" [ref=e395] [cursor=pointer]:
+                  - generic [ref=e396]: 🙂
+                - button "upside down face" [ref=e397] [cursor=pointer]:
+                  - generic [ref=e398]: 🙃
+                - button "melting face" [ref=e399] [cursor=pointer]:
+                  - generic [ref=e400]: 🫠
+                - button "winking face" [ref=e401] [cursor=pointer]:
+                  - generic [ref=e402]: 😉
+                - button "smiling face with smiling eyes" [ref=e403] [cursor=pointer]:
+                  - generic [ref=e404]: 😊
+                - button "smiling face with halo" [ref=e405] [cursor=pointer]:
+                  - generic [ref=e406]: 😇
+                - button "smiling face with hearts" [ref=e407] [cursor=pointer]:
+                  - generic [ref=e408]: 🥰
+                - button "smiling face with heart eyes" [ref=e409] [cursor=pointer]:
+                  - generic [ref=e410]: 😍
+                - button "star struck" [ref=e411] [cursor=pointer]:
+                  - generic [ref=e412]: 🤩
+                - button "face blowing a kiss" [ref=e413] [cursor=pointer]:
+                  - generic [ref=e414]: 😘
+                - button "kissing face" [ref=e415] [cursor=pointer]:
+                  - generic [ref=e416]: 😗
+                - button "smiling face" [ref=e417] [cursor=pointer]:
+                  - generic [ref=e418]: ☺️
+                - button "kissing face with closed eyes" [ref=e419] [cursor=pointer]:
+                  - generic [ref=e420]: 😚
+                - button "kissing face with smiling eyes" [ref=e421] [cursor=pointer]:
+                  - generic [ref=e422]: 😙
+                - button "smiling face with tear" [ref=e423] [cursor=pointer]:
+                  - generic [ref=e424]: 🥲
+                - button "face savoring food" [ref=e425] [cursor=pointer]:
+                  - generic [ref=e426]: 😋
+                - button "face with tongue" [ref=e427] [cursor=pointer]:
+                  - generic [ref=e428]: 😛
+                - button "winking face with tongue" [ref=e429] [cursor=pointer]:
+                  - generic [ref=e430]: 😜
+                - button "zany face" [ref=e431] [cursor=pointer]:
+                  - generic [ref=e432]: 🤪
+                - button "squinting face with tongue" [ref=e433] [cursor=pointer]:
+                  - generic [ref=e434]: 😝
+                - button "money mouth face" [ref=e435] [cursor=pointer]:
+                  - generic [ref=e436]: 🤑
+                - button "smiling face with open hands" [ref=e437] [cursor=pointer]:
+                  - generic [ref=e438]: 🤗
+                - button "face with hand over mouth" [ref=e439] [cursor=pointer]:
+                  - generic [ref=e440]: 🤭
+                - button "face with open eyes and hand over mouth" [ref=e441] [cursor=pointer]:
+                  - generic [ref=e442]: 🫢
+                - button "face with peeking eye" [ref=e443] [cursor=pointer]:
+                  - generic [ref=e444]: 🫣
+                - button "shushing face" [ref=e445] [cursor=pointer]:
+                  - generic [ref=e446]: 🤫
+                - button "thinking face" [ref=e447] [cursor=pointer]:
+                  - generic [ref=e448]: 🤔
+                - button "saluting face" [ref=e449] [cursor=pointer]:
+                  - generic [ref=e450]: 🫡
+            - listitem "Animals & Nature" [ref=e451]:
+              - heading "Animals & Nature" [level=2] [ref=e452]
+            - listitem "Food & Drink" [ref=e454]:
+              - heading "Food & Drink" [level=2] [ref=e455]
+            - listitem "Travel & Places" [ref=e457]:
+              - heading "Travel & Places" [level=2] [ref=e458]
+            - listitem "Activities" [ref=e460]:
+              - heading "Activities" [level=2] [ref=e461]
+            - listitem "Objects" [ref=e463]:
+              - heading "Objects" [level=2] [ref=e464]
+            - listitem "Symbols" [ref=e466]:
+              - heading "Symbols" [level=2] [ref=e467]
+            - listitem "Flags" [ref=e469]:
+              - heading "Flags" [level=2] [ref=e470]

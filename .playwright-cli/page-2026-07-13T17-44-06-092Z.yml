@@ -1,0 +1,87 @@
+- generic [ref=f3e1]:
+  - generic [ref=f3e19]:
+    - generic [ref=f3e21]:
+      - button "Open table menu" [ref=f3e22] [cursor=pointer]
+      - generic [ref=f3e25]:
+        - generic [ref=f3e26]: NL Hold'em
+        - generic [ref=f3e30]: $10 / $20
+      - button "Open settings" [ref=f3e31] [cursor=pointer]
+    - generic [ref=f3e39]:
+      - region "Mobile poker field" [ref=f3e41]:
+        - generic:
+          - generic:
+            - generic:
+              - generic: Pot
+              - generic: $60
+          - generic "Board cards":
+            - generic:
+              - generic:
+                - generic "Q of clubs":
+                  - generic:
+                    - generic: Q
+                    - generic: Q
+            - generic:
+              - generic:
+                - generic "5 of hearts":
+                  - generic:
+                    - generic: "5"
+                    - generic: "5"
+            - generic:
+              - generic:
+                - generic "4 of spades":
+                  - generic:
+                    - generic: "4"
+                    - generic: "4"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+        - generic "Players":
+          - generic [ref=f3e43]:
+            - button "Target Bot Maverick for emojis" [ref=f3e44] [cursor=pointer]: "1"
+            - generic [ref=f3e45]:
+              - generic "Hidden card" [ref=f3e46]
+              - generic "Hidden card" [ref=f3e47]
+            - generic [ref=f3e48]:
+              - button "Maverick" [ref=f3e49] [cursor=pointer]
+              - generic [ref=f3e50]: $1,180
+        - status:
+          - generic:
+            - generic: Bot Maverick
+            - strong: Won $60
+        - generic:
+          - generic:
+            - generic: "5"
+            - generic: D
+            - generic: You
+            - generic: $820
+          - 'generic "Your hand: Ace-high"':
+            - generic:
+              - generic:
+                - generic:
+                  - generic "A of hearts":
+                    - generic:
+                      - generic: A
+                      - generic: A
+              - generic:
+                - generic:
+                  - generic "9 of hearts":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+            - group "Show folded cards" [ref=f3e52]:
+              - button "L" [active] [pressed] [ref=f3e53] [cursor=pointer]
+              - button "R" [ref=f3e54] [cursor=pointer]
+              - button "Both" [ref=f3e55] [cursor=pointer]
+      - region "Rabbit hunt controls" [ref=f3e56]:
+        - generic [ref=f3e57]:
+          - generic [ref=f3e58]: Folded hand
+          - generic [ref=f3e59]: See the board runout
+        - button "Rabbit hunt" [ref=f3e60] [cursor=pointer]
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f3e61] [cursor=pointer]:
+          - generic [ref=f3e62]: ♣
+  - button "Open Next.js Dev Tools" [ref=f3e68] [cursor=pointer]
+  - alert [ref=f3e72]

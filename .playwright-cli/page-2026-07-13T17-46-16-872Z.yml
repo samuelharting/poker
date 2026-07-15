@@ -1,0 +1,74 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e19]:
+    - generic [ref=f3e97]:
+      - generic [ref=f3e98]:
+        - generic [ref=f3e99]: Poker Night
+        - generic [ref=f3e100]: RoomJGHJ7L
+      - button "Open settings" [ref=f3e101] [cursor=pointer]:
+        - generic [ref=f3e109]: Settings
+    - generic [ref=f3e39]:
+      - generic [ref=f3e110]:
+        - generic [ref=f3e112]:
+          - button "Target Bot Maverick for emojis" [ref=f3e113] [cursor=pointer]:
+            - generic [ref=f3e114]: BM
+            - generic [ref=f3e183]: SB
+          - button "Bot Maverick" [ref=f3e118] [cursor=pointer]
+          - generic [ref=f3e119]: $1,210
+          - generic [ref=f3e270]: Won $40
+        - generic [ref=f3e120]:
+          - generic "Board cards" [ref=f3e121]:
+            - generic "8 of hearts" [ref=f3e205]:
+              - generic [ref=f3e125]:
+                - generic [ref=f3e206]: "8"
+                - generic [ref=f3e214]: "8"
+            - generic "3 of diamonds" [ref=f3e219]:
+              - generic [ref=f3e130]:
+                - generic [ref=f3e220]: "3"
+                - generic [ref=f3e228]: "3"
+            - generic "3 of clubs" [ref=f3e233]:
+              - generic [ref=f3e135]:
+                - generic [ref=f3e234]: "3"
+                - generic [ref=f3e242]: "3"
+            - generic "Face-down card" [ref=f3e139]
+            - generic "Face-down card" [ref=f3e144]
+          - generic [ref=f3e148]:
+            - generic [ref=f3e149]: Pot
+            - generic [ref=f3e150]: $40
+          - status:
+            - generic:
+              - generic: Hand Winner
+              - generic:
+                - generic: Bot Maverick
+                - generic: Won $40
+                - generic: $40
+        - 'generic "Your hand: Pair of Threes"':
+          - status:
+            - generic: Pair of Threes
+          - generic:
+            - generic:
+              - generic:
+                - generic "6 of diamonds":
+                  - generic:
+                    - generic: "6"
+                    - generic: "6"
+            - generic:
+              - generic:
+                - generic "4 of clubs":
+                  - generic:
+                    - generic: "4"
+                    - generic: "4"
+          - group "Show folded cards" [ref=f3e272]:
+            - button "L" [ref=f3e273] [cursor=pointer]
+            - button "R" [ref=f3e274] [cursor=pointer]
+            - button "Both" [ref=f3e275] [cursor=pointer]
+      - region "Rabbit hunt controls" [ref=f3e276]:
+        - generic [ref=f3e277]:
+          - generic [ref=f3e278]: Folded hand
+          - generic [ref=f3e279]: See the board runout
+        - button "Rabbit hunt" [ref=f3e280] [cursor=pointer]
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f3e61] [cursor=pointer]:
+          - generic [ref=f3e62]: ♣
+          - strong [ref=f3e152]: Table talk
+  - button "Open Next.js Dev Tools" [ref=f3e68] [cursor=pointer]
+  - alert [ref=f3e72]

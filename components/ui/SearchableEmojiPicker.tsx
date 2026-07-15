@@ -14,6 +14,7 @@ interface SearchableEmojiPickerProps {
   onSelect: (emoji: string) => void
   className?: string
   searchPlaceholder?: string
+  height?: string | number
 }
 
 export function SearchableEmojiPicker({
@@ -21,6 +22,7 @@ export function SearchableEmojiPicker({
   onSelect,
   className,
   searchPlaceholder = 'Search all emojis',
+  height = 360,
 }: SearchableEmojiPickerProps) {
   return (
     <div className={clsx('emoji-picker-shell', className)}>
@@ -31,7 +33,7 @@ export function SearchableEmojiPicker({
         theme={Theme.DARK}
         emojiStyle={EmojiStyle.NATIVE}
         width="100%"
-        height={360}
+        height={height}
         searchPlaceholder={searchPlaceholder}
         previewConfig={{ showPreview: false }}
         onEmojiClick={(emojiData: EmojiClickData) => {

@@ -1,0 +1,16 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e49] [cursor=pointer]
+  - alert [ref=e53]
+  - generic [ref=e55]:
+    - generic [ref=e56]:
+      - generic [ref=e57]:
+        - generic [ref=e58]: Poker Night
+        - generic [ref=e59]:
+          - generic [ref=e60]: Room
+          - generic [ref=e61]: UFRUWW
+      - generic [ref=e62]: Table controls
+      - button "Open settings" [ref=e63] [cursor=pointer]:
+        - generic [ref=e71]: Settings
+    - generic [ref=e72]:
+      - generic [ref=e74]: Connecting...
+      - generic [ref=e75]: Opening a seat and restoring your last state.

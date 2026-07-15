@@ -1,0 +1,60 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e24] [cursor=pointer]
+  - alert [ref=e28]
+  - generic [ref=e29]:
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e32]: Poker Night
+        - generic [ref=e33]: RoomE9QXF5
+      - button "Open settings" [ref=e34] [cursor=pointer]:
+        - generic [ref=e42]: Settings
+    - generic [ref=e43]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players"
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=e44]:
+              - generic [ref=e45]: Waiting for players
+              - generic [ref=e46]: Share the room code and fill the open seats to kick off the next hand.
+              - generic [ref=e47]:
+                - generic [ref=e48]: 1 seated
+                - generic [ref=e49]: 8 max
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=e50] [cursor=pointer]:
+          - generic [ref=e51]: ♣
+          - strong [ref=e52]: Table talk
+      - generic [ref=e54]:
+        - generic [ref=e55]:
+          - generic [ref=e56]:
+            - generic [ref=e57]: Table controls
+            - generic [ref=e58]: Waiting for at least one more player to sit down.
+          - generic [ref=e59]:
+            - generic [ref=e60]: 1 seated
+            - generic [ref=e61]: 7 open
+        - generic [ref=e62]:
+          - generic [ref=e63]: Blinds $10/$20
+          - generic [ref=e64]: Buy-in $1,000
+        - generic [ref=e65]: You are seated with $1,000 and blinds are $10/$20.
+        - generic [ref=e66]:
+          - button "Add bot" [ref=e67] [cursor=pointer]
+          - button "Fill seats" [ref=e68] [cursor=pointer]
+          - button "Start game" [disabled] [ref=e69]

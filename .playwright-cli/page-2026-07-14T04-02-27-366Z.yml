@@ -1,0 +1,138 @@
+- generic [ref=f6e1]:
+  - generic [ref=f6e19]:
+    - generic [ref=f6e20]:
+      - generic [ref=f6e21]:
+        - generic [ref=f6e22]: Poker Night
+        - generic [ref=f6e23]:
+          - generic [ref=f6e24]: Room
+          - generic [ref=f6e25]: E9QXF5
+      - button "Open settings" [ref=f6e26] [cursor=pointer]:
+        - generic [ref=f6e34]: Settings
+    - generic [ref=f6e35]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot River" [ref=f6e36] [cursor=pointer]:
+            - generic [ref=f6e43]:
+              - generic [ref=f6e44]:
+                - strong [ref=f6e45]: Bot River
+                - emphasis [ref=f6e46]: BB
+              - generic [ref=f6e47]:
+                - generic [ref=f6e48]: $3,780
+                - generic [ref=f6e154]: Acting
+          - button "Send a reaction to Bot Bluff" [ref=f6e50] [cursor=pointer]:
+            - generic [ref=f6e57]:
+              - strong [ref=f6e59]: Bot Bluff
+              - generic [ref=f6e60]:
+                - generic [ref=f6e61]: $730
+                - generic [ref=f6e62]: Checked
+          - button "Send a reaction to Bot Dealer Dan" [ref=f6e64] [cursor=pointer]:
+            - generic [ref=f6e71]:
+              - strong [ref=f6e73]: Bot Dealer Dan
+              - generic [ref=f6e74]:
+                - generic [ref=f6e75]: $2,510
+                - generic [ref=f6e76]: Checked
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "8 of clubs":
+                    - generic:
+                      - generic: "8"
+                      - generic: "8"
+              - generic:
+                - generic:
+                  - generic "10 of clubs":
+                    - generic:
+                      - generic: "10"
+                      - generic: "10"
+              - generic:
+                - generic:
+                  - generic "9 of hearts":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+              - generic:
+                - generic:
+                  - generic "Q of hearts":
+                    - generic:
+                      - generic: Q
+                      - generic: Q
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=f6e79]:
+              - generic [ref=f6e80]: Pot
+              - generic [ref=f6e81]: $130
+          - status "3D QA, chips $850":
+            - generic: 3D QA
+            - generic: $850
+          - generic "Your hand":
+            - generic:
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: K
+                      - generic: K
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: "5"
+                      - generic: "5"
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f6e85] [cursor=pointer]:
+          - generic [ref=f6e86]: ♣
+          - strong [ref=f6e87]: Table talk
+      - complementary "Emoji reactions for Bot River" [ref=f6e128]:
+        - generic [ref=f6e129]:
+          - generic [ref=f6e130]:
+            - generic [ref=f6e131]: Opponent
+            - generic [ref=f6e132]: Send to Bot River
+          - button "Close target emote panel" [ref=f6e133] [cursor=pointer]: x
+        - button "Hide picker" [ref=f6e155] [cursor=pointer]
+        - complementary [ref=f6e157]:
+          - generic [ref=f6e158]:
+            - generic [ref=f6e159]:
+              - textbox "Type to search for an emoji" [active] [ref=f6e161]:
+                - /placeholder: Search emojis for Bot River
+              - generic [ref=f6e164]:
+                - button "Skin tone NEUTRAL" [pressed] [ref=f6e165] [cursor=pointer]
+                - button "Skin tone LIGHT" [ref=f6e166] [cursor=pointer]
+                - button "Skin tone MEDIUM_LIGHT" [ref=f6e167] [cursor=pointer]
+                - button "Skin tone MEDIUM" [ref=f6e168] [cursor=pointer]
+                - button "Skin tone MEDIUM_DARK" [ref=f6e169] [cursor=pointer]
+                - button "Skin tone DARK" [ref=f6e170] [cursor=pointer]
+            - tablist "Category navigation" [ref=f6e171]:
+              - tab "Frequently Used" [ref=f6e172] [cursor=pointer]
+              - tab "Smileys & People" [ref=f6e173] [cursor=pointer]
+              - tab "Animals & Nature" [ref=f6e174] [cursor=pointer]
+              - tab "Food & Drink" [ref=f6e175] [cursor=pointer]
+              - tab "Travel & Places" [ref=f6e176] [cursor=pointer]
+              - tab "Activities" [ref=f6e177] [cursor=pointer]
+              - tab "Objects" [ref=f6e178] [cursor=pointer]
+              - tab "Symbols" [ref=f6e179] [cursor=pointer]
+              - tab "Flags" [ref=f6e180] [cursor=pointer]
+          - list [ref=f6e182]:
+            - listitem "Smileys & People" [ref=f6e183]:
+              - heading "Smileys & People" [level=2] [ref=f6e184]
+            - listitem "Animals & Nature" [ref=f6e186]:
+              - heading "Animals & Nature" [level=2] [ref=f6e187]
+            - listitem "Food & Drink" [ref=f6e189]:
+              - heading "Food & Drink" [level=2] [ref=f6e190]
+            - listitem "Travel & Places" [ref=f6e192]:
+              - heading "Travel & Places" [level=2] [ref=f6e193]
+            - listitem "Activities" [ref=f6e195]:
+              - heading "Activities" [level=2] [ref=f6e196]
+            - listitem "Objects" [ref=f6e198]:
+              - heading "Objects" [level=2] [ref=f6e199]
+            - listitem "Symbols" [ref=f6e201]:
+              - heading "Symbols" [level=2] [ref=f6e202]
+            - listitem "Flags" [ref=f6e204]:
+              - heading "Flags" [level=2] [ref=f6e205]
+  - button "Open Next.js Dev Tools" [ref=f6e123] [cursor=pointer]
+  - alert [ref=f6e127]

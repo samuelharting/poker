@@ -12,12 +12,14 @@ export interface TableChatEntry {
   nickname: string
   message: string
   createdAt: number
+  targetPlayerId?: string
 }
 
 export interface PlayerSocialState {
   playerId: string
   message?: string
   messageExpiresAt?: number
+  messageTargetPlayerId?: string
   emote?: string
   emoteExpiresAt?: number
   targetPlayerId?: string
@@ -60,7 +62,7 @@ export type C2SMessage =
   | { type: 'adjust_player_stack'; targetId: string; amount: number }
   | { type: 'set_player_spectator'; targetId: string; spectator: boolean }
   | { type: 'set_show_cards'; mode: ShowCardsMode }
-  | { type: 'table_chat'; message: string }
+  | { type: 'table_chat'; message: string; targetId?: string }
   | { type: 'table_emote'; emote: string; targetId?: string }
 
 // Server -> Client messages
@@ -253,7 +255,8 @@ export function parseC2S(raw: string): C2SMessage | null {
 
       case 'table_chat': {
         const message = typeof parsed.message === 'string' ? sanitizeText(parsed.message) : ''
-        return message ? { type, message } : null
+        const targetId = typeof parsed.targetId === 'string' ? parsed.targetId.trim() : undefined
+        return message ? { type, message, targetId } : null
       }
 
       case 'table_emote': {
@@ -348,6 +351,10 @@ function isValidSocialSnapshot(raw: unknown): raw is SocialSnapshot {
       return false
     }
 
+    if (entry.messageTargetPlayerId !== undefined && typeof entry.messageTargetPlayerId !== 'string') {
+      return false
+    }
+
     if (entry.emote !== undefined && typeof entry.emote !== 'string') {
       return false
     }
@@ -375,6 +382,10 @@ function isValidSocialSnapshot(raw: unknown): raw is SocialSnapshot {
     }
 
     if (typeof entry.message !== 'string') {
+      return false
+    }
+
+    if (entry.targetPlayerId !== undefined && typeof entry.targetPlayerId !== 'string') {
       return false
     }
 

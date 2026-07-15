@@ -1,0 +1,174 @@
+- generic [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e24] [cursor=pointer]
+  - alert [ref=e28]
+  - generic [ref=e29]:
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e32]: Poker Night
+        - generic [ref=e33]:
+          - generic [ref=e34]: Room
+          - generic [ref=e35]: E9QXF5
+      - button "Close settings" [ref=e608] [cursor=pointer]:
+        - generic [ref=e44]: Close
+    - generic [ref=e45]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to test" [ref=e576] [cursor=pointer]:
+            - generic [ref=e583]:
+              - strong [ref=e585]: test
+              - generic [ref=e586]:
+                - generic [ref=e587]: $1,000
+                - generic [ref=e588]: Folded
+          - button "Send a reaction to Bot River" [ref=e486] [cursor=pointer]:
+            - generic [ref=e493]:
+              - generic [ref=e494]:
+                - strong [ref=e495]: Bot River
+                - emphasis [ref=e589]: SB
+              - generic [ref=e496]:
+                - generic [ref=e497]: $1,784
+                - generic [ref=e590]: Checked
+          - button "Send a reaction to LayoutAudit" [ref=e675] [cursor=pointer]:
+            - generic [ref=e679]:
+              - strong [ref=e681]: LayoutAudit
+              - generic [ref=e682]: $1,000
+          - button "Send a reaction to Bot Ace" [ref=e514] [cursor=pointer]:
+            - generic [ref=e521]:
+              - generic [ref=e522]:
+                - strong [ref=e523]: Bot Ace
+                - emphasis [ref=e594]: BB
+              - generic [ref=e525]:
+                - generic [ref=e526]: $1,376
+                - generic [ref=e595]: Checked
+          - button "Send a reaction to Bot Nova" [ref=e529] [cursor=pointer]:
+            - generic [ref=e536]:
+              - strong [ref=e538]: Bot Nova
+              - generic [ref=e540]:
+                - generic [ref=e541]: $4,050
+                - generic [ref=e596]: Won $300
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "9 of spades":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+              - generic:
+                - generic:
+                  - generic "A of spades":
+                    - generic:
+                      - generic: A
+                      - generic: A
+              - generic:
+                - generic:
+                  - generic "K of diamonds":
+                    - generic:
+                      - generic: K
+                      - generic: K
+              - generic:
+                - generic:
+                  - generic "6 of spades":
+                    - generic:
+                      - generic: "6"
+                      - generic: "6"
+              - generic:
+                - generic:
+                  - generic "9 of clubs":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+            - generic [ref=e572]:
+              - generic [ref=e573]: Pot
+              - generic [ref=e574]: $300
+            - status:
+              - generic [ref=e597]:
+                - generic [ref=e598]: Hand Winner
+                - generic [ref=e599]:
+                  - generic [ref=e600]: Bot Nova
+                  - generic [ref=e601]: Won $300
+                  - generic: $300
+          - status "FinalQA, chips $790":
+            - generic: FinalQA
+            - generic: $790
+          - 'generic "Your hand: Two Pair, Aces and Nines"':
+            - status:
+              - generic: Two Pair, Aces and Nines
+            - generic:
+              - generic:
+                - generic:
+                  - generic "A of hearts":
+                    - generic:
+                      - generic: A
+                      - generic: A
+              - generic:
+                - generic:
+                  - generic "6 of hearts":
+                    - generic:
+                      - generic: "6"
+                      - generic: "6"
+      - generic [ref=e610]:
+        - generic [ref=e611]:
+          - generic [ref=e612]:
+            - generic [ref=e613]: Table console
+            - generic [ref=e614]: Table settings and roster
+          - button "Close" [ref=e615] [cursor=pointer]
+        - generic [ref=e616]:
+          - button "Settings" [ref=e617] [cursor=pointer]
+          - button "Players (11)" [ref=e684] [cursor=pointer]
+        - generic [ref=e619]:
+          - generic [ref=e620]:
+            - generic [ref=e621]: Room actions
+            - generic [ref=e622]: "Room code: E9QXF5"
+            - generic [ref=e623]:
+              - button "Copy code" [ref=e624] [cursor=pointer]
+              - button "Share link" [active] [ref=e625] [cursor=pointer]
+          - generic [ref=e626]:
+            - generic [ref=e627]: Cards
+            - generic [ref=e628]:
+              - button "2-color suits" [ref=e629] [cursor=pointer]
+              - button "4-color suits" [ref=e630] [cursor=pointer]
+          - generic [ref=e631]:
+            - generic [ref=e632]: Game setup
+            - generic [ref=e633]:
+              - generic [ref=e634]:
+                - generic [ref=e635]: Small blind
+                - spinbutton "Small blind" [ref=e636]: "10"
+              - generic [ref=e637]:
+                - generic [ref=e638]: Big blind
+                - spinbutton "Big blind" [ref=e639]: "20"
+              - generic [ref=e640]:
+                - generic [ref=e641]: Starting stack
+                - spinbutton "Starting stack" [ref=e642]: "1000"
+          - generic [ref=e643]:
+            - generic [ref=e644]: Timing
+            - generic [ref=e645]:
+              - generic [ref=e646]:
+                - generic [ref=e647]: Action timer (seconds)
+                - spinbutton "Action timer (seconds)" [ref=e648]: "35"
+              - generic [ref=e649]:
+                - generic [ref=e650]: Next hand delay (seconds)
+                - spinbutton "Next hand delay (seconds)" [ref=e651]: "3"
+          - generic [ref=e652]:
+            - generic [ref=e653]: Rules
+            - generic [ref=e654]:
+              - generic [ref=e655]:
+                - generic [ref=e656]: Rabbit hunting
+                - generic [ref=e657]: Run out the board after fold-ended hands.
+              - generic [ref=e658]:
+                - button "On" [ref=e659] [cursor=pointer]
+                - button "Off" [pressed] [ref=e660] [cursor=pointer]
+            - generic [ref=e661]:
+              - generic [ref=e662]:
+                - generic [ref=e663]: 7 / 2 rule
+                - generic [ref=e664]: Winning 7-2 hands collect the configured bounty.
+              - generic [ref=e665]:
+                - button "On" [pressed] [ref=e666] [cursor=pointer]
+                - button "Off" [ref=e667] [cursor=pointer]
+                - button "Customize" [ref=e668] [cursor=pointer]
+          - generic [ref=e669]:
+            - button "Reset" [disabled] [ref=e670]
+            - button "Save table settings" [disabled] [ref=e671]

@@ -42,7 +42,7 @@ export function validatePlayerProfile(input: {
   }
 
   const venmoUsername = normalizeVenmoUsername(input.venmoUsername)
-  if (!VENMO_RE.test(venmoUsername)) {
+  if (venmoUsername && !VENMO_RE.test(venmoUsername)) {
     return { ok: false, error: 'Please enter a valid Venmo username' }
   }
 

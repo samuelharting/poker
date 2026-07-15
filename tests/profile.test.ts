@@ -15,10 +15,25 @@ describe('player profile helpers', () => {
     expect(normalizeVenmoUsername('samvenmo')).toBe('@samvenmo')
   })
 
-  it('rejects missing or invalid profile fields', () => {
+  it('rejects missing required fields and malformed optional payment handles', () => {
     expect(validatePlayerProfile({ nickname: '', email: 'sam@example.com', venmoUsername: '@sam' }).ok).toBe(false)
     expect(validatePlayerProfile({ nickname: 'Sam', email: 'bad', venmoUsername: '@sam' }).ok).toBe(false)
-    expect(validatePlayerProfile({ nickname: 'Sam', email: 'sam@example.com', venmoUsername: '' }).ok).toBe(false)
+    expect(validatePlayerProfile({ nickname: 'Sam', email: 'sam@example.com', venmoUsername: '@' }).ok).toBe(false)
+  })
+
+  it('accepts an empty optional Venmo username', () => {
+    expect(validatePlayerProfile({
+      nickname: 'Sam',
+      email: 'sam@example.com',
+      venmoUsername: '',
+    })).toEqual({
+      ok: true,
+      profile: {
+        nickname: 'Sam',
+        email: 'sam@example.com',
+        venmoUsername: '',
+      },
+    })
   })
 
   it('returns a normalized profile for valid input', () => {

@@ -1,0 +1,116 @@
+- generic [ref=e1]:
+  - generic [ref=e19]:
+    - generic [ref=e20]:
+      - generic [ref=e21]:
+        - generic [ref=e22]: Poker Night
+        - generic [ref=e23]:
+          - generic [ref=e24]: Room
+          - generic [ref=e25]: GC5593
+      - button "Open settings" [ref=e26] [cursor=pointer]:
+        - generic [ref=e34]: Settings
+    - generic [ref=e35]:
+      - generic [ref=e58]:
+        - generic [ref=e61]:
+          - generic [ref=e62]: Poker Night
+          - generic [ref=e63]: Private table · GC5593
+        - generic [ref=e67]: PN
+        - generic "Poker players":
+          - button "Send a reaction to Sam" [ref=e73] [cursor=pointer]:
+            - generic [ref=e77]:
+              - strong [ref=e79]: Sam
+              - generic [ref=e80]: $1,000
+          - button "Send a reaction to Sam" [ref=e82] [cursor=pointer]:
+            - generic [ref=e89]:
+              - strong [ref=e91]: Sam
+              - generic [ref=e92]:
+                - generic [ref=e93]: $1,000
+                - generic [ref=e94]: Folded
+          - button "Send a reaction to Bot Maverick" [ref=e95] [cursor=pointer]:
+            - generic [ref=e102]:
+              - generic [ref=e103]:
+                - strong [ref=e104]: Bot Maverick
+                - emphasis [ref=e105]: SB
+              - generic [ref=e106]:
+                - generic [ref=e107]: $1,080
+                - generic [ref=e108]: Won $160
+          - button "Send a reaction to Bot River" [ref=e109] [cursor=pointer]:
+            - generic [ref=e116]:
+              - generic [ref=e117]:
+                - strong [ref=e118]: Bot River
+                - emphasis [ref=e119]: BB
+              - generic [ref=e120]:
+                - generic [ref=e121]: $920
+                - generic [ref=e122]: Called $20
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "4 of hearts":
+                    - generic:
+                      - generic: "4"
+                      - generic: "4"
+              - generic:
+                - generic:
+                  - generic "Q of hearts":
+                    - generic:
+                      - generic: Q
+                      - generic: Q
+              - generic:
+                - generic:
+                  - generic "3 of spades":
+                    - generic:
+                      - generic: "3"
+                      - generic: "3"
+              - generic:
+                - generic:
+                  - generic "10 of spades":
+                    - generic:
+                      - generic: "10"
+                      - generic: "10"
+              - generic:
+                - generic:
+                  - generic "4 of clubs":
+                    - generic:
+                      - generic: "4"
+                      - generic: "4"
+            - generic [ref=e37]:
+              - generic [ref=e38]: Pot
+              - generic [ref=e39]: $160
+            - status:
+              - generic [ref=e40]:
+                - generic [ref=e41]: Hand Winner
+                - generic [ref=e42]:
+                  - generic [ref=e43]: Bot Maverick
+                  - generic [ref=e44]: Won $160
+                  - generic: $160
+      - complementary "Table chat and reactions":
+        - generic [ref=e151]:
+          - generic [ref=e152]:
+            - generic [ref=e153]:
+              - generic [ref=e154]: Table talk
+              - strong [ref=e155]: Chat & reactions
+            - button "Close table chat" [ref=e156] [cursor=pointer]: ×
+          - generic [ref=e158]:
+            - generic [ref=e159]: Sam
+            - paragraph [ref=e160]: "to Bot River: 👋"
+          - generic "Quick reactions" [ref=e161]:
+            - button "Send wave reaction" [ref=e162] [cursor=pointer]: 👋
+            - button "Send thumbs up reaction" [ref=e163] [cursor=pointer]: 👍
+            - button "Send laugh reaction" [ref=e164] [cursor=pointer]: 😂
+            - button "Send cool reaction" [ref=e165] [cursor=pointer]: 😎
+            - button "Send skull reaction" [ref=e166] [cursor=pointer]: 💀
+            - button "Send cry reaction" [ref=e167] [cursor=pointer]: 😭
+            - button "Send angry reaction" [ref=e168] [cursor=pointer]: 😡
+            - button "Send middle finger reaction" [ref=e169] [cursor=pointer]: 🖕
+          - generic [ref=e170]:
+            - textbox "Table message" [ref=e171]:
+              - /placeholder: Message the table
+            - button "Send" [disabled] [ref=e172]
+        - button "Close table chat" [expanded] [active] [ref=e173] [cursor=pointer]:
+          - generic [ref=e46]: ♣
+          - strong [ref=e47]: Table talk
+          - emphasis [ref=e150]: "1"
+  - button "Open Next.js Dev Tools" [ref=e53] [cursor=pointer]
+  - alert [ref=e57]

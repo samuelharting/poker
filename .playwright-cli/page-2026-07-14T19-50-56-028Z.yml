@@ -1,0 +1,53 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e19]:
+    - generic [ref=f3e21]:
+      - button "Open table menu" [ref=f3e140] [cursor=pointer]
+      - generic [ref=f3e25]:
+        - generic [ref=f3e26]: NL Hold'em
+        - generic [ref=f3e30]: $10 / $20
+      - button "Open settings" [ref=f3e141] [cursor=pointer]
+    - generic [ref=f3e39]:
+      - region "Mobile poker field" [ref=f3e41]:
+        - generic:
+          - generic:
+            - generic:
+              - generic: Pot
+              - generic: $30
+        - generic "Players":
+          - generic [ref=f3e160]:
+            - button "Target Bot Maverick for emojis" [ref=f3e161] [cursor=pointer]: "1"
+            - generic [ref=f3e165]:
+              - generic "Hidden card" [ref=f3e166]
+              - generic "Hidden card" [ref=f3e167]
+            - generic [ref=f3e162]:
+              - button "Maverick" [ref=f3e163] [cursor=pointer]
+              - generic [ref=f3e164]: $1,010
+        - status [ref=f3e192]:
+          - generic [ref=f3e193]: Hand winner
+          - generic [ref=f3e194]:
+            - generic [ref=f3e195]: Bot Maverick
+            - strong [ref=f3e197]: Won $30
+        - generic:
+          - 'generic "Your hand: King-high"':
+            - generic:
+              - generic:
+                - generic:
+                  - generic "K of spades": K
+              - generic:
+                - generic:
+                  - generic "9 of diamonds": "9"
+            - group "Choose which cards to reveal after this hand" [ref=f3e199]:
+              - button "Show left card" [ref=f3e200] [cursor=pointer]: L
+              - button "Show right card" [ref=f3e201] [cursor=pointer]: R
+              - button "Show both cards" [ref=f3e202] [cursor=pointer]: Both
+              - button "Muck both cards" [pressed] [ref=f3e203] [cursor=pointer]: Muck
+      - region "Rabbit hunt controls" [ref=f3e204]:
+        - generic [ref=f3e205]:
+          - generic [ref=f3e206]: Folded hand
+          - generic [ref=f3e207]: See the board runout
+        - button "Rabbit hunt" [ref=f3e208] [cursor=pointer]
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f3e142] [cursor=pointer]:
+          - generic [ref=f3e143]: ♣
+  - button "Open Next.js Dev Tools" [ref=f3e67] [cursor=pointer]
+  - alert [ref=f3e71]

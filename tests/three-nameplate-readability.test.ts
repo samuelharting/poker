@@ -3,24 +3,36 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const sceneSource = readFileSync(join(process.cwd(), 'components', 'three', 'DesktopPokerRoom3D.tsx'), 'utf8')
-const normalizedSceneSource = sceneSource.replace(/\r\n/g, '\n')
+const styleSource = readFileSync(join(process.cwd(), 'app', 'poker-polish.css'), 'utf8')
 
-describe('3D opponent nameplate readability', () => {
-  it('keeps opponent name and stack text about three times larger than the old compact labels', () => {
-    expect(sceneSource).toContain('const opponentLabelFontSize = 0.156')
-    expect(sceneSource).toContain('const opponentStackFontSize = 0.138')
-    expect(sceneSource).toContain('const opponentNameplateWidth = 1.2')
-    expect(sceneSource).toContain('const opponentNameplateHeight = 0.48')
+describe('desktop opponent panel readability', () => {
+  it('keeps identity, stack, and action status together in each seat panel', () => {
+    expect(sceneSource).toContain('className="cinematic-seat-panel"')
+    expect(sceneSource).toContain('className="cinematic-seat-topline"')
+    expect(sceneSource).toContain('className="cinematic-seat-meta"')
+    expect(sceneSource).toContain('{player.nickname}')
+    expect(sceneSource).toContain('player.stack.toLocaleString()')
+    expect(sceneSource).toContain('statusLabel ? (')
+    expect(sceneSource).toContain('className="cinematic-winner-label"')
+    expect(styleSource).toContain('.cinematic-seat-meta .cinematic-winner-label')
   })
 
-  it('keeps blind roles visible on 3D nameplates and table felt markers', () => {
-    expect(sceneSource).toContain('<BlindRoleBadge3D role={player.blindRole} isHero={isHero} />')
-    expect(sceneSource).toContain('function BlindMarker3D')
-    expect(sceneSource).toContain('<BlindMarker3D player={player} layout={layout} />')
+  it('keeps blind roles and state contrast visible', () => {
+    expect(sceneSource).toContain("player.blindRole === 'big' ? 'BB' : 'SB'")
+    expect(styleSource).toContain('.cinematic-seat.is-acting')
+    expect(styleSource).toContain('.cinematic-seat.is-winner')
+    expect(styleSource).toContain('.cinematic-seat.is-folded')
   })
 
-  it('keeps the hero identity out of the old floating 3D nameplate layer', () => {
-    expect(normalizedSceneSource).toContain('{!isHero && (\n        <PlayerNameplate')
-    expect(normalizedSceneSource).not.toContain('      <PlayerNameplate\n        player={player}')
+  it('roughly doubles revealed opponent cards without enlarging live card backs', () => {
+    expect(sceneSource).toContain("hasRevealedCards ? 'has-revealed-cards' : ''")
+    expect(styleSource).toMatch(/\.cinematic-hole-cards\.has-revealed-cards\s*\{[^}]*top:\s*-60px;/s)
+    expect(styleSource).toMatch(/\.cinematic-hole-cards\.has-revealed-cards i\s*\{[^}]*width:\s*38px;[^}]*height:\s*53px;/s)
+    expect(styleSource).toMatch(/\.cinematic-hole-cards i\s*\{[^}]*width:\s*20px;[^}]*height:\s*28px;/s)
+  })
+
+  it('keeps the hero identity in the fixed two-dimensional summary', () => {
+    expect(styleSource).toMatch(/\.cinematic-seat\.is-local-player\s*\{\s*display:\s*none;/)
+    expect(styleSource).not.toMatch(/\.cinematic-seat-0\s*\{\s*display:\s*none;/)
   })
 })

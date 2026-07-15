@@ -27,4 +27,14 @@ describe('PlayingCard suit icons', () => {
     expect(css).toMatch(/\.card-center-suit\.card-suit-spades,[\s\S]*?width:\s*1\.56em;/)
     expect(css).toMatch(/\.card\.card-xs \.card-center-suit\s*{[^}]*width:\s*0\.84em;/s)
   })
+
+  it('animates the card container so a face-down card keeps its flip transform', () => {
+    const markup = renderToStaticMarkup(
+      <PlayingCard card={{ rank: 'A', suit: 'spades' }} faceDown animateIn />
+    )
+
+    expect(markup).toMatch(/class="card-container card-deal-anim"/)
+    expect(markup).toMatch(/class="card[^\"]*face-down[^\"]*"/)
+    expect(markup).not.toMatch(/class="card[^\"]*face-down[^\"]*card-deal-anim/)
+  })
 })

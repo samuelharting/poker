@@ -6,6 +6,7 @@ import {
   formatPlayerStatsSummary,
   getSpectatorRailState,
   getVisibleOwnHandDescription,
+  updateTargetedQuickEmotes,
 } from '@/components/table/PokerTable'
 import type { Card, LobbyPlayer } from '@/lib/poker/types'
 
@@ -17,6 +18,19 @@ function cards(...specs: string[]): Card[] {
     return { rank, suit }
   })
 }
+
+describe('targeted quick emojis', () => {
+  it('starts with the requested defaults and promotes the newest picker choice', () => {
+    const defaults = updateTargetedQuickEmotes([], '')
+    expect(defaults).toEqual(['\uD83D\uDD95', '\uD83C\uDDEE\uD83C\uDDF1', '\uD83D\uDC12'])
+
+    expect(updateTargetedQuickEmotes(defaults, '\uD83D\uDE02')).toEqual([
+      '\uD83D\uDE02',
+      '\uD83D\uDD95',
+      '\uD83C\uDDEE\uD83C\uDDF1',
+    ])
+  })
+})
 
 describe('PokerTable action button descriptors', () => {
   it('keeps wager actions easy to scan without changing legal action order', () => {
@@ -147,7 +161,7 @@ describe('settings and player management helpers', () => {
     })).toBe(true)
   })
 
-  it('allows table-setting saves during live hands', () => {
+  it('allows table-setting saves during a hand so the server can queue them', () => {
     expect(canSaveTableSettings({
       isConnected: true,
       hasSettingsChanges: true,

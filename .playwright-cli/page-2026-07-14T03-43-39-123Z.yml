@@ -1,0 +1,112 @@
+- generic [active] [ref=f4e1]:
+  - generic [ref=f4e19]:
+    - generic [ref=f4e561]:
+      - button "Open table menu" [ref=f4e562] [cursor=pointer]
+      - generic [ref=f4e565]:
+        - generic [ref=f4e566]: NL Hold'em
+        - generic [ref=f4e570]: $10 / $20
+      - button "Open settings" [ref=f4e571] [cursor=pointer]
+    - generic [ref=f4e33]:
+      - region "Mobile poker field" [ref=f4e621]:
+        - generic:
+          - generic:
+            - generic:
+              - generic: Pot
+              - generic: $200
+          - generic "Board cards":
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+        - generic "Players":
+          - generic [ref=f4e623]:
+            - button "Target Bot Maverick for emojis" [ref=f4e624] [cursor=pointer]: "7"
+            - generic [ref=f4e625]:
+              - generic "Hidden card" [ref=f4e626]
+              - generic "Hidden card" [ref=f4e627]
+            - generic [ref=f4e628]:
+              - button "Maverick" [ref=f4e629] [cursor=pointer]
+              - generic [ref=f4e630]: $200
+          - generic [ref=f4e632]:
+            - button "Target Bot River for emojis" [ref=f4e633] [cursor=pointer]: "8"
+            - generic [ref=f4e634]:
+              - generic "Hidden card" [ref=f4e635]
+              - generic "Hidden card" [ref=f4e636]
+            - generic [ref=f4e637]:
+              - button "River" [ref=f4e638] [cursor=pointer]
+              - generic [ref=f4e639]: $3,700
+          - generic [ref=f4e641]:
+            - button "Target Bot Bluff for emojis" [ref=f4e642] [cursor=pointer]: "1"
+            - generic [ref=f4e643]:
+              - generic "Hidden card" [ref=f4e644]
+              - generic "Hidden card" [ref=f4e645]
+            - generic [ref=f4e646]:
+              - button "Bluff" [ref=f4e647] [cursor=pointer]
+              - generic [ref=f4e648]: $200
+          - generic [ref=f4e650]:
+            - button "Target Bot Ace for emojis" [ref=f4e651] [cursor=pointer]: "2"
+            - generic [ref=f4e652]:
+              - generic "Hidden card" [ref=f4e653]
+              - generic "Hidden card" [ref=f4e654]
+            - generic [ref=f4e655]:
+              - button "Ace" [ref=f4e656] [cursor=pointer]
+              - generic [ref=f4e657]: $200
+          - generic [ref=f4e659]:
+            - button "Target Bot Nova for emojis" [ref=f4e660] [cursor=pointer]: "3"
+            - generic [ref=f4e661]:
+              - generic "Hidden card" [ref=f4e662]
+              - generic "Hidden card" [ref=f4e663]
+            - generic [ref=f4e664]:
+              - button "Nova" [ref=f4e665] [cursor=pointer]
+              - generic [ref=f4e666]: $180
+          - generic [ref=f4e668]:
+            - button "Target Bot Dealer Dan for emojis" [ref=f4e669] [cursor=pointer]: "6"
+            - generic [ref=f4e670]:
+              - generic "Hidden card" [ref=f4e671]
+              - generic "Hidden card" [ref=f4e672]
+            - generic [ref=f4e673]:
+              - button "Dealer Dan" [ref=f4e674] [cursor=pointer]
+              - generic [ref=f4e675]: $2,140
+          - generic [ref=f4e677]:
+            - button "Target Bot Pocket for emojis" [ref=f4e678] [cursor=pointer]: "4"
+            - generic [ref=f4e679]:
+              - generic "Hidden card" [ref=f4e680]
+              - generic "Hidden card" [ref=f4e681]
+            - generic [ref=f4e682]:
+              - button "Pocket" [ref=f4e683] [cursor=pointer]
+              - generic [ref=f4e684]: $180
+        - generic:
+          - generic:
+            - generic: "5"
+            - generic: You
+            - generic: $1,000
+          - generic "Your hand":
+            - generic:
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: J
+                      - generic: J
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: A
+                      - generic: A
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f4e44] [cursor=pointer]:
+          - generic [ref=f4e45]: ♣
+  - button "Open Next.js Dev Tools" [ref=f4e69] [cursor=pointer]
+  - alert [ref=f4e73]

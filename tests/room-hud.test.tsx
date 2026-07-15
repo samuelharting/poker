@@ -22,6 +22,8 @@ describe('RoomHud mobile strip', () => {
         phase="in_hand"
         settingsOpen={false}
         onToggleSettings={() => {}}
+        soundMuted={false}
+        onToggleSound={() => {}}
       />
     )
 
@@ -35,6 +37,8 @@ describe('RoomHud mobile strip', () => {
     expect(mobileMarkup).toContain('NL Hold')
     expect(mobileMarkup).toContain('$10 / $20')
     expect(mobileMarkup).toContain('room-hud-mobile-settings')
+    expect(mobileMarkup).toContain('room-hud-mobile-sound')
+    expect(mobileMarkup).toContain('Mute table sounds')
     expect(mobileMarkup).not.toContain('Poker Night')
     expect(mobileMarkup).not.toContain('ABCD')
     expect(mobileMarkup).not.toContain('seated')

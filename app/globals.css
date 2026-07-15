@@ -463,6 +463,63 @@ input {
   box-shadow: 0 10px 26px rgba(0,0,0,0.25);
 }
 
+.system-toasts {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  top: calc(82px + env(safe-area-inset-top));
+  z-index: var(--room-layer-hud, 240);
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.system-toast {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  color: #fffaf0;
+  background: rgba(15, 20, 18, 0.94);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+}
+
+.system-toast-success {
+  border-color: rgba(85, 214, 139, 0.38);
+}
+
+.system-toast-error {
+  border-color: rgba(255, 116, 116, 0.48);
+}
+
+.system-toast-message {
+  min-width: 0;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.system-toast-dismiss {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+
+.system-toast-dismiss:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+}
+
 .table-stage {
   position: relative;
   width: 100%;
@@ -10057,7 +10114,7 @@ body {
   font-size: 8px;
 }
 
-@media (max-width: 1099px) {
+@media (max-width: 1023px) {
   .desktop-3d-stage {
     display: none !important;
     width: 0 !important;
@@ -10073,7 +10130,7 @@ body {
   }
 }
 
-@media (min-width: 1100px) {
+@media (min-width: 1024px) {
   .desktop-3d-stage {
     display: block;
     position: absolute;
@@ -12992,7 +13049,7 @@ button.player-seat-marker:focus-visible {
 }
 
 /* Desktop 3D hero hand readability: keep the hand readout and bet pill separated. */
-@media (min-width: 1100px) {
+@media (min-width: 1024px) {
   .table-scene[data-desktop-three='true'][data-hero-seat='true'] .hero-table-bet {
     left: calc(50% - clamp(170px, 13vw, 250px));
     top: 70%;
@@ -13014,7 +13071,7 @@ button.player-seat-marker:focus-visible {
 }
 
 /* Desktop 3D hero identity: fixed 2D bottom readout, separate from the table/card layer. */
-@media (min-width: 1100px) {
+@media (min-width: 1024px) {
   .table-scene[data-desktop-three='true'][data-hero-seat='true'] .own-hand-area {
     bottom: clamp(58px, 7vh, 82px);
   }
@@ -13078,7 +13135,7 @@ button.player-seat-marker:focus-visible {
 }
 
 /* Desktop 3D fixed card overlays: keep board and hero cards out of camera pan. */
-@media (min-width: 1100px) {
+@media (min-width: 1024px) {
   .table-scene[data-desktop-three='true'] .community-cards {
     position: fixed;
     left: 50%;
@@ -14765,9 +14822,10 @@ button.player-seat-marker:focus-visible {
   box-sizing: border-box;
   width: min(340px, calc(100vw - 20px));
   max-width: calc(100vw - 20px);
+  min-width: 0;
   padding: 16px;
   border-radius: 24px;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .targeted-emote-panel .table-panel-header {
@@ -14860,6 +14918,23 @@ button.player-seat-marker:focus-visible {
   font-size: 14px;
   line-height: 1.2;
   white-space: normal;
+}
+
+.targeted-emote-panel .emoji-picker-shell {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.targeted-emote-panel .EmojiPickerReact {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+.targeted-emote-panel .epr-search-container input {
+  width: 100%;
+  min-width: 0;
 }
 
 @media (max-width: 380px) {

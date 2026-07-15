@@ -3,18 +3,24 @@
 import dynamic from 'next/dynamic'
 import React, { type CSSProperties, useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import type { Card, TableState, SeatPlayer, LobbyPlayer, ShowCardsMode, PlayerStats } from '@/lib/poker/types'
-import type { SocialSnapshot } from '@/shared/protocol'
+import { isAllowedEmote, type SocialSnapshot, type TableChatEntry } from '@/shared/protocol'
 import { PlayerSeat, formatWinnerPaymentLabel, getVisibleSeatCards } from './PlayerSeat'
 import { CommunityCards } from './CommunityCards'
 import { OwnHand } from './OwnHand'
 import { PotDisplay } from './PotDisplay'
+import { ShowdownCinematic, useShowdownPresentation } from './ShowdownCinematic'
 import { ChipStack } from '@/components/ui/ChipStack'
 import { PlayingCard } from '@/components/ui/PlayingCard'
 import { SearchableEmojiPicker } from '@/components/ui/SearchableEmojiPicker'
+import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
 import { evaluateHand } from '@/lib/poker/evaluator'
+import { getShowdownRevealMode } from '@/lib/poker/showdown'
+import type { PokerSoundCueKind } from '@/lib/poker/soundscape'
 import {
+  createThreeChatMessages,
   createThreeEmoteReactions,
   createThreeTableViewModel,
+  type ThreeChatMessage,
   type ThreeEmoteReaction,
   type ThreeTableViewModel,
 } from '@/components/three/tableViewModel'
@@ -26,12 +32,6 @@ type WinnerChipTrailStyle = CSSProperties & {
   '--winner-chip-y': string | number
   '--winner-chip-delay': string
 }
-type WinnerAnnouncementStyle = CSSProperties & {
-  '--winner-announcement-x': string | number
-  '--winner-announcement-y': string | number
-  '--winner-announcement-delay': string
-}
-
 export interface PokerActionButtonDescriptor {
   key: PokerAction
   label: string
@@ -48,6 +48,8 @@ interface PokerTableProps {
   startingStackSetting: number
   settingsOpen: boolean
   suitColorMode: 'two' | 'four'
+  soundMuted?: boolean
+  soundVolume?: number
   roomCode: string
   canShareRoom: boolean
   onAction: (
@@ -75,9 +77,14 @@ interface PokerTableProps {
   onSeatMe: () => void
   onSetShowCards: (mode: ShowCardsMode) => void
   onSetSuitColorMode: (mode: 'two' | 'four') => void
+  onSetSoundMuted?: (muted: boolean) => void
+  onSetSoundVolume?: (volume: number) => void
+  onSoundCue?: (cue: PokerSoundCueKind) => void
   onCloseSettings: () => void
   onCopyRoom: () => void
   onShareRoom: () => void
+  onSendChat?: (message: string) => void
+  onSendTargetChat?: (targetId: string, message: string) => void
   onSendEmote: (emote: string) => void
   onSendTargetEmote: (targetId: string, emote: string) => void
   onFeedback: (message: string, tone?: FeedbackTone) => void
@@ -144,13 +151,32 @@ const EMOTE_OPTIONS = [
   { id: 'middle_finger', glyph: '\uD83D\uDD95', label: 'Middle finger' },
 ] as const
 
-type EmoteId = (typeof EMOTE_OPTIONS)[number]['id']
+const DEFAULT_TARGETED_QUICK_EMOTES = [
+  '\uD83D\uDD95',
+  '\uD83C\uDDEE\uD83C\uDDF1',
+  '\uD83D\uDC12',
+] as const
+const TARGETED_QUICK_EMOTES_STORAGE_KEY = 'poker-night:targeted-quick-emotes'
+
+export function updateTargetedQuickEmotes(current: readonly string[], emote: string): string[] {
+  const next = isAllowedEmote(emote) ? [emote] : []
+
+  for (const candidate of [...current, ...DEFAULT_TARGETED_QUICK_EMOTES]) {
+    if (isAllowedEmote(candidate) && !next.includes(candidate)) {
+      next.push(candidate)
+    }
+  }
+
+  return next.slice(0, 3)
+}
 
 type WinnerDisplay = {
   playerId: string
   nickname: string
   venmoUsername?: string
   amount: number
+  handDescription?: string
+  visualSeat: number
   targetX: string
   targetY: string
   delayMs: number
@@ -161,6 +187,7 @@ type AllInAnnouncementView = NonNullable<ThreeTableViewModel['allInAnnouncement'
 interface DesktopPokerRoom3DProps {
   view: ThreeTableViewModel
   emoteReactions: ThreeEmoteReaction[]
+  chatMessages: ThreeChatMessage[]
   selectedTargetId: string | null
   onSelectPlayer: (playerId: string) => void
 }
@@ -195,17 +222,22 @@ const MOBILE_WINNER_SEAT_TARGETS: Record<number, { x: string; y: string }> = {
 }
 
 const SHOW_CARD_OPTIONS: Array<{
-  mode: Exclude<ShowCardsMode, 'none'>
+  mode: ShowCardsMode
   label: string
   shortLabel: string
 }> = [
   { mode: 'left', label: 'left card', shortLabel: 'L' },
   { mode: 'right', label: 'right card', shortLabel: 'R' },
   { mode: 'both', label: 'both cards', shortLabel: 'Both' },
+  { mode: 'none', label: 'both cards', shortLabel: 'Muck' },
 ]
 
 function getEmoteGlyph(emote?: string): string | undefined {
   return EMOTE_OPTIONS.find(option => option.id === emote)?.glyph ?? emote
+}
+
+function getEmoteLabel(emote: string): string {
+  return EMOTE_OPTIONS.find(option => option.glyph === emote)?.label ?? 'Emoji'
 }
 
 function formatAmount(amount: number): string {
@@ -281,6 +313,8 @@ function MobileEdgeSeat({
   isActing,
   isWinner = false,
   winnerAmount,
+  winnerHandDescription,
+  winningCards = [],
   onNameClick,
 }: {
   player: OpponentSeat
@@ -288,6 +322,8 @@ function MobileEdgeSeat({
   isActing: boolean
   isWinner?: boolean
   winnerAmount?: number
+  winnerHandDescription?: string
+  winningCards?: Card[]
   onNameClick?: (playerId: string) => void
 }) {
   const isFolded = player.status === 'folded'
@@ -301,6 +337,7 @@ function MobileEdgeSeat({
     player.showCards,
     holeCards
   )
+  const hasVisibleHoleCards = Boolean(visibleLeftCard || visibleRightCard)
   const statusLabel = isWinner && typeof winnerAmount === 'number' && winnerAmount > 0
     ? `Won ${formatAmount(winnerAmount)}`
     : isActing
@@ -340,14 +377,30 @@ function MobileEdgeSeat({
         </div>
       )}
       {player.hasCards && (
-        <div className={`mobile-edge-seat-cards ${holeCards.length > 0 ? 'is-revealed' : ''}`}>
+        <div className={`mobile-edge-seat-cards ${hasVisibleHoleCards ? 'is-revealed' : ''}`}>
           {visibleLeftCard ? (
-            <PlayingCard card={visibleLeftCard} size="xs" highlighted={isWinner} />
+            <PlayingCard
+              card={visibleLeftCard}
+              size="xs"
+              highlighted={isWinner && (
+                winningCards.length === 0 || winningCards.some(
+                  card => card.rank === visibleLeftCard.rank && card.suit === visibleLeftCard.suit
+                )
+              )}
+            />
           ) : (
             <span className="mobile-edge-card-back" aria-label="Hidden card" />
           )}
           {visibleRightCard ? (
-            <PlayingCard card={visibleRightCard} size="xs" highlighted={isWinner} />
+            <PlayingCard
+              card={visibleRightCard}
+              size="xs"
+              highlighted={isWinner && (
+                winningCards.length === 0 || winningCards.some(
+                  card => card.rank === visibleRightCard.rank && card.suit === visibleRightCard.suit
+                )
+              )}
+            />
           ) : (
             <span className="mobile-edge-card-back" aria-label="Hidden card" />
           )}
@@ -372,6 +425,9 @@ function MobileEdgeSeat({
       </div>
 
       {statusLabel && <div className="mobile-edge-seat-status">{statusLabel}</div>}
+      {isWinner && winnerHandDescription && (
+        <div className="mobile-edge-winner-hand">{winnerHandDescription}</div>
+      )}
     </div>
   )
 }
@@ -688,6 +744,8 @@ export function PokerTable({
   startingStackSetting,
   settingsOpen,
   suitColorMode,
+  soundMuted = false,
+  soundVolume = 0.65,
   roomCode,
   canShareRoom,
   onAction,
@@ -703,19 +761,76 @@ export function PokerTable({
   onSeatMe,
   onSetShowCards,
   onSetSuitColorMode,
+  onSetSoundMuted = () => {},
+  onSetSoundVolume = () => {},
+  onSoundCue = () => {},
   onCloseSettings,
   onCopyRoom,
   onShareRoom,
+  onSendChat = () => {},
+  onSendTargetChat = () => {},
   onSendEmote,
   onSendTargetEmote,
   onFeedback,
 }: PokerTableProps) {
   const isMobileViewport = useMediaQuery('(max-width: 768px)')
-  const shouldRenderDesktopThree = useMediaQuery('(min-width: 1100px)')
-  const threeTableView = useMemo(
-    () => shouldRenderDesktopThree ? createThreeTableViewModel(state, yourId) : null,
-    [shouldRenderDesktopThree, state, yourId]
+  const shouldRenderDesktopThree = useMediaQuery('(min-width: 1024px)')
+  const showdownView = useShowdownPresentation(state)
+  const showdownPresentation = showdownView.presentation
+  const showWinnerHighlights = !showdownPresentation.isShowdown || showdownPresentation.winningHandHighlighted
+  const showWinnerPayout = !showdownPresentation.isShowdown || showdownPresentation.payoutStarted
+  const showWinnerResults = !showdownPresentation.isShowdown || showdownPresentation.resultsVisible
+  const showdownPresentedPlayers = useMemo(() => {
+    if (!showdownPresentation.isShowdown) {
+      return state.players
+    }
+
+    return state.players.map(player => {
+      // Keep the local player's already-known hand in place. Every other live
+      // hand flips at its existing seat according to the shared timeline.
+      if (player.id === yourId) {
+        return player
+      }
+
+      const revealMode = getShowdownRevealMode(showdownPresentation, player.id)
+      return revealMode === null || revealMode === player.showCards
+        ? player
+        : { ...player, showCards: revealMode }
+    })
+  }, [showdownPresentation, state.players, yourId])
+  const showdownPresentedState = useMemo(
+    () => showdownPresentedPlayers === state.players
+      ? state
+      : { ...state, players: showdownPresentedPlayers },
+    [showdownPresentedPlayers, state]
   )
+  const threeTableView = useMemo(
+    () => shouldRenderDesktopThree ? createThreeTableViewModel(showdownPresentedState, yourId) : null,
+    [shouldRenderDesktopThree, showdownPresentedState, yourId]
+  )
+  const presentedThreeTableView = useMemo(() => {
+    if (!threeTableView) {
+      return threeTableView
+    }
+
+    const suppressWinnerEffects = !showWinnerHighlights
+    const clearCollectedPot = showdownPresentation.isShowdown && showdownPresentation.payoutStarted
+
+    if (!suppressWinnerEffects && !clearCollectedPot) {
+      return threeTableView
+    }
+
+    return {
+      ...threeTableView,
+      collectedPot: clearCollectedPot ? 0 : threeTableView.collectedPot,
+      players: suppressWinnerEffects
+        ? threeTableView.players.map(player => ({ ...player, isWinner: false }))
+        : threeTableView.players,
+      hero: suppressWinnerEffects && threeTableView.hero
+        ? { ...threeTableView.hero, isWinner: false }
+        : threeTableView.hero,
+    }
+  }, [showWinnerHighlights, showdownPresentation.isShowdown, showdownPresentation.payoutStarted, threeTableView])
   const latestAllInAnnouncement = threeTableView?.allInAnnouncement ?? null
   const latestAllInActionKey = latestAllInAnnouncement?.actionKey ?? ''
   const [activeAllInAnnouncement, setActiveAllInAnnouncement] = useState<AllInAnnouncementView | null>(null)
@@ -728,7 +843,8 @@ export function PokerTable({
   const betweenHands = !isInHand
   const hasCompletedHandWinner = betweenHands && Boolean(state.winners?.length)
   const isSpectator = Boolean(lobbyMe?.isSpectator)
-  const canShowRevealedCards = isSpectator || hasCompletedHandWinner
+  const isFoldedViewer = isInHand && me?.status === 'folded'
+  const canShowRevealedCards = isSpectator || isFoldedViewer || hasCompletedHandWinner
   const canAdjustShownCards = Boolean(me?.holeCards?.length) && hasCompletedHandWinner
   const visibleOwnPlayer = (
     !isSpectator &&
@@ -770,16 +886,43 @@ export function PokerTable({
   const [socialTick, setSocialTick] = useState(() => Date.now())
   const [targetEmotePlayerId, setTargetEmotePlayerId] = useState<string | null>(null)
   const [targetEmotePickerOpen, setTargetEmotePickerOpen] = useState(false)
+  const [targetQuickEmotes, setTargetQuickEmotes] = useState<string[]>(() => (
+    [...DEFAULT_TARGETED_QUICK_EMOTES]
+  ))
+  const targetEmoteTriggerRef = useRef<HTMLElement | null>(null)
   const playerIds = useMemo(() => state.players.map(player => player.id), [state.players])
   const playerIdSet = useMemo(() => new Set(playerIds), [playerIds])
   const threeEmoteReactions = useMemo(
     () => createThreeEmoteReactions(socialState, playerIds, socialTick, getEmoteGlyph),
     [playerIds, socialState, socialTick]
   )
+  const threeChatMessages = useMemo(
+    () => createThreeChatMessages(socialState, playerIds, socialTick),
+    [playerIds, socialState, socialTick]
+  )
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(TARGETED_QUICK_EMOTES_STORAGE_KEY)
+      if (!stored) {
+        return
+      }
+
+      const parsed = JSON.parse(stored)
+      if (Array.isArray(parsed)) {
+        setTargetQuickEmotes(updateTargetedQuickEmotes(
+          parsed.filter((value): value is string => typeof value === 'string'),
+          ''
+        ))
+      }
+    } catch {
+      // Local storage is optional; defaults remain available when it is blocked.
+    }
+  }, [])
 
   const orderedOpponents = useMemo<OpponentSeat[]>(() => {
     if (isSpectator || !me) {
-      return state.players
+      return showdownPresentedPlayers
         .map(player => ({
           ...player,
           showCards: canShowRevealedCards ? player.showCards : 'none',
@@ -789,14 +932,14 @@ export function PokerTable({
     }
 
     const mySeat = me.seatIndex
-    return state.players
+    return showdownPresentedPlayers
       .map(player => ({
         ...player,
         showCards: canShowRevealedCards ? player.showCards : 'none',
         visualSeat: (player.seatIndex - mySeat + 8) % 8,
       }))
       .sort((a, b) => a.visualSeat - b.visualSeat)
-  }, [canShowRevealedCards, isSpectator, me, state.players, yourId])
+  }, [canShowRevealedCards, isSpectator, me, showdownPresentedPlayers])
 
   const occupiedVisualSeats = useMemo(() => {
     const occupied = new Set<number>()
@@ -958,8 +1101,9 @@ export function PokerTable({
 
     for (const entry of socialState.active) {
       if (entry.message && entry.messageExpiresAt && entry.messageExpiresAt > socialTick) {
-        const current = entries.get(entry.playerId) ?? {}
-        entries.set(entry.playerId, {
+        const messageSeatId = entry.messageTargetPlayerId?.trim() || entry.playerId
+        const current = entries.get(messageSeatId) ?? {}
+        entries.set(messageSeatId, {
           ...current,
           message: entry.message,
           messageExpiresAt: entry.messageExpiresAt,
@@ -1005,6 +1149,20 @@ export function PokerTable({
     () => new Map((state.winners ?? []).map(winner => [winner.playerId, winner.venmoUsername])),
     [state.winners]
   )
+  const winnerCardsByPlayer = useMemo(
+    () => new Map((state.winners ?? []).map(winner => [winner.playerId, winner.winningCards ?? []])),
+    [state.winners]
+  )
+  const winnerDescriptions = useMemo(
+    () => new Map((state.winners ?? []).map(winner => [winner.playerId, winner.handDescription])),
+    [state.winners]
+  )
+  const highlightedWinningCards = useMemo(
+    () => showWinnerHighlights
+      ? (state.winners ?? []).flatMap(winner => winner.winningCards ?? [])
+      : [],
+    [showWinnerHighlights, state.winners]
+  )
   const myWinnerAmount = winnerAmounts.get(yourId) ?? 0
   const winnerSeatMap = useMemo(() => new Map(orderedOpponents.map(player => [player.id, player.visualSeat])), [orderedOpponents])
   const winnerSeatTargets = isMobileViewport ? MOBILE_WINNER_SEAT_TARGETS : WINNER_SEAT_TARGETS
@@ -1030,6 +1188,8 @@ export function PokerTable({
           nickname: player.nickname,
           venmoUsername: winner.venmoUsername ?? player.venmoUsername,
           amount: winner.amount,
+          handDescription: winner.handDescription,
+          visualSeat: safeVisualSeat,
           targetX: target?.x ?? winnerSeatTargets[0]!.x,
           targetY: target?.y ?? winnerSeatTargets[0]!.y,
           delayMs: index * 180,
@@ -1047,7 +1207,7 @@ export function PokerTable({
   const mobileHeroStatus = !isConnected
     ? 'Reconnecting'
     : betweenHands
-      ? myWinnerAmount > 0
+      ? showWinnerResults && myWinnerAmount > 0
         ? `Won ${formatAmount(myWinnerAmount)}`
         : 'Waiting for next hand'
       : isMyTurn
@@ -1116,25 +1276,56 @@ export function PokerTable({
       ? `${turnTimer.secondsLeft}s left`
       : 'Hand live'
 
+  const closeTargetedEmote = useCallback(() => {
+    setTargetEmotePlayerId(null)
+    setTargetEmotePickerOpen(false)
+
+    const trigger = targetEmoteTriggerRef.current
+    targetEmoteTriggerRef.current = null
+    if (trigger?.isConnected) {
+      trigger.focus({ preventScroll: true })
+    }
+  }, [])
+
   const handleTargetedEmote = useCallback((emote: string) => {
     if (!targetedPlayer) {
       onFeedback('Select a player before sending a targeted emote.', 'error')
       return
     }
 
+    setTargetQuickEmotes(current => {
+      const next = updateTargetedQuickEmotes(current, emote)
+      try {
+        window.localStorage.setItem(TARGETED_QUICK_EMOTES_STORAGE_KEY, JSON.stringify(next))
+      } catch {
+        // Sending a reaction should still work when storage is unavailable.
+      }
+      return next
+    })
     onSendTargetEmote(targetedPlayer.id, emote)
-    setTargetEmotePlayerId(null)
-    setTargetEmotePickerOpen(false)
-  }, [onFeedback, onSendTargetEmote, targetedPlayer])
+    closeTargetedEmote()
+  }, [closeTargetedEmote, onFeedback, onSendTargetEmote, targetedPlayer])
 
-  const closeTargetedEmote = useCallback(() => {
-    setTargetEmotePlayerId(null)
-    setTargetEmotePickerOpen(false)
-  }, [])
+  const handleTargetedMessage = useCallback((message: string) => {
+    if (!targetedPlayer) {
+      onFeedback('Select a player before sending a message.', 'error')
+      return
+    }
+
+    onSendTargetChat(targetedPlayer.id, message)
+    closeTargetedEmote()
+  }, [closeTargetedEmote, onFeedback, onSendTargetChat, targetedPlayer])
 
   const handleSelectEmoteTarget = useCallback((playerId: string) => {
     if (!playerIdSet.has(playerId)) {
       return
+    }
+
+    if (typeof document !== 'undefined' && typeof HTMLElement !== 'undefined') {
+      const activeElement = document.activeElement
+      if (activeElement instanceof HTMLElement && activeElement !== document.body) {
+        targetEmoteTriggerRef.current = activeElement
+      }
     }
 
     setTargetEmotePlayerId(playerId)
@@ -1151,15 +1342,23 @@ export function PokerTable({
       data-suit-colors={suitColorMode}
       data-tray-open={hasActionTray ? 'true' : 'false'}
       data-desktop-three={threeTableView ? 'true' : 'false'}
+      data-showdown={showdownPresentation.isShowdown ? 'true' : 'false'}
+      data-showdown-stage={showdownPresentation.stage}
     >
       {threeTableView ? (
         <DesktopPokerRoom3D
-          view={threeTableView}
+          view={presentedThreeTableView ?? threeTableView}
           emoteReactions={threeEmoteReactions}
+          chatMessages={threeChatMessages}
           selectedTargetId={targetEmotePlayerId}
           onSelectPlayer={handleSelectEmoteTarget}
         />
       ) : null}
+      <ShowdownCinematic
+        state={state}
+        presentation={showdownPresentation}
+        onSoundCue={onSoundCue}
+      />
       {isInHand && actingPlayer && !threeTableView && !isMobileViewport && (
         <div
           className={`turn-focus-banner ${isMyTurn ? 'is-hero-turn' : 'is-opponent-turn'}`}
@@ -1185,7 +1384,10 @@ export function PokerTable({
                 currentBet={state.currentBet}
                 toCall={isMyTurn ? Math.max(0, toCall) : 0}
               />
-              <CommunityCards cards={state.communityCards} />
+              <CommunityCards
+                cards={state.communityCards}
+                highlightedCards={highlightedWinningCards}
+              />
             </div>
 
             <div className="mobile-edge-seats" aria-label="Players">
@@ -1202,16 +1404,15 @@ export function PokerTable({
                         player={player}
                         visualSeat={player.mobileVisualSeat}
                         isActing={state.actingPlayerId === player.id}
-                        isWinner={betweenHands && winnerAmounts.has(player.id)}
+                        isWinner={betweenHands && showWinnerHighlights && winnerAmounts.has(player.id)}
                         winnerAmount={winnerAmounts.get(player.id)}
-                        onNameClick={playerId => {
-                          setTargetEmotePlayerId(playerId)
-                          setTargetEmotePickerOpen(false)
-                        }}
+                        winnerHandDescription={winnerDescriptions.get(player.id)}
+                        winningCards={winnerCardsByPlayer.get(player.id)}
+                        onNameClick={handleSelectEmoteTarget}
                       />
                       {(seatSocial.message || seatSocial.emote) && (
                         <div className="mobile-edge-social" aria-live="polite">
-                          {seatSocial.emote && <span>{seatSocial.emote}</span>}
+                          {seatSocial.emote && <EmojiGlyph emoji={seatSocial.emote} />}
                           {seatSocial.message && <span>{seatSocial.message}</span>}
                         </div>
                       )}
@@ -1220,11 +1421,17 @@ export function PokerTable({
                 })}
             </div>
 
-            {betweenHands && winnerDisplays.length > 0 && (
-              <div className="mobile-edge-winners" role="status" aria-live="polite">
+            {betweenHands && showWinnerResults && winnerDisplays.length > 0 && (
+              <div className="mobile-edge-winners" role="status" aria-live="assertive" aria-atomic="true">
+                <div className="mobile-edge-winners-heading">
+                  {winnerDisplays.length > 1 ? 'Split pot' : 'Hand winner'}
+                </div>
                 {winnerDisplays.map(winner => (
                   <div key={winner.playerId} className="mobile-edge-winner-line">
-                    <span>{formatWinnerPaymentLabel(winner.nickname, winner.venmoUsername)}</span>
+                    <span>
+                      <b>{formatWinnerPaymentLabel(winner.nickname, winner.venmoUsername)}</b>
+                      {winner.handDescription && <small>{winner.handDescription}</small>}
+                    </span>
                     <strong>Won {formatAmount(winner.amount)}</strong>
                   </div>
                 ))}
@@ -1236,7 +1443,7 @@ export function PokerTable({
                 <MobileHeroSeat
                   player={visibleOwnPlayer}
                   isActing={isMyTurn}
-                  isWinner={betweenHands && myWinnerAmount > 0}
+                  isWinner={betweenHands && showWinnerHighlights && myWinnerAmount > 0}
                   status={mobileHeroStatus}
                 />
 
@@ -1244,7 +1451,8 @@ export function PokerTable({
                   cards={ownHandCards}
                   isActing={isMyTurn}
                   isFolded={isOwnHandFolded}
-                  isWinner={betweenHands && myWinnerAmount > 0}
+                  isWinner={betweenHands && showWinnerHighlights && myWinnerAmount > 0}
+                  winningCards={winnerCardsByPlayer.get(yourId)}
                   handDescription={ownHandDescription}
                   showCardsMode={ownShowCardsMode}
                   showCardsControl={
@@ -1292,9 +1500,11 @@ export function PokerTable({
                   <PlayerSeat
                     player={player}
                     isActing={state.actingPlayerId === player.id}
-                    isWinner={betweenHands && winnerAmounts.has(player.id)}
+                    isWinner={betweenHands && showWinnerHighlights && winnerAmounts.has(player.id)}
                     winnerAmount={winnerAmounts.get(player.id)}
                     winnerVenmoUsername={winnerVenmoUsernames.get(player.id) ?? player.venmoUsername}
+                    winnerHandDescription={winnerDescriptions.get(player.id)}
+                    winningCards={winnerCardsByPlayer.get(player.id)}
                     depthClass={layout.depthClass}
                     opacityValue={layout.opacity}
                     socialMessage={seatSocial.message}
@@ -1302,10 +1512,7 @@ export function PokerTable({
                     socialEmote={seatSocial.emote}
                     socialEmoteExpiresAt={seatSocial.emoteExpiresAt}
                     socialEmoteTargeted={seatSocial.emoteTargeted}
-                    onNameClick={playerId => {
-                      setTargetEmotePlayerId(playerId)
-                      setTargetEmotePickerOpen(false)
-                    }}
+                    onNameClick={handleSelectEmoteTarget}
                   />
                 </div>
               )
@@ -1313,7 +1520,10 @@ export function PokerTable({
           </div>
 
           <div className="table-surface">
-            <CommunityCards cards={state.communityCards} />
+            <CommunityCards
+              cards={state.communityCards}
+              highlightedCards={highlightedWinningCards}
+            />
 
             <PotDisplay
               totalPot={state.totalPot}
@@ -1339,59 +1549,55 @@ export function PokerTable({
               </div>
             )}
 
-            {betweenHands && winnerDisplays.length > 0 ? (
-              <div className="table-seat-winner-announcements" role="status" aria-live="polite">
-                {winnerDisplays.map(winner => {
-                  const announcementStyle: WinnerAnnouncementStyle = {
-                    ['--winner-announcement-x']: winner.targetX,
-                    ['--winner-announcement-y']: winner.targetY,
-                    ['--winner-announcement-delay']: `${winner.delayMs}ms`,
-                  }
-
-                  return (
-                    <div
-                      key={winner.playerId}
-                      className="table-center-winner-announcement"
-                      style={announcementStyle}
-                    >
-                      <div className="table-center-winner-title">Hand Winner</div>
-                      <div className="table-center-winner-line">
-                        <span className="table-center-winner-name">
-                          {formatWinnerPaymentLabel(winner.nickname, winner.venmoUsername)}
-                        </span>
-                        <span className="table-center-winner-amount">Won {formatAmount(winner.amount)}</span>
-                        <ChipStack amount={winner.amount} compact />
-                      </div>
+            {betweenHands && winnerDisplays.length > 0 && (showWinnerResults || showWinnerPayout) ? (
+              <div className="table-seat-winner-announcements" role="status" aria-live="assertive" aria-atomic="true">
+                {showWinnerResults && (
+                  <div className="table-hand-result-summary">
+                    <span className="table-hand-result-kicker">
+                      {winnerDisplays.length > 1 ? 'Split pot' : 'Hand winner'}
+                    </span>
+                    <div className="table-hand-result-list">
+                      {winnerDisplays.map(winner => (
+                        <div key={`${winner.playerId}-result`} className="table-hand-result-row">
+                          <span className="table-hand-result-player">
+                            <strong>{formatWinnerPaymentLabel(winner.nickname, winner.venmoUsername)}</strong>
+                            {winner.handDescription && <small>{winner.handDescription}</small>}
+                          </span>
+                          <b className="table-hand-result-amount">+{formatAmount(winner.amount)}</b>
+                        </div>
+                      ))}
                     </div>
-                  )
-                })}
+                  </div>
+                )}
 
-                <div className="table-center-winner-chip-trails" aria-hidden="true">
-                  {winnerDisplays.map(winner => {
-                    const trailStyle: WinnerChipTrailStyle = {
-                      ['--winner-chip-x']: winner.targetX,
-                      ['--winner-chip-y']: winner.targetY,
-                      ['--winner-chip-delay']: `${winner.delayMs}ms`,
-                    }
+                {showWinnerPayout && (
+                  <div className="table-center-winner-chip-trails" aria-hidden="true">
+                    {winnerDisplays.map(winner => {
+                      const trailStyle: WinnerChipTrailStyle = {
+                        ['--winner-chip-x']: winner.targetX,
+                        ['--winner-chip-y']: winner.targetY,
+                        ['--winner-chip-delay']: `${winner.delayMs}ms`,
+                      }
 
-                    return (
-                      <div
-                        key={`${winner.playerId}-trail`}
-                        className="table-center-winner-chip-trail"
-                        style={trailStyle}
-                      >
-                        <ChipStack amount={winner.amount} compact showAmount={false} />
-                      </div>
-                    )
-                  })}
-                </div>
+                      return (
+                        <div
+                          key={`${winner.playerId}-trail`}
+                          className="table-center-winner-chip-trail"
+                          style={trailStyle}
+                        >
+                          <ChipStack amount={winner.amount} compact showAmount={false} />
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             ) : null}
           </div>
 
           {showHeroBottomSummary && visibleOwnPlayer && (
             <div
-              className={`hero-bottom-summary ${isMyTurn ? 'is-acting' : ''} ${betweenHands && myWinnerAmount > 0 ? 'is-winner' : ''}`}
+              className={`hero-bottom-summary ${isMyTurn ? 'is-acting' : ''} ${betweenHands && showWinnerHighlights && myWinnerAmount > 0 ? 'is-winner' : ''}`}
               role="status"
               aria-label={`${visibleOwnPlayer.nickname}, chips ${formatAmount(visibleOwnPlayer.stack)}`}
             >
@@ -1406,7 +1612,8 @@ export function PokerTable({
                 cards={ownHandCards}
                 isActing={isMyTurn}
                 isFolded={isOwnHandFolded}
-                isWinner={betweenHands && myWinnerAmount > 0}
+                isWinner={betweenHands && showWinnerHighlights && myWinnerAmount > 0}
+                winningCards={winnerCardsByPlayer.get(yourId)}
                 handDescription={ownHandDescription}
                 showCardsMode={ownShowCardsMode}
                 showCardsControl={
@@ -1421,7 +1628,7 @@ export function PokerTable({
               />
 
               <div
-                className={`mobile-hero-summary ${isMyTurn ? 'is-acting' : ''} ${betweenHands && myWinnerAmount > 0 ? 'is-winner' : ''}`}
+                className={`mobile-hero-summary ${isMyTurn ? 'is-acting' : ''} ${betweenHands && showWinnerHighlights && myWinnerAmount > 0 ? 'is-winner' : ''}`}
               >
                 <div className="mobile-hero-summary-card">
                   <span className="mobile-hero-summary-name">{visibleOwnPlayer.nickname}</span>
@@ -1442,7 +1649,7 @@ export function PokerTable({
                 Eq {formatEquityPercent(me.equityPercent)}
               </span>
             )}
-            {betweenHands && myWinnerAmount > 0 && (
+            {betweenHands && showWinnerResults && myWinnerAmount > 0 && (
               <span className="table-chip winner-chip">
                 Won {formatAmount(myWinnerAmount)}
                 {me?.venmoUsername ? ` ${me.venmoUsername}` : ''}
@@ -1477,10 +1684,14 @@ export function PokerTable({
           yourId={yourId}
           isConnected={isConnected}
           suitColorMode={suitColorMode}
+          soundMuted={soundMuted}
+          soundVolume={soundVolume}
           roomCode={roomCode}
           canShareRoom={canShareRoom}
           onClose={onCloseSettings}
           onSetSuitColorMode={onSetSuitColorMode}
+          onSetSoundMuted={onSetSoundMuted}
+          onSetSoundVolume={onSetSoundVolume}
           onUpdateSettings={onUpdateSettings}
           onRemovePlayer={onRemovePlayer}
           onAdjustPlayerStack={onAdjustPlayerStack}
@@ -1488,6 +1699,15 @@ export function PokerTable({
           onCopyRoom={onCopyRoom}
           onShareRoom={onShareRoom}
           onFeedback={onFeedback}
+        />
+      )}
+
+      {!settingsOpen && (
+        <TableSocialDock
+          chatLog={socialState.chatLog}
+          isConnected={isConnected}
+          onSendChat={onSendChat}
+          onSendEmote={onSendEmote}
         />
       )}
 
@@ -1712,20 +1932,130 @@ export function PokerTable({
             </div>
           )}
 
-          <div className="table-side-panels chat-dock">
-            {targetedPlayer && (
-              <TargetedEmotePanel
-                target={targetedPlayer}
-                isConnected={isConnected}
-                onSendEmote={handleTargetedEmote}
-                onClose={closeTargetedEmote}
-                fullPickerOpen={targetEmotePickerOpen}
-                onToggleFullPicker={() => setTargetEmotePickerOpen(current => !current)}
-                emotes={EMOTE_OPTIONS}
-              />
+          {targetedPlayer && (
+            <TargetedEmotePanel
+              target={targetedPlayer}
+              isConnected={isConnected}
+              onSendEmote={handleTargetedEmote}
+              onSendMessage={handleTargetedMessage}
+              onClose={closeTargetedEmote}
+              fullPickerOpen={targetEmotePickerOpen}
+              onToggleFullPicker={() => setTargetEmotePickerOpen(current => !current)}
+              quickEmotes={targetQuickEmotes}
+            />
+          )}
+    </div>
+  )
+}
+
+function TableSocialDock({
+  chatLog,
+  isConnected,
+  onSendChat,
+  onSendEmote,
+}: {
+  chatLog: TableChatEntry[]
+  isConnected: boolean
+  onSendChat: (message: string) => void
+  onSendEmote: (emote: string) => void
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [message, setMessage] = useState('')
+  const recentMessages = chatLog.slice(-6)
+
+  const submitMessage = useCallback(() => {
+    const trimmed = message.trim()
+    if (!trimmed || !isConnected) {
+      return
+    }
+
+    onSendChat(trimmed)
+    setMessage('')
+  }, [isConnected, message, onSendChat])
+
+  return (
+    <aside className={`social-dock ${isOpen ? 'is-open' : ''}`} aria-label="Table chat and reactions">
+      {isOpen && (
+        <div className="social-dock-panel">
+          <div className="social-dock-header">
+            <div>
+              <span className="social-dock-kicker">Table talk</span>
+              <strong>Chat &amp; reactions</strong>
+            </div>
+            <button
+              type="button"
+              className="social-dock-close"
+              onClick={() => setIsOpen(false)}
+              aria-label="Close table chat"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="social-dock-messages" aria-live="polite">
+            {recentMessages.length > 0 ? recentMessages.map(entry => (
+              <div key={entry.id} className="social-dock-message">
+                <span>{entry.nickname}</span>
+                <p>{entry.message}</p>
+              </div>
+            )) : (
+              <div className="social-dock-empty">No table talk yet. Break the ice.</div>
             )}
           </div>
-    </div>
+
+          <div className="social-dock-reactions" aria-label="Quick reactions">
+            {EMOTE_OPTIONS.map(item => (
+              <button
+                key={item.id}
+                type="button"
+                disabled={!isConnected}
+                onClick={() => onSendEmote(item.glyph)}
+                aria-label={`Send ${item.label.toLowerCase()} reaction`}
+              >
+                <EmojiGlyph emoji={item.glyph} />
+              </button>
+            ))}
+          </div>
+
+          <div className="social-dock-compose">
+            <input
+              type="text"
+              value={message}
+              maxLength={160}
+              placeholder="Message the table"
+              disabled={!isConnected}
+              onChange={event => setMessage(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  submitMessage()
+                }
+              }}
+              aria-label="Table message"
+            />
+            <button
+              type="button"
+              disabled={!isConnected || !message.trim()}
+              onClick={submitMessage}
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      )}
+
+      <button
+        type="button"
+        className="social-dock-toggle"
+        onClick={() => setIsOpen(current => !current)}
+        aria-expanded={isOpen}
+        aria-label={isOpen ? 'Close table chat' : 'Open table chat and reactions'}
+      >
+        <span aria-hidden="true">♣</span>
+        <strong>Table talk</strong>
+        {chatLog.length > 0 && <em>{Math.min(chatLog.length, 99)}</em>}
+      </button>
+    </aside>
   )
 }
 
@@ -1739,9 +2069,18 @@ function ShowCardsControl({
   onChangeMode: (mode: ShowCardsMode) => void
 }) {
   return (
-    <div className="show-cards-toggle" role="group" aria-label="Show folded cards">
+    <div
+      className="show-cards-toggle"
+      role="group"
+      aria-label="Choose which cards to reveal after this hand"
+    >
       {SHOW_CARD_OPTIONS.map(option => {
         const isActive = mode === option.mode
+        const buttonLabel = option.mode === 'none'
+          ? 'Muck both cards'
+          : isActive
+            ? `Stop showing ${option.label}`
+            : `Show ${option.label}`
 
         return (
           <button
@@ -1751,7 +2090,8 @@ function ShowCardsControl({
             onClick={() => onChangeMode(isActive ? 'none' : option.mode)}
             disabled={!isConnected}
             aria-pressed={isActive}
-            title={isActive ? `Hide ${option.label}` : `Show ${option.label}`}
+            aria-label={buttonLabel}
+            title={buttonLabel}
           >
             {option.shortLabel}
           </button>
@@ -1765,29 +2105,67 @@ function TargetedEmotePanel({
   target,
   isConnected,
   onSendEmote,
+  onSendMessage,
   onClose,
   fullPickerOpen,
   onToggleFullPicker,
-  emotes,
+  quickEmotes,
 }: {
   target: SeatPlayer
   isConnected: boolean
   onSendEmote: (emote: string) => void
+  onSendMessage: (message: string) => void
   onClose: () => void
   fullPickerOpen: boolean
   onToggleFullPicker: () => void
-  emotes: readonly { id: EmoteId; glyph: string; label: string }[]
+  quickEmotes: readonly string[]
 }) {
   const statSummary = formatPlayerStatsSummary(target.stats)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const [message, setMessage] = useState('')
+
+  const submitMessage = useCallback(() => {
+    const trimmed = message.trim()
+    if (!trimmed || !isConnected) {
+      return
+    }
+
+    onSendMessage(trimmed)
+    setMessage('')
+  }, [isConnected, message, onSendMessage])
+
+  useEffect(() => {
+    closeButtonRef.current?.focus({ preventScroll: true })
+  }, [target.id])
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return
+      }
+
+      event.preventDefault()
+      onClose()
+    }
+
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [onClose])
 
   return (
-    <aside className="table-panel targeted-emote-panel">
+    <aside
+      className={`table-panel targeted-emote-panel ${fullPickerOpen ? 'is-picker-open' : ''}`}
+      data-picker-open={fullPickerOpen ? 'true' : 'false'}
+      role="dialog"
+      aria-label={`Message or react to ${target.nickname}`}
+    >
       <div className="table-panel-header">
         <div>
           <div className="table-panel-kicker">Opponent</div>
           <div className="table-panel-title">Send to {target.nickname}</div>
         </div>
         <button
+          ref={closeButtonRef}
           type="button"
           className="targeted-emote-close"
           onClick={onClose}
@@ -1797,26 +2175,56 @@ function TargetedEmotePanel({
         </button>
       </div>
 
-      <div className="targeted-player-stats" aria-label={`${target.nickname} stats`}>
-        {statSummary.map(stat => (
-          <div key={stat.label} className="targeted-player-stat">
-            <span>{stat.label}</span>
-            <strong>{stat.value}</strong>
+      {!fullPickerOpen && (
+        <>
+          <div className="targeted-player-stats" aria-label={`${target.nickname} stats`}>
+            {statSummary.map(stat => (
+              <div key={stat.label} className="targeted-player-stat">
+                <span>{stat.label}</span>
+                <strong>{stat.value}</strong>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+
+          <div className="targeted-message-compose">
+            <input
+              type="text"
+              value={message}
+              maxLength={140}
+              placeholder={`Message ${target.nickname}`}
+              disabled={!isConnected}
+              onChange={event => setMessage(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  submitMessage()
+                }
+              }}
+              aria-label={`Message ${target.nickname}`}
+            />
+            <button
+              type="button"
+              disabled={!isConnected || !message.trim()}
+              onClick={submitMessage}
+            >
+              Send
+            </button>
+          </div>
+        </>
+      )}
 
       <div className="chat-emotes">
-        {emotes.map(item => (
+        {!fullPickerOpen && quickEmotes.map(emote => (
           <button
-            key={item.id}
+            key={emote}
             type="button"
             className="emote-button"
-            onClick={() => onSendEmote(item.glyph)}
+            onClick={() => onSendEmote(emote)}
             disabled={!isConnected}
-            title={`Send ${item.label.toLowerCase()} to ${target.nickname}`}
+            aria-label={`Send ${getEmoteLabel(emote).toLowerCase()} to ${target.nickname}`}
+            title={`Send ${getEmoteLabel(emote).toLowerCase()} to ${target.nickname}`}
           >
-            {item.glyph}
+            <EmojiGlyph emoji={emote} />
           </button>
         ))}
         <button
@@ -1825,7 +2233,7 @@ function TargetedEmotePanel({
           disabled={!isConnected}
           onClick={onToggleFullPicker}
         >
-          {fullPickerOpen ? 'Hide picker' : 'Search all emojis'}
+          {fullPickerOpen ? 'Back' : 'More emojis'}
         </button>
       </div>
 
@@ -1833,6 +2241,7 @@ function TargetedEmotePanel({
         <SearchableEmojiPicker
           className="targeted-emote-picker"
           isConnected={isConnected}
+          height="clamp(240px, calc(100dvh - 260px), 360px)"
           searchPlaceholder={`Search emojis for ${target.nickname}`}
           onSelect={emoji => onSendEmote(emoji)}
         />
@@ -1892,15 +2301,19 @@ function useTurnTimer(
   return timer
 }
 
-function SettingsModal({
+export function SettingsModal({
   state,
   yourId,
   isConnected,
   suitColorMode,
+  soundMuted = false,
+  soundVolume = 0.65,
   roomCode,
   canShareRoom,
   onClose,
   onSetSuitColorMode,
+  onSetSoundMuted = () => {},
+  onSetSoundVolume = () => {},
   onUpdateSettings,
   onRemovePlayer,
   onAdjustPlayerStack,
@@ -1913,10 +2326,14 @@ function SettingsModal({
   yourId: string
   isConnected: boolean
   suitColorMode: 'two' | 'four'
+  soundMuted?: boolean
+  soundVolume?: number
   roomCode: string
   canShareRoom: boolean
   onClose: () => void
   onSetSuitColorMode: (mode: 'two' | 'four') => void
+  onSetSoundMuted?: (muted: boolean) => void
+  onSetSoundVolume?: (volume: number) => void
   onUpdateSettings: (settings: {
     smallBlind?: number
     bigBlind?: number
@@ -1937,62 +2354,72 @@ function SettingsModal({
   const [activeTab, setActiveTab] = useState<'general' | 'players'>('general')
   const [showSevenTwoCustomize, setShowSevenTwoCustomize] = useState(false)
   const [chipDrafts, setChipDrafts] = useState<Record<string, number>>({})
+  const configuredSettings = {
+    smallBlind: state.pendingTableSettings?.smallBlind ?? state.smallBlind,
+    bigBlind: state.pendingTableSettings?.bigBlind ?? state.bigBlind,
+    startingStack: state.pendingTableSettings?.startingStack ?? state.startingStack,
+    actionTimerDuration: state.pendingTableSettings?.actionTimerDuration ?? state.actionTimerDuration,
+    autoStartDelay: state.pendingTableSettings?.autoStartDelay ?? state.autoStartDelay ?? 5000,
+    rabbitHuntingEnabled: state.pendingTableSettings?.rabbitHuntingEnabled ?? state.rabbitHuntingEnabled,
+    sevenTwoRuleEnabled: state.pendingTableSettings?.sevenTwoRuleEnabled ?? state.sevenTwoRuleEnabled,
+    sevenTwoBountyPercent: state.pendingTableSettings?.sevenTwoBountyPercent ?? state.sevenTwoBountyPercent,
+  }
   const [draft, setDraft] = useState(() => ({
-    smallBlind: state.smallBlind,
-    bigBlind: state.bigBlind,
-    startingStack: state.startingStack,
-    actionTimerSeconds: Math.max(1, Math.floor(state.actionTimerDuration / 1000)),
-    autoStartDelaySeconds: Math.max(1, Math.floor((state.autoStartDelay ?? 5000) / 1000)),
-    rabbitHuntingEnabled: state.rabbitHuntingEnabled,
-    sevenTwoRuleEnabled: state.sevenTwoRuleEnabled,
-    sevenTwoBountyPercent: state.sevenTwoBountyPercent,
+    smallBlind: configuredSettings.smallBlind,
+    bigBlind: configuredSettings.bigBlind,
+    startingStack: configuredSettings.startingStack,
+    actionTimerSeconds: Math.max(1, Math.floor(configuredSettings.actionTimerDuration / 1000)),
+    autoStartDelaySeconds: Math.max(1, Math.floor(configuredSettings.autoStartDelay / 1000)),
+    rabbitHuntingEnabled: configuredSettings.rabbitHuntingEnabled,
+    sevenTwoRuleEnabled: configuredSettings.sevenTwoRuleEnabled,
+    sevenTwoBountyPercent: configuredSettings.sevenTwoBountyPercent,
   }))
 
   useEffect(() => {
     setDraft({
-      smallBlind: state.smallBlind,
-      bigBlind: state.bigBlind,
-      startingStack: state.startingStack,
-      actionTimerSeconds: Math.max(1, Math.floor(state.actionTimerDuration / 1000)),
-      autoStartDelaySeconds: Math.max(1, Math.floor((state.autoStartDelay ?? 5000) / 1000)),
-      rabbitHuntingEnabled: state.rabbitHuntingEnabled,
-      sevenTwoRuleEnabled: state.sevenTwoRuleEnabled,
-      sevenTwoBountyPercent: state.sevenTwoBountyPercent,
+      smallBlind: configuredSettings.smallBlind,
+      bigBlind: configuredSettings.bigBlind,
+      startingStack: configuredSettings.startingStack,
+      actionTimerSeconds: Math.max(1, Math.floor(configuredSettings.actionTimerDuration / 1000)),
+      autoStartDelaySeconds: Math.max(1, Math.floor(configuredSettings.autoStartDelay / 1000)),
+      rabbitHuntingEnabled: configuredSettings.rabbitHuntingEnabled,
+      sevenTwoRuleEnabled: configuredSettings.sevenTwoRuleEnabled,
+      sevenTwoBountyPercent: configuredSettings.sevenTwoBountyPercent,
     })
   }, [
-    state.actionTimerDuration,
-    state.autoStartDelay,
-    state.bigBlind,
-    state.rabbitHuntingEnabled,
-    state.sevenTwoBountyPercent,
-    state.sevenTwoRuleEnabled,
-    state.smallBlind,
-    state.startingStack,
+    configuredSettings.actionTimerDuration,
+    configuredSettings.autoStartDelay,
+    configuredSettings.bigBlind,
+    configuredSettings.rabbitHuntingEnabled,
+    configuredSettings.sevenTwoBountyPercent,
+    configuredSettings.sevenTwoRuleEnabled,
+    configuredSettings.smallBlind,
+    configuredSettings.startingStack,
   ])
 
   const hasSettingsChanges =
-    draft.smallBlind !== state.smallBlind ||
-    draft.bigBlind !== state.bigBlind ||
-    draft.startingStack !== state.startingStack ||
-    draft.actionTimerSeconds * 1000 !== state.actionTimerDuration ||
-    draft.autoStartDelaySeconds * 1000 !== (state.autoStartDelay ?? 5000) ||
-    draft.rabbitHuntingEnabled !== state.rabbitHuntingEnabled ||
-    draft.sevenTwoRuleEnabled !== state.sevenTwoRuleEnabled ||
-    draft.sevenTwoBountyPercent !== state.sevenTwoBountyPercent
+    draft.smallBlind !== configuredSettings.smallBlind ||
+    draft.bigBlind !== configuredSettings.bigBlind ||
+    draft.startingStack !== configuredSettings.startingStack ||
+    draft.actionTimerSeconds * 1000 !== configuredSettings.actionTimerDuration ||
+    draft.autoStartDelaySeconds * 1000 !== configuredSettings.autoStartDelay ||
+    draft.rabbitHuntingEnabled !== configuredSettings.rabbitHuntingEnabled ||
+    draft.sevenTwoRuleEnabled !== configuredSettings.sevenTwoRuleEnabled ||
+    draft.sevenTwoBountyPercent !== configuredSettings.sevenTwoBountyPercent
   const canSaveSettings = canSaveTableSettings({
     isConnected,
     hasSettingsChanges,
     phase: state.phase,
   })
   const resetGeneralDraft = () => setDraft({
-    smallBlind: state.smallBlind,
-    bigBlind: state.bigBlind,
-    startingStack: state.startingStack,
-    actionTimerSeconds: Math.max(1, Math.floor(state.actionTimerDuration / 1000)),
-    autoStartDelaySeconds: Math.max(1, Math.floor((state.autoStartDelay ?? 5000) / 1000)),
-    rabbitHuntingEnabled: state.rabbitHuntingEnabled,
-    sevenTwoRuleEnabled: state.sevenTwoRuleEnabled,
-    sevenTwoBountyPercent: state.sevenTwoBountyPercent,
+    smallBlind: configuredSettings.smallBlind,
+    bigBlind: configuredSettings.bigBlind,
+    startingStack: configuredSettings.startingStack,
+    actionTimerSeconds: Math.max(1, Math.floor(configuredSettings.actionTimerDuration / 1000)),
+    autoStartDelaySeconds: Math.max(1, Math.floor(configuredSettings.autoStartDelay / 1000)),
+    rabbitHuntingEnabled: configuredSettings.rabbitHuntingEnabled,
+    sevenTwoRuleEnabled: configuredSettings.sevenTwoRuleEnabled,
+    sevenTwoBountyPercent: configuredSettings.sevenTwoBountyPercent,
   })
 
   const getPlayerChipDraft = (playerId: string) => {
@@ -2009,7 +2436,6 @@ function SettingsModal({
     sevenTwoRuleEnabled?: boolean
   }) => {
     setDraft(current => ({ ...current, ...next }))
-    onUpdateSettings(next)
   }
 
   const saveGeneralSettings = () => {
@@ -2043,11 +2469,17 @@ function SettingsModal({
 
   return (
     <div className="settings-modal-overlay" onClick={onClose}>
-      <div className="settings-modal" onClick={event => event.stopPropagation()}>
+      <div
+        className="settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="table-settings-dialog-title"
+        onClick={event => event.stopPropagation()}
+      >
         <div className="settings-modal-header">
           <div>
             <div className="table-panel-kicker">Table console</div>
-            <div className="table-panel-title">Table settings and roster</div>
+            <div id="table-settings-dialog-title" className="table-panel-title">Table settings and roster</div>
           </div>
           <button type="button" className="btn-subtle" onClick={onClose}>
             Close
@@ -2097,6 +2529,7 @@ function SettingsModal({
                 <button
                   type="button"
                   className={`settings-pill ${suitColorMode === 'two' ? 'is-active' : ''}`}
+                  aria-pressed={suitColorMode === 'two'}
                   onClick={() => onSetSuitColorMode('two')}
                 >
                   2-color suits
@@ -2104,10 +2537,52 @@ function SettingsModal({
                 <button
                   type="button"
                   className={`settings-pill ${suitColorMode === 'four' ? 'is-active' : ''}`}
+                  aria-pressed={suitColorMode === 'four'}
                   onClick={() => onSetSuitColorMode('four')}
                 >
                   4-color suits
                 </button>
+              </div>
+            </div>
+
+            <div className="settings-section settings-audio-section">
+              <div>
+                <div className="settings-section-title">Soundscape</div>
+                <div className="settings-section-copy">
+                  Card, chip, action, and showdown sounds play in both table views.
+                </div>
+              </div>
+              <div className="settings-rule-row settings-audio-controls">
+                <div className="settings-toggle-row">
+                  <button
+                    type="button"
+                    className={`settings-pill ${!soundMuted ? 'is-active' : ''}`}
+                    aria-pressed={!soundMuted}
+                    onClick={() => onSetSoundMuted(false)}
+                  >
+                    Sound on
+                  </button>
+                  <button
+                    type="button"
+                    className={`settings-pill ${soundMuted ? 'is-active' : ''}`}
+                    aria-pressed={soundMuted}
+                    onClick={() => onSetSoundMuted(true)}
+                  >
+                    Muted
+                  </button>
+                </div>
+                <label className="settings-volume-field">
+                  <span>Volume {Math.round(Math.max(0, Math.min(1, soundVolume)) * 100)}%</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={Math.round(Math.max(0, Math.min(1, soundVolume)) * 100)}
+                    aria-label="Table sound volume"
+                    onChange={event => onSetSoundVolume(Number(event.target.value) / 100)}
+                  />
+                </label>
               </div>
             </div>
 
@@ -2227,6 +2702,7 @@ function SettingsModal({
                       <button
                         type="button"
                         className={`settings-pill ${showSevenTwoCustomize ? 'is-active' : ''}`}
+                        aria-pressed={showSevenTwoCustomize}
                         onClick={() => setShowSevenTwoCustomize(current => !current)}
                       >
                         Customize
@@ -2254,6 +2730,15 @@ function SettingsModal({
                 </div>
 
                 <div className="settings-footer">
+                  {state.phase === 'in_hand' && (
+                    <span className="settings-save-status" role="status">
+                      {state.pendingTableSettings && !hasSettingsChanges
+                        ? 'Settings saved. They’ll apply automatically next hand.'
+                        : state.pendingTableSettings
+                          ? 'Save to replace the settings queued for next hand.'
+                          : 'Save now and changes will apply automatically next hand.'}
+                    </span>
+                  )}
                   <button
                     type="button"
                     className="btn-subtle"
@@ -2268,7 +2753,11 @@ function SettingsModal({
                     disabled={!canSaveSettings}
                     onClick={saveGeneralSettings}
                   >
-                    Save table settings
+                    {state.phase === 'in_hand'
+                      ? state.pendingTableSettings && !hasSettingsChanges
+                        ? 'Saved for next hand'
+                        : 'Save for next hand'
+                      : 'Save table settings'}
                   </button>
                 </div>
               </>

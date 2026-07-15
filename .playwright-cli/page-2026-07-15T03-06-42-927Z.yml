@@ -1,0 +1,91 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e50] [cursor=pointer]
+  - alert [ref=e54]
+  - generic [ref=e55]:
+    - generic [ref=e56]:
+      - generic [ref=e57]:
+        - generic [ref=e58]: Poker Night
+        - generic [ref=e59]:
+          - generic [ref=e60]: Room
+          - generic [ref=e61]: 4YQ52Y
+      - button "Open settings" [ref=e62] [cursor=pointer]:
+        - generic [ref=e70]: Settings
+    - generic [ref=e75]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [ref=e105] [cursor=pointer]:
+            - generic [ref=e112]:
+              - generic [ref=e113]:
+                - strong [ref=e114]: Bot Maverick
+                - emphasis [ref=e115]: BB
+              - generic [ref=e116]:
+                - generic [ref=e117]: $1,010
+                - generic "Hand winner" [ref=e154]: Winner
+            - generic [ref=e118]: $20
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=e120]:
+              - generic [ref=e121]: Pot
+              - generic [ref=e122]: $30
+            - status "Your table bet $10":
+              - generic:
+                - generic: Bet
+                - generic: $10
+            - status:
+              - generic [ref=e155]:
+                - generic [ref=e156]: Hand winner
+                - generic [ref=e158]:
+                  - strong [ref=e160]: Bot Maverick
+                  - generic [ref=e161]: +$30
+          - status "Alice, chips $990":
+            - generic: Alice
+            - generic: $990
+          - 'generic "Your hand: Queen-high"':
+            - status:
+              - generic: Queen-high
+            - generic:
+              - generic:
+                - generic:
+                  - generic "4 of clubs":
+                    - generic:
+                      - generic: "4"
+                      - generic: "4"
+              - generic:
+                - generic:
+                  - generic "Q of clubs":
+                    - generic:
+                      - generic: Q
+                      - generic: Q
+            - group "Choose which cards to reveal after this hand" [ref=e163]:
+              - button "Show left card" [ref=e164] [cursor=pointer]: L
+              - button "Show right card" [ref=e165] [cursor=pointer]: R
+              - button "Show both cards" [ref=e166] [cursor=pointer]: Both
+              - button "Muck both cards" [pressed] [ref=e167] [cursor=pointer]: Muck
+      - region "Rabbit hunt controls" [ref=e168]:
+        - generic [ref=e169]:
+          - generic [ref=e170]: Folded hand
+          - generic [ref=e171]: See the board runout
+        - button "Rabbit hunt" [ref=e172] [cursor=pointer]
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=e82] [cursor=pointer]:
+          - generic [ref=e83]: ♣
+          - strong [ref=e84]: Table talk

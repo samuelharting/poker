@@ -1,0 +1,90 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e50] [cursor=pointer]
+  - alert [ref=e54]
+  - generic [ref=e55]:
+    - generic [ref=e431]:
+      - button "Open table menu" [ref=e432] [cursor=pointer]
+      - generic [ref=e435]:
+        - generic [ref=e436]: NL Hold'em
+        - generic [ref=e440]: $10 / $20
+      - button "Open settings" [ref=e441] [cursor=pointer]
+    - generic [ref=e71]:
+      - region "Mobile poker field" [ref=e449]:
+        - generic:
+          - generic:
+            - generic:
+              - generic: Pot
+              - generic: $30
+          - generic "Board cards":
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+        - generic "Players":
+          - generic [ref=e450]:
+            - generic [ref=e451]:
+              - button "Target Bot Maverick for emojis" [ref=e452] [cursor=pointer]: "1"
+              - generic [ref=e453]:
+                - generic "Hidden card" [ref=e454]
+                - generic "Hidden card" [ref=e455]
+              - generic [ref=e456]:
+                - button "Maverick" [ref=e457] [cursor=pointer]
+                - generic [ref=e458]: $1,010
+            - generic [ref=e506]: 😀
+        - generic:
+          - generic:
+            - generic: "5"
+            - generic: You
+            - generic: $960
+          - 'generic "Your hand: King-high"':
+            - generic:
+              - generic:
+                - generic:
+                  - generic "K of diamonds":
+                    - generic:
+                      - generic: K
+                      - generic: K
+              - generic:
+                - generic:
+                  - generic "Q of spades":
+                    - generic:
+                      - generic: Q
+                      - generic: Q
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=e82] [cursor=pointer]:
+          - generic [ref=e83]: ♣
+          - emphasis [ref=e507]: "1"
+      - generic [ref=e508]:
+        - generic [ref=e509]:
+          - generic [ref=e510]:
+            - button "1/4" [ref=e511] [cursor=pointer]
+            - button "1/2" [ref=e512] [cursor=pointer]
+          - generic [ref=e513]: $40
+          - generic [ref=e514]:
+            - button "Pot" [ref=e515] [cursor=pointer]
+            - button "All In" [ref=e516] [cursor=pointer]
+        - generic [ref=e517]:
+          - button "Decrease bet" [ref=e518] [cursor=pointer]: −
+          - generic [ref=e519]:
+            - slider [ref=e520]: "40"
+            - generic [ref=e521]: 2 BB
+          - button "Increase bet" [ref=e522] [cursor=pointer]: +
+        - generic [ref=e523]:
+          - button "FOLD" [ref=e524] [cursor=pointer]
+          - button "CHECK / CALL $10" [ref=e526] [cursor=pointer]:
+            - generic [ref=e527]: CHECK / CALL
+            - strong [ref=e528]: $10
+          - button "BET / RAISE $40" [ref=e529] [cursor=pointer]:
+            - generic [ref=e530]: BET / RAISE
+            - strong [ref=e531]: $40

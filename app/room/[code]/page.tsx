@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import { PokerTable } from '@/components/table/PokerTable'
 import { RoomHud } from '@/components/ui/RoomHud'
+import { SystemToasts, type SystemToast, type SystemToastTone } from '@/components/ui/SystemToasts'
 import { useRoom } from '@/hooks/useRoom'
 import { isAllowedEmote, sanitizeText } from '@/shared/protocol'
 import {
@@ -12,11 +13,20 @@ import {
   validatePlayerProfile,
   type PlayerProfile,
 } from '@/lib/profile'
+import { normalizeRoomCode } from '@/lib/roomCode'
 import type { ShowCardsMode } from '@/lib/poker/types'
+import {
+  DEFAULT_POKER_SOUND_PREFERENCES,
+  loadPokerSoundPreferences,
+  normalizePokerSoundPreferences,
+  savePokerSoundPreferences,
+  type PokerSoundPreferences,
+} from '@/lib/poker/soundscape'
+import { usePokerSoundscape } from '@/hooks/usePokerSoundscape'
 
 export default function RoomPage() {
   const params = useParams()
-  const code = (typeof params.code === 'string' ? params.code : '').toUpperCase()
+  const code = normalizeRoomCode(typeof params.code === 'string' ? params.code : '')
 
   const [profile, setProfile] = useState<PlayerProfile | null>(null)
   const [profileInput, setProfileInput] = useState<PlayerProfile>({
@@ -110,7 +120,7 @@ export default function RoomPage() {
             </label>
 
             <label className="entry-field">
-              <span>Venmo username</span>
+              <span>Venmo username <em>Optional</em></span>
               <input
                 type="text"
                 className="input-dark"
@@ -141,11 +151,38 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
   const [startingStackSetting, setStartingStackSetting] = useState(1000)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [suitColorMode, setSuitColorMode] = useState<'two' | 'four'>('two')
+  const [soundPreferences, setSoundPreferences] = useState<PokerSoundPreferences>({
+    ...DEFAULT_POKER_SOUND_PREFERENCES,
+  })
+  const [soundPreferencesReady, setSoundPreferencesReady] = useState(false)
+  const [systemToasts, setSystemToasts] = useState<SystemToast[]>([])
+
+  const dismissSystemMessage = useCallback((id: string) => {
+    setSystemToasts(current => current.filter(toast => toast.id !== id))
+  }, [])
+
+  const pushSystemMessage = useCallback((message: string, tone: SystemToastTone = 'info') => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    setSystemToasts(current => [
+      ...current.slice(-2),
+      { id, message, tone },
+    ])
+    window.setTimeout(() => {
+      dismissSystemMessage(id)
+    }, tone === 'error' ? 7000 : 4500)
+  }, [dismissSystemMessage])
 
   const { tableState, socialState, yourId, isHost, sendAction, seatMe, sendMessage, isConnected, connectionIssue } = useRoom(
     roomCode,
-    profile
+    profile,
+    { onSystemMessage: pushSystemMessage }
   )
+  const { playCue: playSoundCue } = usePokerSoundscape(tableState ?? undefined, yourId, {
+    enabled: soundPreferencesReady,
+    connected: isConnected,
+    muted: soundPreferences.muted,
+    volume: soundPreferences.volume,
+  })
 
   useEffect(() => {
     setShareUrl(window.location.href)
@@ -168,6 +205,11 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     }
   }, [])
 
+  useEffect(() => {
+    setSoundPreferences(loadPokerSoundPreferences())
+    setSoundPreferencesReady(true)
+  }, [])
+
   const canShareRoom = typeof navigator !== 'undefined' && (
     typeof navigator.share === 'function' ||
     typeof navigator.clipboard?.writeText === 'function'
@@ -183,13 +225,22 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     sessionStorage.setItem('poker_suit_color_mode', mode)
   }, [])
 
+  const updateSoundPreferences = useCallback((update: Partial<PokerSoundPreferences>) => {
+    setSoundPreferences(current => {
+      const next = normalizePokerSoundPreferences({ ...current, ...update })
+      savePokerSoundPreferences(next)
+      return next
+    })
+  }, [])
+
   const handleCopyRoom = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(roomCode)
+      pushSystemMessage('Room code copied.', 'success')
     } catch {
-      // Notification toasts removed.
+      pushSystemMessage('Unable to copy the room code.', 'error')
     }
-  }, [roomCode])
+  }, [pushSystemMessage, roomCode])
 
   const handleShareRoom = useCallback(async () => {
     if (!shareUrl) {
@@ -203,14 +254,16 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           text: `Join my poker table in room ${roomCode}.`,
           url: shareUrl,
         })
+        pushSystemMessage('Room invite shared.', 'success')
         return
       }
 
       await navigator.clipboard.writeText(shareUrl)
+      pushSystemMessage('Room link copied.', 'success')
     } catch {
-      // Notification toasts removed.
+      pushSystemMessage('Unable to share the room link.', 'error')
     }
-  }, [roomCode, shareUrl])
+  }, [pushSystemMessage, roomCode, shareUrl])
 
   const handleUpdateSettings = useCallback((settings: {
     smallBlind?: number
@@ -255,7 +308,11 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
         phase={tableState?.phase ?? null}
         settingsOpen={settingsOpen}
         onToggleSettings={() => setSettingsOpen(current => !current)}
+        soundMuted={soundPreferences.muted}
+        onToggleSound={() => updateSoundPreferences({ muted: !soundPreferences.muted })}
       />
+
+      <SystemToasts toasts={systemToasts} onDismiss={dismissSystemMessage} />
 
       {!isConnected && tableState && (
         <div className="room-connection-banner">
@@ -273,6 +330,8 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           startingStackSetting={startingStackSetting}
           settingsOpen={settingsOpen}
           suitColorMode={suitColorMode}
+          soundMuted={soundPreferences.muted}
+          soundVolume={soundPreferences.volume}
           roomCode={roomCode}
           canShareRoom={canShareRoom}
           onAction={sendAction}
@@ -290,9 +349,20 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           onSeatMe={seatMe}
           onSetShowCards={(mode: ShowCardsMode) => sendMessage({ type: 'set_show_cards', mode })}
           onSetSuitColorMode={handleSuitColorMode}
+          onSetSoundMuted={muted => updateSoundPreferences({ muted })}
+          onSetSoundVolume={volume => updateSoundPreferences({ volume })}
+          onSoundCue={playSoundCue}
           onCloseSettings={() => setSettingsOpen(false)}
           onCopyRoom={handleCopyRoom}
           onShareRoom={handleShareRoom}
+          onSendChat={handleSendChat}
+          onSendTargetChat={(targetId: string, message: string) => {
+            const sanitized = sanitizeText(message)
+            if (!sanitized) {
+              return
+            }
+            sendMessage({ type: 'table_chat', targetId, message: sanitized })
+          }}
           onSendEmote={handleSendEmote}
           onSendTargetEmote={(targetId: string, emote: string) => {
             if (!isAllowedEmote(emote)) {
@@ -300,7 +370,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
             }
             sendMessage({ type: 'table_emote', targetId, emote })
           }}
-          onFeedback={() => {}}
+          onFeedback={pushSystemMessage}
         />
       ) : (
         <div className="room-loading-state">

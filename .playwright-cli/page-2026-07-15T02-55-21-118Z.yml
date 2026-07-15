@@ -1,0 +1,102 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e24] [cursor=pointer]
+  - alert [ref=e28]
+  - generic [ref=e29]:
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e32]: Poker Night
+        - generic [ref=e33]:
+          - generic [ref=e34]: Room
+          - generic [ref=e35]: BIG742
+      - button "Open settings" [ref=e36] [cursor=pointer]:
+        - generic [ref=e44]: Settings
+    - generic "Table notifications":
+      - status [ref=e72]:
+        - generic [ref=e73]: Added 7 bots
+        - button "Dismiss notification" [ref=e74] [cursor=pointer]: x
+    - generic [ref=e45]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [ref=e75] [cursor=pointer]:
+            - generic [ref=e82]:
+              - strong [ref=e84]: Bot Maverick
+              - generic [ref=e85]: $1,000
+          - button "Send a reaction to Bot River" [ref=e87] [cursor=pointer]:
+            - generic [ref=e94]:
+              - generic [ref=e95]:
+                - strong [ref=e96]: Bot River
+                - emphasis [ref=e97]: SB
+              - generic [ref=e98]: $990
+            - generic [ref=e100]: $10
+          - button "Send a reaction to Bot Bluff" [ref=e101] [cursor=pointer]:
+            - generic [ref=e108]:
+              - generic [ref=e109]:
+                - strong [ref=e110]: Bot Bluff
+                - emphasis [ref=e111]: BB
+              - generic [ref=e112]: $980
+            - generic [ref=e114]: $20
+          - button "Send a reaction to Bot Ace" [ref=e115] [cursor=pointer]:
+            - generic [ref=e122]:
+              - strong [ref=e124]: Bot Ace
+              - generic [ref=e125]:
+                - generic [ref=e126]: $1,000
+                - generic [ref=e127]: Acting
+          - button "Send a reaction to Bot Nova" [ref=e128] [cursor=pointer]:
+            - generic [ref=e135]:
+              - strong [ref=e137]: Bot Nova
+              - generic [ref=e138]: $1,000
+          - button "Send a reaction to Bot Dealer Dan" [ref=e140] [cursor=pointer]:
+            - generic [ref=e147]:
+              - strong [ref=e149]: Bot Dealer Dan
+              - generic [ref=e150]: $1,000
+          - button "Send a reaction to Bot Pocket" [ref=e152] [cursor=pointer]:
+            - generic [ref=e159]:
+              - strong [ref=e161]: Bot Pocket
+              - generic [ref=e162]: $1,000
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=e165]:
+              - generic [ref=e166]: Pot
+              - generic [ref=e167]: $30
+          - status "CardCheck, chips $1,000":
+            - generic: CardCheck
+            - generic: $1,000
+          - 'generic "Your hand: Jack-high"':
+            - status:
+              - generic: Jack-high
+            - generic:
+              - generic:
+                - generic:
+                  - generic "J of clubs":
+                    - generic:
+                      - generic: J
+                      - generic: J
+              - generic:
+                - generic:
+                  - generic "3 of spades":
+                    - generic:
+                      - generic: "3"
+                      - generic: "3"
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=e52] [cursor=pointer]:
+          - generic [ref=e53]: ♣
+          - strong [ref=e54]: Table talk

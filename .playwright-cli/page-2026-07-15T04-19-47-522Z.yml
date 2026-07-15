@@ -1,0 +1,60 @@
+- generic [active] [ref=f3e1]:
+  - button "Open Next.js Dev Tools" [ref=f3e72] [cursor=pointer]
+  - alert [ref=f3e76]
+  - generic [ref=f3e753]:
+    - generic [ref=f3e755]:
+      - button "Open table menu" [ref=f3e756] [cursor=pointer]
+      - generic [ref=f3e759]:
+        - generic [ref=f3e760]: NL Hold'em
+        - generic [ref=f3e764]: $10 / $20
+      - generic [ref=f3e765]:
+        - button "Unmute table sounds" [pressed] [ref=f3e766] [cursor=pointer]
+        - button "Open settings" [ref=f3e771] [cursor=pointer]
+    - generic [ref=f3e779]:
+      - region "Mobile poker field" [ref=f3e781]:
+        - generic:
+          - generic:
+            - generic:
+              - generic: Pot
+              - generic: $120
+          - generic "Board cards":
+            - generic:
+              - generic:
+                - generic "5 of clubs": "5"
+            - generic:
+              - generic:
+                - generic "3 of diamonds": "3"
+            - generic:
+              - generic:
+                - generic "K of diamonds": K
+            - generic:
+              - generic:
+                - generic "2 of hearts": "2"
+            - generic:
+              - generic:
+                - generic "4 of spades": "4"
+        - generic "Players":
+          - generic [ref=f3e783]:
+            - button "Target Bot Maverick for emojis" [ref=f3e784] [cursor=pointer]: "1"
+            - generic [ref=f3e785]:
+              - generic "Hidden card" [ref=f3e786]
+              - generic "Hidden card" [ref=f3e787]
+            - generic [ref=f3e788]:
+              - button "Maverick" [ref=f3e789] [cursor=pointer]
+              - generic [ref=f3e790]: $950
+        - generic:
+          - generic:
+            - generic: "5"
+            - generic: You
+            - generic: $930
+          - 'generic "Your hand: King-high"':
+            - generic:
+              - generic:
+                - generic:
+                  - generic "7 of clubs": "7"
+              - generic:
+                - generic:
+                  - generic "9 of spades": "9"
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f3e791] [cursor=pointer]:
+          - generic [ref=f3e792]: ♣

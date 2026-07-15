@@ -43,3 +43,17 @@ describe('table action protocol', () => {
     })
   })
 })
+
+describe('targeted table chat protocol', () => {
+  it('keeps a sanitized player target on chat messages', () => {
+    expect(parseC2S(JSON.stringify({
+      type: 'table_chat',
+      message: '  nice hand  ',
+      targetId: ' bob ',
+    }))).toEqual({
+      type: 'table_chat',
+      message: 'nice hand',
+      targetId: 'bob',
+    })
+  })
+})

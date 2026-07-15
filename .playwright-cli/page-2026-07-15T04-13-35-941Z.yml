@@ -1,0 +1,110 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e24] [cursor=pointer]
+  - alert [ref=e28]
+  - generic [ref=e29]:
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e32]: Poker Night
+        - generic [ref=e33]:
+          - generic [ref=e34]: Room
+          - generic [ref=e35]: WALL3D
+      - generic [ref=e36]:
+        - button "Mute table sounds" [ref=e37] [cursor=pointer]:
+          - generic [ref=e42]: Sound
+        - button "Open settings" [ref=e43] [cursor=pointer]:
+          - generic [ref=e51]: Settings
+    - generic [ref=e52]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [ref=e79] [cursor=pointer]:
+            - generic [ref=e86]:
+              - strong [ref=e88]: Bot Maverick
+              - generic [ref=e89]: $1,000
+          - button "Send a reaction to Bot River" [ref=e91] [cursor=pointer]:
+            - generic [ref=e98]:
+              - generic [ref=e99]:
+                - strong [ref=e100]: Bot River
+                - emphasis [ref=e101]: SB
+              - generic [ref=e102]: $990
+            - generic [ref=e104]: $10
+          - button "Send a reaction to Bot Bluff" [ref=e105] [cursor=pointer]:
+            - generic [ref=e112]:
+              - generic [ref=e113]:
+                - strong [ref=e114]: Bot Bluff
+                - emphasis [ref=e115]: BB
+              - generic [ref=e116]: $980
+            - generic [ref=e118]: $20
+          - button "Send a reaction to Bot Ace" [ref=e119] [cursor=pointer]:
+            - generic [ref=e126]:
+              - strong [ref=e128]: Bot Ace
+              - generic [ref=e129]:
+                - generic [ref=e130]: $980
+                - generic [ref=e131]: Called $20
+            - generic [ref=e132]: $20
+          - button "Send a reaction to Bot Nova" [ref=e133] [cursor=pointer]:
+            - generic [ref=e140]:
+              - strong [ref=e142]: Bot Nova
+              - generic [ref=e143]:
+                - generic [ref=e144]: $960
+                - generic [ref=e145]: Raised $40
+            - generic [ref=e146]: $40
+          - button "Send a reaction to Bot Dealer Dan" [ref=e147] [cursor=pointer]:
+            - generic [ref=e154]:
+              - strong [ref=e156]: Bot Dealer Dan
+              - generic [ref=e157]:
+                - generic [ref=e158]: $960
+                - generic [ref=e159]: Called $40
+            - generic [ref=e160]: $40
+          - button "Send a reaction to Bot Pocket" [ref=e161] [cursor=pointer]:
+            - generic [ref=e168]:
+              - strong [ref=e170]: Bot Pocket
+              - generic [ref=e171]:
+                - generic [ref=e172]: $1,000
+                - generic [ref=e173]: Acting
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=e175]:
+              - generic [ref=e176]: Pot
+              - generic [ref=e177]: $130
+          - status "Wall Curator, chips $1,000":
+            - generic: Wall Curator
+            - generic: $1,000
+          - 'generic "Your hand: Nine-high"':
+            - status:
+              - generic: Nine-high
+            - generic:
+              - generic:
+                - generic:
+                  - generic "4 of hearts":
+                    - generic:
+                      - generic: "4"
+                      - generic: "4"
+              - generic:
+                - generic:
+                  - generic "9 of spades":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=e59] [cursor=pointer]:
+          - generic [ref=e60]: ♣
+          - strong [ref=e61]: Table talk

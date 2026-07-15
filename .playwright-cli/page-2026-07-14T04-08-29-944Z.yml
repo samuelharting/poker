@@ -1,0 +1,122 @@
+- generic [ref=f6e1]:
+  - generic [ref=f6e19]:
+    - generic [ref=f6e613]:
+      - button "Open table menu" [ref=f6e614] [cursor=pointer]
+      - generic [ref=f6e617]:
+        - generic [ref=f6e618]: NL Hold'em
+        - generic [ref=f6e622]: $10 / $20
+      - button "Open settings" [ref=f6e623] [cursor=pointer]
+    - generic [ref=f6e35]:
+      - region "Mobile poker field" [ref=f6e736]:
+        - generic:
+          - generic:
+            - generic:
+              - generic: Pot
+              - generic: $300
+          - generic "Board cards":
+            - generic:
+              - generic:
+                - generic "K of clubs":
+                  - generic:
+                    - generic: K
+                    - generic: K
+            - generic:
+              - generic:
+                - generic "A of hearts":
+                  - generic:
+                    - generic: A
+                    - generic: A
+            - generic:
+              - generic:
+                - generic "8 of hearts":
+                  - generic:
+                    - generic: "8"
+                    - generic: "8"
+            - generic:
+              - generic:
+                - generic "5 of hearts":
+                  - generic:
+                    - generic: "5"
+                    - generic: "5"
+            - generic:
+              - generic:
+                - generic "J of clubs":
+                  - generic:
+                    - generic: J
+                    - generic: J
+        - generic "Players":
+          - generic [ref=f6e738]:
+            - button "Target Bot River for emojis" [active] [ref=f6e739] [cursor=pointer]: "8"
+            - generic [ref=f6e740]:
+              - generic "Hidden card" [ref=f6e741]
+              - generic "Hidden card" [ref=f6e742]
+            - generic [ref=f6e743]:
+              - button "River" [ref=f6e744] [cursor=pointer]
+              - generic [ref=f6e745]: $3,660
+          - generic [ref=f6e747]:
+            - button "Target Bot Bluff for emojis" [ref=f6e748] [cursor=pointer]: "1"
+            - generic [ref=f6e749]:
+              - generic "Hidden card" [ref=f6e750]
+              - generic "Hidden card" [ref=f6e751]
+            - generic [ref=f6e752]:
+              - button "Bluff" [ref=f6e753] [cursor=pointer]
+              - generic [ref=f6e754]: $670
+          - generic [ref=f6e756]:
+            - button "Target Bot Dealer Dan for emojis" [ref=f6e757] [cursor=pointer]: "2"
+            - generic [ref=f6e758]:
+              - generic "Hidden card" [ref=f6e759]
+              - generic "Hidden card" [ref=f6e760]
+            - generic [ref=f6e761]:
+              - button "Dealer Dan" [ref=f6e762] [cursor=pointer]
+              - generic [ref=f6e763]: $2,600
+        - generic:
+          - generic:
+            - generic: "5"
+            - generic: You
+            - generic: $770
+          - generic "Your hand":
+            - generic:
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: J
+                      - generic: J
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: "2"
+                      - generic: "2"
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f6e608] [cursor=pointer]:
+          - generic [ref=f6e609]: ♣
+          - emphasis [ref=f6e611]: "1"
+      - complementary "Emoji reactions for Bot River" [ref=f6e786]:
+        - generic [ref=f6e787]:
+          - generic [ref=f6e788]:
+            - generic [ref=f6e789]: Opponent
+            - generic [ref=f6e790]: Send to Bot River
+          - button "Close target emote panel" [ref=f6e791] [cursor=pointer]: x
+        - generic "Bot River stats" [ref=f6e792]:
+          - generic [ref=f6e793]:
+            - generic [ref=f6e794]: Fold
+            - strong [ref=f6e795]: 0%
+          - generic [ref=f6e796]:
+            - generic [ref=f6e797]: Games
+            - strong [ref=f6e798]: "27"
+          - generic [ref=f6e799]:
+            - generic [ref=f6e800]: Won
+            - strong [ref=f6e801]: "10"
+        - generic [ref=f6e802]:
+          - button "👋" [ref=f6e803] [cursor=pointer]
+          - button "👍" [ref=f6e804] [cursor=pointer]
+          - button "😂" [ref=f6e805] [cursor=pointer]
+          - button "😎" [ref=f6e806] [cursor=pointer]
+          - button "💀" [ref=f6e807] [cursor=pointer]
+          - button "😭" [ref=f6e808] [cursor=pointer]
+          - button "😡" [ref=f6e809] [cursor=pointer]
+          - button "🖕" [ref=f6e810] [cursor=pointer]
+          - button "Search all emojis" [ref=f6e811] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f6e123] [cursor=pointer]
+  - alert [ref=f6e127]

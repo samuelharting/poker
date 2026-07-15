@@ -11,6 +11,7 @@ interface OwnHandProps {
   isActing: boolean
   isFolded?: boolean
   isWinner?: boolean
+  winningCards?: Card[]
   handDescription?: string | null
   showCardsMode?: ShowCardsMode
   showCardsControl?: React.ReactNode
@@ -21,6 +22,7 @@ export function OwnHand({
   isActing,
   isFolded = false,
   isWinner = false,
+  winningCards = [],
   handDescription = null,
   showCardsMode = 'none',
   showCardsControl = null,
@@ -77,7 +79,17 @@ export function OwnHand({
               isFolded && isCardFaceUp(index) && 'is-shown'
             )}
           >
-            <PlayingCard card={card} size="xl" animateIn highlighted={isWinner} faceDown={!isCardFaceUp(index)} />
+            <PlayingCard
+              card={card}
+              size="xl"
+              animateIn
+              highlighted={isWinner && (
+                winningCards.length === 0 || winningCards.some(
+                  winningCard => winningCard.rank === card.rank && winningCard.suit === card.suit
+                )
+              )}
+              faceDown={!isCardFaceUp(index)}
+            />
           </div>
         ))}
       </div>

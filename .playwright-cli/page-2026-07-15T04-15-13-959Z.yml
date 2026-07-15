@@ -1,0 +1,108 @@
+- generic [active] [ref=f3e1]:
+  - button "Open Next.js Dev Tools" [ref=f3e72] [cursor=pointer]
+  - alert [ref=f3e76]
+  - generic [ref=f3e215]:
+    - generic [ref=f3e216]:
+      - generic [ref=f3e217]:
+        - generic [ref=f3e218]: Poker Night
+        - generic [ref=f3e219]: RoomGBVNHQ
+      - generic [ref=f3e220]:
+        - button "Unmute table sounds" [pressed] [ref=f3e221] [cursor=pointer]:
+          - generic [ref=f3e226]: Muted
+        - button "Open settings" [ref=f3e407] [cursor=pointer]:
+          - generic [ref=f3e235]: Settings
+    - generic [ref=f3e236]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [ref=f3e237] [cursor=pointer]:
+            - generic [ref=f3e244]:
+              - generic [ref=f3e245]:
+                - strong [ref=f3e246]: Bot Maverick
+                - emphasis [ref=f3e247]: BB
+              - generic [ref=f3e248]:
+                - generic [ref=f3e249]: $1,010
+                - generic [ref=f3e453]: Raised $20
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "2 of diamonds":
+                    - generic:
+                      - generic: "2"
+                      - generic: "2"
+              - generic:
+                - generic:
+                  - generic "Q of clubs":
+                    - generic:
+                      - generic: Q
+                      - generic: Q
+              - generic:
+                - generic:
+                  - generic "2 of clubs":
+                    - generic:
+                      - generic: "2"
+                      - generic: "2"
+              - generic:
+                - generic:
+                  - generic "9 of spades":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+              - generic:
+                - generic:
+                  - generic "A of hearts":
+                    - generic:
+                      - generic: A
+                      - generic: A
+            - generic [ref=f3e252]:
+              - generic [ref=f3e253]: Pot
+              - generic [ref=f3e254]: $80
+          - status "ShowdownQA, chips $910":
+            - generic: ShowdownQA
+            - generic: $910
+          - 'generic "Your hand: Two Pair, Aces and Twos"':
+            - generic: Your turn
+            - status:
+              - generic: Two Pair, Aces and Twos
+            - generic:
+              - generic:
+                - generic:
+                  - generic "7 of clubs":
+                    - generic:
+                      - generic: "7"
+                      - generic: "7"
+              - generic:
+                - generic:
+                  - generic "A of clubs":
+                    - generic:
+                      - generic: A
+                      - generic: A
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f3e408] [cursor=pointer]:
+          - generic [ref=f3e409]: ♣
+          - strong [ref=f3e410]: Table talk
+      - generic [ref=f3e502]:
+        - generic [ref=f3e503]:
+          - generic [ref=f3e504]: Your turn
+          - generic [ref=f3e505]: Your turn
+        - generic [ref=f3e507]:
+          - generic [ref=f3e508]: Fold timer
+          - generic [ref=f3e509]: 35s left
+        - generic [ref=f3e512]:
+          - generic [ref=f3e513]:
+            - button "Min" [ref=f3e514] [cursor=pointer]
+            - button "1/4 Pot" [ref=f3e515] [cursor=pointer]
+            - button "1/2 Pot" [ref=f3e525] [cursor=pointer]
+            - button "3/4 Pot" [ref=f3e516] [cursor=pointer]
+            - button "Pot" [ref=f3e517] [cursor=pointer]
+          - slider [ref=f3e518]: "40"
+          - spinbutton [ref=f3e519]: "40"
+        - generic [ref=f3e520]:
+          - button "Check" [ref=f3e526] [cursor=pointer]
+          - button "Raise to $40" [ref=f3e522] [cursor=pointer]: Raise to$40
+          - button "All-in $910" [ref=f3e527] [cursor=pointer]: All-in$910
+          - button "Fold" [ref=f3e524] [cursor=pointer]

@@ -78,6 +78,14 @@ export interface Pot {
   eligiblePlayerIds: string[]
 }
 
+export interface HandWinner {
+  playerId: string
+  amount: number
+  handDescription?: string
+  winningCards?: Card[]
+  venmoUsername?: string
+}
+
 export interface LobbyPlayer {
   id: string
   nickname: string
@@ -89,6 +97,17 @@ export interface LobbyPlayer {
   isBot?: boolean
   isSeated: boolean
   isSpectator: boolean
+}
+
+export interface TableSettingsSnapshot {
+  smallBlind: number
+  bigBlind: number
+  startingStack: number
+  actionTimerDuration: number
+  autoStartDelay: number
+  rabbitHuntingEnabled: boolean
+  sevenTwoRuleEnabled: boolean
+  sevenTwoBountyPercent: number
 }
 
 export interface TableState {
@@ -114,11 +133,13 @@ export interface TableState {
   rabbitHuntingEnabled: boolean
   sevenTwoRuleEnabled: boolean
   sevenTwoBountyPercent: number
+  pendingTableSettings?: TableSettingsSnapshot
   handNumber: number
   actionSequence?: number
+  showdownAt?: number
   recentActions: string[]
   lobbyPlayers: LobbyPlayer[]
-  winners?: Array<{ playerId: string; amount: number; handDescription?: string; venmoUsername?: string }>
+  winners?: HandWinner[]
   bounty?: BountyMetadata
 }
 
@@ -153,7 +174,8 @@ export interface InternalGameState {
   sevenTwoBountyPercent: number
   handNumber: number
   actionSequence?: number
+  showdownAt?: number
   recentActions: string[]
-  winners?: Array<{ playerId: string; amount: number; handDescription?: string; venmoUsername?: string }>
+  winners?: HandWinner[]
   bounty?: BountyMetadata
 }

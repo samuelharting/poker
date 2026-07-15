@@ -98,7 +98,7 @@ export function useRoom(
   }, [sendMessage])
 
   useEffect(() => {
-    if (!roomCode || !profile.nickname || !profile.email || !profile.venmoUsername) {
+    if (!roomCode || !profile.nickname || !profile.email) {
       return
     }
 
@@ -383,6 +383,13 @@ function sanitizeSocialEntry(raw: unknown): PlayerSocialState | null {
     }
   }
 
+  if (typeof candidate.messageTargetPlayerId === 'string') {
+    const messageTargetPlayerId = candidate.messageTargetPlayerId.trim()
+    if (messageTargetPlayerId) {
+      entry.messageTargetPlayerId = messageTargetPlayerId
+    }
+  }
+
   const messageExpiresAt = typeof candidate.messageExpiresAt === 'number'
     ? candidate.messageExpiresAt
     : undefined
@@ -426,5 +433,9 @@ function sanitizeChatLog(raw: unknown): TableChatEntry | null {
     ? candidate.createdAt
     : Date.now()
 
-  return { id, playerId, nickname, message, createdAt }
+  const targetPlayerId = typeof candidate.targetPlayerId === 'string'
+    ? candidate.targetPlayerId.trim() || undefined
+    : undefined
+
+  return { id, playerId, nickname, message, createdAt, targetPlayerId }
 }
