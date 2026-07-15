@@ -1274,6 +1274,31 @@ describe('PokerTable table-management controls', () => {
     expect(mobileMarkup).toContain('Rabbit hunt')
   })
 
+  it('clears the mobile winner summary after a rabbit runout so the board stays visible', () => {
+    const state = makeFoldEndedState()
+    state.communityCards = [
+      { rank: 'A', suit: 'spades' },
+      { rank: 'K', suit: 'hearts' },
+      { rank: 'Q', suit: 'diamonds' },
+      { rank: 'J', suit: 'clubs' },
+      { rank: 'T', suit: 'spades' },
+    ]
+    state.recentActions = ['Rabbit hunt: flop As Kh Qd | turn Jc | river 10s', ...state.recentActions]
+
+    const desktopMarkup = renderTable(state, {
+      '(max-width: 768px)': false,
+      '(min-width: 1024px)': false,
+    })
+    const mobileMarkup = renderTable(state, {
+      '(max-width: 768px)': true,
+      '(min-width: 1024px)': false,
+    })
+
+    expect(desktopMarkup).toContain('table-hand-result-summary')
+    expect(mobileMarkup).not.toContain('mobile-edge-winners')
+    expect(mobileMarkup).toContain('class="community-cards"')
+  })
+
   it('uses explicit, mobile-safe labels for player management controls', () => {
     const tableSource = readFileSync(join(process.cwd(), 'components', 'table', 'PokerTable.tsx'), 'utf8')
 

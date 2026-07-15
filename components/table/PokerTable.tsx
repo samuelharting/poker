@@ -1200,6 +1200,10 @@ export function PokerTable({
   }, [betweenHands, state.winners, state.players, winnerSeatMap, winnerSeatTargets])
   const showDesktopWaitingBanner = betweenHands && !isMobileViewport && winnerDisplays.length === 0
   const showManualRabbitHunt = canManualRabbitHunt(state) && Boolean(onRabbitHunt)
+  const hasVisibleRabbitRunout = betweenHands &&
+    state.round !== 'showdown' &&
+    state.communityCards.length === 5 &&
+    state.recentActions[0]?.startsWith('Rabbit hunt:') === true
 
   const tableCenterLabel = me
       ? me.nickname.toUpperCase()
@@ -1421,7 +1425,7 @@ export function PokerTable({
                 })}
             </div>
 
-            {betweenHands && showWinnerResults && winnerDisplays.length > 0 && (
+            {betweenHands && showWinnerResults && winnerDisplays.length > 0 && !hasVisibleRabbitRunout && (
               <div className="mobile-edge-winners" role="status" aria-live="assertive" aria-atomic="true">
                 <div className="mobile-edge-winners-heading">
                   {winnerDisplays.length > 1 ? 'Split pot' : 'Hand winner'}
