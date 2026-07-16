@@ -2,10 +2,11 @@
 
 import dynamic from 'next/dynamic'
 import React, { type CSSProperties, useState, useMemo, useCallback, useEffect, useRef } from 'react'
-import type { Card, TableState, SeatPlayer, LobbyPlayer, ShowCardsMode, PlayerStats } from '@/lib/poker/types'
+import type { Card, CardRevealRequest, TableState, SeatPlayer, LobbyPlayer, ShowCardsMode, PlayerStats } from '@/lib/poker/types'
 import { isAllowedEmote, type SocialSnapshot, type TableChatEntry } from '@/shared/protocol'
 import { PlayerSeat, formatWinnerPaymentLabel, getVisibleSeatCards } from './PlayerSeat'
 import { CommunityCards } from './CommunityCards'
+import { RunItTwiceBoards, RunItTwicePrompt } from './RunItTwice'
 import { OwnHand } from './OwnHand'
 import { PotDisplay } from './PotDisplay'
 import { ShowdownCinematic, useShowdownPresentation } from './ShowdownCinematic'
@@ -16,6 +17,17 @@ import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
 import { evaluateHand } from '@/lib/poker/evaluator'
 import { getShowdownRevealMode } from '@/lib/poker/showdown'
 import type { PokerSoundCueKind } from '@/lib/poker/soundscape'
+import {
+  AVATAR_CELEBRATION_OPTIONS,
+  AVATAR_GLASSES_OPTIONS,
+  AVATAR_HAT_OPTIONS,
+  AVATAR_IDLE_TELL_OPTIONS,
+  AVATAR_JACKET_COLOR_OPTIONS,
+  AVATAR_JACKET_OPTIONS,
+  AVATAR_MODEL_KEYS,
+  DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
+  type PlayerAvatarCustomization,
+} from '@/lib/profile'
 import {
   createThreeChatMessages,
   createThreeEmoteReactions,
@@ -50,6 +62,7 @@ interface PokerTableProps {
   suitColorMode: 'two' | 'four'
   soundMuted?: boolean
   soundVolume?: number
+  avatarCustomization?: PlayerAvatarCustomization
   roomCode: string
   canShareRoom: boolean
   onAction: (
@@ -59,6 +72,7 @@ interface PokerTableProps {
   onStartGame: () => void
   onAddBots: (count: number) => void
   onRabbitHunt?: () => void
+  onRunItTwiceVote?: (vote: 'yes' | 'no') => void
   autoStartEnabled: boolean
   onSetAutoStart: (enabled: boolean) => void
   onUpdateSettings: (settings: {
@@ -76,9 +90,12 @@ interface PokerTableProps {
   onSetPlayerSpectator: (targetId: string, spectator: boolean) => void
   onSeatMe: () => void
   onSetShowCards: (mode: ShowCardsMode) => void
+  onRequestCardReveal?: (targetId: string) => void
+  onRespondCardReveal?: (requesterId: string, allow: boolean) => void
   onSetSuitColorMode: (mode: 'two' | 'four') => void
   onSetSoundMuted?: (muted: boolean) => void
   onSetSoundVolume?: (volume: number) => void
+  onUpdateAvatar?: (avatar: PlayerAvatarCustomization) => void
   onSoundCue?: (cue: PokerSoundCueKind) => void
   onCloseSettings: () => void
   onCopyRoom: () => void
@@ -184,12 +201,22 @@ type WinnerDisplay = {
 
 type AllInAnnouncementView = NonNullable<ThreeTableViewModel['allInAnnouncement']>
 
+interface CardRevealSeatAction {
+  playerId: string
+  label: string
+  ariaLabel: string
+  status?: CardRevealRequest['status']
+  disabled: boolean
+}
+
 interface DesktopPokerRoom3DProps {
   view: ThreeTableViewModel
   emoteReactions: ThreeEmoteReaction[]
   chatMessages: ThreeChatMessage[]
   selectedTargetId: string | null
   onSelectPlayer: (playerId: string) => void
+  cardRevealActions: CardRevealSeatAction[]
+  onRequestCardReveal: (playerId: string) => void
 }
 
 const DesktopPokerRoom3D = dynamic<DesktopPokerRoom3DProps>(
@@ -226,8 +253,8 @@ const SHOW_CARD_OPTIONS: Array<{
   label: string
   shortLabel: string
 }> = [
-  { mode: 'left', label: 'left card', shortLabel: 'L' },
-  { mode: 'right', label: 'right card', shortLabel: 'R' },
+  { mode: 'left', label: 'left card', shortLabel: 'Left' },
+  { mode: 'right', label: 'right card', shortLabel: 'Right' },
   { mode: 'both', label: 'both cards', shortLabel: 'Both' },
   { mode: 'none', label: 'both cards', shortLabel: 'Muck' },
 ]
@@ -281,6 +308,35 @@ function HeroTableBet({ amount }: { amount: number }) {
   )
 }
 
+function MobileBetIndicator({
+  amount,
+  ownerLabel,
+  className,
+}: {
+  amount: number
+  ownerLabel: string
+  className: string
+}) {
+  if (amount <= 0) {
+    return null
+  }
+
+  const formattedAmount = formatAmount(amount)
+
+  return (
+    <div className={className}>
+      <div
+        className="mobile-bet-indicator"
+        role="status"
+        aria-label={`${ownerLabel} bet ${formattedAmount}`}
+      >
+        <span className="mobile-bet-token" aria-hidden="true" />
+        <strong>{formattedAmount}</strong>
+      </div>
+    </div>
+  )
+}
+
 function AllInAnnouncement({ announcement }: { announcement: AllInAnnouncementView }) {
   const amountCopy = announcement.amountLabel
     ? `${announcement.amountLabel} in the middle`
@@ -315,6 +371,7 @@ function MobileEdgeSeat({
   winnerAmount,
   winnerHandDescription,
   winningCards = [],
+  cardRevealControl,
   onNameClick,
 }: {
   player: OpponentSeat
@@ -324,6 +381,7 @@ function MobileEdgeSeat({
   winnerAmount?: number
   winnerHandDescription?: string
   winningCards?: Card[]
+  cardRevealControl?: React.ReactNode
   onNameClick?: (playerId: string) => void
 }) {
   const isFolded = player.status === 'folded'
@@ -355,6 +413,7 @@ function MobileEdgeSeat({
     isActing ? 'is-acting' : '',
     isFolded ? 'is-folded' : '',
     isWinner ? 'is-winner' : '',
+    hasVisibleHoleCards ? 'has-visible-cards' : '',
     isDisconnected ? 'is-disconnected' : '',
   ].filter(Boolean).join(' ')
 
@@ -405,6 +464,17 @@ function MobileEdgeSeat({
             <span className="mobile-edge-card-back" aria-label="Hidden card" />
           )}
         </div>
+      )}
+      {player.bet > 0 && (
+        <MobileBetIndicator
+          key={`${player.id}-${player.bet}`}
+          amount={player.bet}
+          ownerLabel={mobileSeatName}
+          className="mobile-edge-bet-anchor"
+        />
+      )}
+      {cardRevealControl && (
+        <div className="mobile-card-reveal-control">{cardRevealControl}</div>
       )}
 
       <div className="mobile-edge-seat-main">
@@ -517,6 +587,14 @@ export function buildActionButtonDescriptors({
   }
 
   return buttons
+}
+
+export function resolveCheckFoldPreAction(legalActions: PokerAction[]): 'check' | 'fold' | null {
+  if (legalActions.includes('check')) {
+    return 'check'
+  }
+
+  return legalActions.includes('fold') ? 'fold' : null
 }
 
 function formatEquityPercent(value: number): string {
@@ -746,12 +824,14 @@ export function PokerTable({
   suitColorMode,
   soundMuted = false,
   soundVolume = 0.65,
+  avatarCustomization = DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
   roomCode,
   canShareRoom,
   onAction,
   onStartGame,
   onAddBots,
   onRabbitHunt,
+  onRunItTwiceVote = () => {},
   autoStartEnabled,
   onSetAutoStart,
   onUpdateSettings,
@@ -760,9 +840,12 @@ export function PokerTable({
   onSetPlayerSpectator,
   onSeatMe,
   onSetShowCards,
+  onRequestCardReveal = () => {},
+  onRespondCardReveal = () => {},
   onSetSuitColorMode,
   onSetSoundMuted = () => {},
   onSetSoundVolume = () => {},
+  onUpdateAvatar = () => {},
   onSoundCue = () => {},
   onCloseSettings,
   onCopyRoom,
@@ -777,15 +860,40 @@ export function PokerTable({
   const shouldRenderDesktopThree = useMediaQuery('(min-width: 1024px)')
   const showdownView = useShowdownPresentation(state)
   const showdownPresentation = showdownView.presentation
+  const runItTwiceVote = state.runItTwice?.status === 'voting' ? state.runItTwice : null
+  const acceptedRunItTwice = state.runItTwice?.status === 'accepted' ? state.runItTwice : null
+  const isSpectatorViewer = Boolean(
+    state.lobbyPlayers.find(player => player.id === yourId)?.isSpectator
+  )
+  const liveCardRevealTargetIds = useMemo(() => new Set(
+    (state.cardRevealRequests ?? [])
+      .filter(request => request.requesterId === yourId && request.status === 'approved')
+      .map(request => request.targetId)
+  ), [state.cardRevealRequests, yourId])
+  const privacyProtectedPlayers = useMemo(() => {
+    if (state.phase !== 'in_hand' || isSpectatorViewer) {
+      return state.players
+    }
+
+    return state.players.map(player => {
+      if (player.id === yourId || liveCardRevealTargetIds.has(player.id)) {
+        return player
+      }
+
+      return player.holeCards || player.showCards !== 'none'
+        ? { ...player, holeCards: undefined, showCards: 'none' as const }
+        : player
+    })
+  }, [isSpectatorViewer, liveCardRevealTargetIds, state.phase, state.players, yourId])
   const showWinnerHighlights = !showdownPresentation.isShowdown || showdownPresentation.winningHandHighlighted
   const showWinnerPayout = !showdownPresentation.isShowdown || showdownPresentation.payoutStarted
   const showWinnerResults = !showdownPresentation.isShowdown || showdownPresentation.resultsVisible
   const showdownPresentedPlayers = useMemo(() => {
     if (!showdownPresentation.isShowdown) {
-      return state.players
+      return privacyProtectedPlayers
     }
 
-    return state.players.map(player => {
+    return privacyProtectedPlayers.map(player => {
       // Keep the local player's already-known hand in place. Every other live
       // hand flips at its existing seat according to the shared timeline.
       if (player.id === yourId) {
@@ -797,7 +905,7 @@ export function PokerTable({
         ? player
         : { ...player, showCards: revealMode }
     })
-  }, [showdownPresentation, state.players, yourId])
+  }, [privacyProtectedPlayers, showdownPresentation, yourId])
   const showdownPresentedState = useMemo(
     () => showdownPresentedPlayers === state.players
       ? state
@@ -842,10 +950,42 @@ export function PokerTable({
   const isInHand = state.phase === 'in_hand'
   const betweenHands = !isInHand
   const hasCompletedHandWinner = betweenHands && Boolean(state.winners?.length)
-  const isSpectator = Boolean(lobbyMe?.isSpectator)
-  const isFoldedViewer = isInHand && me?.status === 'folded'
-  const canShowRevealedCards = isSpectator || isFoldedViewer || hasCompletedHandWinner
+  const isSpectator = isSpectatorViewer
+  const isCompletedHandReveal = state.phase === 'between_hands' && Boolean(state.winners?.length)
+  const isFoldedViewer = me?.status === 'folded' && (isInHand || isCompletedHandReveal)
+  const canShowRevealedCards = isSpectator || hasCompletedHandWinner
   const canAdjustShownCards = Boolean(me?.holeCards?.length) && hasCompletedHandWinner
+  const cardRevealRequests = state.cardRevealRequests ?? []
+  const pendingIncomingCardRequest = cardRevealRequests.find(request => (
+    request.targetId === yourId && request.status === 'pending'
+  ))
+  const incomingCardRequester = pendingIncomingCardRequest
+    ? state.players.find(player => player.id === pendingIncomingCardRequest.requesterId)
+    : undefined
+  const requestableCardPlayers = isFoldedViewer
+      ? state.players.filter(player => (
+        player.id !== yourId &&
+        player.hasCards &&
+        (player.status === 'active' || player.status === 'all_in' || player.status === 'folded')
+      ))
+    : []
+  const cardRevealActions = useMemo<CardRevealSeatAction[]>(() => {
+    if (settingsOpen) {
+      return []
+    }
+
+    return requestableCardPlayers.map(player => createCardRevealSeatAction(
+      player,
+      cardRevealRequests.find(request => (
+        request.requesterId === yourId && request.targetId === player.id
+      )),
+      isConnected
+    ))
+  }, [cardRevealRequests, isConnected, requestableCardPlayers, settingsOpen, yourId])
+  const cardRevealActionByPlayerId = useMemo(
+    () => new Map(cardRevealActions.map(action => [action.playerId, action])),
+    [cardRevealActions]
+  )
   const visibleOwnPlayer = (
     !isSpectator &&
     me &&
@@ -925,7 +1065,9 @@ export function PokerTable({
       return showdownPresentedPlayers
         .map(player => ({
           ...player,
-          showCards: canShowRevealedCards ? player.showCards : 'none',
+          showCards: canShowRevealedCards || (
+            isFoldedViewer && liveCardRevealTargetIds.has(player.id)
+          ) ? player.showCards : 'none',
           visualSeat: player.seatIndex,
         }))
         .sort((a, b) => a.visualSeat - b.visualSeat)
@@ -935,11 +1077,13 @@ export function PokerTable({
     return showdownPresentedPlayers
       .map(player => ({
         ...player,
-        showCards: canShowRevealedCards ? player.showCards : 'none',
+        showCards: canShowRevealedCards || (
+          isFoldedViewer && liveCardRevealTargetIds.has(player.id)
+        ) ? player.showCards : 'none',
         visualSeat: (player.seatIndex - mySeat + 8) % 8,
       }))
       .sort((a, b) => a.visualSeat - b.visualSeat)
-  }, [canShowRevealedCards, isSpectator, me, showdownPresentedPlayers])
+  }, [canShowRevealedCards, isFoldedViewer, isSpectator, liveCardRevealTargetIds, me, showdownPresentedPlayers])
 
   const occupiedVisualSeats = useMemo(() => {
     const occupied = new Set<number>()
@@ -1001,6 +1145,60 @@ export function PokerTable({
     return actions
   }, [canCheck, isConnected, isMyTurn, me, toCall])
   const hasActionTray = isInHand && isMyTurn && Boolean(me) && legalActions.length > 0
+  const [queuedCheckFoldHand, setQueuedCheckFoldHand] = useState<number | null>(null)
+  const isCheckFoldQueued = queuedCheckFoldHand === state.handNumber
+  const canQueueCheckFold = Boolean(
+    isInHand &&
+    state.actingPlayerId &&
+    !isMyTurn &&
+    me?.status === 'active' &&
+    visibleOwnPlayer &&
+    isConnected &&
+    !settingsOpen
+  )
+  const showCheckFoldPreAction = canQueueCheckFold && (
+    isMobileViewport || Boolean(threeTableView)
+  )
+
+  useEffect(() => {
+    if (queuedCheckFoldHand === null) {
+      return
+    }
+
+    const queueIsStillValid =
+      queuedCheckFoldHand === state.handNumber &&
+      isInHand &&
+      me?.status === 'active' &&
+      isConnected &&
+      !settingsOpen
+
+    if (!queueIsStillValid) {
+      setQueuedCheckFoldHand(null)
+      return
+    }
+
+    if (!isMyTurn) {
+      return
+    }
+
+    const action = resolveCheckFoldPreAction(legalActions)
+    if (!action) {
+      return
+    }
+
+    setQueuedCheckFoldHand(null)
+    onAction(action)
+  }, [
+    isConnected,
+    isInHand,
+    isMyTurn,
+    legalActions,
+    me?.status,
+    onAction,
+    queuedCheckFoldHand,
+    settingsOpen,
+    state.handNumber,
+  ])
 
   const maxRaise = me ? me.stack + me.bet : 0
   const effectiveMin = Math.min(state.minRaise, maxRaise)
@@ -1164,7 +1362,15 @@ export function PokerTable({
     [showWinnerHighlights, state.winners]
   )
   const myWinnerAmount = winnerAmounts.get(yourId) ?? 0
-  const winnerSeatMap = useMemo(() => new Map(orderedOpponents.map(player => [player.id, player.visualSeat])), [orderedOpponents])
+  const winnerSeatMap = useMemo(() => {
+    if (isMobileViewport) {
+      return new Map(
+        mobileEdgeOpponents.map(player => [player.id, player.mobileVisualSeat])
+      )
+    }
+
+    return new Map(orderedOpponents.map(player => [player.id, player.visualSeat]))
+  }, [isMobileViewport, mobileEdgeOpponents, orderedOpponents])
   const winnerSeatTargets = isMobileViewport ? MOBILE_WINNER_SEAT_TARGETS : WINNER_SEAT_TARGETS
   const winnerDisplays = useMemo<WinnerDisplay[]>(() => {
     if (!betweenHands || !state.winners?.length) {
@@ -1217,7 +1423,7 @@ export function PokerTable({
       : isMyTurn
         ? toCall > 0
           ? `To call ${formatAmount(toCall)}`
-          : 'Your turn'
+          : 'Check or raise'
         : actingPlayer
           ? `${actingPlayer.nickname}'s turn`
           : 'In hand'
@@ -1252,6 +1458,28 @@ export function PokerTable({
   const mobileRaiseBlindCount = state.bigBlind > 0
     ? Math.max(1, Math.round(raiseAmount / state.bigBlind))
     : raiseAmount
+  const checkFoldPreActionControl = showCheckFoldPreAction ? (
+    <button
+      type="button"
+      className={`own-hand-pre-action-button ${isCheckFoldQueued ? 'is-queued' : ''}`}
+      aria-label={isCheckFoldQueued
+        ? 'Cancel queued check or fold'
+        : 'Queue check if possible, otherwise fold'}
+      aria-pressed={isCheckFoldQueued}
+      title="Checks if checking is free; otherwise folds when action reaches you."
+      onClick={() => setQueuedCheckFoldHand(current => (
+        current === state.handNumber ? null : state.handNumber
+      ))}
+    >
+      <span className="own-hand-pre-action-mark" aria-hidden="true">
+        {isCheckFoldQueued ? '✓' : ''}
+      </span>
+      <span className="own-hand-pre-action-copy">
+        <small>{isCheckFoldQueued ? 'Queued' : 'Pre-action'}</small>
+        <strong>Check / Fold</strong>
+      </span>
+    </button>
+  ) : null
 
   const tableWaitingCopy = !isConnected
     ? 'Restoring the room snapshot and reconnecting your seat.'
@@ -1267,8 +1495,8 @@ export function PokerTable({
   const desktopWaitingBannerCopy = tableWaitingCopy
   const bettingTrayHeader = isMyTurn
     ? toCall > 0
-      ? `Your turn - Call ${formatAmount(toCall)}`
-      : 'Your turn'
+      ? `Call ${formatAmount(toCall)}`
+      : 'Check or raise'
     : toCall > 0
       ? `To call ${formatAmount(toCall)}`
       : 'Action live'
@@ -1347,7 +1575,9 @@ export function PokerTable({
       data-tray-open={hasActionTray ? 'true' : 'false'}
       data-desktop-three={threeTableView ? 'true' : 'false'}
       data-showdown={showdownPresentation.isShowdown ? 'true' : 'false'}
+      data-run-it-twice={state.runItTwice?.status ?? 'none'}
       data-showdown-stage={showdownPresentation.stage}
+      data-settings-open={settingsOpen ? 'true' : 'false'}
     >
       {threeTableView ? (
         <DesktopPokerRoom3D
@@ -1356,6 +1586,8 @@ export function PokerTable({
           chatMessages={threeChatMessages}
           selectedTargetId={targetEmotePlayerId}
           onSelectPlayer={handleSelectEmoteTarget}
+          cardRevealActions={cardRevealActions}
+          onRequestCardReveal={onRequestCardReveal}
         />
       ) : null}
       <ShowdownCinematic
@@ -1363,6 +1595,22 @@ export function PokerTable({
         presentation={showdownPresentation}
         onSoundCue={onSoundCue}
       />
+      {pendingIncomingCardRequest && incomingCardRequester && !settingsOpen ? (
+        <CardRevealConsentPrompt
+          requesterName={incomingCardRequester.nickname}
+          isConnected={isConnected}
+          onRespond={allow => onRespondCardReveal(pendingIncomingCardRequest.requesterId, allow)}
+        />
+      ) : null}
+      {runItTwiceVote && !settingsOpen ? (
+        <RunItTwicePrompt
+          runItTwice={runItTwiceVote}
+          players={state.players}
+          yourId={yourId}
+          isConnected={isConnected}
+          onVote={onRunItTwiceVote}
+        />
+      ) : null}
       {isInHand && actingPlayer && !threeTableView && !isMobileViewport && (
         <div
           className={`turn-focus-banner ${isMyTurn ? 'is-hero-turn' : 'is-opponent-turn'}`}
@@ -1370,7 +1618,7 @@ export function PokerTable({
           aria-live={isMyTurn ? 'assertive' : 'polite'}
         >
           <span className="turn-focus-kicker">
-            {isMyTurn ? 'Your turn' : 'Turn'}
+            {isMyTurn ? 'Action' : 'Turn'}
           </span>
           <span className="turn-focus-name">
             {isMyTurn ? 'You are up' : `${actingPlayer.nickname} is up`}
@@ -1388,10 +1636,14 @@ export function PokerTable({
                 currentBet={state.currentBet}
                 toCall={isMyTurn ? Math.max(0, toCall) : 0}
               />
-              <CommunityCards
-                cards={state.communityCards}
-                highlightedCards={highlightedWinningCards}
-              />
+              {acceptedRunItTwice ? (
+                <RunItTwiceBoards runItTwice={acceptedRunItTwice} players={state.players} />
+              ) : (
+                <CommunityCards
+                  cards={state.communityCards}
+                  highlightedCards={highlightedWinningCards}
+                />
+              )}
             </div>
 
             <div className="mobile-edge-seats" aria-label="Players">
@@ -1412,6 +1664,12 @@ export function PokerTable({
                         winnerAmount={winnerAmounts.get(player.id)}
                         winnerHandDescription={winnerDescriptions.get(player.id)}
                         winningCards={winnerCardsByPlayer.get(player.id)}
+                        cardRevealControl={cardRevealActionByPlayerId.has(player.id) ? (
+                          <CardRevealSeatButton
+                            action={cardRevealActionByPlayerId.get(player.id)!}
+                            onRequest={onRequestCardReveal}
+                          />
+                        ) : null}
                         onNameClick={handleSelectEmoteTarget}
                       />
                       {(seatSocial.message || seatSocial.emote) && (
@@ -1425,7 +1683,32 @@ export function PokerTable({
                 })}
             </div>
 
-            {betweenHands && showWinnerResults && winnerDisplays.length > 0 && !hasVisibleRabbitRunout && (
+            {betweenHands && showWinnerPayout && winnerDisplays.length > 0 && (
+              <div
+                className="table-center-winner-chip-trails mobile-winner-chip-trails"
+                aria-hidden="true"
+              >
+                {winnerDisplays.map(winner => {
+                  const trailStyle: WinnerChipTrailStyle = {
+                    ['--winner-chip-x']: winner.targetX,
+                    ['--winner-chip-y']: winner.targetY,
+                    ['--winner-chip-delay']: `${winner.delayMs}ms`,
+                  }
+
+                  return (
+                    <div
+                      key={`${winner.playerId}-mobile-trail`}
+                      className="table-center-winner-chip-trail"
+                      style={trailStyle}
+                    >
+                      <ChipStack amount={winner.amount} compact showAmount={false} />
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {betweenHands && showWinnerResults && winnerDisplays.length > 0 && !hasVisibleRabbitRunout && !acceptedRunItTwice && (
               <div className="mobile-edge-winners" role="status" aria-live="assertive" aria-atomic="true">
                 <div className="mobile-edge-winners-heading">
                   {winnerDisplays.length > 1 ? 'Split pot' : 'Hand winner'}
@@ -1444,6 +1727,14 @@ export function PokerTable({
 
             {shouldShowOwnHand && visibleOwnPlayer && (
               <div className="mobile-hero-lane">
+                {visibleOwnPlayer.bet > 0 && (
+                  <MobileBetIndicator
+                    key={`${visibleOwnPlayer.id}-${visibleOwnPlayer.bet}`}
+                    amount={visibleOwnPlayer.bet}
+                    ownerLabel="Your"
+                    className="mobile-hero-bet-anchor"
+                  />
+                )}
                 <MobileHeroSeat
                   player={visibleOwnPlayer}
                   isActing={isMyTurn}
@@ -1459,6 +1750,7 @@ export function PokerTable({
                   winningCards={winnerCardsByPlayer.get(yourId)}
                   handDescription={ownHandDescription}
                   showCardsMode={ownShowCardsMode}
+                  revealChoiceActive={canAdjustShownCards}
                   showCardsControl={
                     canAdjustShownCards && me && !isSpectator && !settingsOpen ? (
                       <ShowCardsControl
@@ -1468,6 +1760,7 @@ export function PokerTable({
                       />
                     ) : null
                   }
+                  preActionControl={checkFoldPreActionControl}
                 />
               </div>
             )}
@@ -1516,6 +1809,12 @@ export function PokerTable({
                     socialEmote={seatSocial.emote}
                     socialEmoteExpiresAt={seatSocial.emoteExpiresAt}
                     socialEmoteTargeted={seatSocial.emoteTargeted}
+                    cardRevealControl={cardRevealActionByPlayerId.has(player.id) ? (
+                      <CardRevealSeatButton
+                        action={cardRevealActionByPlayerId.get(player.id)!}
+                        onRequest={onRequestCardReveal}
+                      />
+                    ) : null}
                     onNameClick={handleSelectEmoteTarget}
                   />
                 </div>
@@ -1524,10 +1823,14 @@ export function PokerTable({
           </div>
 
           <div className="table-surface">
-            <CommunityCards
-              cards={state.communityCards}
-              highlightedCards={highlightedWinningCards}
-            />
+            {acceptedRunItTwice ? (
+              <RunItTwiceBoards runItTwice={acceptedRunItTwice} players={state.players} />
+            ) : (
+              <CommunityCards
+                cards={state.communityCards}
+                highlightedCards={highlightedWinningCards}
+              />
+            )}
 
             <PotDisplay
               totalPot={state.totalPot}
@@ -1553,9 +1856,9 @@ export function PokerTable({
               </div>
             )}
 
-            {betweenHands && winnerDisplays.length > 0 && (showWinnerResults || showWinnerPayout) ? (
+            {betweenHands && winnerDisplays.length > 0 && !acceptedRunItTwice && (showWinnerResults || showWinnerPayout) ? (
               <div className="table-seat-winner-announcements" role="status" aria-live="assertive" aria-atomic="true">
-                {showWinnerResults && (
+                {showWinnerResults && !hasVisibleRabbitRunout && (
                   <div className="table-hand-result-summary">
                     <span className="table-hand-result-kicker">
                       {winnerDisplays.length > 1 ? 'Split pot' : 'Hand winner'}
@@ -1620,6 +1923,7 @@ export function PokerTable({
                 winningCards={winnerCardsByPlayer.get(yourId)}
                 handDescription={ownHandDescription}
                 showCardsMode={ownShowCardsMode}
+                revealChoiceActive={canAdjustShownCards}
                 showCardsControl={
                   canAdjustShownCards && me && !isSpectator && !settingsOpen ? (
                     <ShowCardsControl
@@ -1629,6 +1933,7 @@ export function PokerTable({
                     />
                   ) : null
                 }
+                preActionControl={checkFoldPreActionControl}
               />
 
               <div
@@ -1690,12 +1995,14 @@ export function PokerTable({
           suitColorMode={suitColorMode}
           soundMuted={soundMuted}
           soundVolume={soundVolume}
+          avatarCustomization={avatarCustomization}
           roomCode={roomCode}
           canShareRoom={canShareRoom}
           onClose={onCloseSettings}
           onSetSuitColorMode={onSetSuitColorMode}
           onSetSoundMuted={onSetSoundMuted}
           onSetSoundVolume={onSetSoundVolume}
+          onUpdateAvatar={onUpdateAvatar}
           onUpdateSettings={onUpdateSettings}
           onRemovePlayer={onRemovePlayer}
           onAdjustPlayerStack={onAdjustPlayerStack}
@@ -1825,11 +2132,6 @@ export function PokerTable({
               <span className="betting-tray-kicker">
                 {bettingTrayHeader}
               </span>
-              {isMyTurn && (
-                <span className="betting-tray-turn">
-                  Your turn
-                </span>
-              )}
             </div>
 
             <div className="timer-bar-shell">
@@ -2063,6 +2365,96 @@ function TableSocialDock({
   )
 }
 
+function CardRevealConsentPrompt({
+  requesterName,
+  isConnected,
+  onRespond,
+}: {
+  requesterName: string
+  isConnected: boolean
+  onRespond: (allow: boolean) => void
+}) {
+  return (
+    <aside
+      className="card-reveal-consent"
+      role="alertdialog"
+      aria-labelledby="card-reveal-consent-title"
+      aria-describedby="card-reveal-consent-description"
+    >
+      <span className="card-reveal-consent-kicker">Card request</span>
+      <strong id="card-reveal-consent-title">{requesterName} wants to see your cards</strong>
+      <p id="card-reveal-consent-description">
+        Only {requesterName} will see them, and permission expires after this hand.
+      </p>
+      <div className="card-reveal-consent-actions">
+        <button
+          type="button"
+          className="card-reveal-deny"
+          disabled={!isConnected}
+          onClick={() => onRespond(false)}
+        >
+          Keep hidden
+        </button>
+        <button
+          type="button"
+          className="card-reveal-allow"
+          disabled={!isConnected}
+          onClick={() => onRespond(true)}
+        >
+          Allow this hand
+        </button>
+      </div>
+    </aside>
+  )
+}
+
+function createCardRevealSeatAction(
+  player: SeatPlayer,
+  request: CardRevealRequest | undefined,
+  isConnected: boolean
+): CardRevealSeatAction {
+  const label = request?.status === 'pending'
+    ? 'Waiting'
+    : request?.status === 'approved'
+      ? 'Shown'
+      : request?.status === 'denied'
+        ? 'Hidden'
+        : player.isBot ? 'See' : 'Ask'
+
+  return {
+    playerId: player.id,
+    label,
+    ariaLabel: request
+      ? `${player.nickname}: ${label}`
+      : player.isBot
+        ? `See ${player.nickname}'s cards`
+        : `Ask ${player.nickname} for permission to see their cards`,
+    status: request?.status,
+    disabled: !isConnected || Boolean(request),
+  }
+}
+
+function CardRevealSeatButton({
+  action,
+  onRequest,
+}: {
+  action: CardRevealSeatAction
+  onRequest: (targetId: string) => void
+}) {
+  return (
+    <button
+      type="button"
+      className={`card-reveal-seat-button${action.status ? ` is-${action.status}` : ''}`}
+      disabled={action.disabled}
+      onClick={() => onRequest(action.playerId)}
+      aria-label={action.ariaLabel}
+      title={action.ariaLabel}
+    >
+      {action.label}
+    </button>
+  )
+}
+
 function ShowCardsControl({
   mode,
   isConnected,
@@ -2078,6 +2470,9 @@ function ShowCardsControl({
       role="group"
       aria-label="Choose which cards to reveal after this hand"
     >
+      <span className="show-cards-toggle-label">
+        {mode === 'none' ? 'Your cards are private' : 'Visible to the table'}
+      </span>
       {SHOW_CARD_OPTIONS.map(option => {
         const isActive = mode === option.mode
         const buttonLabel = option.mode === 'none'
@@ -2305,6 +2700,105 @@ function useTurnTimer(
   return timer
 }
 
+function formatAvatarChoice(value: string): string {
+  return value
+    .split('_')
+    .map(word => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+    .join(' ')
+}
+
+function buildAvatarSummary(avatar: PlayerAvatarCustomization): string {
+  const hat = avatar.hat === 'none' ? 'No hat' : formatAvatarChoice(avatar.hat)
+  const glasses = avatar.glasses === 'none' ? 'No glasses' : formatAvatarChoice(avatar.glasses)
+  const jacket = avatar.jacket === 'none'
+    ? 'No jacket'
+    : `${formatAvatarChoice(avatar.jacket)} in ${formatAvatarChoice(avatar.jacketColor)}`
+
+  return [
+    formatAvatarChoice(avatar.modelKey),
+    hat,
+    glasses,
+    jacket,
+    `${formatAvatarChoice(avatar.idleTell)} tell`,
+    `${formatAvatarChoice(avatar.celebration)} win`,
+  ].join(' \u00b7 ')
+}
+
+function AvatarChoiceGroup<T extends string>({
+  legend,
+  value,
+  options,
+  onChange,
+}: {
+  legend: string
+  value: T
+  options: readonly T[]
+  onChange: (value: T) => void
+}) {
+  return (
+    <fieldset className="avatar-choice-group">
+      <legend>{legend}</legend>
+      <div className="avatar-choice-options">
+        {options.map(option => (
+          <button
+            key={option}
+            type="button"
+            className={`avatar-choice ${value === option ? 'is-active' : ''}`}
+            data-option={option}
+            aria-pressed={value === option}
+            onClick={() => onChange(option)}
+          >
+            {formatAvatarChoice(option)}
+          </button>
+        ))}
+      </div>
+    </fieldset>
+  )
+}
+
+function AvatarLookPreview({ avatar }: { avatar: PlayerAvatarCustomization }) {
+  const summary = buildAvatarSummary(avatar)
+
+  return (
+    <div className="avatar-look-card">
+      <div
+        className="avatar-preview-figure"
+        role="img"
+        aria-label={`Avatar preview: ${summary}`}
+        data-model={avatar.modelKey}
+        data-hat={avatar.hat}
+        data-glasses={avatar.glasses}
+        data-jacket={avatar.jacket}
+        data-jacket-color={avatar.jacketColor}
+      >
+        <div className="avatar-preview-glow" aria-hidden="true" />
+        <div className="avatar-preview-person" aria-hidden="true">
+          <div className="avatar-preview-hat"><span /></div>
+          <div className="avatar-preview-head">
+            <div className="avatar-preview-hair" />
+            <div className="avatar-preview-glasses">
+              <i />
+              <b />
+              <i />
+            </div>
+          </div>
+          <div className="avatar-preview-neck" />
+          <div className="avatar-preview-torso">
+            <div className="avatar-preview-jacket avatar-preview-jacket-left" />
+            <div className="avatar-preview-shirt" />
+            <div className="avatar-preview-jacket avatar-preview-jacket-right" />
+          </div>
+        </div>
+      </div>
+      <div className="avatar-look-copy">
+        <span className="settings-section-title">Live look</span>
+        <strong>{formatAvatarChoice(avatar.modelKey)}</strong>
+        <p aria-live="polite">{summary}</p>
+      </div>
+    </div>
+  )
+}
+
 export function SettingsModal({
   state,
   yourId,
@@ -2312,12 +2806,14 @@ export function SettingsModal({
   suitColorMode,
   soundMuted = false,
   soundVolume = 0.65,
+  avatarCustomization = DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
   roomCode,
   canShareRoom,
   onClose,
   onSetSuitColorMode,
   onSetSoundMuted = () => {},
   onSetSoundVolume = () => {},
+  onUpdateAvatar = () => {},
   onUpdateSettings,
   onRemovePlayer,
   onAdjustPlayerStack,
@@ -2332,12 +2828,14 @@ export function SettingsModal({
   suitColorMode: 'two' | 'four'
   soundMuted?: boolean
   soundVolume?: number
+  avatarCustomization?: PlayerAvatarCustomization
   roomCode: string
   canShareRoom: boolean
   onClose: () => void
   onSetSuitColorMode: (mode: 'two' | 'four') => void
   onSetSoundMuted?: (muted: boolean) => void
   onSetSoundVolume?: (volume: number) => void
+  onUpdateAvatar?: (avatar: PlayerAvatarCustomization) => void
   onUpdateSettings: (settings: {
     smallBlind?: number
     bigBlind?: number
@@ -2355,9 +2853,21 @@ export function SettingsModal({
   onShareRoom: () => void
   onFeedback: (message: string, tone?: FeedbackTone) => void
 }) {
-  const [activeTab, setActiveTab] = useState<'general' | 'players'>('general')
+  type NumericDraftValue = number | ''
+  type NumericSettingsDraftKey =
+    | 'smallBlind'
+    | 'bigBlind'
+    | 'startingStack'
+    | 'actionTimerSeconds'
+    | 'autoStartDelaySeconds'
+    | 'sevenTwoBountyPercent'
+
+  const [activeTab, setActiveTab] = useState<'general' | 'avatar' | 'players'>('general')
   const [showSevenTwoCustomize, setShowSevenTwoCustomize] = useState(false)
-  const [chipDrafts, setChipDrafts] = useState<Record<string, number>>({})
+  const [chipDrafts, setChipDrafts] = useState<Record<string, NumericDraftValue>>({})
+  const [avatarDraft, setAvatarDraft] = useState<PlayerAvatarCustomization>(() => ({
+    ...avatarCustomization,
+  }))
   const configuredSettings = {
     smallBlind: state.pendingTableSettings?.smallBlind ?? state.smallBlind,
     bigBlind: state.pendingTableSettings?.bigBlind ?? state.bigBlind,
@@ -2368,7 +2878,16 @@ export function SettingsModal({
     sevenTwoRuleEnabled: state.pendingTableSettings?.sevenTwoRuleEnabled ?? state.sevenTwoRuleEnabled,
     sevenTwoBountyPercent: state.pendingTableSettings?.sevenTwoBountyPercent ?? state.sevenTwoBountyPercent,
   }
-  const [draft, setDraft] = useState(() => ({
+  const [draft, setDraft] = useState<{
+    smallBlind: NumericDraftValue
+    bigBlind: NumericDraftValue
+    startingStack: NumericDraftValue
+    actionTimerSeconds: NumericDraftValue
+    autoStartDelaySeconds: NumericDraftValue
+    rabbitHuntingEnabled: boolean
+    sevenTwoRuleEnabled: boolean
+    sevenTwoBountyPercent: NumericDraftValue
+  }>(() => ({
     smallBlind: configuredSettings.smallBlind,
     bigBlind: configuredSettings.bigBlind,
     startingStack: configuredSettings.startingStack,
@@ -2401,15 +2920,35 @@ export function SettingsModal({
     configuredSettings.startingStack,
   ])
 
+  useEffect(() => {
+    setAvatarDraft({ ...avatarCustomization })
+  }, [
+    avatarCustomization.celebration,
+    avatarCustomization.glasses,
+    avatarCustomization.hat,
+    avatarCustomization.idleTell,
+    avatarCustomization.jacket,
+    avatarCustomization.jacketColor,
+    avatarCustomization.modelKey,
+  ])
+
   const hasSettingsChanges =
     draft.smallBlind !== configuredSettings.smallBlind ||
     draft.bigBlind !== configuredSettings.bigBlind ||
     draft.startingStack !== configuredSettings.startingStack ||
-    draft.actionTimerSeconds * 1000 !== configuredSettings.actionTimerDuration ||
-    draft.autoStartDelaySeconds * 1000 !== configuredSettings.autoStartDelay ||
+    Number(draft.actionTimerSeconds) * 1000 !== configuredSettings.actionTimerDuration ||
+    Number(draft.autoStartDelaySeconds) * 1000 !== configuredSettings.autoStartDelay ||
     draft.rabbitHuntingEnabled !== configuredSettings.rabbitHuntingEnabled ||
     draft.sevenTwoRuleEnabled !== configuredSettings.sevenTwoRuleEnabled ||
     draft.sevenTwoBountyPercent !== configuredSettings.sevenTwoBountyPercent
+  const hasAvatarChanges =
+    avatarDraft.modelKey !== avatarCustomization.modelKey ||
+    avatarDraft.hat !== avatarCustomization.hat ||
+    avatarDraft.glasses !== avatarCustomization.glasses ||
+    avatarDraft.jacket !== avatarCustomization.jacket ||
+    avatarDraft.jacketColor !== avatarCustomization.jacketColor ||
+    avatarDraft.idleTell !== avatarCustomization.idleTell ||
+    avatarDraft.celebration !== avatarCustomization.celebration
   const canSaveSettings = canSaveTableSettings({
     isConnected,
     hasSettingsChanges,
@@ -2426,10 +2965,17 @@ export function SettingsModal({
     sevenTwoBountyPercent: configuredSettings.sevenTwoBountyPercent,
   })
 
-  const getPlayerChipDraft = (playerId: string) => {
-    const draftValue = chipDrafts[playerId]
-    if (typeof draftValue === 'number' && Number.isFinite(draftValue) && draftValue > 0) {
-      return draftValue
+  const updateNumericDraft = (field: NumericSettingsDraftKey, value: string) => {
+    const parsedValue = value === '' ? '' : Number(value)
+    setDraft(current => ({
+      ...current,
+      [field]: typeof parsedValue === 'number' && !Number.isFinite(parsedValue) ? '' : parsedValue,
+    }))
+  }
+
+  const getPlayerChipDraft = (playerId: string): NumericDraftValue => {
+    if (Object.prototype.hasOwnProperty.call(chipDrafts, playerId)) {
+      return chipDrafts[playerId]
     }
 
     return Math.max(state.bigBlind, 100)
@@ -2447,17 +2993,25 @@ export function SettingsModal({
       return
     }
 
-    const smallBlind = Math.max(1, Math.floor(draft.smallBlind))
-    const bigBlind = Math.max(smallBlind, Math.floor(draft.bigBlind))
-    const startingStack = Math.max(bigBlind * 10, Math.floor(draft.startingStack))
-    const actionTimerDuration = Math.min(60000, Math.max(5000, Math.floor(draft.actionTimerSeconds) * 1000))
-    const autoStartDelay = Math.min(30000, Math.max(1000, Math.floor(draft.autoStartDelaySeconds) * 1000))
-    const sevenTwoBountyPercent = Math.min(100, Math.max(0, Number(draft.sevenTwoBountyPercent)))
-
-    if (!Number.isFinite(smallBlind) || !Number.isFinite(bigBlind) || !Number.isFinite(startingStack)) {
-      onFeedback('Enter valid blinds and stack sizes before saving.', 'error')
+    const numericDrafts = [
+      draft.smallBlind,
+      draft.bigBlind,
+      draft.startingStack,
+      draft.actionTimerSeconds,
+      draft.autoStartDelaySeconds,
+      draft.sevenTwoBountyPercent,
+    ]
+    if (numericDrafts.some(value => value === '' || !Number.isFinite(value))) {
+      onFeedback('Enter a number in every numeric setting before saving.', 'error')
       return
     }
+
+    const smallBlind = Math.max(1, Math.floor(Number(draft.smallBlind)))
+    const bigBlind = Math.max(smallBlind, Math.floor(Number(draft.bigBlind)))
+    const startingStack = Math.max(bigBlind * 10, Math.floor(Number(draft.startingStack)))
+    const actionTimerDuration = Math.min(60000, Math.max(5000, Math.floor(Number(draft.actionTimerSeconds)) * 1000))
+    const autoStartDelay = Math.min(30000, Math.max(1000, Math.floor(Number(draft.autoStartDelaySeconds)) * 1000))
+    const sevenTwoBountyPercent = Math.min(100, Math.max(0, Number(draft.sevenTwoBountyPercent)))
 
     onUpdateSettings({
       smallBlind,
@@ -2469,6 +3023,18 @@ export function SettingsModal({
       sevenTwoRuleEnabled: draft.sevenTwoRuleEnabled,
       sevenTwoBountyPercent,
     })
+  }
+
+  const saveAvatar = () => {
+    if (!isConnected) {
+      onFeedback('Reconnect to the table before saving your avatar.', 'error')
+      return
+    }
+    if (!hasAvatarChanges) {
+      return
+    }
+
+    onUpdateAvatar({ ...avatarDraft })
   }
 
   return (
@@ -2483,7 +3049,7 @@ export function SettingsModal({
         <div className="settings-modal-header">
           <div>
             <div className="table-panel-kicker">Table console</div>
-            <div id="table-settings-dialog-title" className="table-panel-title">Table settings and roster</div>
+            <div id="table-settings-dialog-title" className="table-panel-title">Table, avatar, and roster</div>
           </div>
           <button type="button" className="btn-subtle" onClick={onClose}>
             Close
@@ -2497,6 +3063,13 @@ export function SettingsModal({
             onClick={() => setActiveTab('general')}
           >
             Settings
+          </button>
+          <button
+            type="button"
+            className={`settings-tab ${activeTab === 'avatar' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('avatar')}
+          >
+            Avatar
           </button>
           <button
             type="button"
@@ -2601,7 +3174,7 @@ export function SettingsModal({
                         min={1}
                         step={1}
                         value={draft.smallBlind}
-                        onChange={event => setDraft(current => ({ ...current, smallBlind: Number(event.target.value) || current.smallBlind }))}
+                        onChange={event => updateNumericDraft('smallBlind', event.target.value)}
                       />
                     </label>
                     <label className="settings-field">
@@ -2611,7 +3184,7 @@ export function SettingsModal({
                         min={1}
                         step={1}
                         value={draft.bigBlind}
-                        onChange={event => setDraft(current => ({ ...current, bigBlind: Number(event.target.value) || current.bigBlind }))}
+                        onChange={event => updateNumericDraft('bigBlind', event.target.value)}
                       />
                     </label>
                     <label className="settings-field">
@@ -2621,7 +3194,7 @@ export function SettingsModal({
                         min={10}
                         step={10}
                         value={draft.startingStack}
-                        onChange={event => setDraft(current => ({ ...current, startingStack: Number(event.target.value) || current.startingStack }))}
+                        onChange={event => updateNumericDraft('startingStack', event.target.value)}
                       />
                     </label>
                   </div>
@@ -2638,7 +3211,7 @@ export function SettingsModal({
                         max={60}
                         step={1}
                         value={draft.actionTimerSeconds}
-                        onChange={event => setDraft(current => ({ ...current, actionTimerSeconds: Number(event.target.value) || current.actionTimerSeconds }))}
+                        onChange={event => updateNumericDraft('actionTimerSeconds', event.target.value)}
                       />
                     </label>
                     <label className="settings-field">
@@ -2649,7 +3222,7 @@ export function SettingsModal({
                         max={30}
                         step={1}
                         value={draft.autoStartDelaySeconds}
-                        onChange={event => setDraft(current => ({ ...current, autoStartDelaySeconds: Number(event.target.value) || current.autoStartDelaySeconds }))}
+                        onChange={event => updateNumericDraft('autoStartDelaySeconds', event.target.value)}
                       />
                     </label>
                   </div>
@@ -2723,10 +3296,7 @@ export function SettingsModal({
                           max={100}
                           step={0.5}
                           value={draft.sevenTwoBountyPercent}
-                          onChange={event => setDraft(current => ({
-                            ...current,
-                            sevenTwoBountyPercent: Number(event.target.value) || 0,
-                          }))}
+                          onChange={event => updateNumericDraft('sevenTwoBountyPercent', event.target.value)}
                         />
                       </label>
                     </div>
@@ -2768,6 +3338,92 @@ export function SettingsModal({
           </div>
         )}
 
+        {activeTab === 'avatar' && (
+          <div className="settings-modal-body avatar-settings-body">
+            <section className="settings-section avatar-settings-intro">
+              <div>
+                <div className="settings-section-title">Make the seat yours</div>
+                <div className="settings-section-copy">
+                  Build a table look, choose a natural idle tell, and pick how you celebrate a win.
+                  Nothing changes for the room until you save.
+                </div>
+              </div>
+              <AvatarLookPreview avatar={avatarDraft} />
+            </section>
+
+            <section className="settings-section avatar-customizer-section" aria-label="Avatar options">
+              <AvatarChoiceGroup
+                legend="Base look"
+                value={avatarDraft.modelKey}
+                options={AVATAR_MODEL_KEYS}
+                onChange={modelKey => setAvatarDraft(current => ({ ...current, modelKey }))}
+              />
+              <AvatarChoiceGroup
+                legend="Hat"
+                value={avatarDraft.hat}
+                options={AVATAR_HAT_OPTIONS}
+                onChange={hat => setAvatarDraft(current => ({ ...current, hat }))}
+              />
+              <AvatarChoiceGroup
+                legend="Glasses"
+                value={avatarDraft.glasses}
+                options={AVATAR_GLASSES_OPTIONS}
+                onChange={glasses => setAvatarDraft(current => ({ ...current, glasses }))}
+              />
+              <AvatarChoiceGroup
+                legend="Jacket"
+                value={avatarDraft.jacket}
+                options={AVATAR_JACKET_OPTIONS}
+                onChange={jacket => setAvatarDraft(current => ({ ...current, jacket }))}
+              />
+              <AvatarChoiceGroup
+                legend="Jacket color"
+                value={avatarDraft.jacketColor}
+                options={AVATAR_JACKET_COLOR_OPTIONS}
+                onChange={jacketColor => setAvatarDraft(current => ({ ...current, jacketColor }))}
+              />
+              <AvatarChoiceGroup
+                legend="Idle tell"
+                value={avatarDraft.idleTell}
+                options={AVATAR_IDLE_TELL_OPTIONS}
+                onChange={idleTell => setAvatarDraft(current => ({ ...current, idleTell }))}
+              />
+              <AvatarChoiceGroup
+                legend="Win celebration"
+                value={avatarDraft.celebration}
+                options={AVATAR_CELEBRATION_OPTIONS}
+                onChange={celebration => setAvatarDraft(current => ({ ...current, celebration }))}
+              />
+
+              <div className="settings-footer avatar-settings-footer">
+                <span className="settings-save-status" role="status">
+                  {!isConnected
+                    ? 'Reconnect to save this look to the table.'
+                    : hasAvatarChanges
+                      ? 'Previewing unsaved changes.'
+                      : 'Your saved look is live at the table.'}
+                </span>
+                <button
+                  type="button"
+                  className="btn-subtle"
+                  disabled={!hasAvatarChanges}
+                  onClick={() => setAvatarDraft({ ...avatarCustomization })}
+                >
+                  Reset avatar
+                </button>
+                <button
+                  type="button"
+                  className="btn-subtle btn-subtle-gold"
+                  disabled={!hasAvatarChanges || !isConnected}
+                  onClick={saveAvatar}
+                >
+                  {hasAvatarChanges ? 'Save avatar' : 'Avatar saved'}
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
+
         {activeTab === 'players' && (
           <div className="settings-modal-body">
             <div className="settings-roster-summary">
@@ -2780,11 +3436,15 @@ export function SettingsModal({
 
             <div className="settings-player-list">
               {state.lobbyPlayers.map(player => {
-                const manageAmount = Math.max(state.bigBlind, Math.floor(getPlayerChipDraft(player.id)))
+                const chipDraft = getPlayerChipDraft(player.id)
+                const hasValidChipDraft = typeof chipDraft === 'number' && Number.isFinite(chipDraft) && chipDraft > 0
+                const manageAmount = hasValidChipDraft
+                  ? Math.max(state.bigBlind, Math.floor(chipDraft))
+                  : Math.max(state.bigBlind, 100)
                 const tags = buildPlayerManagementTags(player, {
                   yourId,
                 })
-                const canRemoveChips = isConnected && player.stack > 0
+                const canRemoveChips = isConnected && player.stack > 0 && hasValidChipDraft
                 const canToggleSpectator = isConnected && (
                   !player.isSpectator || player.stack > 0
                 )
@@ -2811,14 +3471,14 @@ export function SettingsModal({
                           type="number"
                           min={state.bigBlind}
                           step={state.bigBlind}
-                          value={getPlayerChipDraft(player.id)}
+                          value={chipDraft}
                           onChange={event => {
-                            const nextValue = Number(event.target.value)
+                            const nextValue = event.target.value === '' ? '' : Number(event.target.value)
                             setChipDrafts(current => ({
                               ...current,
-                              [player.id]: Number.isFinite(nextValue) && nextValue > 0
-                                ? nextValue
-                                : state.bigBlind,
+                              [player.id]: typeof nextValue === 'number' && !Number.isFinite(nextValue)
+                                ? ''
+                                : nextValue,
                             }))
                           }}
                         />
@@ -2827,7 +3487,7 @@ export function SettingsModal({
                         type="button"
                         className="btn-subtle btn-chip-add"
                         aria-label={`Add ${formatAmount(manageAmount)} chips to ${player.nickname}`}
-                        disabled={!isConnected}
+                        disabled={!isConnected || !hasValidChipDraft}
                         onClick={() => onAdjustPlayerStack(player.id, manageAmount)}
                       >
                         Add chips

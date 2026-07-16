@@ -22,6 +22,7 @@ interface PlayerSeatProps {
   socialEmote?: string
   socialEmoteExpiresAt?: number
   socialEmoteTargeted?: boolean
+  cardRevealControl?: React.ReactNode
   onNameClick?: (playerId: string) => void
 }
 
@@ -89,6 +90,7 @@ export function PlayerSeat({
   socialEmote,
   socialEmoteExpiresAt,
   socialEmoteTargeted = false,
+  cardRevealControl,
   onNameClick,
 }: PlayerSeatProps) {
   const isFolded = player.status === 'folded'
@@ -207,6 +209,9 @@ export function PlayerSeat({
             </>
           )}
         </div>
+      )}
+      {cardRevealControl && (
+        <div className="player-card-reveal-control">{cardRevealControl}</div>
       )}
 
       {player.bet > 0 && (

@@ -20,6 +20,8 @@ import {
 } from './betting'
 import { compareHands, evaluateHand } from './evaluator'
 
+export const RUN_IT_TWICE_VOTE_DURATION_MS = 12_000
+
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
@@ -370,7 +372,7 @@ export function createInitialGameState(
   smallBlind = 10,
   bigBlind = 20,
   startingStack = 1000,
-  actionTimerDuration = 30000
+  actionTimerDuration = 10000
 ): InternalGameState {
   return {
     roomCode,
@@ -428,6 +430,7 @@ export function startHand(state: InternalGameState): InternalGameState {
   s.winners = undefined
   s.bounty = undefined
   s.showdownAt = undefined
+  s.runItTwice = undefined
   s.handNumber += 1
 
   // Reset all players
@@ -748,6 +751,30 @@ export function advanceRound(state: InternalGameState): InternalGameState {
   // If only 1 or fewer players can act, run out the board automatically
   const actionable = countActionablePlayers(s.players)
 
+  // Pause a true heads-up all-in before dealing another street. The room owns
+  // the vote and will only resume with two boards after both players consent.
+  if (
+    !s.runItTwice &&
+    s.communityCards.length < 5 &&
+    playersInHand.length === 2 &&
+    actionable <= 1 &&
+    playersInHand.every(player => !player.isBot)
+  ) {
+    const now = Date.now()
+    s.runItTwice = {
+      status: 'voting',
+      eligiblePlayerIds: playersInHand.map(player => player.id),
+      votes: {},
+      sharedCardCount: s.communityCards.length,
+      expiresAt: now + RUN_IT_TWICE_VOTE_DURATION_MS,
+    }
+    s.actingPlayerId = null
+    s.actingPlayerIndex = -1
+    s.actionTimerStart = null
+    addAction(s, 'Run it twice offered to both players')
+    return s
+  }
+
   switch (s.round) {
     case 'preflop': {
       s.round = 'flop'
@@ -841,6 +868,198 @@ function awardLastPlayer(
   s.actingPlayerId = null
   s.actingPlayerIndex = -1
   return s
+}
+
+function dealRunItTwiceBoard(state: InternalGameState, sharedCards: Card[]): Card[] {
+  const board = [...sharedCards]
+
+  if (board.length === 0) {
+    dealCards(state.deck, 1)
+    board.push(...dealCards(state.deck, 3))
+  }
+
+  if (board.length === 3) {
+    dealCards(state.deck, 1)
+    board.push(...dealCards(state.deck, 1))
+  }
+
+  if (board.length === 4) {
+    dealCards(state.deck, 1)
+    board.push(...dealCards(state.deck, 1))
+  }
+
+  return board
+}
+
+function resolveRunItTwiceBoards(state: InternalGameState): InternalGameState {
+  const s = cloneState(state)
+  const voteState = s.runItTwice
+  if (!voteState || voteState.status !== 'voting') {
+    throw new Error('Run it twice is not awaiting votes')
+  }
+
+  s.pots = buildSidePots(s.players)
+  s.totalPot = s.pots.reduce((sum, pot) => sum + pot.amount, 0)
+
+  const sharedCards = [...s.communityCards]
+  const boards = [
+    dealRunItTwiceBoard(s, sharedCards),
+    dealRunItTwiceBoard(s, sharedCards),
+  ]
+  const combinedWinnerTotals = new Map<string, number>()
+  const combinedWinnerDescriptions = new Map<string, string>()
+  const combinedWinnerCards = new Map<string, Card[]>()
+  const boardWinnerTotals = boards.map(() => new Map<string, number>())
+  const boardWinnerDescriptions = boards.map(() => new Map<string, string>())
+  const boardWinnerCards = boards.map(() => new Map<string, Card[]>())
+
+  for (const pot of s.pots) {
+    const boardShares = [Math.ceil(pot.amount / 2), Math.floor(pot.amount / 2)]
+
+    boards.forEach((board, boardIndex) => {
+      const potAmount = boardShares[boardIndex] ?? 0
+      if (potAmount <= 0) {
+        return
+      }
+
+      const contenders = pot.eligiblePlayerIds
+        .map(playerId => {
+          const player = s.players.find(candidate => candidate.id === playerId)
+          if (!player || player.holeCards.length !== 2) {
+            return null
+          }
+
+          return {
+            playerId,
+            result: evaluateHand([...player.holeCards, ...board]),
+          }
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+        .sort((a, b) => compareHands(b.result, a.result))
+
+      if (contenders.length === 0) {
+        return
+      }
+
+      const bestResult = contenders[0]!.result
+      const winners = contenders.filter(({ result }) => compareHands(result, bestResult) === 0)
+      const winnerShare = Math.floor(potAmount / winners.length)
+      const remainder = potAmount - winnerShare * winners.length
+
+      winners.forEach((winner, winnerIndex) => {
+        const amount = winnerShare + (winnerIndex === 0 ? remainder : 0)
+        const playerId = winner.playerId
+        boardWinnerTotals[boardIndex]!.set(
+          playerId,
+          (boardWinnerTotals[boardIndex]!.get(playerId) ?? 0) + amount
+        )
+        boardWinnerDescriptions[boardIndex]!.set(playerId, winner.result.description)
+        boardWinnerCards[boardIndex]!.set(playerId, winner.result.cards)
+        combinedWinnerTotals.set(playerId, (combinedWinnerTotals.get(playerId) ?? 0) + amount)
+        combinedWinnerDescriptions.set(playerId, winner.result.description)
+        combinedWinnerCards.set(playerId, winner.result.cards)
+      })
+    })
+  }
+
+  applyHandPayouts(
+    s,
+    combinedWinnerTotals,
+    combinedWinnerDescriptions,
+    combinedWinnerCards
+  )
+
+  const startedAt = Date.now()
+  const resolvedBoards = boards.map((cards, boardIndex) => ({
+    cards,
+    winners: Array.from(boardWinnerTotals[boardIndex]!.entries()).map(([playerId, amount]) => ({
+      playerId,
+      amount,
+      handDescription: boardWinnerDescriptions[boardIndex]!.get(playerId),
+      winningCards: boardWinnerCards[boardIndex]!.get(playerId),
+    })),
+  }))
+  s.communityCards = boards[0]!
+  s.runItTwice = {
+    ...voteState,
+    status: 'accepted',
+    startedAt,
+    boards: resolvedBoards,
+  }
+  s.round = 'showdown'
+  s.actingPlayerId = null
+  s.actingPlayerIndex = -1
+  s.actionTimerStart = null
+  s.showdownAt = startedAt
+  s.phase = 'between_hands'
+
+  resolvedBoards.forEach((board, index) => {
+    const winnerCopy = board.winners
+      .map(winner => {
+        const player = s.players.find(candidate => candidate.id === winner.playerId)
+        return `${player?.nickname ?? 'Player'} ${winner.amount}`
+      })
+      .join(', ')
+    addAction(s, `Run ${index + 1}: ${formatBoardCards(board.cards)} - ${winnerCopy}`)
+  })
+
+  return s
+}
+
+export function resolveRunItTwiceDecision(
+  state: InternalGameState,
+  runTwice: boolean
+): InternalGameState {
+  const voteState = state.runItTwice
+  if (!voteState || voteState.status !== 'voting') {
+    throw new Error('Run it twice is not awaiting votes')
+  }
+
+  if (runTwice) {
+    return resolveRunItTwiceBoards(state)
+  }
+
+  const s = cloneState(state)
+  s.runItTwice = {
+    ...s.runItTwice!,
+    status: 'declined',
+  }
+  addAction(s, 'Run it twice declined - dealing one board')
+  return advanceRound(s)
+}
+
+export function voteRunItTwice(
+  state: InternalGameState,
+  playerId: string,
+  vote: 'yes' | 'no'
+): InternalGameState {
+  const voteState = state.runItTwice
+  if (!voteState || voteState.status !== 'voting') {
+    throw new Error('Run it twice is not available')
+  }
+
+  if (!voteState.eligiblePlayerIds.includes(playerId)) {
+    throw new Error('Only the two players still in the hand can vote')
+  }
+
+  if (voteState.votes[playerId]) {
+    throw new Error('Your run it twice vote is already locked in')
+  }
+
+  const s = cloneState(state)
+  s.runItTwice!.votes[playerId] = vote
+  const player = s.players.find(candidate => candidate.id === playerId)
+  addAction(s, `${player?.nickname ?? 'Player'} voted ${vote} to run it twice`)
+
+  if (vote === 'no') {
+    return resolveRunItTwiceDecision(s, false)
+  }
+
+  const bothAccepted = s.runItTwice!.eligiblePlayerIds.every(
+    eligibleId => s.runItTwice!.votes[eligibleId] === 'yes'
+  )
+
+  return bothAccepted ? resolveRunItTwiceDecision(s, true) : s
 }
 
 /**
@@ -958,6 +1177,7 @@ export function prepareNextHand(state: InternalGameState): InternalGameState {
   s.communityCards = []
   s.winners = undefined
   s.showdownAt = undefined
+  s.runItTwice = undefined
   s.actingPlayerId = null
   s.actingPlayerIndex = -1
 
@@ -990,26 +1210,18 @@ export function prepareNextHand(state: InternalGameState): InternalGameState {
 
 /**
  * Convert internal game state to a public TableState for a specific viewer.
- * Sanitizes hole cards for the owning player, formal spectators, and a seated
- * player who has folded out of the current live hand.
+ * Sanitizes hole cards for every viewer. During a live hand, only the owner
+ * can see their cards. Once the hand ends, showdown participants are revealed
+ * automatically and everyone else remains hidden unless they opt in.
  */
 export function toTableState(
   state: InternalGameState,
   viewerPlayerId: string,
   options: {
-    revealAllHoleCards?: boolean
+    permittedHoleCardPlayerIds?: readonly string[]
   } = {}
 ): TableState {
-  const viewer = state.players.find(player => player.id === viewerPlayerId)
-  const foldedViewerCanSeeAllHands = Boolean(
-    state.phase === 'in_hand' &&
-    viewer &&
-    !viewer.isBot &&
-    viewer.isConnected &&
-    viewer.status === 'folded' &&
-    viewer.holeCards.length === 2
-  )
-  const revealAllHoleCards = options.revealAllHoleCards === true || foldedViewerCanSeeAllHands
+  const permittedHoleCardPlayerIds = new Set(options.permittedHoleCardPlayerIds ?? [])
   const canRevealOptInCards = state.phase === 'between_hands' && Boolean(state.winners?.length)
   const isShowdownReveal = canRevealOptInCards && state.round === 'showdown'
   const showdownParticipantIds = new Set(
@@ -1032,11 +1244,11 @@ export function toTableState(
       return undefined
     }
 
-    if (revealAllHoleCards) {
+    if (isShowdownParticipant(player)) {
       return player.holeCards
     }
 
-    if (isShowdownParticipant(player)) {
+    if (permittedHoleCardPlayerIds.has(player.id)) {
       return player.holeCards
     }
 
@@ -1060,7 +1272,7 @@ export function toTableState(
   }
 
   const visibleShowCards = (player: InternalPlayer): ShowCardsMode => {
-    if (revealAllHoleCards && player.holeCards.length > 0) {
+    if (permittedHoleCardPlayerIds.has(player.id) && player.holeCards.length > 0) {
       return 'both'
     }
 
@@ -1116,6 +1328,7 @@ export function toTableState(
     handNumber: state.handNumber,
     actionSequence: state.actionSequence ?? 0,
     showdownAt: state.showdownAt,
+    runItTwice: state.runItTwice,
     recentActions: state.recentActions,
     lobbyPlayers: [],
     winners: state.winners,

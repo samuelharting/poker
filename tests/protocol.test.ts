@@ -56,4 +56,95 @@ describe('targeted table chat protocol', () => {
       targetId: 'bob',
     })
   })
+
+  it('normalizes optional avatar data on join and avatar updates', () => {
+    const expectedAvatar = {
+      modelKey: 'hoodie',
+      hat: 'beanie',
+      glasses: 'none',
+      jacket: 'none',
+      jacketColor: 'emerald',
+      idleTell: 'chip_shuffle',
+      celebration: 'wave',
+    }
+
+    expect(parseC2S(JSON.stringify({
+      type: 'join_room',
+      nickname: 'Sam',
+      email: 'sam@example.com',
+      venmoUsername: '',
+      avatar: {
+        modelKey: 'hoodie',
+        hat: 'beanie',
+        jacketColor: 'emerald',
+        idleTell: 'chip_shuffle',
+      },
+    }))).toEqual({
+      type: 'join_room',
+      nickname: 'Sam',
+      email: 'sam@example.com',
+      venmoUsername: '',
+      avatar: expectedAvatar,
+      reconnectToken: undefined,
+    })
+
+    expect(parseC2S(JSON.stringify({
+      type: 'update_avatar',
+      avatar: {
+        modelKey: 'hoodie',
+        hat: 'beanie',
+        jacketColor: 'emerald',
+        idleTell: 'chip_shuffle',
+      },
+    }))).toEqual({
+      type: 'update_avatar',
+      avatar: expectedAvatar,
+    })
+
+    expect(parseC2S(JSON.stringify({
+      type: 'update_avatar',
+      avatar: 'hoodie',
+    }))).toBeNull()
+  })
+
+  it('only accepts explicit yes or no run-it-twice votes', () => {
+    expect(parseC2S(JSON.stringify({
+      type: 'run_it_twice_vote',
+      vote: 'yes',
+    }))).toEqual({
+      type: 'run_it_twice_vote',
+      vote: 'yes',
+    })
+
+    expect(parseC2S(JSON.stringify({
+      type: 'run_it_twice_vote',
+      vote: true,
+    }))).toBeNull()
+  })
+
+  it('accepts card reveal requests and explicit consent responses', () => {
+    expect(parseC2S(JSON.stringify({
+      type: 'request_card_reveal',
+      targetId: ' player-2 ',
+    }))).toEqual({
+      type: 'request_card_reveal',
+      targetId: 'player-2',
+    })
+
+    expect(parseC2S(JSON.stringify({
+      type: 'respond_card_reveal',
+      requesterId: 'player-1',
+      allow: true,
+    }))).toEqual({
+      type: 'respond_card_reveal',
+      requesterId: 'player-1',
+      allow: true,
+    })
+
+    expect(parseC2S(JSON.stringify({
+      type: 'respond_card_reveal',
+      requesterId: 'player-1',
+      allow: 'yes',
+    }))).toBeNull()
+  })
 })

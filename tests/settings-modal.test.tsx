@@ -2,6 +2,7 @@ import React, { act } from 'react'
 import { create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TableState } from '@/lib/poker/types'
+import { DEFAULT_PLAYER_AVATAR_CUSTOMIZATION } from '@/lib/profile'
 
 vi.mock('next/dynamic', () => ({
   default: () => () => null,
@@ -53,10 +54,12 @@ function makeProps(overrides: Partial<SettingsModalProps> = {}): SettingsModalPr
     yourId: 'hero',
     isConnected: true,
     suitColorMode: 'two',
+    avatarCustomization: DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
     roomCode: 'ABC123',
     canShareRoom: true,
     onClose: vi.fn(),
     onSetSuitColorMode: vi.fn(),
+    onUpdateAvatar: vi.fn(),
     onUpdateSettings: vi.fn(),
     onRemovePlayer: vi.fn(),
     onAdjustPlayerStack: vi.fn(),
@@ -120,6 +123,98 @@ afterEach(() => {
 })
 
 describe('SettingsModal', () => {
+  it('lets numeric settings be cleared before typing replacement values', () => {
+    const onUpdateSettings = vi.fn()
+    const view = renderModal(makeProps({ onUpdateSettings }))
+    act(() => {
+      findButton(view.root, 'Customize').props.onClick()
+    })
+    const fields = [
+      ['Small blind', '5'],
+      ['Big blind', '10'],
+      ['Starting stack', '500'],
+      ['Action timer', '15'],
+      ['Next hand delay', '4'],
+      ['Bounty %', '4.5'],
+    ] as const
+
+    for (const [label, replacement] of fields) {
+      act(() => {
+        findInput(view.root, label).props.onChange({ target: { value: '' } })
+      })
+      expect(findInput(view.root, label).props.value).toBe('')
+
+      act(() => {
+        findInput(view.root, label).props.onChange({ target: { value: replacement } })
+      })
+      expect(findInput(view.root, label).props.value).toBe(Number(replacement))
+    }
+
+    act(() => {
+      findButton(view.root, 'Save table settings').props.onClick()
+    })
+
+    expect(onUpdateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      smallBlind: 5,
+      bigBlind: 10,
+      startingStack: 500,
+      actionTimerDuration: 15_000,
+      autoStartDelay: 4_000,
+      sevenTwoBountyPercent: 4.5,
+    }))
+  })
+
+  it('lets player chip amounts be cleared before typing a replacement', () => {
+    const state = makeTableState({
+      lobbyPlayers: [{
+        id: 'hero',
+        nickname: 'Codex Host',
+        stack: 1_000,
+        status: 'waiting',
+        isConnected: true,
+        isSeated: true,
+        isSpectator: false,
+      }],
+    })
+    const view = renderModal(makeProps({ state }))
+
+    act(() => {
+      findButton(view.root, 'Players (1)').props.onClick()
+    })
+    act(() => {
+      findInput(view.root, 'Chip amount').props.onChange({ target: { value: '' } })
+    })
+
+    expect(findInput(view.root, 'Chip amount').props.value).toBe('')
+    expect(findButton(view.root, 'Add chips').props.disabled).toBe(true)
+
+    act(() => {
+      findInput(view.root, 'Chip amount').props.onChange({ target: { value: '200' } })
+    })
+
+    expect(findInput(view.root, 'Chip amount').props.value).toBe(200)
+    expect(findButton(view.root, 'Add chips').props.disabled).toBe(false)
+  })
+
+  it('keeps save from treating a temporarily empty number as zero', () => {
+    const onUpdateSettings = vi.fn()
+    const onFeedback = vi.fn()
+    const view = renderModal(makeProps({ onUpdateSettings, onFeedback }))
+
+    act(() => {
+      findInput(view.root, 'Small blind').props.onChange({ target: { value: '' } })
+    })
+    act(() => {
+      findButton(view.root, 'Save table settings').props.onClick()
+    })
+
+    expect(onUpdateSettings).not.toHaveBeenCalled()
+    expect(onFeedback).toHaveBeenCalledWith(
+      'Enter a number in every numeric setting before saving.',
+      'error'
+    )
+  })
+
   it('preserves unsaved numeric edits through rule toggles and resets to the server snapshot', () => {
     const onUpdateSettings = vi.fn()
     const view = renderModal(makeProps({ onUpdateSettings }))
@@ -287,5 +382,75 @@ describe('SettingsModal', () => {
     expect(onSetSoundMuted).toHaveBeenCalledWith(true)
     expect(onSetSoundVolume).toHaveBeenCalledWith(0.25)
     expect(onUpdateSettings).not.toHaveBeenCalled()
+  })
+
+  it('previews a complete avatar look and only publishes it on explicit save', () => {
+    const onUpdateAvatar = vi.fn()
+    const avatarCustomization = {
+      ...DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
+      modelKey: 'casual' as const,
+      jacketColor: 'midnight' as const,
+    }
+    const view = renderModal(makeProps({ avatarCustomization, onUpdateAvatar }))
+
+    act(() => {
+      findButton(view.root, 'Avatar').props.onClick()
+    })
+
+    expect(findButton(view.root, 'Avatar saved').props.disabled).toBe(true)
+    expect(view.root.findByProps({ role: 'img' }).props['aria-label']).toContain('Casual')
+
+    act(() => {
+      findButton(view.root, 'Adventurer').props.onClick()
+      findButton(view.root, 'Fedora').props.onClick()
+      findButton(view.root, 'Shades').props.onClick()
+      findButton(view.root, 'Leather').props.onClick()
+      findButton(view.root, 'Emerald').props.onClick()
+      findButton(view.root, 'Chip Shuffle').props.onClick()
+      findButton(view.root, 'Fist Pump').props.onClick()
+    })
+
+    expect(onUpdateAvatar).not.toHaveBeenCalled()
+    expect(findButton(view.root, 'Fedora').props['aria-pressed']).toBe(true)
+    expect(view.root.findByProps({ role: 'img' }).props['aria-label']).toContain(
+      'Adventurer \u00b7 Fedora \u00b7 Shades \u00b7 Leather in Emerald'
+    )
+    expect(nodeText(view.root)).toContain('Previewing unsaved changes.')
+
+    act(() => {
+      findButton(view.root, 'Save avatar').props.onClick()
+    })
+
+    expect(onUpdateAvatar).toHaveBeenCalledOnce()
+    expect(onUpdateAvatar).toHaveBeenCalledWith({
+      modelKey: 'adventurer',
+      hat: 'fedora',
+      glasses: 'shades',
+      jacket: 'leather',
+      jacketColor: 'emerald',
+      idleTell: 'chip_shuffle',
+      celebration: 'fist_pump',
+    })
+  })
+
+  it('can reset an unsaved avatar draft without publishing it', () => {
+    const onUpdateAvatar = vi.fn()
+    const view = renderModal(makeProps({ onUpdateAvatar }))
+
+    act(() => {
+      findButton(view.root, 'Avatar').props.onClick()
+    })
+    act(() => {
+      findButton(view.root, 'Cowboy').props.onClick()
+    })
+    expect(findButton(view.root, 'Save avatar').props.disabled).toBe(false)
+
+    act(() => {
+      findButton(view.root, 'Reset avatar').props.onClick()
+    })
+
+    expect(findButton(view.root, 'Avatar saved').props.disabled).toBe(true)
+    expect(view.root.findByProps({ role: 'img' }).props['aria-label']).toContain('No hat')
+    expect(onUpdateAvatar).not.toHaveBeenCalled()
   })
 })

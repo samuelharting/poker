@@ -566,6 +566,49 @@ describe('createThreeTableViewModel', () => {
     expect(firstSam?.avatarProfile).not.toEqual(firstMaya?.avatarProfile)
   })
 
+  it('uses a player-selected avatar look instead of the automatic cosmetic profile', () => {
+    const avatar = {
+      modelKey: 'punk',
+      hat: 'crown',
+      glasses: 'shades',
+      jacket: 'smoking',
+      jacketColor: 'violet',
+      idleTell: 'table_drum',
+      celebration: 'victory',
+    } as const
+    const view = createThreeTableViewModel(
+      makeTable({ players: [makePlayer({ id: 'hero', avatar })] }),
+      'hero'
+    )
+
+    expect(view.hero?.avatarProfile).toMatchObject({
+      ...avatar,
+      isCustomized: true,
+    })
+  })
+
+  it('scales wager intensity from the displayed action amount and treats all-in as maximum', () => {
+    const view = createThreeTableViewModel(
+      makeTable({
+        bigBlind: 20,
+        players: [
+          makePlayer({ id: 'small', lastAction: 'Called $20', lastActionId: '1:1', bet: 20 }),
+          makePlayer({ id: 'large', seatIndex: 1, lastAction: 'Raised $400', lastActionId: '1:2', bet: 400 }),
+          makePlayer({ id: 'all', seatIndex: 2, lastAction: 'All-in for $250', lastActionId: '1:3', bet: 250 }),
+        ],
+      }),
+      'small'
+    )
+
+    const small = view.players.find(player => player.id === 'small')
+    const large = view.players.find(player => player.id === 'large')
+    const allIn = view.players.find(player => player.id === 'all')
+
+    expect(small?.actionAmount).toBe(20)
+    expect(large?.wagerIntensity).toBeGreaterThan(small?.wagerIntensity ?? 0)
+    expect(allIn?.wagerIntensity).toBe(1)
+  })
+
   it('does not retrigger the same hero action when only table totals change', () => {
     const before = createThreeTableViewModel(
       makeTable({

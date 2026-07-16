@@ -1,15 +1,9 @@
 import type { Vec3 } from './pokerActionPose'
+import { AVATAR_MODEL_KEYS, type PlayerAvatarModelKey } from '@/lib/profile'
 
-export const REALISTIC_AVATAR_MODEL_KEYS = [
-  'business_man',
-  'casual',
-  'hoodie',
-  'worker',
-  'punk',
-  'adventurer',
-] as const
+export const REALISTIC_AVATAR_MODEL_KEYS = AVATAR_MODEL_KEYS
 
-export type RealisticAvatarModelKey = (typeof REALISTIC_AVATAR_MODEL_KEYS)[number]
+export type RealisticAvatarModelKey = PlayerAvatarModelKey
 
 export interface RealisticAvatarModelConfig {
   label: string

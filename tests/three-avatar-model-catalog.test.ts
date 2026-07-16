@@ -72,7 +72,7 @@ describe('animated WebGL desktop player presentation', () => {
     expect(renderer).toContain('className="cinematic-seat-reaction"')
   })
 
-  it('animates player actions, cards, table light, and camera focus', () => {
+  it('animates player actions, cards, table light, and all-in camera impact', () => {
     expect(renderer).toContain('function animateSeat')
     expect(renderer).toContain("playback.cue === 'all_in'")
     expect(renderer).toContain('getSeatedAvatarActionPose')
@@ -80,7 +80,8 @@ describe('animated WebGL desktop player presentation', () => {
     expect(renderer).toContain('seat.cards.position.set')
     expect(renderer).toContain('seat.avatarMixer.update(reducedMotion ? 0 : delta)')
     expect(renderer).toContain('runtime.feltMaterial.emissiveIntensity')
-    expect(renderer).toContain('getTurnCameraPose(actingSeat)')
+    expect(renderer).toContain('targetCamera.copy(baseCameraPosition)')
+    expect(renderer).toContain('getAllInCameraImpact')
     expect(renderer).toContain('camera.position.lerp')
     expect(renderer).toContain('window.requestAnimationFrame(animate)')
   })

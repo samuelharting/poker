@@ -10,6 +10,7 @@ export const SHOWDOWN_WINNING_HAND_HOLD_MS = 420
 export const SHOWDOWN_PAYOUT_TRAVEL_MS = 850
 export const SHOWDOWN_RESULT_HOLD_MS = 650
 export const SHOWDOWN_AUTO_START_BUFFER_MS = 400
+export const RUN_IT_TWICE_PRESENTATION_DURATION_MS = 7_200
 
 export type ShowdownStage =
   | 'idle'

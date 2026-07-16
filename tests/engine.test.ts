@@ -535,12 +535,12 @@ describe('toTableState', () => {
     expect(p1InView2.holeCards).toBeUndefined()
   })
 
-  it('reveals every hand to a spectator view during a live hand', () => {
+  it('reveals every hand when the viewer has spectator card access', () => {
     const state = startHand(setup2Players())
     const [p1, p2] = state.players
 
     const spectatorView = toTableState(state, 'spectator-1', {
-      revealAllHoleCards: true,
+      permittedHoleCardPlayerIds: state.players.map(player => player.id),
     })
     const p1InSpectatorView = spectatorView.players.find(player => player.id === p1!.id)!
     const p2InSpectatorView = spectatorView.players.find(player => player.id === p2!.id)!
@@ -583,7 +583,7 @@ describe('toTableState', () => {
     expect(view.winners?.[0]?.handDescription).toContain('Three of a Kind')
   })
 
-  it('reveals every live hand only to the connected seated player who folded', () => {
+  it('keeps opponents private from a seated player who folded', () => {
     const state = startHand(setup3Players())
     const foldedState = processAction(state, state.actingPlayerId!, 'fold')
     const folder = foldedState.players.find(player => player.status === 'folded')!
@@ -592,8 +592,13 @@ describe('toTableState', () => {
     expect(foldedState.phase).toBe('in_hand')
 
     const folderView = toTableState(foldedState, folder.id)
-    expect(folderView.players.every(player => player.holeCards?.length === 2)).toBe(true)
-    expect(folderView.players.every(player => player.showCards === 'both')).toBe(true)
+    expect(folderView.players.find(player => player.id === folder.id)?.holeCards).toHaveLength(2)
+    expect(
+      folderView.players
+        .filter(player => player.id !== folder.id)
+        .every(player => player.holeCards === undefined)
+    ).toBe(true)
+    expect(folderView.players.every(player => player.showCards === 'none')).toBe(true)
 
     const activeView = toTableState(foldedState, activeOpponent.id)
     expect(activeView.players.find(player => player.id === activeOpponent.id)?.holeCards).toHaveLength(2)
@@ -603,16 +608,35 @@ describe('toTableState', () => {
         .every(player => player.holeCards === undefined)
     ).toBe(true)
 
-    folder.isConnected = false
-    const disconnectedView = toTableState(foldedState, folder.id)
-    expect(
-      disconnectedView.players
-        .filter(player => player.id !== folder.id)
-        .every(player => player.holeCards === undefined)
-    ).toBe(true)
   })
 
-  it('removes folded-view access when the next hand starts', () => {
+  it('reveals only a specifically permitted hand to the folded requester', () => {
+    const state = startHand(setup3Players())
+    const foldedState = processAction(state, state.actingPlayerId!, 'fold')
+    const folder = foldedState.players.find(player => player.status === 'folded')!
+    const opponents = foldedState.players.filter(player => player.id !== folder.id)
+    const permittedOpponent = opponents[0]!
+    const privateOpponent = opponents[1]!
+
+    const permittedView = toTableState(foldedState, folder.id, {
+      permittedHoleCardPlayerIds: [permittedOpponent.id],
+    })
+
+    expect(permittedView.players.find(player => player.id === permittedOpponent.id)?.holeCards)
+      .toEqual(permittedOpponent.holeCards)
+    expect(permittedView.players.find(player => player.id === permittedOpponent.id)?.showCards)
+      .toBe('both')
+    expect(permittedView.players.find(player => player.id === privateOpponent.id)?.holeCards)
+      .toBeUndefined()
+    expect(permittedView.players.find(player => player.id === privateOpponent.id)?.showCards)
+      .toBe('none')
+
+    const unrelatedView = toTableState(foldedState, privateOpponent.id)
+    expect(unrelatedView.players.find(player => player.id === permittedOpponent.id)?.holeCards)
+      .toBeUndefined()
+  })
+
+  it('continues masking opponents when the next hand starts', () => {
     const state = startHand(setup3Players())
     const foldedState = processAction(state, state.actingPlayerId!, 'fold')
     const folder = foldedState.players.find(player => player.status === 'folded')!

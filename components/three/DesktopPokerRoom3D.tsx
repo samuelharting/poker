@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type MutableRefObject } from 'react'
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import {
   advanceActionPlaybackState,
   createActionPlaybackState,
@@ -13,7 +14,22 @@ import {
   disposeAvatarAssetInstance,
   type AvatarAssetInstance,
 } from './avatarAssetLoader'
-import { getOpponentTableActionPose, getSeatedAvatarActionPose } from './pokerActionPose'
+import {
+  ACTION_ANIMATION_DURATION_MS,
+  getOpponentTableActionPose,
+  getPokerActionMotionProfile,
+  getSeatedAvatarActionPose,
+  type PokerActionMotionProfile,
+} from './pokerActionPose'
+import {
+  createFallbackAvatarAccessories,
+  createRiggedAvatarAccessories,
+  disposeAvatarAccessorySet,
+  getAvatarAppearanceKey,
+  type AvatarAccessorySet,
+} from './avatarCustomization'
+import { getAvatarPersonalityPose } from './avatarPersonality'
+import { DESKTOP_CAMERA_FRAMING } from './cameraFraming'
 import type {
   ThreeActionCue,
   ThreeCardView,
@@ -32,11 +48,19 @@ import {
   TABLE_SEAT_SCALES,
   type TableVisualSeat,
 } from './tableWagerLayout'
-import { getAvatarHeadTurn, getTurnCameraPose } from './turnFocus'
+import { getAvatarHeadTurn } from './turnFocus'
 import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
 
 type Vec3 = [number, number, number]
 type WebGLStatus = 'loading' | 'ready' | 'error'
+
+interface CardRevealSeatAction {
+  playerId: string
+  label: string
+  ariaLabel: string
+  status?: 'pending' | 'approved' | 'denied'
+  disabled: boolean
+}
 
 interface DesktopPokerRoom3DProps {
   view: ThreeTableViewModel
@@ -44,9 +68,12 @@ interface DesktopPokerRoom3DProps {
   chatMessages: ThreeChatMessage[]
   selectedTargetId: string | null
   onSelectPlayer: (playerId: string) => void
+  cardRevealActions: CardRevealSeatAction[]
+  onRequestCardReveal: (playerId: string) => void
 }
 
 interface SeatRuntime {
+  playerId: string
   root: THREE.Group
   body: THREE.Group
   fallbackAvatar: THREE.Group
@@ -67,6 +94,7 @@ interface SeatRuntime {
   winnerSparkles: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial>
   winnerLight: THREE.PointLight
   materials: THREE.MeshStandardMaterial[]
+  foldMaterials: THREE.MeshStandardMaterial[]
   visualSeat: number
   baseY: number
   phase: number
@@ -85,9 +113,15 @@ interface SeatRuntime {
   avatarRetryAt: number
   avatarFailureCount: number
   avatarBoneOffsets: Map<THREE.Bone, THREE.Euler>
+  fallbackAccessories: AvatarAccessorySet
+  riggedAccessories: AvatarAccessorySet | null
+  appearanceKey: string
+  avatarProfile: ThreePlayerView['avatarProfile']
+  wagerIntensity: number
 }
 
 interface WagerRuntime {
+  playerId: string
   group: THREE.Group
   chipMeshes: THREE.Mesh[]
   chipBasePositions: THREE.Vector3[]
@@ -99,6 +133,7 @@ interface WagerRuntime {
   target: THREE.Vector3
   startedAt: number
   animating: boolean
+  motionProfile: PokerActionMotionProfile
 }
 
 interface PotRuntime {
@@ -247,19 +282,25 @@ const FOLD_MATERIAL_BASELINE = 'pokerFoldMaterialBaseline'
 
 function applyFoldOpacity(material: THREE.Material, folded: boolean) {
   const stored = material.userData[FOLD_MATERIAL_BASELINE] as
-    | { opacity: number; transparent: boolean }
+    | { opacity: number; transparent: boolean; depthWrite: boolean }
     | undefined
   const baseline = stored ?? {
     opacity: material.opacity,
     transparent: material.transparent,
+    depthWrite: material.depthWrite,
   }
 
   if (!stored) material.userData[FOLD_MATERIAL_BASELINE] = baseline
 
   const nextOpacity = folded ? baseline.opacity * 0.35 : baseline.opacity
   const nextTransparent = folded || baseline.transparent
-  if (material.transparent !== nextTransparent) material.needsUpdate = true
+  const nextDepthWrite = folded ? false : baseline.depthWrite
+  if (
+    material.transparent !== nextTransparent ||
+    material.depthWrite !== nextDepthWrite
+  ) material.needsUpdate = true
   material.transparent = nextTransparent
+  material.depthWrite = nextDepthWrite
   material.opacity = nextOpacity
 }
 
@@ -837,6 +878,7 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     createStandardMaterial(profile.hairColor, { roughness: 0.9 }),
   ]
   const [chairMaterial, trimMaterial, shirtMaterial, sleeveMaterial, skinMaterial, hairMaterial] = materials
+  const foldMaterials = [shirtMaterial, sleeveMaterial, skinMaterial, hairMaterial]
 
   const chair = new THREE.Group()
   root.add(chair)
@@ -906,13 +948,7 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
   const hair = addMesh(head, new THREE.SphereGeometry(0.405, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.52), hairMaterial, [0, 0.1, 0])
   hair.scale.set(1.02, profile.hairStyle === 'waves' ? 0.62 : 0.52, 1.02)
 
-  if (profile.accessory === 'glasses') {
-    const glassesMaterial = createStandardMaterial('#171a18', { roughness: 0.38, metalness: 0.7 })
-    materials.push(glassesMaterial)
-    addMesh(head, new THREE.TorusGeometry(0.12, 0.018, 6, 18), glassesMaterial, [-0.14, 0.01, -0.36])
-    addMesh(head, new THREE.TorusGeometry(0.12, 0.018, 6, 18), glassesMaterial, [0.14, 0.01, -0.36])
-    addMesh(head, new THREE.BoxGeometry(0.1, 0.018, 0.02), glassesMaterial, [0, 0.01, -0.37])
-  }
+  const fallbackAccessories = createFallbackAvatarAccessories(head, fallbackAvatar, profile)
 
   const leftArm = addMesh(fallbackAvatar, new THREE.CylinderGeometry(0.105, 0.12, 0.92, 18), sleeveMaterial, [-0.52, 0.5, -0.28])
   const rightArm = addMesh(fallbackAvatar, new THREE.CylinderGeometry(0.105, 0.12, 0.92, 18), sleeveMaterial, [0.52, 0.5, -0.28])
@@ -1030,9 +1066,11 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
 
   const winnerLight = new THREE.PointLight('#ffd978', 0, 4.2, 1.75)
   winnerLight.position.set(0, 1.45, -0.2)
+  winnerLight.visible = false
   root.add(winnerLight)
 
   const seatRuntime: SeatRuntime = {
+    playerId: player.id,
     root,
     body,
     fallbackAvatar,
@@ -1053,6 +1091,7 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     winnerSparkles,
     winnerLight,
     materials,
+    foldMaterials,
     visualSeat: player.visualSeat,
     baseY: 0,
     phase: player.visualSeat * 0.9,
@@ -1071,6 +1110,11 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     avatarRetryAt: 0,
     avatarFailureCount: 0,
     avatarBoneOffsets: new Map(),
+    fallbackAccessories,
+    riggedAccessories: null,
+    appearanceKey: getAvatarAppearanceKey(profile),
+    avatarProfile: profile,
+    wagerIntensity: player.wagerIntensity,
   }
   setSeatPosition(seatRuntime, player.visualSeat)
   return seatRuntime
@@ -1118,6 +1162,8 @@ function applyAvatarBoneOffset(
 
 function detachRiggedAvatar(seat: SeatRuntime) {
   restoreAvatarBoneOffsets(seat)
+  disposeAvatarAccessorySet(seat.riggedAccessories)
+  seat.riggedAccessories = null
   if (seat.avatar) {
     disposeAvatarAssetInstance(seat.avatar, {
       mixer: seat.avatarMixer ?? undefined,
@@ -1169,7 +1215,9 @@ function playAvatarOneShot(seat: SeatRuntime, cue: ThreeActionCue, winner = fals
   if (!avatar || !mixer) return
 
   const clip = winner
-    ? avatar.clips.wave
+    ? seat.avatarProfile.celebration === 'slow_clap'
+      ? avatar.clips.interact ?? avatar.clips.wave
+      : avatar.clips.wave ?? avatar.clips.interact
     : cue === 'fold'
       ? avatar.clips.hitReceive
       : cue === 'ready'
@@ -1185,11 +1233,31 @@ function playAvatarOneShot(seat: SeatRuntime, cue: ThreeActionCue, winner = fals
   action.reset()
   action.setLoop(THREE.LoopOnce, 1)
   action.clampWhenFinished = true
-  action.setDuration(winner ? 1.5 : cue === 'all_in' ? 1.08 : cue === 'check' ? 0.72 : 0.92)
+  const winnerDuration = seat.avatarProfile.celebration === 'slow_clap'
+    ? 2.15
+    : seat.avatarProfile.celebration === 'fist_pump'
+      ? 1.15
+      : 1.5
+  action.setDuration(winner ? winnerDuration : cue === 'all_in' ? 1.08 : cue === 'check' ? 0.72 : 0.92)
   action.setEffectiveWeight(1)
   seat.avatarIdleAction?.fadeOut(0.16)
   action.fadeIn(0.16).play()
   seat.avatarActiveAction = action
+}
+
+function applySeatFoldVisualState(seat: SeatRuntime) {
+  seat.foldMaterials.forEach(material => {
+    applyFoldOpacity(material, seat.folded)
+  })
+  seat.avatar?.materials.forEach(material => {
+    applyFoldOpacity(material, seat.folded)
+  })
+  seat.fallbackAccessories.materials.forEach(material => {
+    applyFoldOpacity(material, seat.folded)
+  })
+  seat.riggedAccessories?.materials.forEach(material => {
+    applyFoldOpacity(material, seat.folded)
+  })
 }
 
 async function requestRiggedAvatar(
@@ -1220,6 +1288,11 @@ async function requestRiggedAvatar(
     detachRiggedAvatar(seat)
     seat.avatar = avatar
     seat.avatarMount.add(avatar.root)
+    seat.riggedAccessories = createRiggedAvatarAccessories(
+      avatar.root,
+      avatar.bones,
+      seat.avatarProfile
+    )
     avatar.model.traverse(object => {
       const mesh = object as THREE.Mesh
       if (mesh.isMesh) mesh.renderOrder = 2
@@ -1230,6 +1303,7 @@ async function requestRiggedAvatar(
     seat.avatarFailureCount = 0
     seat.fallbackAvatar.visible = false
     seat.avatarOccluder.visible = true
+    applySeatFoldVisualState(seat)
     startAvatarIdle(seat)
     if (seat.winner) playAvatarOneShot(seat, 'ready', true)
     updateAvatarDiagnostics(runtime)
@@ -1247,6 +1321,35 @@ async function requestRiggedAvatar(
   }
 }
 
+function syncSeatAppearance(
+  seat: SeatRuntime,
+  profile: ThreePlayerView['avatarProfile']
+) {
+  const nextAppearanceKey = getAvatarAppearanceKey(profile)
+  const appearanceChanged = seat.appearanceKey !== nextAppearanceKey
+  seat.avatarProfile = profile
+
+  if (!appearanceChanged) return
+
+  disposeAvatarAccessorySet(seat.fallbackAccessories)
+  seat.fallbackAccessories = createFallbackAvatarAccessories(
+    seat.head,
+    seat.fallbackAvatar,
+    profile
+  )
+
+  // A model swap loads asynchronously. Keep accessories calibrated to the
+  // mounted model until its replacement is ready instead of briefly attaching
+  // the new model's offsets to the old skeleton.
+  if (!seat.avatar || seat.avatar.modelKey === profile.modelKey) {
+    disposeAvatarAccessorySet(seat.riggedAccessories)
+    seat.riggedAccessories = seat.avatar
+      ? createRiggedAvatarAccessories(seat.avatar.root, seat.avatar.bones, profile)
+      : null
+  }
+  seat.appearanceKey = nextAppearanceKey
+}
+
 function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number) {
   if (seat.visualSeat !== player.visualSeat) setSeatPosition(seat, player.visualSeat)
   const actionChanged = seat.actionKey !== player.actionKey
@@ -1262,6 +1365,8 @@ function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number) {
   seat.folded = player.isOutOfHand
   seat.keepFoldedCardsVisible = player.visibleCards.length > 0
   seat.actionCue = player.actionCue
+  seat.wagerIntensity = player.wagerIntensity
+  syncSeatAppearance(seat, player.avatarProfile)
 
   seat.playback = advanceActionPlaybackState(
     seat.playback,
@@ -1278,12 +1383,7 @@ function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number) {
   )
   seat.dealerButton.visible = player.isDealer
 
-  seat.materials.forEach(material => {
-    if (material !== seat.ring.material) applyFoldOpacity(material, player.isOutOfHand)
-  })
-  seat.avatar?.materials.forEach(material => {
-    applyFoldOpacity(material, player.isOutOfHand)
-  })
+  applySeatFoldVisualState(seat)
 
   const ringColor = player.isWinner ? '#f4d77e' : player.isActing ? '#d8bd68' : '#69bfa0'
   seat.ring.material.color.set(ringColor)
@@ -1348,6 +1448,24 @@ function createChipSet(maxChips: number) {
   const chipMeshes: THREE.Mesh[] = []
   const chipBasePositions: THREE.Vector3[] = []
   const stackCount = Math.ceil(maxChips / 4)
+  const chipBodyGeometry = new THREE.CylinderGeometry(0.14, 0.14, 0.05, 32)
+  const detailParts: THREE.BufferGeometry[] = []
+  const topRingGeometry = new THREE.TorusGeometry(0.087, 0.011, 6, 28)
+  topRingGeometry.rotateX(Math.PI / 2)
+  topRingGeometry.translate(0, 0.027, 0)
+  detailParts.push(topRingGeometry)
+  for (const rotation of [0, Math.PI / 2]) {
+    const inlayGeometry = new THREE.BoxGeometry(0.024, 0.006, 0.23)
+    inlayGeometry.rotateY(rotation)
+    inlayGeometry.translate(0, 0.028, 0)
+    detailParts.push(inlayGeometry)
+  }
+  const chipDetailGeometry = mergeGeometries(detailParts, false)
+  detailParts.forEach(geometry => geometry.dispose())
+  if (!chipDetailGeometry) {
+    chipBodyGeometry.dispose()
+    throw new Error('Unable to build shared chip detail geometry.')
+  }
 
   for (let index = 0; index < maxChips; index += 1) {
     const styleIndex = index % CHIP_STYLES.length
@@ -1357,31 +1475,19 @@ function createChipSet(maxChips: number) {
     const stackLevel = index % 4
     const chip = addMesh(
       group,
-      new THREE.CylinderGeometry(0.14, 0.14, 0.05, 32),
+      chipBodyGeometry,
       bodyMaterial,
       [(stackIndex - (stackCount - 1) / 2) * 0.29, stackLevel * 0.052, (stackIndex % 2) * 0.08 - 0.04]
     )
     chip.name = `casino-chip-${index}`
     chip.visible = false
 
-    const topRing = addMesh(
+    const chipDetail = addMesh(
       chip,
-      new THREE.TorusGeometry(0.087, 0.011, 6, 28),
-      stripeMaterial,
-      [0, 0.027, 0]
+      chipDetailGeometry,
+      stripeMaterial
     )
-    topRing.rotation.x = Math.PI / 2
-    topRing.castShadow = false
-    for (const rotation of [0, Math.PI / 2]) {
-      const inlay = addMesh(
-        chip,
-        new THREE.BoxGeometry(0.024, 0.006, 0.23),
-        stripeMaterial,
-        [0, 0.028, 0]
-      )
-      inlay.rotation.y = rotation
-      inlay.castShadow = false
-    }
+    chipDetail.castShadow = false
 
     chipMeshes.push(chip)
     chipBasePositions.push(chip.position.clone())
@@ -1416,6 +1522,7 @@ function createWagerRuntime(
   scene.add(chips.group)
 
   return {
+    playerId: player.id,
     ...chips,
     visualSeat,
     amount: player.bet,
@@ -1424,6 +1531,11 @@ function createWagerRuntime(
     target,
     startedAt: now,
     animating: false,
+    motionProfile: getPokerActionMotionProfile(player.actionCue, {
+      actionKey: player.actionKey,
+      playerId: player.id,
+      wagerIntensity: player.wagerIntensity,
+    }),
   }
 }
 
@@ -1468,6 +1580,13 @@ function syncWagers(runtime: SceneRuntime, view: ThreeTableViewModel) {
 
     wager.amount = player.bet
     wager.actionKey = player.actionKey
+    if (actionChanged) {
+      wager.motionProfile = getPokerActionMotionProfile(player.actionCue, {
+        actionKey: player.actionKey,
+        playerId: player.id,
+        wagerIntensity: player.wagerIntensity,
+      })
+    }
     const chipCount = view.phase === 'in_hand'
       ? getWagerChipCount(player.bet, view.bigBlind, wager.chipMeshes.length)
       : 0
@@ -1507,23 +1626,68 @@ function animateWagers(runtime: SceneRuntime, time: number, reducedMotion: boole
       continue
     }
 
-    const progress = THREE.MathUtils.clamp((time - wager.startedAt) / 0.68, 0, 1)
+    const { wagerStyle, wagerIntensity, variant } = wager.motionProfile
+    const duration = wagerStyle === 'flick'
+      ? 0.78 - wagerIntensity * 0.08
+      : wagerStyle === 'shove'
+        ? 0.62 - wagerIntensity * 0.06
+        : 0.72
+    const progress = THREE.MathUtils.clamp((time - wager.startedAt) / duration, 0, 1)
+    const arcHeight = wagerStyle === 'flick'
+      ? 0.42 + wagerIntensity * 0.2
+      : wagerStyle === 'shove'
+        ? 0.16 + wagerIntensity * 0.08
+        : 0.1 + wagerIntensity * 0.07
+    const leaderProgress = THREE.MathUtils.clamp(progress * 1.04, 0, 1)
     const position = interpolateWagerArc(
       [wager.start.x, wager.start.y, wager.start.z],
       [wager.target.x, wager.target.y, wager.target.z],
-      progress
+      leaderProgress,
+      arcHeight * 0.72
     )
     wager.group.position.set(position[0], position[1], position[2])
-    const settle = Math.sin(progress * Math.PI)
-    wager.group.rotation.z = (wager.visualSeat % 2 === 0 ? 1 : -1) * settle * 0.08
+    wager.group.rotation.set(0, 0, 0)
+
+    const staggerStep = wagerStyle === 'flick'
+      ? 0.038 + wagerIntensity * 0.008
+      : wagerStyle === 'shove'
+        ? 0.009
+        : 0.015
+    const progressBoost = 1 + staggerStep * Math.min(11, wager.chipMeshes.length - 1)
     wager.chipMeshes.forEach((chip, index) => {
       const base = wager.chipBasePositions[index]
       if (!base) return
-      const arrival = THREE.MathUtils.clamp(progress * 1.18 - index * 0.018, 0, 1)
-      const lift = Math.sin(arrival * Math.PI) * 0.075
-      chip.position.set(base.x, base.y + lift, base.z)
-      chip.rotation.y = (index % 2 === 0 ? 1 : -1) * arrival * 0.7
-      chip.rotation.z = (index % 2 === 0 ? 1 : -1) * Math.sin(arrival * Math.PI) * 0.09
+      const orderedIndex = variant === 1
+        ? (index * 5) % wager.chipMeshes.length
+        : variant === 2
+          ? wager.chipMeshes.length - index - 1
+          : index
+      const chipProgress = THREE.MathUtils.clamp(
+        progress * progressBoost - orderedIndex * staggerStep,
+        0,
+        1
+      )
+      const chipWorld = interpolateWagerArc(
+        [wager.start.x, wager.start.y, wager.start.z],
+        [wager.target.x, wager.target.y, wager.target.z],
+        chipProgress,
+        arcHeight + (index % 3) * 0.025
+      )
+      const landingBounce = chipProgress > 0.82
+        ? Math.sin((chipProgress - 0.82) / 0.18 * Math.PI) * 0.035 * (1 - wagerIntensity * 0.35)
+        : 0
+      chip.position.set(
+        base.x + chipWorld[0] - position[0],
+        base.y + chipWorld[1] - position[1] + landingBounce,
+        base.z + chipWorld[2] - position[2]
+      )
+      const spinDirection = (index + variant) % 2 === 0 ? 1 : -1
+      const spinRate = wagerStyle === 'flick' ? 5.4 : wagerStyle === 'shove' ? 1.25 : 2.1
+      chip.rotation.x = spinDirection * chipProgress * Math.PI * (wagerStyle === 'flick' ? 1.8 : 0.24)
+      chip.rotation.y = spinDirection * chipProgress * Math.PI * spinRate
+      chip.rotation.z = spinDirection * Math.sin(chipProgress * Math.PI) * (
+        wagerStyle === 'flick' ? 0.32 : wagerStyle === 'shove' ? 0.08 : 0.15
+      )
     })
 
     if (progress >= 1) {
@@ -1602,26 +1766,47 @@ function animateSeat(
     seat.playback,
     reducedMotion ? Number.POSITIVE_INFINITY : time * 1000
   )
-  const avatarPose = getSeatedAvatarActionPose(playback.cue, playback.elapsedMs)
+  const actionPoseOptions = {
+    actionKey: seat.actionKey,
+    playerId: seat.playerId,
+    wagerIntensity: seat.wagerIntensity,
+  }
+  const avatarPose = getSeatedAvatarActionPose(
+    playback.cue,
+    playback.elapsedMs,
+    actionPoseOptions
+  )
   const tablePose = getOpponentTableActionPose(
     seat.folded && seat.keepFoldedCardsVisible ? 'ready' : playback.cue,
     seat.folded && seat.keepFoldedCardsVisible
       ? Number.POSITIVE_INFINITY
-      : playback.elapsedMs
+      : playback.elapsedMs,
+    actionPoseOptions
   )
+  const personalityPose = getAvatarPersonalityPose({
+    idleTell: seat.avatarProfile.idleTell,
+    celebration: seat.avatarProfile.celebration,
+    winner: seat.winner,
+    actionActive: playback.isActive,
+    acting: seat.acting,
+    folded: seat.folded,
+    time,
+    phase: seat.phase,
+    reducedMotion,
+  })
   const alertLift = seat.acting && !reducedMotion
     ? Math.sin(time * 3.2 + seat.phase) * 0.018
     : 0
 
   seat.body.position.set(
-    avatarPose.bodyPosition[0],
-    0.12 + idle * 0.012 + alertLift + avatarPose.bodyPosition[1],
-    0.03 + avatarPose.bodyPosition[2]
+    avatarPose.bodyPosition[0] + personalityPose.bodyPosition[0],
+    0.12 + idle * 0.012 + alertLift + avatarPose.bodyPosition[1] + personalityPose.bodyPosition[1],
+    0.03 + avatarPose.bodyPosition[2] + personalityPose.bodyPosition[2]
   )
   seat.body.rotation.set(
-    -0.035 + idle * 0.006 + avatarPose.bodyRotation[0],
-    avatarPose.bodyRotation[1],
-    idle * 0.006 + avatarPose.bodyRotation[2]
+    -0.035 + idle * 0.006 + avatarPose.bodyRotation[0] + personalityPose.bodyRotation[0],
+    avatarPose.bodyRotation[1] + personalityPose.bodyRotation[1],
+    idle * 0.006 + avatarPose.bodyRotation[2] + personalityPose.bodyRotation[2]
   )
 
   const bothArms = playback.cue === 'all_in'
@@ -1629,11 +1814,15 @@ function animateSeat(
   const armY = avatarPose.armRotation[1] * 1.6
   const armZ = avatarPose.armRotation[2] * 1.5
   seat.leftArm.rotation.set(
-    1.08 - (bothArms ? armX : armX * 0.22),
-    bothArms ? -armY : 0,
-    -0.22 - (bothArms ? armZ : 0)
+    1.08 - (bothArms ? armX : armX * 0.22) + personalityPose.leftUpperArm[0],
+    (bothArms ? -armY : 0) + personalityPose.leftUpperArm[1],
+    -0.22 - (bothArms ? armZ : 0) + personalityPose.leftUpperArm[2]
   )
-  seat.rightArm.rotation.set(1.08 - armX, armY, 0.22 + armZ)
+  seat.rightArm.rotation.set(
+    1.08 - armX + personalityPose.rightUpperArm[0],
+    armY + personalityPose.rightUpperArm[1],
+    0.22 + armZ + personalityPose.rightUpperArm[2]
+  )
 
   const headTurn = getAvatarHeadTurn(seat.visualSeat, actingVisualSeat)
   seat.head.rotation.y = headTurn.yaw + (
@@ -1641,8 +1830,9 @@ function animateSeat(
       ? Math.sin(time * 1.8 + seat.phase) * 0.035
       : idle * 0.018
   )
-  seat.head.rotation.x = (seat.folded ? 0.18 : headTurn.pitch) + avatarPose.headRotation[0]
-  seat.head.rotation.z = avatarPose.headRotation[2]
+  seat.head.rotation.x = (seat.folded ? 0.18 : headTurn.pitch) + avatarPose.headRotation[0] + personalityPose.headRotation[0]
+  seat.head.rotation.y += personalityPose.headRotation[1]
+  seat.head.rotation.z = avatarPose.headRotation[2] + personalityPose.headRotation[2]
 
   if (seat.avatar && seat.avatarMixer) {
     // AnimationMixer only rewrites bones that have tracks in the active clip.
@@ -1745,6 +1935,40 @@ function animateSeat(
         applyAvatarBoneOffset(seat, bones.get(name), tablePose.hand.fingerCurl * 0.34, 0, 0)
       }
     }
+
+    applyAvatarBoneOffset(
+      seat,
+      headBone,
+      personalityPose.headRotation[0],
+      personalityPose.headRotation[1],
+      personalityPose.headRotation[2]
+    )
+    applyAvatarBoneOffset(
+      seat,
+      chestBone,
+      personalityPose.bodyRotation[0],
+      personalityPose.bodyRotation[1],
+      personalityPose.bodyRotation[2]
+    )
+    applyAvatarBoneOffset(seat, upperArmRight, ...personalityPose.rightUpperArm)
+    applyAvatarBoneOffset(seat, lowerArmRight, ...personalityPose.rightLowerArm)
+    applyAvatarBoneOffset(seat, wristRight, ...personalityPose.rightWrist)
+    applyAvatarBoneOffset(seat, upperArmLeft, ...personalityPose.leftUpperArm)
+    applyAvatarBoneOffset(seat, lowerArmLeft, ...personalityPose.leftLowerArm)
+    applyAvatarBoneOffset(seat, bones.get('WristL'), ...personalityPose.leftWrist)
+    if (personalityPose.fingerCurl > 0) {
+      for (const side of ['R', 'L']) {
+        for (const finger of ['Index1', 'Middle1', 'Ring1', 'Pinky1']) {
+          applyAvatarBoneOffset(
+            seat,
+            bones.get(`${finger}${side}`),
+            personalityPose.fingerCurl * 0.34,
+            0,
+            0
+          )
+        }
+      }
+    }
   }
 
   const ringPulse = reducedMotion
@@ -1760,6 +1984,7 @@ function animateSeat(
 
   seat.winnerHalo.visible = seat.winner
   seat.winnerSparkles.visible = seat.winner
+  seat.winnerLight.visible = seat.winner
   if (seat.winner) {
     const celebrationPulse = reducedMotion ? 1 : 0.88 + Math.sin(time * 3.8 + seat.phase) * 0.12
     seat.winnerHalo.position.y = 2.08 + (reducedMotion ? 0 : Math.sin(time * 2.4) * 0.035)
@@ -1824,6 +2049,33 @@ function animateSeat(
   }
 }
 
+function getAllInCameraImpact(
+  seats: Iterable<SeatRuntime>,
+  time: number,
+  reducedMotion: boolean
+): { strength: number; visualSeat: number | null } {
+  if (reducedMotion) return { strength: 0, visualSeat: null }
+
+  for (const seat of seats) {
+    if (seat.actionCue !== 'all_in') continue
+    const playback = getActionPlaybackSnapshot(seat.playback, time * 1000)
+    if (!playback.isActive) continue
+
+    const progress = THREE.MathUtils.clamp(
+      playback.elapsedMs / ACTION_ANIMATION_DURATION_MS,
+      0,
+      1
+    )
+    const punch = Math.sin(THREE.MathUtils.clamp((progress - 0.12) / 0.72, 0, 1) * Math.PI)
+    return {
+      strength: punch * (0.7 + seat.wagerIntensity * 0.3),
+      visualSeat: seat.visualSeat,
+    }
+  }
+
+  return { strength: 0, visualSeat: null }
+}
+
 function disposeObject(root: THREE.Object3D) {
   const geometries = new Set<THREE.BufferGeometry>()
   const materialsToDispose = new Set<THREE.Material>()
@@ -1865,9 +2117,11 @@ function createSceneRuntime(
   scene.background = new THREE.Color('#06100e')
   scene.fog = new THREE.FogExp2('#06100e', 0.027)
 
-  const camera = new THREE.PerspectiveCamera(39, 1, 0.1, 60)
-  camera.position.set(0, 7.25, 11.4)
-  const cameraLookAt = new THREE.Vector3(0, 0.25, -0.45)
+  const camera = new THREE.PerspectiveCamera(DESKTOP_CAMERA_FRAMING.fov, 1, 0.1, 60)
+  camera.position.set(...DESKTOP_CAMERA_FRAMING.position)
+  const cameraLookAt = new THREE.Vector3(...DESKTOP_CAMERA_FRAMING.lookAt)
+  const baseCameraPosition = camera.position.clone()
+  const baseCameraLookAt = cameraLookAt.clone()
   camera.lookAt(cameraLookAt)
 
   createLighting(scene)
@@ -1913,7 +2167,11 @@ function createSceneRuntime(
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelRatioCap))
     renderer.setSize(width, height, false)
     camera.aspect = width / height
-    camera.fov = camera.aspect < 1.28 ? 43 : camera.aspect > 2.15 ? 41 : 39
+    camera.fov = camera.aspect < 1.28
+      ? 43
+      : camera.aspect > 2.15
+        ? 41
+        : DESKTOP_CAMERA_FRAMING.fov
     camera.updateProjectionMatrix()
   }
   const resizeObserver = new ResizeObserver(resize)
@@ -1947,19 +2205,26 @@ function createSceneRuntime(
     animateWagers(runtime, time, reducedMotion)
     animatePot(runtime, time, reducedMotion)
 
-    const focusPose = getTurnCameraPose(actingSeat)
-    const drift = reducedMotion ? 0 : Math.sin(time * 0.14) * 0.16
-    targetCamera.set(
-      drift + focusPose.position[0] * 2.1,
-      7.25 + (focusPose.position[1] - 4.08) * 1.3,
-      11.4 + (focusPose.position[2] - 6.26) * 1.8
+    // Keep normal table framing stable so the DOM nameplates stay aligned
+    // with their 3D seats. Player motion still calls out the actor, while the
+    // short all-in impact below is the only camera displacement.
+    targetCamera.copy(baseCameraPosition)
+    targetLook.copy(baseCameraLookAt)
+    const allInImpact = getAllInCameraImpact(runtime.seats.values(), time, reducedMotion)
+    if (allInImpact.strength > 0) {
+      const impactSeat = allInImpact.visualSeat === null
+        ? null
+        : TABLE_SEAT_POSITIONS[toVisualSeat(allInImpact.visualSeat)]
+      const microShake = Math.sin(time * 61) * allInImpact.strength * 0.026
+      targetCamera.x += microShake + (impactSeat?.[0] ?? 0) * allInImpact.strength * 0.018
+      targetCamera.y -= allInImpact.strength * 0.16
+      targetCamera.z -= allInImpact.strength * 0.72
+      targetLook.x += (impactSeat?.[0] ?? 0) * allInImpact.strength * 0.035
+      targetLook.z += (impactSeat?.[2] ?? 0) * allInImpact.strength * 0.025
+    }
+    const smoothing = reducedMotion ? 1 : 1 - Math.exp(
+      -delta * (allInImpact.strength > 0 ? 3.8 : 1.65)
     )
-    targetLook.set(
-      focusPose.lookAt[0] * 1.65,
-      0.25 + (focusPose.lookAt[1] - 0.92) * 1.2,
-      -0.45 + (focusPose.lookAt[2] - 0.02) * 1.2
-    )
-    const smoothing = reducedMotion ? 1 : 1 - Math.exp(-delta * 1.65)
     camera.position.lerp(targetCamera, smoothing)
     cameraLookAt.lerp(targetLook, smoothing)
     camera.lookAt(cameraLookAt)
@@ -2022,6 +2287,8 @@ export function DesktopPokerRoom3D({
   chatMessages,
   selectedTargetId,
   onSelectPlayer,
+  cardRevealActions,
+  onRequestCardReveal,
 }: DesktopPokerRoom3DProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -2127,16 +2394,20 @@ export function DesktopPokerRoom3D({
           const reaction = emoteReactions.find(item => item.targetId === player.id)
           const chatMessage = chatMessages.find(item => item.targetId === player.id)
           const statusLabel = getStatusLabel(player)
+          const cardRevealAction = cardRevealActions.find(action => action.playerId === player.id)
 
           return (
-            <button
+            <div
               key={player.id}
-              type="button"
               className={`cinematic-seat cinematic-seat-${player.visualSeat} ${player.isHero ? 'is-local-player' : ''} ${player.isActing ? 'is-acting' : ''} ${player.isWinner ? 'is-winner' : ''} ${player.isOutOfHand ? 'is-folded' : ''} ${selectedTargetId === player.id ? 'is-selected' : ''}`}
-              onClick={() => onSelectPlayer(player.id)}
-              aria-label={`Send a reaction to ${player.nickname}`}
             >
-              {(chatMessage || reaction) && (
+              <button
+                type="button"
+                className="cinematic-seat-target"
+                onClick={() => onSelectPlayer(player.id)}
+                aria-label={`Send a reaction to ${player.nickname}`}
+              >
+                {(chatMessage || reaction) && (
                 <span className="cinematic-seat-social" aria-live="polite">
                   {chatMessage && (
                     <span
@@ -2152,9 +2423,9 @@ export function DesktopPokerRoom3D({
                     </span>
                   )}
                 </span>
-              )}
+                )}
 
-              <span className="cinematic-avatar" aria-hidden="true">
+                <span className="cinematic-avatar" aria-hidden="true">
                 <span
                   className="cinematic-avatar-head"
                   style={{ backgroundColor: player.avatarProfile.skinColor }}
@@ -2163,15 +2434,15 @@ export function DesktopPokerRoom3D({
                   className="cinematic-avatar-body"
                   style={{ backgroundColor: player.avatarProfile.shirtColor }}
                 />
-              </span>
+                </span>
 
-              {player.hasCards && (
-                !player.isOutOfHand || player.visibleCards.length > 0
-              ) && !player.isHero && (
-                <CinematicHoleCards player={player} />
-              )}
+                {player.hasCards && (
+                  !player.isOutOfHand || player.visibleCards.length > 0 || cardRevealAction
+                ) && !player.isHero && (
+                  <CinematicHoleCards player={player} />
+                )}
 
-              <span className="cinematic-seat-panel">
+                <span className="cinematic-seat-panel">
                 <span className="cinematic-seat-topline">
                   <strong>{player.nickname}</strong>
                   {player.blindRole && <em>{player.blindRole === 'big' ? 'BB' : 'SB'}</em>}
@@ -2191,12 +2462,26 @@ export function DesktopPokerRoom3D({
                     <small>{statusLabel}</small>
                   ) : null}
                 </span>
-              </span>
+                </span>
 
-              {player.bet > 0 && (
-                <span className="cinematic-seat-bet">${player.bet.toLocaleString()}</span>
+                {player.bet > 0 && (
+                  <span className="cinematic-seat-bet">${player.bet.toLocaleString()}</span>
+                )}
+              </button>
+
+              {cardRevealAction && (
+                <button
+                  type="button"
+                  className={`card-reveal-seat-button cinematic-card-reveal-control${cardRevealAction.status ? ` is-${cardRevealAction.status}` : ''}`}
+                  disabled={cardRevealAction.disabled}
+                  onClick={() => onRequestCardReveal(player.id)}
+                  aria-label={cardRevealAction.ariaLabel}
+                  title={cardRevealAction.ariaLabel}
+                >
+                  {cardRevealAction.label}
+                </button>
               )}
-            </button>
+            </div>
           )
         })}
       </div>

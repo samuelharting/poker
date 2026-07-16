@@ -42,6 +42,14 @@ describe('desktop 3D board cards', () => {
     expect(renderer).toContain('seat.cards.visible = seat.keepFoldedCardsVisible || (')
   })
 
+  it('places folded-viewer card requests beside each 3D opponent hand', () => {
+    expect(table).toContain('cardRevealActions={cardRevealActions}')
+    expect(renderer).toContain('cardRevealActions.find(action => action.playerId === player.id)')
+    expect(renderer).toContain('className={`card-reveal-seat-button cinematic-card-reveal-control')
+    expect(renderer).toContain('onClick={() => onRequestCardReveal(player.id)}')
+    expect(renderer).toContain('player.visibleCards.length > 0 || cardRevealAction')
+  })
+
   it('renders persistent world-space wager stacks and a physical pot mound', () => {
     expect(renderer).toContain('function syncWagers')
     expect(renderer).toContain('getTableWagerAnchor')
@@ -53,5 +61,14 @@ describe('desktop 3D board cards', () => {
     expect(renderer).toContain("view.phase === 'in_hand'")
     expect(renderer).toContain('data-table-wager-count')
     expect(renderer).toContain('data-pot-amount')
+  })
+
+  it('shares chip geometry and merges stripe details to control draw calls', () => {
+    expect(renderer).toContain("import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'")
+    expect(renderer).toContain('const chipBodyGeometry = new THREE.CylinderGeometry')
+    expect(renderer).toContain('const chipDetailGeometry = mergeGeometries(detailParts, false)')
+    expect(renderer).toContain('chipDetail.castShadow = false')
+    expect(renderer).toContain('chipBodyGeometry,')
+    expect(renderer).toContain('chipDetailGeometry,')
   })
 })

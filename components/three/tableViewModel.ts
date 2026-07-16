@@ -1,4 +1,12 @@
 import type { Card, SeatPlayer, TableState } from '@/lib/poker/types'
+import type {
+  PlayerAvatarCelebration,
+  PlayerAvatarGlassesStyle,
+  PlayerAvatarHatStyle,
+  PlayerAvatarIdleTell,
+  PlayerAvatarJacketColor,
+  PlayerAvatarJacketStyle,
+} from '@/lib/profile'
 import type { SocialSnapshot } from '@/shared/protocol'
 import { REALISTIC_AVATAR_MODEL_KEYS, type RealisticAvatarModelKey } from './avatarModelCatalog'
 
@@ -35,6 +43,13 @@ export interface ThreeAvatarProfile {
   accessory: ThreeAvatarAccessory
   faceShape: ThreeAvatarFaceShape
   browWeight: ThreeAvatarBrowWeight
+  hat: PlayerAvatarHatStyle
+  glasses: PlayerAvatarGlassesStyle
+  jacket: PlayerAvatarJacketStyle
+  jacketColor: PlayerAvatarJacketColor
+  idleTell: PlayerAvatarIdleTell
+  celebration: PlayerAvatarCelebration
+  isCustomized: boolean
 }
 
 export interface ThreePlayerView {
@@ -60,6 +75,8 @@ export interface ThreePlayerView {
   avatarProfile: ThreeAvatarProfile
   actionCue: ThreeActionCue
   actionKey: string
+  actionAmount: number
+  wagerIntensity: number
   lastAction?: string
   lastActionId?: string
 }
@@ -208,6 +225,49 @@ const AVATAR_FACE_STYLES: ThreeAvatarFaceStyle[] = ['calm', 'focused', 'smirk']
 const AVATAR_ACCESSORIES: ThreeAvatarAccessory[] = ['none', 'glasses', 'mustache']
 const AVATAR_FACE_SHAPES: ThreeAvatarFaceShape[] = ['oval', 'round', 'square']
 const AVATAR_BROW_WEIGHTS: ThreeAvatarBrowWeight[] = ['low', 'medium', 'high']
+const AUTO_AVATAR_HATS: PlayerAvatarHatStyle[] = [
+  'none',
+  'none',
+  'fedora',
+  'cowboy',
+  'beanie',
+  'visor',
+]
+const AUTO_AVATAR_GLASSES: PlayerAvatarGlassesStyle[] = [
+  'none',
+  'none',
+  'round',
+  'aviator',
+  'shades',
+]
+const AUTO_AVATAR_JACKETS: PlayerAvatarJacketStyle[] = [
+  'none',
+  'tuxedo',
+  'leather',
+  'varsity',
+  'western',
+  'smoking',
+]
+const AUTO_AVATAR_JACKET_COLORS: PlayerAvatarJacketColor[] = [
+  'burgundy',
+  'midnight',
+  'emerald',
+  'ivory',
+  'gold',
+  'violet',
+]
+const AUTO_AVATAR_IDLE_TELLS: PlayerAvatarIdleTell[] = [
+  'calm',
+  'chip_shuffle',
+  'card_peek',
+  'table_drum',
+]
+const AUTO_AVATAR_CELEBRATIONS: PlayerAvatarCelebration[] = [
+  'wave',
+  'fist_pump',
+  'victory',
+  'slow_clap',
+]
 
 export function createThreeTableViewModel(state: TableState, yourId: string): ThreeTableViewModel {
   const heroPlayer = state.players.find(player => player.id === yourId) ?? null
@@ -219,6 +279,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
     .map((player): ThreePlayerView => {
       const avatarProfile = createAvatarProfile(player)
       const actionCue = player.lastAction ? getActionCue(player.lastAction) : 'ready'
+      const actionAmount = getActionAmount(player)
       const winner = winnersByPlayerId.get(player.id)
       const isOutOfHand = state.phase === 'in_hand' && (
         player.status === 'folded' ||
@@ -251,6 +312,8 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
         avatarProfile,
         actionCue,
         actionKey: getPlayerAnimationKey(player, actionCue, state),
+        actionAmount,
+        wagerIntensity: getWagerIntensity(actionCue, actionAmount, state.bigBlind),
         lastAction: player.lastAction,
         lastActionId: player.lastActionId,
       }
@@ -366,9 +429,11 @@ export function createThreeChatMessages(
 function createAvatarProfile(player: SeatPlayer): ThreeAvatarProfile {
   const seed = hashPlayerIdentity(`${player.id}:${player.nickname}`)
   const shirt = pickSeeded(AVATAR_SHIRT_COLORS, seed + 11)
+  const customization = player.avatar
+  const legacyAccessory = pickSeeded(AVATAR_ACCESSORIES, seed + 31)
 
   return {
-    modelKey: pickSeeded(REALISTIC_AVATAR_MODEL_KEYS, seed + 43),
+    modelKey: customization?.modelKey ?? pickSeeded(REALISTIC_AVATAR_MODEL_KEYS, seed + 43),
     accentColor: pickSeeded(AVATAR_ACCENT_COLORS, seed),
     skinColor: pickSeeded(AVATAR_SKIN_COLORS, seed + 3),
     hairColor: pickSeeded(AVATAR_HAIR_COLORS, seed + 5),
@@ -380,10 +445,47 @@ function createAvatarProfile(player: SeatPlayer): ThreeAvatarProfile {
     hairStyle: pickSeeded(AVATAR_HAIR_STYLES, seed + 7),
     build: pickSeeded(AVATAR_BUILDS, seed + 13),
     faceStyle: pickSeeded(AVATAR_FACE_STYLES, seed + 17),
-    accessory: pickSeeded(AVATAR_ACCESSORIES, seed + 31),
+    accessory: legacyAccessory,
     faceShape: pickSeeded(AVATAR_FACE_SHAPES, seed + 37),
     browWeight: pickSeeded(AVATAR_BROW_WEIGHTS, seed + 41),
+    hat: customization?.hat ?? pickSeeded(AUTO_AVATAR_HATS, seed + 47),
+    glasses: customization?.glasses ?? (
+      legacyAccessory === 'glasses'
+        ? 'round'
+        : pickSeeded(AUTO_AVATAR_GLASSES, seed + 53)
+    ),
+    jacket: customization?.jacket ?? pickSeeded(AUTO_AVATAR_JACKETS, seed + 59),
+    jacketColor: customization?.jacketColor ?? pickSeeded(AUTO_AVATAR_JACKET_COLORS, seed + 61),
+    idleTell: customization?.idleTell ?? pickSeeded(AUTO_AVATAR_IDLE_TELLS, seed + 67),
+    celebration: customization?.celebration ?? pickSeeded(AUTO_AVATAR_CELEBRATIONS, seed + 71),
+    isCustomized: Boolean(customization),
   }
+}
+
+function getActionAmount(player: SeatPlayer): number {
+  const amountMatch = player.lastAction?.match(/\$([0-9][0-9,]*)/)
+  const parsedAmount = amountMatch?.[1]
+    ? Number(amountMatch[1].replaceAll(',', ''))
+    : Number.NaN
+
+  if (Number.isFinite(parsedAmount) && parsedAmount >= 0) {
+    return parsedAmount
+  }
+
+  return Math.max(0, player.bet)
+}
+
+function getWagerIntensity(
+  cue: ThreeActionCue,
+  amount: number,
+  bigBlind: number
+): number {
+  if (cue === 'all_in') return 1
+  if (cue !== 'call' && cue !== 'bet' && cue !== 'raise') return 0
+
+  const blind = Math.max(1, bigBlind)
+  const blindRatio = Math.max(0, amount) / blind
+  return Math.max(0.12, Math.min(1, Math.log2(blindRatio + 1) / 3.5))
 }
 
 function pickSeeded<T>(values: readonly T[], seed: number): T {

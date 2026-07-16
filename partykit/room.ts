@@ -11,17 +11,24 @@ import type {
   TableChatEntry,
 } from '../shared/protocol'
 import type { ShowCardsMode } from '../lib/poker/types'
-import type { InternalGameState, InternalPlayer, LobbyPlayer, PlayerStats, SeatPlayer } from '../lib/poker/types'
+import type { CardRevealRequest, InternalGameState, InternalPlayer, LobbyPlayer, PlayerStats, SeatPlayer } from '../lib/poker/types'
+import type { PlayerAvatarCustomization } from '../lib/profile'
 import {
   createInitialGameState,
   processAction,
+  resolveRunItTwiceDecision,
   runRabbitHunt,
   setPlayerLastAction,
   startHand,
   toTableState,
+  voteRunItTwice,
 } from '../lib/poker/engine'
 import { withVisibleHandOdds } from '../lib/poker/odds'
-import { getShowdownMinimumDurationMs, isTrueShowdown } from '../lib/poker/showdown'
+import {
+  getShowdownMinimumDurationMs,
+  isTrueShowdown,
+  RUN_IT_TWICE_PRESENTATION_DURATION_MS,
+} from '../lib/poker/showdown'
 import { MAX_CHAT_LENGTH, parseC2S } from '../shared/protocol'
 
 interface TableSettings {
@@ -39,6 +46,7 @@ interface TableSettings {
 interface PlayerProfileRecord {
   email: string
   venmoUsername: string
+  avatar?: PlayerAvatarCustomization
 }
 
 interface TrackedPlayerStats {
@@ -64,6 +72,7 @@ interface RoomData {
   spectatorStacks: Record<string, number>
   pendingRemovals: Record<string, true>
   pendingSpectators: Record<string, true>
+  cardRevealRequests: Record<string, CardRevealRequest>
   social: {
     activeByPlayer: Record<string, Omit<PlayerSocialState, 'playerId'>>
     chatLog: TableChatEntry[]
@@ -91,8 +100,8 @@ const DEFAULT_SETTINGS: TableSettings = {
   bigBlind: 20,
   startingStack: 1000,
   maxPlayers: 8,
-  actionTimerDuration: 35000,
-  autoStartDelay: 3000,
+  actionTimerDuration: 10000,
+  autoStartDelay: 5000,
   rabbitHuntingEnabled: false,
   sevenTwoRuleEnabled: true,
   sevenTwoBountyPercent: 2,
@@ -125,6 +134,8 @@ export default class PokerRoom implements PartyServer {
   private autoStartTimeout: ReturnType<typeof setTimeout> | null = null
   private botActionTimeout: ReturnType<typeof setTimeout> | null = null
   private botActionPlayerId: string | null = null
+  private runItTwiceTimeout: ReturnType<typeof setTimeout> | null = null
+  private runItTwiceDeadline: number | null = null
 
   constructor(readonly room: Room) {
     const roomCode = room.id.toUpperCase()
@@ -150,6 +161,7 @@ export default class PokerRoom implements PartyServer {
       spectatorStacks: {},
       pendingRemovals: {},
       pendingSpectators: {},
+      cardRevealRequests: {},
       social: {
         activeByPlayer: {},
         chatLog: [],
@@ -175,7 +187,17 @@ export default class PokerRoom implements PartyServer {
     try {
       switch (msg.type) {
         case 'join_room':
-          this.handleJoinRoom(sender, msg.nickname, msg.email, msg.venmoUsername, msg.reconnectToken)
+          this.handleJoinRoom(
+            sender,
+            msg.nickname,
+            msg.email,
+            msg.venmoUsername,
+            msg.avatar,
+            msg.reconnectToken
+          )
+          break
+        case 'update_avatar':
+          this.handleUpdateAvatar(sender, msg.avatar)
           break
         case 'seat_me':
           this.handleSeatMe(sender, msg.seatIndex)
@@ -191,6 +213,9 @@ export default class PokerRoom implements PartyServer {
           break
         case 'rabbit_hunt':
           this.handleRabbitHunt(sender)
+          break
+        case 'run_it_twice_vote':
+          this.handleRunItTwiceVote(sender, msg.vote)
           break
         case 'player_action':
           this.handlePlayerAction(sender, msg.action, msg.amount)
@@ -215,6 +240,12 @@ export default class PokerRoom implements PartyServer {
           break
         case 'set_show_cards':
           this.handleSetShowCards(sender, msg.mode)
+          break
+        case 'request_card_reveal':
+          this.handleCardRevealRequest(sender, msg.targetId)
+          break
+        case 'respond_card_reveal':
+          this.handleCardRevealResponse(sender, msg.requesterId, msg.allow)
           break
         case 'table_chat':
           this.handleTableChat(sender, msg.message, msg.targetId)
@@ -255,6 +286,18 @@ export default class PokerRoom implements PartyServer {
 
   onAlarm() {
     const gameState = this.data.gameState
+    const runItTwice = gameState.runItTwice
+    if (runItTwice?.status === 'voting' && runItTwice.expiresAt) {
+      const remainingMs = runItTwice.expiresAt - Date.now()
+      if (remainingMs > 25) {
+        void this.room.storage.setAlarm(runItTwice.expiresAt)
+        return
+      }
+
+      this.expireRunItTwiceVote()
+      return
+    }
+
     const actingPlayerId = gameState.actingPlayerId
     if (
       gameState.phase !== 'in_hand' ||
@@ -284,6 +327,7 @@ export default class PokerRoom implements PartyServer {
     nickname: string,
     email: string,
     venmoUsername: string,
+    avatar?: PlayerAvatarCustomization,
     reconnectToken?: string
   ) {
     const trimmed = nickname.trim().slice(0, 20)
@@ -300,7 +344,9 @@ export default class PokerRoom implements PartyServer {
       this.bindConnection(conn, reconnectPlayerId)
       this.data.reconnectTokens[reconnectPlayerId] = generateReconnectToken()
       if (!this.data.playerProfiles[reconnectPlayerId]) {
-        this.data.playerProfiles[reconnectPlayerId] = { email, venmoUsername }
+        this.data.playerProfiles[reconnectPlayerId] = { email, venmoUsername, avatar }
+      } else if (avatar) {
+        this.data.playerProfiles[reconnectPlayerId].avatar = avatar
       }
       this.ensureStats(email)
 
@@ -322,7 +368,7 @@ export default class PokerRoom implements PartyServer {
     this.bindConnection(conn, playerId)
     this.data.reconnectTokens[playerId] = generateReconnectToken()
     this.data.playerNicknames[playerId] = trimmed
-    this.data.playerProfiles[playerId] = { email, venmoUsername }
+    this.data.playerProfiles[playerId] = { email, venmoUsername, avatar }
     this.ensureStats(email)
 
     if (!this.data.hostId) {
@@ -367,6 +413,24 @@ export default class PokerRoom implements PartyServer {
     this.seatPlayerAt(playerId, seatIndex)
 
     this.sendActionResult(conn)
+    this.broadcastState()
+  }
+
+  private handleUpdateAvatar(conn: Connection, avatar: PlayerAvatarCustomization) {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    if (!playerId) {
+      this.sendActionFailed(conn, 'Join the room before updating your avatar')
+      return
+    }
+
+    const profile = this.data.playerProfiles[playerId]
+    if (!profile) {
+      this.sendActionFailed(conn, 'Player profile not found')
+      return
+    }
+
+    profile.avatar = avatar
+    this.sendActionResult(conn, 'Avatar updated')
     this.broadcastState()
   }
 
@@ -464,6 +528,7 @@ export default class PokerRoom implements PartyServer {
 
     try {
       this.clearAutoStart()
+      this.data.cardRevealRequests = {}
       this.data.gameState = startHand(this.data.gameState)
       this.recordHandsPlayedForCurrentHand()
       this.syncActionTimer(true)
@@ -642,6 +707,35 @@ export default class PokerRoom implements PartyServer {
     this.applyTableSettings(settingsPatch)
     this.sendActionResult(conn, 'Updated table settings.')
     this.broadcastState()
+  }
+
+  private handleRunItTwiceVote(conn: Connection, vote: 'yes' | 'no') {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    if (!playerId) {
+      this.sendActionFailed(conn, 'Join the room before voting')
+      return
+    }
+
+    try {
+      this.data.gameState = voteRunItTwice(this.data.gameState, playerId, vote)
+      this.recordCompletedHandStats()
+      this.finalizeState()
+      this.syncActionTimer()
+
+      const stillVoting = this.data.gameState.runItTwice?.status === 'voting'
+      this.sendActionResult(
+        conn,
+        stillVoting
+          ? 'Vote locked. Waiting for the other player.'
+          : vote === 'yes'
+            ? 'Both players agreed. Running it twice.'
+            : 'Running the board once.'
+      )
+      this.broadcastState()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Run it twice vote failed'
+      this.sendActionFailed(conn, message)
+    }
   }
 
   private applyTableSettings(settings: Partial<TableSettings>) {
@@ -979,6 +1073,86 @@ export default class PokerRoom implements PartyServer {
     this.broadcastState()
   }
 
+  private handleCardRevealRequest(conn: Connection, targetId: string) {
+    const requesterId = this.data.connectionToPlayer[conn.id]
+    if (!requesterId) {
+      this.sendActionFailed(conn, 'Join the room before requesting cards')
+      return
+    }
+
+    const state = this.data.gameState
+    const requester = this.getPlayer(requesterId)
+    const isCardRevealWindow = state.phase === 'in_hand' || (
+      state.phase === 'between_hands' && Boolean(state.winners?.length)
+    )
+    if (!isCardRevealWindow || requester?.status !== 'folded') {
+      this.sendActionFailed(conn, 'You can only request cards after folding in the current hand.')
+      return
+    }
+
+    const target = this.getPlayer(targetId)
+    if (
+      !target ||
+      target.id === requesterId ||
+      target.holeCards.length !== 2 ||
+      target.status === 'waiting' ||
+      target.status === 'sitting_out' ||
+      target.status === 'disconnected'
+    ) {
+      this.sendActionFailed(conn, 'That player cannot share cards right now.')
+      return
+    }
+
+    const key = this.cardRevealRequestKey(state.handNumber, requesterId, targetId)
+    const existing = this.data.cardRevealRequests[key]
+    if (existing) {
+      const message = existing.status === 'pending'
+        ? `Waiting for ${target.nickname} to answer.`
+        : existing.status === 'approved'
+          ? `${target.nickname} already shared their cards for this hand.`
+          : `${target.nickname} chose to keep their cards hidden this hand.`
+      this.sendActionFailed(conn, message)
+      return
+    }
+
+    const status = target.isBot ? 'approved' : 'pending'
+    this.data.cardRevealRequests[key] = {
+      requesterId,
+      targetId,
+      handNumber: state.handNumber,
+      status,
+    }
+    this.sendActionResult(conn)
+    this.broadcastState()
+  }
+
+  private handleCardRevealResponse(conn: Connection, requesterId: string, allow: boolean) {
+    const targetId = this.data.connectionToPlayer[conn.id]
+    if (!targetId) {
+      this.sendActionFailed(conn, 'Join the room before answering card requests')
+      return
+    }
+
+    const state = this.data.gameState
+    const key = this.cardRevealRequestKey(state.handNumber, requesterId, targetId)
+    const request = this.data.cardRevealRequests[key]
+    const isCardRevealWindow = state.phase === 'in_hand' || (
+      state.phase === 'between_hands' && Boolean(state.winners?.length)
+    )
+    if (!isCardRevealWindow || !request || request.status !== 'pending') {
+      this.sendActionFailed(conn, 'That card request is no longer active.')
+      return
+    }
+
+    request.status = allow ? 'approved' : 'denied'
+    this.sendActionResult(conn)
+    this.broadcastState()
+  }
+
+  private cardRevealRequestKey(handNumber: number, requesterId: string, targetId: string): string {
+    return `${handNumber}:${requesterId}:${targetId}`
+  }
+
   private handleTableChat(conn: Connection, message: string, targetId?: string) {
     const playerId = this.data.connectionToPlayer[conn.id]
     if (!playerId) {
@@ -1220,6 +1394,7 @@ export default class PokerRoom implements PartyServer {
         Boolean(this.data.gameState.winners?.length)
       )
       if (!isPostHandRevealWindow) {
+        this.data.cardRevealRequests = {}
         this.flushPendingRemovals()
         this.flushPendingSpectators()
         this.moveZeroStackPlayersToSpectators()
@@ -1310,11 +1485,22 @@ export default class PokerRoom implements PartyServer {
     const spectatorCanSeeAllHands = Boolean(
       playerId && (this.data.spectatorIds[playerId] || this.data.pendingSpectators[playerId])
     )
-
+    const isCardRevealWindow = this.data.gameState.phase === 'in_hand' || (
+      this.data.gameState.phase === 'between_hands' && Boolean(this.data.gameState.winners?.length)
+    )
+    const currentCardRevealRequests = isCardRevealWindow
+      ? Object.values(this.data.cardRevealRequests).filter(request => (
+          request.handNumber === this.data.gameState.handNumber &&
+          (request.requesterId === playerId || request.targetId === playerId)
+        ))
+      : []
+    const permittedHoleCardPlayerIds = spectatorCanSeeAllHands
+      ? this.data.gameState.players.map(player => player.id)
+      : currentCardRevealRequests
+          .filter(request => request.requesterId === playerId && request.status === 'approved')
+          .map(request => request.targetId)
     const publicState = withVisibleHandOdds(
-      toTableState(this.data.gameState, playerId, {
-        revealAllHoleCards: spectatorCanSeeAllHands,
-      })
+      toTableState(this.data.gameState, playerId, { permittedHoleCardPlayerIds })
     )
     const winners = publicState.winners?.map(winner => ({
       ...winner,
@@ -1337,6 +1523,7 @@ export default class PokerRoom implements PartyServer {
       type: 'room_snapshot',
       state: {
         ...publicState,
+        cardRevealRequests: currentCardRevealRequests,
         players: publicState.players.map(player => this.withPublicPlayerMetadata(player)),
         winners,
         autoStartEnabled: true,
@@ -1372,6 +1559,7 @@ export default class PokerRoom implements PartyServer {
         return {
           id,
           nickname: seatedPlayer?.nickname ?? this.data.playerNicknames[id] ?? 'Player',
+          avatar: this.data.playerProfiles[id]?.avatar,
           venmoUsername: this.data.playerProfiles[id]?.venmoUsername,
           stats: this.getPublicStats(id),
           stack: seatedPlayer?.stack ?? this.data.spectatorStacks[id] ?? 0,
@@ -1410,6 +1598,7 @@ export default class PokerRoom implements PartyServer {
   private withPublicPlayerMetadata(player: SeatPlayer): SeatPlayer {
     return {
       ...player,
+      avatar: this.data.playerProfiles[player.id]?.avatar,
       venmoUsername: this.data.playerProfiles[player.id]?.venmoUsername,
       stats: this.getPublicStats(player.id),
     }
@@ -1564,6 +1753,7 @@ export default class PokerRoom implements PartyServer {
 
   private broadcastState() {
     this.finalizeState()
+    this.syncRunItTwiceVote()
     const socialSnapshot = this.buildSocialSnapshotMessage()
 
     for (const conn of Array.from(this.room.getConnections())) {
@@ -1717,6 +1907,59 @@ export default class PokerRoom implements PartyServer {
     this.botActionPlayerId = null
   }
 
+  private syncRunItTwiceVote() {
+    const runItTwice = this.data.gameState.runItTwice
+    if (
+      runItTwice?.status !== 'voting' ||
+      !runItTwice.expiresAt
+    ) {
+      this.clearRunItTwiceVoteTimeout()
+      return
+    }
+
+    if (
+      this.runItTwiceTimeout &&
+      this.runItTwiceDeadline === runItTwice.expiresAt
+    ) {
+      return
+    }
+
+    this.clearRunItTwiceVoteTimeout()
+    this.runItTwiceDeadline = runItTwice.expiresAt
+    const remainingMs = Math.max(0, runItTwice.expiresAt - Date.now())
+    void this.room.storage.setAlarm(runItTwice.expiresAt)
+    this.runItTwiceTimeout = setTimeout(() => {
+      this.runItTwiceTimeout = null
+      this.runItTwiceDeadline = null
+      this.expireRunItTwiceVote()
+    }, remainingMs)
+  }
+
+  private expireRunItTwiceVote() {
+    if (this.data.gameState.runItTwice?.status !== 'voting') {
+      return
+    }
+
+    try {
+      this.data.gameState = resolveRunItTwiceDecision(this.data.gameState, false)
+      this.recordCompletedHandStats()
+      this.finalizeState()
+      this.syncActionTimer()
+      this.broadcastState()
+    } catch {
+      this.finalizeState()
+    }
+  }
+
+  private clearRunItTwiceVoteTimeout() {
+    if (this.runItTwiceTimeout) {
+      clearTimeout(this.runItTwiceTimeout)
+    }
+
+    this.runItTwiceTimeout = null
+    this.runItTwiceDeadline = null
+  }
+
   private chooseBotAction(playerId: string): {
     action: 'fold' | 'check' | 'call' | 'raise' | 'all_in'
     amount?: number
@@ -1822,6 +2065,7 @@ export default class PokerRoom implements PartyServer {
           this.broadcastState()
           return
         }
+        this.data.cardRevealRequests = {}
         this.data.gameState = startHand(this.data.gameState)
         this.recordHandsPlayedForCurrentHand()
         this.clearAutoFold()
@@ -1841,9 +2085,7 @@ export default class PokerRoom implements PartyServer {
       return configuredDelay
     }
 
-    const presentationDuration = getShowdownMinimumDurationMs(
-      this.getShowdownParticipantCount()
-    )
+    const presentationDuration = this.getShowdownPresentationDurationMs()
     const elapsed = Math.max(0, Date.now() - state.showdownAt)
 
     return Math.max(0, Math.max(configuredDelay, presentationDuration) - elapsed)
@@ -1855,9 +2097,7 @@ export default class PokerRoom implements PartyServer {
       return 0
     }
 
-    const presentationDuration = getShowdownMinimumDurationMs(
-      this.getShowdownParticipantCount()
-    )
+    const presentationDuration = this.getShowdownPresentationDurationMs()
     const elapsed = Math.max(0, Date.now() - state.showdownAt)
     return Math.max(0, presentationDuration - elapsed)
   }
@@ -1873,6 +2113,16 @@ export default class PokerRoom implements PartyServer {
         player.status === 'all_in'
       )
     )).length
+  }
+
+  private getShowdownPresentationDurationMs(): number {
+    const standardDuration = getShowdownMinimumDurationMs(
+      this.getShowdownParticipantCount()
+    )
+
+    return this.data.gameState.runItTwice?.status === 'accepted'
+      ? Math.max(standardDuration, RUN_IT_TWICE_PRESENTATION_DURATION_MS)
+      : standardDuration
   }
 
   private clearAutoStart() {

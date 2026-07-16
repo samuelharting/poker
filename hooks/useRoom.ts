@@ -29,12 +29,6 @@ function buildConnectionIssue(): string {
   return `Can't reach the live table server at ${PARTYKIT_HOST}. Check that the PartyKit host is running and reachable, then retry.`
 }
 
-type SystemTone = 'info' | 'success' | 'error'
-
-interface UseRoomOptions {
-  onSystemMessage?: (message: string, tone: SystemTone) => void
-}
-
 interface RoomSocket {
   readyState: number
   close: () => void
@@ -63,10 +57,11 @@ export interface RoomState {
 
 export function useRoom(
   roomCode: string,
-  profile: PlayerProfile,
-  options: UseRoomOptions = {}
+  profile: PlayerProfile
 ): RoomState {
   const socketRef = useRef<RoomSocket | null>(null)
+  const latestProfileRef = useRef(profile)
+  latestProfileRef.current = profile
   const reconnectTokenRef = useRef<string | null>(null)
   const hasSeated = useRef(false)
   const hasEverConnectedRef = useRef(false)
@@ -78,8 +73,6 @@ export function useRoom(
   const [isHost, setIsHost] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
   const [connectionIssue, setConnectionIssue] = useState<string | null>(null)
-  const { onSystemMessage } = options
-
   const sendMessage = useCallback((msg: C2SMessage) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(msg))
@@ -150,11 +143,13 @@ export function useRoom(
           }
           setIsConnected(true)
           setConnectionIssue(null)
+          const latestProfile = latestProfileRef.current
           const joinMsg: C2SMessage = {
             type: 'join_room',
-            nickname: profile.nickname,
-            email: profile.email,
-            venmoUsername: profile.venmoUsername,
+            nickname: latestProfile.nickname,
+            email: latestProfile.email,
+            venmoUsername: latestProfile.venmoUsername,
+            avatar: latestProfile.avatar,
             reconnectToken: reconnectTokenRef.current ?? undefined,
           }
           socket.send(JSON.stringify(joinMsg))
@@ -164,7 +159,6 @@ export function useRoom(
           const payload = event as MessageEvent
           const msg = parseS2C(payload.data as string)
           if (!msg) {
-            onSystemMessage?.('Invalid server payload. Refreshing table state...', 'error')
             return
           }
 
@@ -199,19 +193,9 @@ export function useRoom(
               break
             }
 
-            case 'action_result': {
-              if (msg.message) {
-                onSystemMessage?.(msg.message, 'success')
-              }
-              break
-            }
-
+            case 'action_result':
             case 'action_failed':
-              onSystemMessage?.(msg.message, 'error')
-              break
-
             case 'error':
-              onSystemMessage?.(msg.message, 'error')
               break
           }
         })
@@ -235,7 +219,6 @@ export function useRoom(
         if (active) {
           setIsConnected(false)
           setConnectionIssue('Unable to load the live table connection.')
-          onSystemMessage?.('Unable to load the live table connection.', 'error')
         }
       }
     })()
@@ -249,7 +232,7 @@ export function useRoom(
       socketRef.current?.close()
       socketRef.current = null
     }
-  }, [onSystemMessage, profile.email, profile.nickname, profile.venmoUsername, roomCode])
+  }, [profile.email, profile.nickname, profile.venmoUsername, roomCode])
 
   useEffect(() => {
     if (!yourId || !tableState || !isConnected) {

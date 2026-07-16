@@ -6,6 +6,7 @@ import {
   formatPlayerStatsSummary,
   getSpectatorRailState,
   getVisibleOwnHandDescription,
+  resolveCheckFoldPreAction,
   updateTargetedQuickEmotes,
 } from '@/components/table/PokerTable'
 import type { Card, LobbyPlayer } from '@/lib/poker/types'
@@ -59,6 +60,14 @@ describe('PokerTable action button descriptors', () => {
       { key: 'all_in', label: 'All-in', amountLabel: '$1,000', className: 'btn-all-in' },
       { key: 'fold', label: 'Fold', className: 'btn-fold' },
     ])
+  })
+})
+
+describe('check/fold pre-action', () => {
+  it('checks for free and folds when facing a bet', () => {
+    expect(resolveCheckFoldPreAction(['fold', 'check', 'raise'])).toBe('check')
+    expect(resolveCheckFoldPreAction(['fold', 'call', 'raise'])).toBe('fold')
+    expect(resolveCheckFoldPreAction([])).toBeNull()
   })
 })
 

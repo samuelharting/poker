@@ -2,8 +2,10 @@ import type { TableState } from '../lib/poker/types'
 import type { ShowCardsMode } from '../lib/poker/types'
 import {
   normalizeEmail,
+  normalizePlayerAvatarCustomization,
   normalizeVenmoUsername,
   validatePlayerProfile,
+  type PlayerAvatarCustomization,
 } from '../lib/profile'
 
 export interface TableChatEntry {
@@ -37,13 +39,16 @@ export type C2SMessage =
     nickname: string
     email: string
     venmoUsername: string
+    avatar?: PlayerAvatarCustomization
     reconnectToken?: string
   }
+  | { type: 'update_avatar'; avatar: PlayerAvatarCustomization }
   | { type: 'seat_me'; seatIndex?: number }
   | { type: 'start_game' }
   | { type: 'add_bots'; count: number }
   | { type: 'set_auto_start'; enabled: boolean }
   | { type: 'rabbit_hunt' }
+  | { type: 'run_it_twice_vote'; vote: 'yes' | 'no' }
   | { type: 'player_action'; action: 'fold' | 'check' | 'call' | 'raise' | 'all_in'; amount?: number }
   | {
     type: 'update_table_settings'
@@ -62,6 +67,8 @@ export type C2SMessage =
   | { type: 'adjust_player_stack'; targetId: string; amount: number }
   | { type: 'set_player_spectator'; targetId: string; spectator: boolean }
   | { type: 'set_show_cards'; mode: ShowCardsMode }
+  | { type: 'request_card_reveal'; targetId: string }
+  | { type: 'respond_card_reveal'; requesterId: string; allow: boolean }
   | { type: 'table_chat'; message: string; targetId?: string }
   | { type: 'table_emote'; emote: string; targetId?: string }
 
@@ -138,17 +145,26 @@ export function parseC2S(raw: string): C2SMessage | null {
           parsed.reconnectToken === undefined || typeof parsed.reconnectToken === 'string'
             ? parsed.reconnectToken
             : undefined
-        const profile = validatePlayerProfile({ nickname, email, venmoUsername })
+        const avatar = parsed.avatar === undefined
+          ? undefined
+          : normalizePlayerAvatarCustomization(parsed.avatar)
+        const profile = validatePlayerProfile({ nickname, email, venmoUsername, avatar })
         return profile.ok
           ? {
             type,
             nickname,
             email: profile.profile.email,
             venmoUsername: profile.profile.venmoUsername,
+            ...(profile.profile.avatar ? { avatar: profile.profile.avatar } : {}),
             reconnectToken,
           }
           : null
       }
+
+      case 'update_avatar':
+        return isObject(parsed.avatar)
+          ? { type, avatar: normalizePlayerAvatarCustomization(parsed.avatar) }
+          : null
 
       case 'seat_me': {
         if (parsed.seatIndex === undefined) {
@@ -172,6 +188,11 @@ export function parseC2S(raw: string): C2SMessage | null {
 
       case 'rabbit_hunt':
         return { type }
+
+      case 'run_it_twice_vote': {
+        const vote = parsed.vote
+        return vote === 'yes' || vote === 'no' ? { type, vote } : null
+      }
 
       case 'player_action': {
         const action = parsed.action
@@ -251,6 +272,18 @@ export function parseC2S(raw: string): C2SMessage | null {
       case 'set_show_cards': {
         const mode = parseShowCardsMode(parsed.mode ?? parsed.show)
         return mode ? { type, mode } : null
+      }
+
+      case 'request_card_reveal': {
+        const targetId = typeof parsed.targetId === 'string' ? parsed.targetId.trim() : ''
+        return targetId ? { type, targetId } : null
+      }
+
+      case 'respond_card_reveal': {
+        const requesterId = typeof parsed.requesterId === 'string' ? parsed.requesterId.trim() : ''
+        return requesterId && typeof parsed.allow === 'boolean'
+          ? { type, requesterId, allow: parsed.allow }
+          : null
       }
 
       case 'table_chat': {

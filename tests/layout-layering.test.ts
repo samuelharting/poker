@@ -41,6 +41,11 @@ describe('room UI layering', () => {
     expectRule('.settings-modal-overlay', [
       'z-index: var(--room-layer-modal);',
     ])
+    expectRule(".table-scene[data-settings-open='true']", [
+      'z-index: var(--room-layer-modal);',
+    ])
+    expect(pokerTableSource).toContain("data-settings-open={settingsOpen ? 'true' : 'false'}")
+    expect(pokerTableSource).toContain('{runItTwiceVote && !settingsOpen ? (')
   })
 
   it('pins desktop 3D card overlays to the viewport instead of the moving camera', () => {
@@ -160,7 +165,8 @@ describe('room UI layering', () => {
       'transform: translateX(-50%) scale(0.9);',
     ])
     expectRule(".table-scene[data-desktop-three='true'][data-tray-open='true'] .hero-table-bet", [
-      'left: calc(50% - clamp(170px, 13vw, 250px));',
+      'left: 72%;',
+      'top: 78%;',
       'transform: translate(-50%, -50%) perspective(720px) rotateX(12deg) scale(0.78);',
     ])
     expectRule(".table-scene[data-desktop-three='true'][data-hero-seat='true'] .own-hand-area", [
@@ -189,7 +195,7 @@ describe('room UI layering', () => {
     expect(css).toContain('Desktop 3D hero hand readability')
 
     expectRule(".table-scene[data-desktop-three='true'][data-hero-seat='true'] .hero-table-bet", [
-      'left: calc(50% - clamp(170px, 13vw, 250px));',
+      'left: calc(50% - clamp(230px, 18vw, 300px));',
       'top: 70%;',
       'transform: translate(-50%, -50%) perspective(720px) rotateX(12deg) scale(0.78);',
     ])
@@ -223,6 +229,25 @@ describe('room UI layering', () => {
     expect(pokerTableSource).toContain('className="table-hand-result-summary"')
     expect(pokerTableSource).toContain("winnerDisplays.length > 1 ? 'Split pot' : 'Hand winner'")
     expect(pokerTableSource).not.toContain('className="table-center-winner-announcement"')
+  })
+
+  it('makes the winner chip payout large, bright, and visible on mobile', () => {
+    expect(pokerTableSource).toContain(
+      'className="table-center-winner-chip-trails mobile-winner-chip-trails"'
+    )
+    expect(polishCss).toContain('@keyframes winnerChipTravelEmphasis')
+    expectRule('.table-center-winner-chip-trail', [
+      'animation: winnerChipTravelEmphasis 1200ms',
+      'will-change: left, top, opacity, transform, filter;',
+    ], polishCss)
+    expectRule('.table-center-winner-chip-trail .chip-stack-display', [
+      'transform: scale(1.62);',
+      'drop-shadow(0 0 13px rgba(255, 220, 115, 0.72))',
+    ], polishCss)
+    expectRule('.mobile-winner-chip-trails', [
+      'z-index: calc(var(--room-layer-winner) - 1);',
+      'border-radius: 0;',
+    ], polishCss)
   })
 
   it('enlarges showdown cards at their existing seats instead of opening a new screen', () => {
@@ -272,7 +297,9 @@ describe('room UI layering', () => {
       'padding-inline: 8px;',
     ], polishCss)
     expectRule(".table-scene[data-tray-open='true'] .cinematic-seat-7", [
-      'right: 512px;',
+      'right: 12px;',
+      'bottom: 44%;',
+      'transform: none;',
     ], polishCss)
     expectRule(".table-scene[data-tray-open='true'] .cinematic-seat-6", [
       'top: 36%;',
@@ -291,7 +318,7 @@ describe('room UI layering', () => {
       'text-overflow: ellipsis;',
     ], polishCss)
     expectRule('.cinematic-seat-4', [
-      'top: 21%;',
+      'top: 14%;',
     ], polishCss)
     expectRule('.three-live-badge', [
       'left: auto;',
@@ -349,6 +376,7 @@ describe('room UI layering', () => {
   it('uses a tableless mobile poker field with reference-style header, seats, board, and controls', () => {
     expect(css).toContain('Mobile edge arena restructure')
     expect(css).toContain('Mobile reference poker app layout')
+    expect(polishCss).toContain('Mobile tableless edge layout')
 
     expectRule('.mobile-poker-field', [
       'position: relative;',
@@ -387,5 +415,27 @@ describe('room UI layering', () => {
     expectRule('.mobile-main-actions', [
       'grid-template-columns: repeat(3, minmax(0, 1fr));',
     ])
+    expectRule('.mobile-poker-field::before', [
+      'content: none;',
+      'display: none;',
+    ], polishCss)
+    expectRule('.mobile-poker-field::after', [
+      'content: none;',
+      'display: none;',
+    ], polishCss)
+    expectRule(".table-scene[data-phase='in_hand']:not([data-tray-open='true'])", [
+      'padding-bottom: calc(8px + env(safe-area-inset-bottom));',
+    ], polishCss)
+    expectRule('.mobile-edge-seat', [
+      'border: 0;',
+      'background: transparent;',
+      'box-shadow: none;',
+    ], polishCss)
+    expectRule('.mobile-seat-position-2', [
+      'left: env(safe-area-inset-left, 0px);',
+    ], polishCss)
+    expectRule('.mobile-seat-position-6', [
+      'right: env(safe-area-inset-right, 0px);',
+    ], polishCss)
   })
 })

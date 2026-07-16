@@ -45,4 +45,55 @@ describe('OwnHand strength badge', () => {
     expect(markup).toContain('own-hand-show-cards')
     expect(markup).toContain('R')
   })
+
+  it('starts an optional post-hand reveal face-down and flips only the selected card', () => {
+    const cards = [
+      { rank: 'A' as const, suit: 'spades' as const },
+      { rank: 'K' as const, suit: 'diamonds' as const },
+    ]
+
+    const hiddenMarkup = renderToStaticMarkup(
+      <OwnHand
+        cards={cards}
+        isActing={false}
+        revealChoiceActive
+        showCardsMode="none"
+      />
+    )
+    const leftMarkup = renderToStaticMarkup(
+      <OwnHand
+        cards={cards}
+        isActing={false}
+        revealChoiceActive
+        showCardsMode="left"
+      />
+    )
+
+    expect(hiddenMarkup.match(/Face-down card/g)).toHaveLength(2)
+    expect(hiddenMarkup).not.toContain('A of spades')
+    expect(hiddenMarkup).not.toContain('K of diamonds')
+    expect(leftMarkup).toContain('A of spades')
+    expect(leftMarkup).not.toContain('K of diamonds')
+    expect(leftMarkup).toContain('own-card-slot-left is-shown')
+    expect(leftMarkup).toContain('own-card-slot-right is-face-down')
+  })
+
+  it('attaches an optional pre-action control to the hole cards', () => {
+    const markup = renderToStaticMarkup(
+      <OwnHand
+        cards={[
+          { rank: 'A', suit: 'spades' },
+          { rank: 'K', suit: 'hearts' },
+        ]}
+        isActing={false}
+        preActionControl={(
+          <button type="button" aria-pressed="false">Check / Fold</button>
+        )}
+      />
+    )
+
+    expect(markup).toContain('own-hand-pre-action')
+    expect(markup).toContain('Check / Fold')
+    expect(markup).toContain('aria-pressed="false"')
+  })
 })

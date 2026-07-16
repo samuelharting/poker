@@ -14,7 +14,9 @@ interface OwnHandProps {
   winningCards?: Card[]
   handDescription?: string | null
   showCardsMode?: ShowCardsMode
+  revealChoiceActive?: boolean
   showCardsControl?: React.ReactNode
+  preActionControl?: React.ReactNode
 }
 
 export function OwnHand({
@@ -25,14 +27,16 @@ export function OwnHand({
   winningCards = [],
   handDescription = null,
   showCardsMode = 'none',
+  revealChoiceActive = false,
   showCardsControl = null,
+  preActionControl = null,
 }: OwnHandProps) {
   if (cards.length === 0) {
     return null
   }
 
   const isCardFaceUp = (index: number) => {
-    if (!isFolded) {
+    if (!isFolded && !revealChoiceActive) {
       return true
     }
 
@@ -58,11 +62,12 @@ export function OwnHand({
         handDescription && 'has-strength',
         isActing && 'is-acting',
         isFolded && 'is-folded',
-        isWinner && 'is-winner'
+        isWinner && 'is-winner',
+        preActionControl && 'has-pre-action'
       )}
       aria-label={handDescription ? `Your hand: ${handDescription}` : 'Your hand'}
     >
-      {isActing && <div className="own-hand-turn-chip">Your turn</div>}
+      {isActing && <div className="own-hand-turn-chip">Act now</div>}
       {handDescription && (
         <div className="own-hand-strength" role="status" aria-live="polite">
           <span className="own-hand-strength-value">{handDescription}</span>
@@ -75,8 +80,8 @@ export function OwnHand({
             className={clsx(
               'own-card-slot',
               index === 0 ? 'own-card-slot-left' : 'own-card-slot-right',
-              isFolded && !isCardFaceUp(index) && 'is-face-down',
-              isFolded && isCardFaceUp(index) && 'is-shown'
+              !isCardFaceUp(index) && 'is-face-down',
+              (isFolded || revealChoiceActive) && isCardFaceUp(index) && 'is-shown'
             )}
           >
             <PlayingCard
@@ -93,6 +98,7 @@ export function OwnHand({
           </div>
         ))}
       </div>
+      {preActionControl && <div className="own-hand-pre-action">{preActionControl}</div>}
       {showCardsControl && <div className="own-hand-show-cards">{showCardsControl}</div>}
     </div>
   )
