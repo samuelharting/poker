@@ -328,6 +328,37 @@ input:focus-visible {
   outline-offset: 2px;
 }
 
+.own-hand-social {
+  position: absolute;
+  left: 50%;
+  bottom: 46%;
+  z-index: 12;
+  width: max-content;
+  max-width: min(180px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.own-hand-social .player-chat-bubble {
+  max-width: 180px;
+  font-size: 12px;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5);
+}
+
+.own-hand-social .player-emote-badge {
+  width: 44px;
+  height: 44px;
+  margin-top: 0;
+  font-size: 25px;
+  background: rgba(5, 13, 11, 0.94);
+  border-color: var(--pn-line-strong);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.46);
+}
+
 .entry-field > span {
   display: flex;
   align-items: baseline;
@@ -4331,22 +4362,21 @@ input:focus-visible {
   }
 }
 
-/* Check/fold pre-action attached to the hero's hole cards on mobile and 3D. */
-.own-hand-pre-action {
-  position: absolute;
-  left: 50%;
-  bottom: -14px;
-  z-index: 4;
-  transform: translateX(-50%);
-  pointer-events: auto;
+/* Large check/fold pre-action bubble in the bottom-right on mobile and 3D. */
+.check-fold-pre-action-dock {
+  position: fixed;
+  right: calc(20px + env(safe-area-inset-right));
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 226;
+  pointer-events: none;
 }
 
 .own-hand-pre-action-button {
-  min-width: 112px;
-  min-height: 34px;
-  padding: 4px 9px 4px 6px;
+  min-width: 176px;
+  min-height: 64px;
+  padding: 10px 20px;
   border: 1px solid rgba(242, 222, 161, 0.5);
-  border-radius: 999px;
+  border-radius: 22px;
   background: linear-gradient(180deg, rgba(24, 32, 30, 0.97), rgba(7, 13, 12, 0.98));
   color: #f5f0e5;
   box-shadow:
@@ -4355,9 +4385,9 @@ input:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
   font: inherit;
   cursor: pointer;
+  pointer-events: auto;
   touch-action: manipulation;
   transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
 }
@@ -4381,42 +4411,23 @@ input:focus-visible {
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
-.own-hand-pre-action-mark {
-  width: 16px;
-  height: 16px;
-  border: 1px solid rgba(245, 240, 229, 0.46);
-  border-radius: 5px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #dff7df;
-  font-size: 12px;
-  font-weight: 950;
-  line-height: 1;
-}
-
-.own-hand-pre-action-button.is-queued .own-hand-pre-action-mark {
-  border-color: rgba(203, 244, 207, 0.8);
-  background: rgba(103, 209, 118, 0.2);
-}
-
 .own-hand-pre-action-copy {
   display: grid;
-  gap: 0;
-  text-align: left;
-  line-height: 1;
+  gap: 4px;
+  text-align: center;
+  line-height: 1.05;
 }
 
 .own-hand-pre-action-copy small {
   color: rgba(245, 240, 229, 0.58);
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.11em;
   text-transform: uppercase;
 }
 
 .own-hand-pre-action-copy strong {
-  font-size: 10px;
+  font-size: 16px;
   font-weight: 950;
   letter-spacing: 0.025em;
   text-transform: uppercase;
@@ -4427,12 +4438,15 @@ input:focus-visible {
 }
 
 @media (max-width: 768px) {
-  .mobile-hero-lane .own-hand-area.has-pre-action {
-    margin-bottom: 15px;
+  .check-fold-pre-action-dock {
+    right: calc(10px + env(safe-area-inset-right));
+    bottom: calc(10px + env(safe-area-inset-bottom));
   }
 
-  .mobile-hero-lane .own-hand-pre-action {
-    bottom: -15px;
+  .own-hand-pre-action-button {
+    min-width: 160px;
+    min-height: 58px;
+    padding: 8px 16px;
   }
 }
 

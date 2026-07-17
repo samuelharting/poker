@@ -1703,7 +1703,7 @@ function createPotRuntime(scene: THREE.Scene): PotRuntime {
   const pot = createChipSet(18)
   pot.group.name = 'table-pot-chip-mound'
   pot.group.position.set(0, 0.435, 0.96)
-  pot.group.scale.setScalar(0.9)
+  pot.group.scale.setScalar(1.2)
   scene.add(pot.group)
   return {
     ...pot,

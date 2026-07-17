@@ -357,6 +357,21 @@ describe('room UI layering', () => {
     ])
   })
 
+  it('uses one large bottom-right bubble for the check/fold pre-action', () => {
+    expectRule('.check-fold-pre-action-dock', [
+      'position: fixed;',
+      'right: calc(20px + env(safe-area-inset-right));',
+      'bottom: calc(20px + env(safe-area-inset-bottom));',
+    ], polishCss)
+    expectRule('.own-hand-pre-action-button', [
+      'min-width: 176px;',
+      'min-height: 64px;',
+      'pointer-events: auto;',
+    ], polishCss)
+    expect(pokerTableSource).toContain('<div className="check-fold-pre-action-dock">')
+    expect(pokerTableSource).not.toContain('own-hand-pre-action-mark')
+  })
+
   it('cleans up desktop 3D room overlays', () => {
     expect(css).toContain('Desktop 3D room HUD cleanup')
 

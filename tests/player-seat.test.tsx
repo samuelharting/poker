@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { formatWinnerPaymentLabel, getVisibleSeatCards } from '@/components/table/PlayerSeat'
 import { PlayerSeat } from '@/components/table/PlayerSeat'
+import { OwnHand } from '@/components/table/OwnHand'
 import type { Card, SeatPlayer } from '@/lib/poker/types'
 
 function makeSeatPlayer(overrides: Partial<SeatPlayer> = {}): SeatPlayer {
@@ -132,5 +133,29 @@ describe('PlayerSeat target controls', () => {
 
     expect(markup).toContain('data-player-target-trigger="avatar"')
     expect(markup).toContain('Target Villain for emojis')
+  })
+})
+
+describe('OwnHand social overlays', () => {
+  it('shows targeted chat and emoji over the hero cards in 2D', () => {
+    const markup = renderToStaticMarkup(
+      <OwnHand
+        cards={[
+          { rank: 'A', suit: 'spades' },
+          { rank: 'K', suit: 'hearts' },
+        ]}
+        isActing={false}
+        socialMessage="Nice hand"
+        socialMessageExpiresAt={Date.now() + 5_000}
+        socialEmote={'\uD83D\uDE02'}
+        socialEmoteExpiresAt={Date.now() + 5_000}
+        socialEmoteTargeted
+      />
+    )
+
+    expect(markup).toContain('own-hand-social')
+    expect(markup).toContain('Nice hand')
+    expect(markup).toContain('player-emote-badge-targeted')
+    expect(markup).toContain('\uD83D\uDE02')
   })
 })

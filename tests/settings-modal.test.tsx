@@ -52,6 +52,7 @@ function makeProps(overrides: Partial<SettingsModalProps> = {}): SettingsModalPr
   return {
     state: makeTableState(),
     yourId: 'hero',
+    isHost: true,
     isConnected: true,
     suitColorMode: 'two',
     avatarCustomization: DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
@@ -194,6 +195,32 @@ describe('SettingsModal', () => {
 
     expect(findInput(view.root, 'Chip amount').props.value).toBe(200)
     expect(findButton(view.root, 'Add chips').props.disabled).toBe(false)
+  })
+
+  it('keeps table and player management controls hidden from non-creators', () => {
+    const state = makeTableState({
+      lobbyPlayers: [{
+        id: 'guest',
+        nickname: 'Guest',
+        stack: 1_000,
+        status: 'waiting',
+        isConnected: true,
+        isSeated: true,
+        isSpectator: false,
+      }],
+    })
+    const view = renderModal(makeProps({ state, yourId: 'guest', isHost: false }))
+
+    expect(nodeText(view.root)).toContain('Only the game creator can change blinds, stacks, timing, and table rules.')
+    expect(view.root.findAllByType('input').some(input => input.props.type === 'number')).toBe(false)
+
+    act(() => {
+      findButton(view.root, 'Players (1)').props.onClick()
+    })
+
+    expect(nodeText(view.root)).toContain('Only the game creator can manage players')
+    expect(view.root.findAllByType('button').some(button => nodeText(button).trim() === 'Add chips')).toBe(false)
+    expect(view.root.findAllByType('button').some(button => nodeText(button).trim() === 'Kick player')).toBe(false)
   })
 
   it('keeps save from treating a temporarily empty number as zero', () => {

@@ -1423,7 +1423,7 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
     expect(Object.prototype.hasOwnProperty.call(hostSnapshot ?? {}, 'connectionToPlayer')).toBe(false)
   })
 
-  it('allows joined non-host clients to manage table controls', () => {
+  it('rejects every creator-only table control from non-host clients', () => {
     const { room, server } = createHarness()
     const host = joinPlayer(server, room, 'host', 'Alice')
     seatPlayer(server, host.connection, 0)
@@ -1432,29 +1432,37 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
     seatPlayer(server, nonHost.connection, 1)
 
     send(server, nonHost.connection, { type: 'set_auto_start', enabled: true })
-    expect(lastMessage(nonHost.connection, 'action_result')).toBeDefined()
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
 
     send(server, nonHost.connection, { type: 'update_table_settings', smallBlind: 25, bigBlind: 50 })
-    expect(lastMessage(nonHost.connection, 'action_result')?.message).toBe('Updated table settings.')
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
 
     send(server, nonHost.connection, { type: 'add_bots', count: 1 })
-    expect(lastMessage(nonHost.connection, 'action_result')?.message).toContain('Added 1 bot')
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
 
     send(server, nonHost.connection, { type: 'adjust_player_stack', targetId: host.playerId, amount: 125 })
-    expect(lastMessage(nonHost.connection, 'action_result')?.message).toContain('Added $125 to Alice')
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
 
     send(server, nonHost.connection, { type: 'set_player_spectator', targetId: host.playerId, spectator: true })
-    expect(lastMessage(nonHost.connection, 'action_result')).toBeDefined()
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
+
+    send(server, nonHost.connection, { type: 'remove_player', targetId: host.playerId })
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
+
+    send(server, nonHost.connection, { type: 'rebuy', amount: 500 })
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
+
+    send(server, nonHost.connection, { type: 'start_game' })
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
 
     const snapshot = lastMessage(nonHost.connection, 'room_snapshot')
     const hostInLobby = snapshot?.state.lobbyPlayers.find(player => player.id === host.playerId)
-    expect(snapshot?.state.smallBlind).toBe(25)
-    expect(snapshot?.state.bigBlind).toBe(50)
-    expect(hostInLobby?.isSpectator).toBe(true)
-
-    send(server, nonHost.connection, { type: 'start_game' })
-    expect(lastMessage(nonHost.connection, 'action_result')?.message).toBe('Dealing the first hand.')
-    expect(lastMessage(nonHost.connection, 'room_snapshot')?.state.phase).toBe('in_hand')
+    expect(snapshot?.state.smallBlind).toBe(10)
+    expect(snapshot?.state.bigBlind).toBe(20)
+    expect(snapshot?.state.players).toHaveLength(2)
+    expect(hostInLobby?.stack).toBe(1_000)
+    expect(hostInLobby?.isSpectator).toBe(false)
+    expect(snapshot?.state.phase).toBe('waiting')
   })
 
   it('rejects invalid table-setting ranges and relationships', () => {
@@ -1499,7 +1507,7 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
 
     vi.advanceTimersByTime(1_000)
 
-    send(server, nonHost.connection, {
+    send(server, host.connection, {
       type: 'update_table_settings',
       smallBlind: 50,
       bigBlind: 100,
@@ -1508,7 +1516,7 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
       rabbitHuntingEnabled: true,
     })
 
-    expect(lastMessage(nonHost.connection, 'action_result')?.message)
+    expect(lastMessage(host.connection, 'action_result')?.message)
       .toBe('Settings saved. Changes will apply automatically next hand.')
 
     const snapshot = lastMessage(nonHost.connection, 'room_snapshot')
@@ -1935,7 +1943,7 @@ describe('PokerRoom social protocol', () => {
 })
 
 describe('PokerRoom rabbit hunting', () => {
-  it('syncs the rabbit hunting setting through any player update', () => {
+  it('syncs the rabbit hunting setting through a creator update', () => {
     const { room, server } = createHarness()
 
     const host = joinPlayer(server, room, 'host', 'Alice')
@@ -1947,8 +1955,8 @@ describe('PokerRoom rabbit hunting', () => {
     const initialSnapshot = lastMessage(host.connection, 'room_snapshot')
     expect(initialSnapshot?.state.rabbitHuntingEnabled).toBe(false)
 
-    send(server, guest.connection, { type: 'update_table_settings', rabbitHuntingEnabled: true })
-    expect(lastMessage(guest.connection, 'action_result')?.message).toBe('Updated table settings.')
+    send(server, host.connection, { type: 'update_table_settings', rabbitHuntingEnabled: true })
+    expect(lastMessage(host.connection, 'action_result')?.message).toBe('Updated table settings.')
 
     const hostSnapshot = lastMessage(host.connection, 'room_snapshot')
     const guestSnapshot = lastMessage(guest.connection, 'room_snapshot')

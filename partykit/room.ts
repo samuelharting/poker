@@ -489,10 +489,23 @@ export default class PokerRoom implements PartyServer {
     delete this.data.pendingSpectators[playerId]
   }
 
-  private handleStartGame(conn: Connection) {
+  private requireGameCreator(conn: Connection, action: string): string | null {
     const playerId = this.data.connectionToPlayer[conn.id]
     if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before starting the game')
+      this.sendActionFailed(conn, `Join the room before you ${action}`)
+      return null
+    }
+
+    if (this.data.hostId !== playerId) {
+      this.sendActionFailed(conn, `Only the game creator can ${action}.`)
+      return null
+    }
+
+    return playerId
+  }
+
+  private handleStartGame(conn: Connection) {
+    if (!this.requireGameCreator(conn, 'start the game')) {
       return
     }
 
@@ -541,9 +554,7 @@ export default class PokerRoom implements PartyServer {
   }
 
   private handleAddBots(conn: Connection, count: number) {
-    const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before adding bots')
+    if (!this.requireGameCreator(conn, 'add bots')) {
       return
     }
 
@@ -595,9 +606,7 @@ export default class PokerRoom implements PartyServer {
   }
 
   private handleSetAutoStart(conn: Connection, enabled: boolean) {
-    const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before changing auto-start settings')
+    if (!this.requireGameCreator(conn, 'change auto-deal settings')) {
       return
     }
 
@@ -643,9 +652,7 @@ export default class PokerRoom implements PartyServer {
     conn: Connection,
     msg: Extract<C2SMessage, { type: 'update_table_settings' }>
   ) {
-    const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before changing settings')
+    if (!this.requireGameCreator(conn, 'change table settings')) {
       return
     }
 
@@ -822,9 +829,8 @@ export default class PokerRoom implements PartyServer {
   }
 
   private handleRebuy(conn: Connection, amount: number) {
-    const playerId = this.data.connectionToPlayer[conn.id]
+    const playerId = this.requireGameCreator(conn, 'change player chip counts')
     if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before rebuying')
       return
     }
 
@@ -849,9 +855,8 @@ export default class PokerRoom implements PartyServer {
   }
 
   private handleRemovePlayer(conn: Connection, targetId: string) {
-    const playerId = this.data.connectionToPlayer[conn.id]
+    const playerId = this.requireGameCreator(conn, 'kick players')
     if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before removing players')
       return
     }
 
@@ -892,9 +897,7 @@ export default class PokerRoom implements PartyServer {
   }
 
   private handleAdjustPlayerStack(conn: Connection, targetId: string, amount: number) {
-    const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before changing player chips')
+    if (!this.requireGameCreator(conn, 'change player chip counts')) {
       return
     }
 
@@ -972,9 +975,7 @@ export default class PokerRoom implements PartyServer {
   }
 
   private handleSetPlayerSpectator(conn: Connection, targetId: string, spectator: boolean) {
-    const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before changing spectator mode')
+    if (!this.requireGameCreator(conn, 'seat or spectate players')) {
       return
     }
 

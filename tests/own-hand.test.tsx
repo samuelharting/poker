@@ -77,23 +77,4 @@ describe('OwnHand strength badge', () => {
     expect(leftMarkup).toContain('own-card-slot-left is-shown')
     expect(leftMarkup).toContain('own-card-slot-right is-face-down')
   })
-
-  it('attaches an optional pre-action control to the hole cards', () => {
-    const markup = renderToStaticMarkup(
-      <OwnHand
-        cards={[
-          { rank: 'A', suit: 'spades' },
-          { rank: 'K', suit: 'hearts' },
-        ]}
-        isActing={false}
-        preActionControl={(
-          <button type="button" aria-pressed="false">Check / Fold</button>
-        )}
-      />
-    )
-
-    expect(markup).toContain('own-hand-pre-action')
-    expect(markup).toContain('Check / Fold')
-    expect(markup).toContain('aria-pressed="false"')
-  })
 })

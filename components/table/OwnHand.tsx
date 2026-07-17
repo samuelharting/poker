@@ -5,6 +5,7 @@ import type { ShowCardsMode } from '@/lib/poker/types'
 import clsx from 'clsx'
 import React from 'react'
 import { PlayingCard } from '@/components/ui/PlayingCard'
+import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
 
 interface OwnHandProps {
   cards: Card[]
@@ -15,8 +16,12 @@ interface OwnHandProps {
   handDescription?: string | null
   showCardsMode?: ShowCardsMode
   revealChoiceActive?: boolean
+  socialMessage?: string
+  socialMessageExpiresAt?: number
+  socialEmote?: string
+  socialEmoteExpiresAt?: number
+  socialEmoteTargeted?: boolean
   showCardsControl?: React.ReactNode
-  preActionControl?: React.ReactNode
 }
 
 export function OwnHand({
@@ -28,8 +33,12 @@ export function OwnHand({
   handDescription = null,
   showCardsMode = 'none',
   revealChoiceActive = false,
+  socialMessage,
+  socialMessageExpiresAt,
+  socialEmote,
+  socialEmoteExpiresAt,
+  socialEmoteTargeted = false,
   showCardsControl = null,
-  preActionControl = null,
 }: OwnHandProps) {
   if (cards.length === 0) {
     return null
@@ -55,6 +64,9 @@ export function OwnHand({
     return false
   }
 
+  const socialBubbleTtl = Math.max(0, socialMessageExpiresAt ? socialMessageExpiresAt - Date.now() : 0)
+  const socialEmoteTtl = Math.max(0, socialEmoteExpiresAt ? socialEmoteExpiresAt - Date.now() : 0)
+
   return (
     <div
       className={clsx(
@@ -62,11 +74,35 @@ export function OwnHand({
         handDescription && 'has-strength',
         isActing && 'is-acting',
         isFolded && 'is-folded',
-        isWinner && 'is-winner',
-        preActionControl && 'has-pre-action'
+        isWinner && 'is-winner'
       )}
       aria-label={handDescription ? `Your hand: ${handDescription}` : 'Your hand'}
     >
+      {(socialMessage || socialEmote) && (
+        <div className="own-hand-social" aria-live="polite">
+          {socialMessage && (
+            <div
+              key={`${socialMessage}-${socialMessageExpiresAt}`}
+              className="player-chat-bubble"
+              style={{ ['--chat-ttl' as any]: `${socialBubbleTtl}ms` }}
+            >
+              {socialMessage}
+            </div>
+          )}
+          {socialEmote && (
+            <div
+              key={`${socialEmote}-${socialEmoteExpiresAt}`}
+              className={clsx(
+                'player-emote-badge',
+                socialEmoteTargeted && 'player-emote-badge-targeted'
+              )}
+              style={{ ['--chat-ttl' as any]: `${socialEmoteTtl}ms` }}
+            >
+              <EmojiGlyph emoji={socialEmote} />
+            </div>
+          )}
+        </div>
+      )}
       {isActing && <div className="own-hand-turn-chip">Act now</div>}
       {handDescription && (
         <div className="own-hand-strength" role="status" aria-live="polite">
@@ -98,7 +134,6 @@ export function OwnHand({
           </div>
         ))}
       </div>
-      {preActionControl && <div className="own-hand-pre-action">{preActionControl}</div>}
       {showCardsControl && <div className="own-hand-show-cards">{showCardsControl}</div>}
     </div>
   )

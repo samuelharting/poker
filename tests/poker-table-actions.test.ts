@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildActiveSocialByPlayer,
   buildActionButtonDescriptors,
   buildPlayerManagementTags,
   canSaveTableSettings,
@@ -30,6 +31,42 @@ describe('targeted quick emojis', () => {
       '\uD83D\uDD95',
       '\uD83C\uDDEE\uD83C\uDDF1',
     ])
+  })
+})
+
+describe('2D targeted table social overlays', () => {
+  it('places a targeted emoji only on the clicked player', () => {
+    const now = 10_000
+    const social = buildActiveSocialByPlayer([
+      {
+        playerId: 'sender',
+        emote: '\uD83D\uDE02',
+        emoteExpiresAt: now + 2_000,
+        targetPlayerId: 'target',
+      },
+    ], now)
+
+    expect(social.has('sender')).toBe(false)
+    expect(social.get('target')).toMatchObject({
+      emote: '\uD83D\uDE02',
+      emoteTargeted: true,
+    })
+  })
+
+  it('keeps untargeted reactions on the sender', () => {
+    const now = 10_000
+    const social = buildActiveSocialByPlayer([
+      {
+        playerId: 'sender',
+        emote: '\uD83D\uDC4B',
+        emoteExpiresAt: now + 2_000,
+      },
+    ], now)
+
+    expect(social.get('sender')).toMatchObject({
+      emote: '\uD83D\uDC4B',
+      emoteTargeted: false,
+    })
   })
 })
 

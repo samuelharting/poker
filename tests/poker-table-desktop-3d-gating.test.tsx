@@ -807,7 +807,9 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).toContain('hero-bottom-summary-stack')
     expect(markup).toContain('$960')
     expect(markup).not.toContain('class="seat-position seat-0 hero-seat-position"')
+    expect(markup).toContain('check-fold-pre-action-dock')
     expect(markup).toContain('own-hand-pre-action-button')
+    expect(markup).not.toContain('own-hand-pre-action-mark')
   })
 
   it('does not expose two-hand streak companion eligibility to the desktop 3D stage', () => {
@@ -1086,6 +1088,75 @@ describe('PokerTable desktop 3D gate', () => {
     expect(tableSource).toContain('emoteReactions={threeEmoteReactions}')
   })
 
+  it('shows a targeted 3D reaction over the recipient own cards when their avatar is hidden', () => {
+    const state = makeTableState()
+    state.players = [
+      makeSeatPlayer({
+        id: 'hero',
+        nickname: 'Hero',
+        seatIndex: 0,
+        holeCards: [
+          { rank: 'A', suit: 'spades' },
+          { rank: 'K', suit: 'hearts' },
+        ],
+      }),
+      makeSeatPlayer({
+        id: 'sender',
+        nickname: 'Sender',
+        seatIndex: 3,
+      }),
+    ]
+
+    const markup = renderWithMedia(
+      {
+        '(min-width: 1024px)': true,
+        '(max-width: 768px)': false,
+      },
+      <PokerTable
+        state={state}
+        socialState={{
+          active: [{
+            playerId: 'sender',
+            emote: '\uD83D\uDE02',
+            emoteExpiresAt: Date.now() + 5_000,
+            targetPlayerId: 'hero',
+          }],
+          chatLog: [],
+        }}
+        yourId="hero"
+        isHost={true}
+        isConnected={true}
+        startingStackSetting={1000}
+        settingsOpen={false}
+        suitColorMode="two"
+        roomCode="123"
+        canShareRoom={false}
+        onAction={noop}
+        onStartGame={noop}
+        onAddBots={noop}
+        autoStartEnabled={true}
+        onSetAutoStart={noop}
+        onUpdateSettings={noop}
+        onRemovePlayer={noop}
+        onAdjustPlayerStack={noop}
+        onSetPlayerSpectator={noop}
+        onSeatMe={noop}
+        onSetShowCards={noop}
+        onSetSuitColorMode={noop}
+        onCloseSettings={noop}
+        onCopyRoom={noop}
+        onShareRoom={noop}
+        onSendEmote={noop}
+        onSendTargetEmote={noop}
+        onFeedback={noop}
+      />
+    )
+
+    expect(markup).toContain('data-desktop-three="true"')
+    expect(markup).toContain('own-hand-social')
+    expect(markup).toContain('player-emote-badge-targeted')
+  })
+
   it('uses a tableless mobile field instead of the table surface on phone viewports', () => {
     const socialState: SocialSnapshot = {
       active: [],
@@ -1167,8 +1238,10 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).not.toContain('table-seat-placeholder')
     expect(markup).not.toContain('player-action-badge')
     expect(markup).not.toContain('chip-stack')
+    expect(markup).toContain('check-fold-pre-action-dock')
     expect(markup).toContain('own-hand-pre-action-button')
     expect(markup).toContain('Queue check if possible, otherwise fold')
+    expect(markup).not.toContain('own-hand-pre-action-mark')
   })
 
   it('renders mobile betting controls as the reference three-button bottom panel', () => {
