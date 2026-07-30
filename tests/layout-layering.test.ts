@@ -320,11 +320,8 @@ describe('room UI layering', () => {
     expectRule('.cinematic-seat-4', [
       'top: 14%;',
     ], polishCss)
-    expectRule('.three-live-badge', [
-      'left: auto;',
-      'right: 20px;',
-      'transform: none;',
-    ], polishCss)
+    expect(desktopThreeSource).not.toContain('Live 3D')
+    expect(polishCss).not.toContain('.three-live-badge')
   })
 
   it('makes folded players visually fall out of the live hand', () => {
@@ -415,6 +412,14 @@ describe('room UI layering', () => {
       'left: auto;',
       'bottom: auto;',
     ])
+    expectRule('.table-scene .mobile-hero-lane .own-hand-strength', [
+      'display: inline-flex;',
+      'bottom: calc(100% + 8px);',
+    ], polishCss)
+    expectRule('.mobile-edge-seat-timer', [
+      'position: absolute;',
+      'min-width: 32px;',
+    ], polishCss)
     expectRule('.room-hud-mobile-topline', [
       'grid-template-columns: 44px minmax(0, 1fr) 44px;',
     ])

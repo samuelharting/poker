@@ -6,7 +6,9 @@ import {
   canSaveTableSettings,
   formatPlayerStatsSummary,
   getSpectatorRailState,
+  getMobileCheckCallLabel,
   getVisibleOwnHandDescription,
+  resolveRaiseDraftAmount,
   resolveCheckFoldPreAction,
   updateTargetedQuickEmotes,
 } from '@/components/table/PokerTable'
@@ -100,11 +102,55 @@ describe('PokerTable action button descriptors', () => {
   })
 })
 
+describe('raise amount draft', () => {
+  it('resets a new betting decision to the legal minimum', () => {
+    expect(resolveRaiseDraftAmount({
+      currentAmount: 240,
+      effectiveMin: 80,
+      maxRaise: 960,
+      resetToMinimum: true,
+    })).toBe(80)
+  })
+
+  it('preserves a chosen size during the same decision while keeping it legal', () => {
+    expect(resolveRaiseDraftAmount({
+      currentAmount: 240,
+      effectiveMin: 80,
+      maxRaise: 960,
+      resetToMinimum: false,
+    })).toBe(240)
+
+    expect(resolveRaiseDraftAmount({
+      currentAmount: 240,
+      effectiveMin: 60,
+      maxRaise: 150,
+      resetToMinimum: false,
+    })).toBe(150)
+  })
+
+  it('uses the all-in maximum when it is below the normal minimum', () => {
+    expect(resolveRaiseDraftAmount({
+      currentAmount: 200,
+      effectiveMin: 35,
+      maxRaise: 35,
+      resetToMinimum: true,
+    })).toBe(35)
+  })
+})
+
 describe('check/fold pre-action', () => {
   it('checks for free and folds when facing a bet', () => {
     expect(resolveCheckFoldPreAction(['fold', 'check', 'raise'])).toBe('check')
     expect(resolveCheckFoldPreAction(['fold', 'call', 'raise'])).toBe('fold')
     expect(resolveCheckFoldPreAction([])).toBeNull()
+  })
+})
+
+describe('mobile check/call label', () => {
+  it('shows only the action that is currently legal', () => {
+    expect(getMobileCheckCallLabel('call')).toBe('CALL')
+    expect(getMobileCheckCallLabel('check')).toBe('CHECK')
+    expect(getMobileCheckCallLabel()).toBe('CHECK / CALL')
   })
 })
 

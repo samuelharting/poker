@@ -93,10 +93,13 @@ describe('mobile card layout hardening', () => {
       /\.mobile-bet-indicator\s*\{[^}]*animation:\s*mobileBetCommit 420ms/s
     )
     expect(polishCss).toMatch(
-      /\.mobile-seat-1 \.mobile-edge-bet-anchor,[\s\S]*?left:\s*calc\(50% \+ 5px\);/s
+      /\.mobile-seat-1 \.mobile-edge-bet-anchor,[\s\S]*?left:\s*calc\(100% \+ 8px\);/s
     )
     expect(polishCss).toMatch(
-      /\.mobile-seat-5 \.mobile-edge-bet-anchor,[\s\S]*?right:\s*calc\(50% \+ 5px\);/s
+      /\.mobile-seat-5 \.mobile-edge-bet-anchor,[\s\S]*?right:\s*calc\(100% \+ 8px\);/s
+    )
+    expect(polishCss).toMatch(
+      /\.mobile-seat-0 \.mobile-edge-bet-anchor,[\s\S]*?\.mobile-seat-4 \.mobile-edge-bet-anchor\s*\{[^}]*top:\s*40px;[^}]*left:\s*calc\(100% \+ 6px\);[^}]*transform:\s*none;/s
     )
     expect(polishCss).toMatch(
       /@media \(max-width: 390px\) and \(max-height: 620px\)[\s\S]*?\.table-scene\[data-tray-open='true'\] \.mobile-board-zone\s*\{[^}]*top:\s*31%;/s

@@ -105,6 +105,7 @@ interface PokerTableProps {
   onCloseSettings: () => void
   onCopyRoom: () => void
   onShareRoom: () => void
+  onLeaveGame?: () => void
   onSendChat?: (message: string) => void
   onSendTargetChat?: (targetId: string, message: string) => void
   onSendEmote: (emote: string) => void
@@ -412,6 +413,7 @@ function MobileEdgeSeat({
   player,
   visualSeat,
   isActing,
+  secondsLeft,
   isWinner = false,
   winnerAmount,
   winnerHandDescription,
@@ -422,6 +424,7 @@ function MobileEdgeSeat({
   player: OpponentSeat
   visualSeat: number
   isActing: boolean
+  secondsLeft?: number
   isWinner?: boolean
   winnerAmount?: number
   winnerHandDescription?: string
@@ -432,6 +435,7 @@ function MobileEdgeSeat({
   const isFolded = player.status === 'folded'
   const isDisconnected = player.status === 'disconnected' || !player.isConnected
   const isAllIn = player.status === 'all_in'
+  const blindRole = player.isBB ? 'big' : player.isSB ? 'small' : null
   const seatNumber = MOBILE_SEAT_NUMBERS_BY_VISUAL_SEAT[visualSeat] ?? visualSeat + 1
   const mobileSeatName = getMobileSeatName(player)
   const targetTitle = `Target ${player.nickname} for emojis`
@@ -478,6 +482,15 @@ function MobileEdgeSeat({
       ) : (
         <div className={`mobile-seat-number ${isActing ? 'is-acting' : ''}`}>
           {seatNumber}
+        </div>
+      )}
+      {isActing && typeof secondsLeft === 'number' && (
+        <div
+          className={`mobile-edge-seat-timer ${secondsLeft <= 5 ? 'is-low' : ''}`}
+          role="timer"
+          aria-label={`${secondsLeft} seconds left`}
+        >
+          {secondsLeft}s
         </div>
       )}
       {player.hasCards && (
@@ -537,6 +550,12 @@ function MobileEdgeSeat({
           <div className="mobile-edge-seat-name">{mobileSeatName}</div>
         )}
         <div className="mobile-edge-seat-stack">{formatAmount(player.stack)}</div>
+        {blindRole && (
+          <div className={`mobile-blind-role is-${blindRole}`}>
+            <strong>{blindRole === 'big' ? 'BB' : 'SB'}</strong>
+            <span>{blindRole === 'big' ? 'Big Blind' : 'Small Blind'}</span>
+          </div>
+        )}
       </div>
 
       {statusLabel && <div className="mobile-edge-seat-status">{statusLabel}</div>}
@@ -558,6 +577,8 @@ function MobileHeroSeat({
   isWinner: boolean
   status: string
 }) {
+  const blindRole = player.isBB ? 'big' : player.isSB ? 'small' : null
+
   return (
     <div className={`mobile-hero-seat ${isActing ? 'is-acting' : ''} ${isWinner ? 'is-winner' : ''}`}>
       <div className={`mobile-seat-number ${isActing ? 'is-acting' : ''}`}>
@@ -570,6 +591,12 @@ function MobileHeroSeat({
       {player.isDealer && <span className="mobile-hero-dealer-badge">D</span>}
       <div className="mobile-hero-seat-name">You</div>
       <div className="mobile-hero-seat-stack">{formatAmount(player.stack)}</div>
+      {blindRole && (
+        <div className={`mobile-blind-role is-${blindRole}`}>
+          <strong>{blindRole === 'big' ? 'BB' : 'SB'}</strong>
+          <span>{blindRole === 'big' ? 'Big Blind' : 'Small Blind'}</span>
+        </div>
+      )}
       <div className="mobile-hero-seat-status">{status}</div>
     </div>
   )
@@ -640,6 +667,18 @@ export function resolveCheckFoldPreAction(legalActions: PokerAction[]): 'check' 
   }
 
   return legalActions.includes('fold') ? 'fold' : null
+}
+
+export function getMobileCheckCallLabel(action?: PokerAction): 'CHECK' | 'CALL' | 'CHECK / CALL' {
+  if (action === 'call') {
+    return 'CALL'
+  }
+
+  if (action === 'check') {
+    return 'CHECK'
+  }
+
+  return 'CHECK / CALL'
 }
 
 function formatEquityPercent(value: number): string {
@@ -825,6 +864,29 @@ export function canSaveTableSettings({
   return isConnected && hasSettingsChanges
 }
 
+export function resolveRaiseDraftAmount({
+  currentAmount,
+  effectiveMin,
+  maxRaise,
+  resetToMinimum,
+}: {
+  currentAmount: number
+  effectiveMin: number
+  maxRaise: number
+  resetToMinimum: boolean
+}): number {
+  if (maxRaise <= 0) {
+    return 0
+  }
+
+  if (resetToMinimum) {
+    return effectiveMin
+  }
+
+  const nextAmount = Number.isFinite(currentAmount) ? currentAmount : effectiveMin
+  return Math.max(effectiveMin, Math.min(maxRaise, nextAmount))
+}
+
 export function canManualRabbitHunt(state: TableState): boolean {
   return (
     state.phase === 'between_hands' &&
@@ -895,6 +957,7 @@ export function PokerTable({
   onCloseSettings,
   onCopyRoom,
   onShareRoom,
+  onLeaveGame = () => {},
   onSendChat = () => {},
   onSendTargetChat = () => {},
   onSendEmote,
@@ -957,10 +1020,11 @@ export function PokerTable({
       : { ...state, players: showdownPresentedPlayers },
     [showdownPresentedPlayers, state]
   )
-  const threeTableView = useMemo(
-    () => shouldRenderDesktopThree ? createThreeTableViewModel(showdownPresentedState, yourId) : null,
-    [shouldRenderDesktopThree, showdownPresentedState, yourId]
+  const allViewportTableView = useMemo(
+    () => createThreeTableViewModel(showdownPresentedState, yourId),
+    [showdownPresentedState, yourId]
   )
+  const threeTableView = shouldRenderDesktopThree ? allViewportTableView : null
   const presentedThreeTableView = useMemo(() => {
     if (!threeTableView) {
       return threeTableView
@@ -984,7 +1048,7 @@ export function PokerTable({
         : threeTableView.hero,
     }
   }, [showWinnerHighlights, showdownPresentation.isShowdown, showdownPresentation.payoutStarted, threeTableView])
-  const latestAllInAnnouncement = threeTableView?.allInAnnouncement ?? null
+  const latestAllInAnnouncement = allViewportTableView.allInAnnouncement
   const latestAllInActionKey = latestAllInAnnouncement?.actionKey ?? ''
   const [activeAllInAnnouncement, setActiveAllInAnnouncement] = useState<AllInAnnouncementView | null>(null)
   const consumedAllInActionKeyRef = useRef<string | null>(latestAllInActionKey || null)
@@ -1248,17 +1312,16 @@ export function PokerTable({
   const maxRaise = me ? me.stack + me.bet : 0
   const effectiveMin = Math.min(state.minRaise, maxRaise)
   const [raiseAmount, setRaiseAmount] = useState(effectiveMin)
+  const bettingDecisionKey = `${state.handNumber}:${state.round ?? 'none'}:${state.actingPlayerId ?? 'none'}`
 
   useEffect(() => {
-    if (maxRaise <= 0) {
-      return
-    }
-
-    setRaiseAmount(current => {
-      const nextAmount = Number.isFinite(current) ? current : effectiveMin
-      return Math.max(effectiveMin, Math.min(maxRaise, nextAmount))
-    })
-  }, [effectiveMin, maxRaise])
+    setRaiseAmount(current => resolveRaiseDraftAmount({
+      currentAmount: current,
+      effectiveMin,
+      maxRaise,
+      resetToMinimum: isMyTurn,
+    }))
+  }, [bettingDecisionKey, effectiveMin, isMyTurn, maxRaise])
 
   const quickBets = useMemo(() => {
     const bets: Array<{ label: string; amount: number }> = []
@@ -1368,12 +1431,18 @@ export function PokerTable({
   const winnerSeatMap = useMemo(() => {
     if (isMobileViewport) {
       return new Map(
-        mobileEdgeOpponents.map(player => [player.id, player.mobileVisualSeat])
+        [
+          [yourId, 0],
+          ...mobileEdgeOpponents.map(player => [player.id, player.mobileVisualSeat] as const),
+        ]
       )
     }
 
-    return new Map(orderedOpponents.map(player => [player.id, player.visualSeat]))
-  }, [isMobileViewport, mobileEdgeOpponents, orderedOpponents])
+    return new Map([
+      [yourId, 0],
+      ...orderedOpponents.map(player => [player.id, player.visualSeat] as const),
+    ])
+  }, [isMobileViewport, mobileEdgeOpponents, orderedOpponents, yourId])
   const winnerSeatTargets = isMobileViewport ? MOBILE_WINNER_SEAT_TARGETS : WINNER_SEAT_TARGETS
   const winnerDisplays = useMemo<WinnerDisplay[]>(() => {
     if (!betweenHands || !state.winners?.length) {
@@ -1662,6 +1731,7 @@ export function PokerTable({
                         player={player}
                         visualSeat={player.mobileVisualSeat}
                         isActing={state.actingPlayerId === player.id}
+                        secondsLeft={state.actingPlayerId === player.id ? turnTimer.secondsLeft : undefined}
                         isWinner={betweenHands && showWinnerHighlights && winnerAmounts.has(player.id)}
                         winnerAmount={winnerAmounts.get(player.id)}
                         winnerHandDescription={winnerDescriptions.get(player.id)}
@@ -1975,8 +2045,8 @@ export function PokerTable({
               </span>
             )}
             {me.isDealer && <span className="table-chip">Dealer</span>}
-            {me.isSB && <span className="table-chip">SB</span>}
-            {me.isBB && <span className="table-chip">BB</span>}
+            {me.isSB && <span className="table-chip hero-blind-role is-small">Small Blind</span>}
+            {me.isBB && <span className="table-chip hero-blind-role is-big">Big Blind</span>}
             {isMyTurn && <span className="table-chip table-chip-soft">Your action</span>}
             {!isConnected && <span className="table-chip chip-warning">Reconnecting</span>}
           </div>
@@ -2026,6 +2096,7 @@ export function PokerTable({
           onSetPlayerSpectator={onSetPlayerSpectator}
           onCopyRoom={onCopyRoom}
           onShareRoom={onShareRoom}
+          onLeaveGame={onLeaveGame}
           onFeedback={onFeedback}
         />
       )}
@@ -2129,7 +2200,7 @@ export function PokerTable({
                 onClick={mobileCheckCallAction?.onClick}
                 disabled={!mobileCheckCallAction}
               >
-                <span>CHECK / CALL</span>
+                <span>{getMobileCheckCallLabel(mobileCheckCallAction?.key)}</span>
                 {toCall > 0 && <strong>{formatAmount(toCall)}</strong>}
               </button>
               <button
@@ -2840,6 +2911,7 @@ export function SettingsModal({
   onSetPlayerSpectator,
   onCopyRoom,
   onShareRoom,
+  onLeaveGame = () => {},
   onFeedback,
 }: {
   state: TableState
@@ -2872,6 +2944,7 @@ export function SettingsModal({
   onSetPlayerSpectator: (targetId: string, spectator: boolean) => void
   onCopyRoom: () => void
   onShareRoom: () => void
+  onLeaveGame?: () => void
   onFeedback: (message: string, tone?: FeedbackTone) => void
 }) {
   type NumericDraftValue = number | ''
@@ -3117,6 +3190,14 @@ export function SettingsModal({
                   disabled={!canShareRoom}
                 >
                   Share link
+                </button>
+                <button
+                  type="button"
+                  className="btn-subtle btn-subtle-danger"
+                  onClick={onLeaveGame}
+                  disabled={!isConnected}
+                >
+                  Leave game
                 </button>
               </div>
             </div>

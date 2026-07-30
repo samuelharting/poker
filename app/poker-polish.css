@@ -1877,42 +1877,6 @@ input:focus-visible {
     color: #f2c2bc;
   }
 
-  .three-live-badge {
-    position: absolute;
-    left: auto;
-    right: 20px;
-    top: 18px;
-    z-index: 5;
-    min-height: 24px;
-    padding: 0 9px;
-    border: 1px solid rgba(118, 197, 168, 0.22);
-    border-radius: 999px;
-    background: rgba(4, 13, 11, 0.58);
-    color: rgba(189, 229, 214, 0.72);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-    font-size: 8px;
-    font-weight: 800;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    transform: none;
-  }
-
-  .three-live-badge i {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: #6bd3aa;
-    box-shadow: 0 0 9px rgba(107, 211, 170, 0.8);
-    animation: threeLivePulse 1.6s ease-in-out infinite;
-  }
-
-  @keyframes threeLivePulse {
-    50% { opacity: 0.45; transform: scale(0.75); }
-  }
-
   .table-stage,
   .table-wrapper {
     position: absolute;
@@ -4579,19 +4543,20 @@ input:focus-visible {
   .mobile-seat-1 .mobile-edge-bet-anchor,
   .mobile-seat-2 .mobile-edge-bet-anchor,
   .mobile-seat-3 .mobile-edge-bet-anchor {
-    left: calc(50% + 5px);
+    left: calc(100% + 8px);
   }
 
   .mobile-seat-5 .mobile-edge-bet-anchor,
   .mobile-seat-6 .mobile-edge-bet-anchor,
   .mobile-seat-7 .mobile-edge-bet-anchor {
-    right: calc(50% + 5px);
+    right: calc(100% + 8px);
   }
 
   .mobile-seat-0 .mobile-edge-bet-anchor,
   .mobile-seat-4 .mobile-edge-bet-anchor {
-    left: 50%;
-    transform: translateX(-50%);
+    top: 40px;
+    left: calc(100% + 6px);
+    transform: none;
   }
 
   .mobile-hero-bet-anchor {
@@ -4725,5 +4690,153 @@ input:focus-visible {
   .table-scene[data-tray-open='true'] .mobile-edge-board,
   .table-scene[data-tray-open='true'] .mobile-board-zone {
     top: 31%;
+  }
+}
+
+/* Blind role clarity ----------------------------------------------------- */
+.player-blind-role,
+.mobile-blind-role,
+.cinematic-seat-topline .cinematic-blind-role,
+.hero-blind-role {
+  border: 1px solid currentColor;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.player-blind-role.is-small,
+.mobile-blind-role.is-small,
+.cinematic-seat-topline .cinematic-blind-role.is-small,
+.hero-blind-role.is-small {
+  border-color: rgba(255, 190, 72, 0.86);
+  background: rgba(91, 55, 4, 0.94);
+  color: #ffd476;
+}
+
+.player-blind-role.is-big,
+.mobile-blind-role.is-big,
+.cinematic-seat-topline .cinematic-blind-role.is-big,
+.hero-blind-role.is-big {
+  border-color: rgba(255, 107, 104, 0.9);
+  background: rgba(91, 22, 24, 0.96);
+  color: #ffaaa7;
+}
+
+.player-blind-role {
+  min-width: 82px;
+  min-height: 22px;
+  padding: 3px 7px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.36);
+  font-size: 8px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.player-blind-role strong,
+.mobile-blind-role strong,
+.cinematic-blind-role b {
+  color: #fff;
+  font-size: 1.12em;
+}
+
+.hero-blind-role {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.05) inset;
+}
+
+.cinematic-seat-topline .cinematic-blind-role {
+  width: auto;
+  min-width: 66px;
+  height: 23px;
+  padding: 2px 5px;
+  border-radius: 7px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  place-items: center;
+  gap: 3px;
+  font-size: 6px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.cinematic-seat-topline .cinematic-blind-role b {
+  font-size: 8px;
+}
+
+@media (max-width: 768px) {
+  /* Keep the live hand readout visible above the hero cards. An older mobile
+     layout rule hides this badge even though the evaluator still provides it. */
+  .table-scene .mobile-hero-lane .own-hand-strength {
+    bottom: calc(100% + 8px);
+    z-index: 3;
+    display: inline-flex;
+    min-height: 24px;
+    max-width: min(240px, calc(100vw - 32px));
+    padding: 4px 9px;
+  }
+
+  .mobile-hero-lane .own-hand-strength-value {
+    font-size: 11px;
+  }
+
+  .mobile-edge-seat-timer {
+    position: absolute;
+    top: -5px;
+    left: calc(50% + 13px);
+    z-index: 14;
+    min-width: 32px;
+    padding: 3px 6px;
+    border: 1px solid rgba(255, 205, 105, 0.9);
+    border-radius: 999px;
+    background: rgba(18, 20, 18, 0.96);
+    color: #ffd469;
+    box-shadow: 0 5px 12px rgba(0, 0, 0, 0.48);
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 10px;
+    font-weight: 950;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .mobile-seat-5 .mobile-edge-seat-timer,
+  .mobile-seat-6 .mobile-edge-seat-timer,
+  .mobile-seat-7 .mobile-edge-seat-timer {
+    right: calc(50% + 13px);
+    left: auto;
+  }
+
+  .mobile-edge-seat-timer.is-low {
+    border-color: rgba(255, 103, 92, 0.96);
+    background: rgba(77, 16, 15, 0.96);
+    color: #ffaaa2;
+  }
+
+  .mobile-blind-role {
+    min-width: 66px;
+    min-height: 18px;
+    padding: 2px 4px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.42);
+    font-size: 6px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .mobile-blind-role strong {
+    font-size: 8px;
+  }
+
+  .mobile-hero-seat .mobile-blind-role {
+    margin-top: 3px;
   }
 }

@@ -67,6 +67,7 @@ function makeProps(overrides: Partial<SettingsModalProps> = {}): SettingsModalPr
     onSetPlayerSpectator: vi.fn(),
     onCopyRoom: vi.fn(),
     onShareRoom: vi.fn(),
+    onLeaveGame: vi.fn(),
     onFeedback: vi.fn(),
     ...overrides,
   }
@@ -124,6 +125,17 @@ afterEach(() => {
 })
 
 describe('SettingsModal', () => {
+  it('lets every connected player leave from room actions', () => {
+    const onLeaveGame = vi.fn()
+    const view = renderModal(makeProps({ isHost: false, onLeaveGame }))
+
+    act(() => {
+      findButton(view.root, 'Leave game').props.onClick()
+    })
+
+    expect(onLeaveGame).toHaveBeenCalledOnce()
+  })
+
   it('lets numeric settings be cleared before typing replacement values', () => {
     const onUpdateSettings = vi.fn()
     const view = renderModal(makeProps({ onUpdateSettings }))

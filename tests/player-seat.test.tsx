@@ -101,6 +101,32 @@ describe('PlayerSeat turn label', () => {
   })
 })
 
+describe('PlayerSeat blind roles', () => {
+  it('spells out the big and small blind instead of relying on initials', () => {
+    const bigBlindMarkup = renderToStaticMarkup(
+      <PlayerSeat
+        player={makeSeatPlayer({ status: 'active', isBB: true })}
+        isActing={false}
+        depthClass="seat-depth-mid"
+        opacityValue={1}
+      />
+    )
+    const smallBlindMarkup = renderToStaticMarkup(
+      <PlayerSeat
+        player={makeSeatPlayer({ status: 'active', isSB: true, isDealer: true })}
+        isActing={false}
+        depthClass="seat-depth-mid"
+        opacityValue={1}
+      />
+    )
+
+    expect(bigBlindMarkup).toContain('player-blind-role is-big')
+    expect(bigBlindMarkup).toContain('Big Blind')
+    expect(smallBlindMarkup).toContain('player-blind-role is-small')
+    expect(smallBlindMarkup).toContain('Small Blind')
+  })
+})
+
 describe('PlayerSeat folded presentation', () => {
   it('marks folded seats with a status hook and stronger inactive opacity', () => {
     const markup = renderToStaticMarkup(

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import type { Connection, Room } from 'partykit/server'
-import PokerRoom, { AUTO_FOLD_DELAY, AUTO_START_DELAY, BOT_ACTION_DELAY } from '@/partykit/room'
+import PokerRoom, { AUTO_FOLD_DELAY, AUTO_START_DELAY, BOT_ACTION_DELAY, HOST_DISCONNECT_GRACE_MS } from '@/partykit/room'
 import { getShowdownMinimumDurationMs } from '@/lib/poker/showdown'
 import type { C2SMessage, S2CMessage } from '@/shared/protocol'
 import type { PlayerAvatarCustomization } from '@/lib/profile'
@@ -419,7 +419,7 @@ describe('PokerRoom showdown pacing', () => {
 })
 
 describe('PokerRoom reconnect and session handling', () => {
-  it('rotates reconnect tokens, preserves the seat, and strips stale connections of private cards', () => {
+  it('keeps a stable reconnect token, preserves the seat, and strips stale connections of private cards', () => {
     const { room, server } = createHarness()
 
     const alice = joinPlayer(server, room, 'alice-1', 'Alice')
@@ -432,7 +432,7 @@ describe('PokerRoom reconnect and session handling', () => {
 
     const aliceReconnect = joinPlayer(server, room, 'alice-2', 'Alice', alice.reconnectToken)
     expect(aliceReconnect.playerId).toBe(alice.playerId)
-    expect(aliceReconnect.reconnectToken).not.toBe(alice.reconnectToken)
+    expect(aliceReconnect.reconnectToken).toBe(alice.reconnectToken)
 
     const staleSnapshot = lastMessage(alice.connection, 'room_snapshot')
     const staleAliceView = staleSnapshot?.state.players.find(player => player.id === alice.playerId)
@@ -467,6 +467,45 @@ describe('PokerRoom reconnect and session handling', () => {
 
     const hostId = (server as unknown as { data: { hostId: string | null } }).data.hostId
     expect(hostId).toBe(bob.playerId)
+  })
+
+  it('transfers host authority when the host disconnects without sending leave_room', () => {
+    vi.useFakeTimers()
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice', 'Alice')
+    const bob = joinPlayer(server, room, 'bob', 'Bob')
+
+    room.removeConnection(alice.connection.id)
+    server.onClose(alice.connection)
+
+    expect(lastMessage(bob.connection, 'private_session')?.isHost).toBe(false)
+    vi.advanceTimersByTime(HOST_DISCONNECT_GRACE_MS + 1)
+    expect(lastMessage(bob.connection, 'private_session')?.isHost).toBe(true)
+    send(server, bob.connection, { type: 'set_auto_start', enabled: true })
+    expect(lastMessage(bob.connection, 'action_result')).toBeDefined()
+
+    const hostId = (server as unknown as { data: { hostId: string | null } }).data.hostId
+    expect(hostId).toBe(bob.playerId)
+  })
+
+  it('restores leadership to the first player who reconnects to an empty room', () => {
+    vi.useFakeTimers()
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice', 'Alice')
+    room.removeConnection(alice.connection.id)
+    server.onClose(alice.connection)
+
+    const runtime = server as unknown as { data: { hostId: string | null } }
+    expect(runtime.data.hostId).toBe(alice.playerId)
+    vi.advanceTimersByTime(HOST_DISCONNECT_GRACE_MS + 1)
+    expect(runtime.data.hostId).toBeNull()
+
+    const reconnect = joinPlayer(server, room, 'alice-reconnect', 'Alice', alice.reconnectToken)
+    expect(reconnect.playerId).toBe(alice.playerId)
+    expect(lastMessage(reconnect.connection, 'private_session')?.isHost).toBe(true)
+    expect(runtime.data.hostId).toBe(alice.playerId)
   })
 })
 
@@ -913,6 +952,42 @@ describe('PokerRoom timer handling', () => {
     expect(guestSeatForHost?.equityPercent).toBeUndefined()
   })
 
+  it('keeps fold-ended hands hidden from spectators until a player chooses to show', () => {
+    const { room, server } = createHarness()
+
+    const host = joinPlayer(server, room, 'host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+
+    const guest = joinPlayer(server, room, 'guest', 'Bob')
+    seatPlayer(server, guest.connection, 1)
+
+    const rail = joinPlayer(server, room, 'rail', 'Charlie')
+    send(server, host.connection, { type: 'set_player_spectator', targetId: rail.playerId, spectator: true })
+
+    send(server, host.connection, { type: 'start_game' })
+    const liveSnapshot = lastMessage(host.connection, 'room_snapshot')
+    const folder = liveSnapshot?.state.actingPlayerId === host.playerId ? host : guest
+
+    send(server, folder.connection, { type: 'player_action', action: 'fold' })
+
+    const hiddenSnapshot = lastMessage(rail.connection, 'room_snapshot')
+    expect(hiddenSnapshot?.state.phase).toBe('between_hands')
+    expect(hiddenSnapshot?.state.round).not.toBe('showdown')
+    expect(hiddenSnapshot?.state.players.every(player => player.holeCards === undefined)).toBe(true)
+    expect(hiddenSnapshot?.state.players.every(player => player.showCards === 'none')).toBe(true)
+
+    send(server, folder.connection, { type: 'set_show_cards', mode: 'both' })
+
+    const shownSnapshot = lastMessage(rail.connection, 'room_snapshot')
+    const shownFolder = shownSnapshot?.state.players.find(player => player.id === folder.playerId)
+    const hiddenOpponent = shownSnapshot?.state.players.find(player => player.id !== folder.playerId)
+
+    expect(shownFolder?.holeCards).toHaveLength(2)
+    expect(shownFolder?.showCards).toBe('both')
+    expect(hiddenOpponent?.holeCards).toBeUndefined()
+    expect(hiddenOpponent?.showCards).toBe('none')
+  })
+
   it('automatically turns a full-table entrant into a spectator with access to every hand', () => {
     const { room, server } = createHarness()
     const seated = Array.from({ length: 8 }, (_, index) => {
@@ -1150,7 +1225,34 @@ describe('PokerRoom timer handling', () => {
 })
 
 describe('PokerRoom auto-start lifecycle', () => {
-  it('blocks auto-start while host is disconnected and resumes once host reconnects', () => {
+  it('waits for the creator to start the first hand after another player joins', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-31T12:00:00.000Z'))
+
+    const { room, server } = createHarness()
+    const host = joinPlayer(server, room, 'host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+
+    const guest = joinPlayer(server, room, 'guest', 'Bob')
+    seatPlayer(server, guest.connection, 1)
+
+    vi.advanceTimersByTime(AUTO_START_DELAY + 10)
+
+    const waitingSnapshot = lastMessage(host.connection, 'room_snapshot')
+    expect(waitingSnapshot?.state.phase).toBe('waiting')
+    expect(waitingSnapshot?.state.handNumber).toBe(0)
+    expect(
+      (server as unknown as { autoStartTimeout: ReturnType<typeof setTimeout> | null }).autoStartTimeout
+    ).toBeNull()
+
+    send(server, host.connection, { type: 'start_game' })
+
+    const startedSnapshot = lastMessage(host.connection, 'room_snapshot')
+    expect(startedSnapshot?.state.phase).toBe('in_hand')
+    expect(startedSnapshot?.state.handNumber).toBe(1)
+  })
+
+  it('preserves leadership when a disconnected host returns within the grace period', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-03-31T12:00:00.000Z'))
 
@@ -1164,22 +1266,26 @@ describe('PokerRoom auto-start lifecycle', () => {
     send(server, host.connection, { type: 'set_auto_start', enabled: true })
     expect(lastMessage(host.connection, 'action_result')).toBeDefined()
 
-    ;(server as unknown as { data: { gameState: { phase: string }; autoStartEnabled: boolean } }).data.gameState.phase =
-      'between_hands'
+    const runtime = server as unknown as {
+      data: { gameState: { phase: string; handNumber: number }; autoStartEnabled: boolean }
+    }
+    runtime.data.gameState.phase = 'between_hands'
+    runtime.data.gameState.handNumber = 1
 
     room.removeConnection(host.connection.id)
     server.onClose(host.connection)
 
+    expect(lastMessage(guest.connection, 'private_session')?.isHost).toBe(false)
     vi.advanceTimersByTime(AUTO_START_DELAY + 10)
-    const blockedSnapshot = lastMessage(guest.connection, 'room_snapshot')
-    expect(blockedSnapshot?.state.phase).toBe('between_hands')
+    const transferredSnapshot = lastMessage(guest.connection, 'room_snapshot')
+    expect(transferredSnapshot?.state.phase).toBe('between_hands')
 
     const hostReconnect = joinPlayer(server, room, 'host-reconnect', 'Alice', host.reconnectToken)
     expect(hostReconnect.playerId).toBe(host.playerId)
+    expect(lastMessage(hostReconnect.connection, 'private_session')?.isHost).toBe(true)
 
     vi.advanceTimersByTime(AUTO_START_DELAY + 10)
-    const resumedSnapshot = lastMessage(hostReconnect.connection, 'room_snapshot')
-    expect(resumedSnapshot?.state.phase).toBe('in_hand')
+    expect(lastMessage(hostReconnect.connection, 'room_snapshot')?.state.phase).toBe('in_hand')
   })
 
   it('does not auto-start with fewer than 2 eligible active players', () => {
@@ -1194,8 +1300,15 @@ describe('PokerRoom auto-start lifecycle', () => {
     expect(lastMessage(host.connection, 'action_result')).toBeDefined()
 
     ;(server as unknown as {
-      data: { gameState: { phase: 'between_hands' | 'waiting'; players: Array<{ id: string; stack: number; status: string }> } }
+      data: {
+        gameState: {
+          phase: 'between_hands' | 'waiting'
+          handNumber: number
+          players: Array<{ id: string; stack: number; status: string }>
+        }
+      }
     }).data.gameState.phase = 'between_hands'
+    ;(server as unknown as { data: { gameState: { handNumber: number } } }).data.gameState.handNumber = 1
     send(server, host.connection, { type: 'set_auto_start', enabled: true })
     expect(lastMessage(host.connection, 'action_result')).toBeDefined()
 
@@ -1228,8 +1341,9 @@ describe('PokerRoom auto-start lifecycle', () => {
     seatPlayer(server, guest.connection, 1)
 
     ;(server as unknown as {
-      data: { gameState: { phase: 'between_hands' | 'waiting' } }
+      data: { gameState: { phase: 'between_hands' | 'waiting'; handNumber: number } }
     }).data.gameState.phase = 'between_hands'
+    ;(server as unknown as { data: { gameState: { handNumber: number } } }).data.gameState.handNumber = 1
 
     send(server, host.connection, { type: 'set_auto_start', enabled: true })
     vi.advanceTimersByTime(AUTO_START_DELAY + 10)

@@ -746,6 +746,7 @@ describe('PokerTable desktop 3D gate', () => {
       makeSeatPlayer({
         id: 'hero',
         nickname: 'Hero Player',
+        isSB: true,
         stack: 960,
         bet: 20,
         holeCards: [
@@ -757,6 +758,7 @@ describe('PokerTable desktop 3D gate', () => {
         id: 'villain',
         nickname: 'Villain',
         seatIndex: 4,
+        isBB: true,
         status: 'active',
       }),
     ]
@@ -912,7 +914,7 @@ describe('PokerTable desktop 3D gate', () => {
     expect(tableSource).toContain('onSelectPlayer={handleSelectEmoteTarget}')
   })
 
-  it('wires all-in actions to a table-level popup above the 3D stage', () => {
+  it('wires all-in actions to a table-level popup on every viewport', () => {
     const tableSource = readFileSync(
       join(process.cwd(), 'components', 'table', 'PokerTable.tsx'),
       'utf8'
@@ -922,7 +924,8 @@ describe('PokerTable desktop 3D gate', () => {
       'utf8'
     )
 
-    expect(tableSource).toContain('const latestAllInAnnouncement = threeTableView?.allInAnnouncement ?? null')
+    expect(tableSource).toContain('const latestAllInAnnouncement = allViewportTableView.allInAnnouncement')
+    expect(tableSource).toContain('const threeTableView = shouldRenderDesktopThree ? allViewportTableView : null')
     expect(tableSource).toContain('setActiveAllInAnnouncement(latestAllInAnnouncement)')
     expect(tableSource).toContain('<AllInAnnouncement')
     expect(tableSource).toContain('className="all-in-announcement"')
@@ -1228,6 +1231,9 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).toContain('mobile-board-zone')
     expect(markup).toContain('mobile-edge-seat')
     expect(markup).toContain('mobile-seat-number')
+    expect(markup).toContain('mobile-edge-seat-timer')
+    expect(markup).toContain('30s')
+    expect(markup).toContain('30 seconds left')
     expect(markup).toContain('You')
     expect(markup).toContain('Villain')
     expect(markup).toContain('community-cards')
@@ -1255,6 +1261,7 @@ describe('PokerTable desktop 3D gate', () => {
       makeSeatPlayer({
         id: 'hero',
         nickname: 'Hero Player',
+        isSB: true,
         stack: 960,
         bet: 20,
         holeCards: [
@@ -1266,6 +1273,7 @@ describe('PokerTable desktop 3D gate', () => {
         id: 'villain',
         nickname: 'Villain',
         seatIndex: 4,
+        isBB: true,
         status: 'active',
         stack: 1240,
         bet: 40,
@@ -1320,9 +1328,14 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).toContain('mobile-raise-control')
     expect(markup).toContain('mobile-main-actions')
     expect(markup).toContain('FOLD')
-    expect(markup).toContain('CHECK / CALL')
+    expect(markup).toContain('CALL')
+    expect(markup).not.toContain('CHECK / CALL')
     expect(markup).toContain('BET / RAISE')
     expect(markup).toContain('$80')
+    expect(markup).toContain('Small Blind')
+    expect(markup).toContain('Big Blind')
+    expect(markup).toContain('mobile-blind-role is-small')
+    expect(markup).toContain('mobile-blind-role is-big')
     expect(markup).not.toContain('betting-tray-header')
   })
 
@@ -1530,6 +1543,24 @@ describe('PokerTable table-management controls', () => {
     expect(mobileMarkup).toContain('mobile-seat-position-4')
     expect(mobileMarkup).toContain('table-center-winner-chip-trails mobile-winner-chip-trails')
     expect(mobileMarkup).toContain('--winner-chip-x:50%;--winner-chip-y:11%')
+  })
+
+  it('sends hero payout chips to the hero lane regardless of their physical seat', () => {
+    const state = makeFoldEndedState()
+    state.players[0] = { ...state.players[0]!, seatIndex: 6 }
+    state.players[1] = { ...state.players[1]!, seatIndex: 7 }
+
+    const mobileMarkup = renderTable(state, {
+      '(max-width: 768px)': true,
+      '(min-width: 1024px)': false,
+    })
+    const desktopMarkup = renderTable(state, {
+      '(max-width: 768px)': false,
+      '(min-width: 1024px)': false,
+    })
+
+    expect(mobileMarkup).toContain('--winner-chip-x:50%;--winner-chip-y:85%')
+    expect(desktopMarkup).toContain('--winner-chip-x:50.5%;--winner-chip-y:88.2%')
   })
 
   it('clears the mobile and desktop 3D winner summaries after a rabbit runout so the board stays visible', () => {

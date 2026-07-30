@@ -20,6 +20,9 @@ describe('desktop opponent panel readability', () => {
 
   it('keeps blind roles and state contrast visible', () => {
     expect(sceneSource).toContain("player.blindRole === 'big' ? 'BB' : 'SB'")
+    expect(sceneSource).toContain("player.blindRole === 'big' ? 'Big Blind' : 'Small Blind'")
+    expect(styleSource).toContain('.cinematic-blind-role.is-big')
+    expect(styleSource).toContain('.cinematic-blind-role.is-small')
     expect(styleSource).toContain('.cinematic-seat.is-acting')
     expect(styleSource).toContain('.cinematic-seat.is-winner')
     expect(styleSource).toContain('.cinematic-seat.is-folded')

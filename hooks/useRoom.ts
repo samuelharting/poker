@@ -20,6 +20,7 @@ import {
 const PARTYKIT_HOST = process.env.NEXT_PUBLIC_PARTYKIT_HOST ?? 'localhost:1999'
 const PARTY_NAME = process.env.NEXT_PUBLIC_PARTY_NAME ?? 'main'
 const LOCAL_PARTYKIT_HOST_PATTERN = /^(localhost|127\.0\.0\.1)(:\d+)?$/i
+const BACKGROUND_RECONNECT_THRESHOLD_MS = 10_000
 
 function buildConnectionIssue(): string {
   if (LOCAL_PARTYKIT_HOST_PATTERN.test(PARTYKIT_HOST)) {
@@ -27,6 +28,65 @@ function buildConnectionIssue(): string {
   }
 
   return `Can't reach the live table server at ${PARTYKIT_HOST}. Check that the PartyKit host is running and reachable, then retry.`
+}
+
+function reconnectTokenStorageKey(roomCode: string): string {
+  return `poker_reconnect_${roomCode}`
+}
+
+function getBrowserStorage(kind: 'localStorage' | 'sessionStorage'): Storage | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    return window[kind]
+  } catch {
+    return null
+  }
+}
+
+export function loadStoredReconnectToken(roomCode: string): string | null {
+  const key = reconnectTokenStorageKey(roomCode)
+  const persistentStorage = getBrowserStorage('localStorage')
+  const sessionStorage = getBrowserStorage('sessionStorage')
+
+  try {
+    const persistentToken = persistentStorage?.getItem(key)
+    if (persistentToken) {
+      return persistentToken
+    }
+
+    const legacySessionToken = sessionStorage?.getItem(key) ?? null
+    if (legacySessionToken) {
+      persistentStorage?.setItem(key, legacySessionToken)
+    }
+    return legacySessionToken
+  } catch {
+    return null
+  }
+}
+
+export function storeReconnectToken(roomCode: string, token: string): void {
+  const key = reconnectTokenStorageKey(roomCode)
+  for (const storage of [getBrowserStorage('localStorage'), getBrowserStorage('sessionStorage')]) {
+    try {
+      storage?.setItem(key, token)
+    } catch {
+      // Storage can be unavailable in private browsing; the in-memory ref still reconnects this tab.
+    }
+  }
+}
+
+export function clearStoredReconnectToken(roomCode: string): void {
+  const key = reconnectTokenStorageKey(roomCode)
+  for (const storage of [getBrowserStorage('localStorage'), getBrowserStorage('sessionStorage')]) {
+    try {
+      storage?.removeItem(key)
+    } catch {
+      // Leaving the room should still continue when browser storage is unavailable.
+    }
+  }
 }
 
 interface RoomSocket {
@@ -109,9 +169,9 @@ export function useRoom(
       connectionIssueTimerRef.current = null
     }
 
-    const tokenStorageKey = `poker_reconnect_${roomCode}`
-    reconnectTokenRef.current = sessionStorage.getItem(tokenStorageKey)
+    reconnectTokenRef.current = loadStoredReconnectToken(roomCode)
     let active = true
+    let removeLifecycleListeners: (() => void) | null = null
 
     ;(async () => {
       try {
@@ -129,6 +189,48 @@ export function useRoom(
         }) as unknown as RoomSocket
 
         socketRef.current = socket
+        let inactiveAt: number | null = document.visibilityState === 'hidden' ? Date.now() : null
+
+        const markInactive = () => {
+          inactiveAt ??= Date.now()
+        }
+        const refreshConnection = (force = false) => {
+          if (!active || socketRef.current !== socket) {
+            return
+          }
+
+          if (force || socket.readyState !== WebSocket.OPEN) {
+            socket.reconnect()
+          }
+        }
+        const markActive = () => {
+          const inactiveDuration = inactiveAt === null ? 0 : Date.now() - inactiveAt
+          inactiveAt = null
+          refreshConnection(inactiveDuration >= BACKGROUND_RECONNECT_THRESHOLD_MS)
+        }
+        const handleVisibilityChange = () => {
+          if (document.visibilityState === 'hidden') {
+            markInactive()
+          } else {
+            markActive()
+          }
+        }
+        const handleOnline = () => refreshConnection(true)
+        const handlePageShow = () => markActive()
+
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+        window.addEventListener('blur', markInactive)
+        window.addEventListener('focus', markActive)
+        window.addEventListener('online', handleOnline)
+        window.addEventListener('pageshow', handlePageShow)
+        removeLifecycleListeners = () => {
+          document.removeEventListener('visibilitychange', handleVisibilityChange)
+          window.removeEventListener('blur', markInactive)
+          window.removeEventListener('focus', markActive)
+          window.removeEventListener('online', handleOnline)
+          window.removeEventListener('pageshow', handlePageShow)
+        }
+
         connectionIssueTimerRef.current = setTimeout(() => {
           if (active && !hasEverConnectedRef.current) {
             setConnectionIssue(buildConnectionIssue())
@@ -189,7 +291,7 @@ export function useRoom(
               setYourId(msg.yourId)
               setIsHost(msg.isHost)
               reconnectTokenRef.current = msg.reconnectToken
-              sessionStorage.setItem(tokenStorageKey, msg.reconnectToken)
+              storeReconnectToken(roomCode, msg.reconnectToken)
               break
             }
 
@@ -225,6 +327,8 @@ export function useRoom(
 
     return () => {
       active = false
+      removeLifecycleListeners?.()
+      removeLifecycleListeners = null
       if (connectionIssueTimerRef.current) {
         clearTimeout(connectionIssueTimerRef.current)
         connectionIssueTimerRef.current = null

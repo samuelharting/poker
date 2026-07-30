@@ -167,6 +167,25 @@ describe('full hand flow', () => {
     expect(result.phase).toBe('between_hands')
   })
 
+  it('awards consecutive folds to the player who never folded', () => {
+    let state = startHand(setup3Players())
+    const firstFolderId = state.actingPlayerId!
+    state = processAction(state, firstFolderId, 'fold')
+
+    const secondFolderId = state.actingPlayerId!
+    state = processAction(state, secondFolderId, 'fold')
+
+    const survivingPlayer = state.players.find(player => (
+      player.id !== firstFolderId && player.id !== secondFolderId
+    ))!
+
+    expect(state.phase).toBe('between_hands')
+    expect(state.winners).toEqual([expect.objectContaining({
+      playerId: survivingPlayer.id,
+    })])
+    expect(state.winners?.some(winner => winner.playerId === firstFolderId)).toBe(false)
+  })
+
   it('advances to flop after preflop calls', () => {
     let state = startHand(setup3Players())
     // In 3-player, preflop action goes: UTG, SB, BB
@@ -581,6 +600,33 @@ describe('toTableState', () => {
     expect(aliceView.holeCards).toEqual(alice!.holeCards)
     expect(view.winners?.[0]?.winningCards).toHaveLength(5)
     expect(view.winners?.[0]?.handDescription).toContain('Three of a Kind')
+  })
+
+  it('hides a fold winner hand description until they show both cards', () => {
+    const state = startHand(setup2Players())
+    state.round = 'flop'
+    state.communityCards = [
+      card('A', 'diamonds'),
+      card('7', 'clubs'),
+      card('5', 'hearts'),
+    ]
+
+    const folderId = state.actingPlayerId!
+    const finished = processAction(state, folderId, 'fold')
+    const winner = finished.players.find(player => player.id !== folderId)!
+    const privateView = toTableState(finished, folderId)
+
+    expect(finished.winners?.[0]?.handDescription).toBeTruthy()
+    expect(privateView.winners?.[0]?.handDescription).toBeUndefined()
+    expect(privateView.winners?.[0]?.winningCards).toBeUndefined()
+    expect(privateView.players.find(player => player.id === winner.id)?.holeCards).toBeUndefined()
+
+    winner.showCards = 'both'
+    const shownView = toTableState(finished, folderId)
+
+    expect(shownView.players.find(player => player.id === winner.id)?.holeCards).toHaveLength(2)
+    expect(shownView.winners?.[0]?.handDescription).toBeTruthy()
+    expect(shownView.winners?.[0]?.winningCards).toHaveLength(5)
   })
 
   it('keeps opponents private from a seated player who folded', () => {

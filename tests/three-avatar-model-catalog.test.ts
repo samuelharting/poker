@@ -59,6 +59,7 @@ describe('animated WebGL desktop player presentation', () => {
     expect(renderer).toContain("player.isWinner ? 'is-winner' : ''")
     expect(renderer).toContain("player.isOutOfHand ? 'is-folded' : ''")
     expect(renderer).toContain("player.blindRole === 'big' ? 'BB' : 'SB'")
+    expect(renderer).toContain("player.blindRole === 'big' ? 'Big Blind' : 'Small Blind'")
     expect(renderer).toContain('className="cinematic-seat-bet"')
     expect(renderer).toContain('syncWagers(runtimeRef.current, view)')
     expect(renderer).toContain('data-table-wager-count')

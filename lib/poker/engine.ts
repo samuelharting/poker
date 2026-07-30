@@ -1285,6 +1285,25 @@ export function toTableState(
     return canRevealOptInCards ? player.showCards : 'none'
   }
 
+  const publicWinners = state.winners?.map(winner => {
+    const winningPlayer = state.players.find(player => player.id === winner.playerId)
+    const canRevealWinningHand = Boolean(
+      winningPlayer && (
+        isShowdownParticipant(winningPlayer) ||
+        permittedHoleCardPlayerIds.has(winningPlayer.id) ||
+        (canRevealOptInCards && winningPlayer.showCards === 'both')
+      )
+    )
+
+    return canRevealWinningHand
+      ? winner
+      : {
+          ...winner,
+          handDescription: undefined,
+          winningCards: undefined,
+        }
+  })
+
   return {
     roomCode: state.roomCode,
     phase: state.phase,
@@ -1331,7 +1350,7 @@ export function toTableState(
     runItTwice: state.runItTwice,
     recentActions: state.recentActions,
     lobbyPlayers: [],
-    winners: state.winners,
+    winners: publicWinners,
     bounty: state.bounty,
   }
 }

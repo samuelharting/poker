@@ -113,6 +113,7 @@ const CHAT_BUBBLE_DURATION = 9000
 const EMOTE_DURATION = 6000
 const MAX_CHAT_HISTORY = 18
 export const AUTO_START_DELAY = DEFAULT_SETTINGS.autoStartDelay
+export const HOST_DISCONNECT_GRACE_MS = 30_000
 const BOT_NAMES = ['Maverick', 'River', 'Bluff', 'Ace', 'Nova', 'Dealer Dan', 'Pocket', 'Lucky', 'Tilt', 'Rook']
 
 function formatCurrency(amount: number): string {
@@ -136,6 +137,8 @@ export default class PokerRoom implements PartyServer {
   private botActionPlayerId: string | null = null
   private runItTwiceTimeout: ReturnType<typeof setTimeout> | null = null
   private runItTwiceDeadline: number | null = null
+  private hostTransferTimeout: ReturnType<typeof setTimeout> | null = null
+  private disconnectedHostId: string | null = null
 
   constructor(readonly room: Room) {
     const roomCode = room.id.toUpperCase()
@@ -270,6 +273,10 @@ export default class PokerRoom implements PartyServer {
 
     this.detachConnection(conn.id)
 
+    if (this.data.hostId === playerId) {
+      this.scheduleDisconnectedHostTransfer(playerId)
+    }
+
     const player = this.getPlayer(playerId)
     if (player) {
       player.isConnected = false
@@ -342,7 +349,10 @@ export default class PokerRoom implements PartyServer {
 
     if (reconnectPlayerId) {
       this.bindConnection(conn, reconnectPlayerId)
-      this.data.reconnectTokens[reconnectPlayerId] = generateReconnectToken()
+      this.cancelDisconnectedHostTransfer(reconnectPlayerId)
+      if (!this.data.hostId) {
+        this.data.hostId = reconnectPlayerId
+      }
       if (!this.data.playerProfiles[reconnectPlayerId]) {
         this.data.playerProfiles[reconnectPlayerId] = { email, venmoUsername, avatar }
       } else if (avatar) {
@@ -823,6 +833,7 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
+    this.cancelDisconnectedHostTransfer(playerId)
     this.sendActionResult(conn)
     this.evictPlayer(playerId)
     this.broadcastState()
@@ -1464,27 +1475,65 @@ export default class PokerRoom implements PartyServer {
     }
   }
 
-  private selectNextHost(): string | null {
-    const joinedIds = new Set(Object.keys(this.data.playerNicknames))
-    const seatedIds = this.data.gameState.players.map(player => player.id)
+  private selectNextHost(excludedPlayerId?: string): string | null {
+    const joinedIds = new Set(
+      Object.keys(this.data.playerNicknames).filter(playerId => playerId !== excludedPlayerId)
+    )
+    const seatedIds = this.data.gameState.players
+      .map(player => player.id)
+      .filter(playerId => playerId !== excludedPlayerId)
     const connectedIds = Object.keys(this.data.playerToConnection).filter(
-      playerId => joinedIds.has(playerId) && !this.isBotPlayer(playerId)
+      playerId => joinedIds.has(playerId) && playerId !== excludedPlayerId && !this.isBotPlayer(playerId)
     )
 
     const preferredOrder = [
       ...seatedIds.filter(playerId => connectedIds.includes(playerId)),
       ...connectedIds.filter(playerId => !seatedIds.includes(playerId)),
       ...seatedIds.filter(playerId => joinedIds.has(playerId)),
-      ...Object.keys(this.data.playerNicknames).filter(playerId => !seatedIds.includes(playerId)),
+      ...Object.keys(this.data.playerNicknames).filter(
+        playerId => joinedIds.has(playerId) && !seatedIds.includes(playerId)
+      ),
     ]
 
     return preferredOrder[0] ?? null
   }
 
+  private scheduleDisconnectedHostTransfer(playerId: string) {
+    this.cancelDisconnectedHostTransfer()
+    this.disconnectedHostId = playerId
+    this.hostTransferTimeout = setTimeout(() => {
+      this.hostTransferTimeout = null
+      this.disconnectedHostId = null
+
+      if (this.data.hostId !== playerId || this.data.playerToConnection[playerId]) {
+        return
+      }
+
+      this.data.hostId = this.selectNextHost(playerId)
+      this.finalizeState()
+      this.broadcastState()
+    }, HOST_DISCONNECT_GRACE_MS)
+  }
+
+  private cancelDisconnectedHostTransfer(playerId?: string) {
+    if (playerId && this.disconnectedHostId !== playerId) {
+      return
+    }
+
+    if (this.hostTransferTimeout) {
+      clearTimeout(this.hostTransferTimeout)
+    }
+    this.hostTransferTimeout = null
+    this.disconnectedHostId = null
+  }
+
   private buildSnapshotFor(connId: string): Extract<S2CMessage, { type: 'room_snapshot' }> {
     const playerId = this.data.connectionToPlayer[connId] ?? ''
-    const spectatorCanSeeAllHands = Boolean(
+    const isSpectatorViewer = Boolean(
       playerId && (this.data.spectatorIds[playerId] || this.data.pendingSpectators[playerId])
+    )
+    const spectatorCanSeeLiveHands = (
+      isSpectatorViewer && this.data.gameState.phase === 'in_hand'
     )
     const isCardRevealWindow = this.data.gameState.phase === 'in_hand' || (
       this.data.gameState.phase === 'between_hands' && Boolean(this.data.gameState.winners?.length)
@@ -1495,7 +1544,7 @@ export default class PokerRoom implements PartyServer {
           (request.requesterId === playerId || request.targetId === playerId)
         ))
       : []
-    const permittedHoleCardPlayerIds = spectatorCanSeeAllHands
+    const permittedHoleCardPlayerIds = spectatorCanSeeLiveHands
       ? this.data.gameState.players.map(player => player.id)
       : currentCardRevealRequests
           .filter(request => request.requesterId === playerId && request.status === 'approved')
@@ -2024,6 +2073,12 @@ export default class PokerRoom implements PartyServer {
 
   private shouldAutoStartNow(): boolean {
     if (!this.data.autoStartEnabled) {
+      return false
+    }
+
+    // The creator must explicitly start the game. Auto-deal only owns the
+    // transition between hands after hand #1 has begun.
+    if (this.data.gameState.handNumber <= 0) {
       return false
     }
 

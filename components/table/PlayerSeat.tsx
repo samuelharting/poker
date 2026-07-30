@@ -96,6 +96,7 @@ export function PlayerSeat({
   const isFolded = player.status === 'folded'
   const isDisconnected = player.status === 'disconnected' || !player.isConnected
   const isAllIn = player.status === 'all_in'
+  const blindRole = player.isBB ? 'big' : player.isSB ? 'small' : null
   const displayAction = player.lastAction ?? STATUS_LABELS[player.status] ?? null
   const showAction = displayAction && player.status !== 'active' && player.status !== 'waiting'
   const showEquity = typeof player.equityPercent === 'number' && isFolded === false && isDisconnected === false
@@ -121,8 +122,6 @@ export function PlayerSeat({
     <>
       <span className="player-seat-initials">{initials}</span>
       {player.isDealer && <span className="dealer-button">D</span>}
-      {player.isSB && !player.isDealer && <span className="blind-badge sb">SB</span>}
-      {player.isBB && <span className="blind-badge bb">BB</span>}
     </>
   )
 
@@ -254,6 +253,13 @@ export function PlayerSeat({
           <div className="player-name">{player.nickname}</div>
         )}
       </div>
+
+      {blindRole && (
+        <div className={`player-blind-role is-${blindRole}`}>
+          <strong>{blindRole === 'big' ? 'BB' : 'SB'}</strong>
+          <span>{blindRole === 'big' ? 'Big Blind' : 'Small Blind'}</span>
+        </div>
+      )}
 
       {!isFolded && (
         <div className={clsx('player-stack', isAllIn && 'text-yellow-400')}>

@@ -2383,12 +2383,6 @@ export function DesktopPokerRoom3D({
           The 3D table was interrupted. Restoring automatically; reload if this message stays.
         </div>
       )}
-      {webGLStatus === 'ready' && (
-        <div className="three-live-badge" aria-hidden="true">
-          <i /> Live 3D
-        </div>
-      )}
-
       <div className="cinematic-seats" aria-label="Poker players">
         {view.players.map(player => {
           const reaction = emoteReactions.find(item => item.targetId === player.id)
@@ -2445,7 +2439,12 @@ export function DesktopPokerRoom3D({
                 <span className="cinematic-seat-panel">
                 <span className="cinematic-seat-topline">
                   <strong>{player.nickname}</strong>
-                  {player.blindRole && <em>{player.blindRole === 'big' ? 'BB' : 'SB'}</em>}
+                  {player.blindRole && (
+                    <em className={`cinematic-blind-role is-${player.blindRole}`}>
+                      <b>{player.blindRole === 'big' ? 'BB' : 'SB'}</b>
+                      <span>{player.blindRole === 'big' ? 'Big Blind' : 'Small Blind'}</span>
+                    </em>
+                  )}
                 </span>
                 <span className="cinematic-seat-meta">
                   <b>${player.stack.toLocaleString()}</b>

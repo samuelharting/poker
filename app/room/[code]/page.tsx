@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import { PokerTable } from '@/components/table/PokerTable'
 import { RoomHud } from '@/components/ui/RoomHud'
-import { useRoom } from '@/hooks/useRoom'
+import { clearStoredReconnectToken, useRoom } from '@/hooks/useRoom'
 import { isAllowedEmote, sanitizeText } from '@/shared/protocol'
 import {
   DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
@@ -174,6 +174,16 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     muted: soundPreferences.muted,
     volume: soundPreferences.volume,
   })
+
+  const handleLeaveGame = useCallback(() => {
+    if (!window.confirm('Leave this game and return home?')) {
+      return
+    }
+
+    sendMessage({ type: 'leave_room' })
+    clearStoredReconnectToken(roomCode)
+    window.setTimeout(() => window.location.assign('/'), 100)
+  }, [roomCode, sendMessage])
 
   useEffect(() => {
     setShareUrl(window.location.href)
@@ -356,6 +366,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           onCloseSettings={() => setSettingsOpen(false)}
           onCopyRoom={handleCopyRoom}
           onShareRoom={handleShareRoom}
+          onLeaveGame={handleLeaveGame}
           onSendChat={handleSendChat}
           onSendTargetChat={(targetId: string, message: string) => {
             const sanitized = sanitizeText(message)
