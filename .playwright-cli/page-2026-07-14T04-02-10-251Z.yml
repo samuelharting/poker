@@ -1,0 +1,143 @@
+- generic [ref=f6e1]:
+  - generic [ref=f6e19]:
+    - generic [ref=f6e20]:
+      - generic [ref=f6e21]:
+        - generic [ref=f6e22]: Poker Night
+        - generic [ref=f6e23]:
+          - generic [ref=f6e24]: Room
+          - generic [ref=f6e25]: E9QXF5
+      - button "Open settings" [ref=f6e26] [cursor=pointer]:
+        - generic [ref=f6e34]: Settings
+    - generic [ref=f6e35]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot River" [active] [ref=f6e36] [cursor=pointer]:
+            - generic [ref=f6e43]:
+              - generic [ref=f6e44]:
+                - strong [ref=f6e45]: Bot River
+                - emphasis [ref=f6e46]: BB
+              - generic [ref=f6e47]: $3,800
+            - generic [ref=f6e49]: $20
+          - button "Send a reaction to Bot Bluff" [ref=f6e50] [cursor=pointer]:
+            - generic [ref=f6e57]:
+              - strong [ref=f6e59]: Bot Bluff
+              - generic [ref=f6e60]:
+                - generic [ref=f6e61]: $750
+                - generic [ref=f6e62]: Called $20
+            - generic [ref=f6e63]: $20
+          - button "Send a reaction to Bot Dealer Dan" [ref=f6e64] [cursor=pointer]:
+            - generic [ref=f6e71]:
+              - strong [ref=f6e73]: Bot Dealer Dan
+              - generic [ref=f6e74]:
+                - generic [ref=f6e75]: $2,510
+                - generic [ref=f6e76]: Raised $40
+            - generic [ref=f6e77]: $40
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=f6e78]:
+              - generic [ref=f6e79]:
+                - generic [ref=f6e80]: Pot
+                - generic [ref=f6e81]: $90
+              - generic [ref=f6e82]:
+                - generic [ref=f6e83]: To call
+                - generic [ref=f6e84]: $30
+            - status "Your table bet $10":
+              - generic:
+                - generic: Bet
+                - generic: $10
+          - status "3D QA, chips $850":
+            - generic: 3D QA
+            - generic: $850
+          - 'generic "Your hand: King-high"':
+            - status:
+              - generic: King-high
+            - generic:
+              - generic:
+                - generic:
+                  - generic "K of clubs":
+                    - generic:
+                      - generic: K
+                      - generic: K
+              - generic:
+                - generic:
+                  - generic "5 of spades":
+                    - generic:
+                      - generic: "5"
+                      - generic: "5"
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f6e85] [cursor=pointer]:
+          - generic [ref=f6e86]: ♣
+          - strong [ref=f6e87]: Table talk
+      - generic [ref=f6e88]:
+        - generic [ref=f6e89]:
+          - generic [ref=f6e90]: Your turn - Call $30
+          - generic [ref=f6e91]: Your turn
+        - generic [ref=f6e93]:
+          - generic [ref=f6e94]: Fold timer
+          - generic [ref=f6e95]: 12s left
+        - generic [ref=f6e98]:
+          - generic [ref=f6e99]:
+            - button "Min" [ref=f6e100] [cursor=pointer]
+            - button "1/4 Pot" [ref=f6e101] [cursor=pointer]
+            - button "3/4 Pot" [ref=f6e102] [cursor=pointer]
+            - button "Pot" [ref=f6e103] [cursor=pointer]
+          - slider [ref=f6e104]: "60"
+          - spinbutton [ref=f6e105]: "60"
+        - generic [ref=f6e106]:
+          - button "Call $30" [ref=f6e107] [cursor=pointer]:
+            - generic [ref=f6e108]: Call
+            - generic [ref=f6e109]: $30
+          - button "Raise to $60" [ref=f6e110] [cursor=pointer]:
+            - generic [ref=f6e111]: Raise to
+            - generic [ref=f6e112]: $60
+          - button "All-in $860" [ref=f6e113] [cursor=pointer]:
+            - generic [ref=f6e114]: All-in
+            - generic [ref=f6e115]: $860
+          - button "Fold" [ref=f6e116] [cursor=pointer]
+      - complementary "Emoji reactions for Bot River" [ref=f6e128]:
+        - generic [ref=f6e129]:
+          - generic [ref=f6e130]:
+            - generic [ref=f6e131]: Opponent
+            - generic [ref=f6e132]: Send to Bot River
+          - button "Close target emote panel" [ref=f6e133] [cursor=pointer]: x
+        - generic "Bot River stats" [ref=f6e134]:
+          - generic [ref=f6e135]:
+            - generic [ref=f6e136]: Fold
+            - strong [ref=f6e137]: 0%
+          - generic [ref=f6e138]:
+            - generic [ref=f6e139]: Games
+            - strong [ref=f6e140]: "23"
+          - generic [ref=f6e141]:
+            - generic [ref=f6e142]: Won
+            - strong [ref=f6e143]: "9"
+        - generic [ref=f6e144]:
+          - button "👋" [ref=f6e145] [cursor=pointer]
+          - button "👍" [ref=f6e146] [cursor=pointer]
+          - button "😂" [ref=f6e147] [cursor=pointer]
+          - button "😎" [ref=f6e148] [cursor=pointer]
+          - button "💀" [ref=f6e149] [cursor=pointer]
+          - button "😭" [ref=f6e150] [cursor=pointer]
+          - button "😡" [ref=f6e151] [cursor=pointer]
+          - button "🖕" [ref=f6e152] [cursor=pointer]
+          - button "Search all emojis" [ref=f6e153] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f6e123] [cursor=pointer]
+  - alert [ref=f6e127]

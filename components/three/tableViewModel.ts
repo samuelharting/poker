@@ -1,4 +1,12 @@
 import type { Card, SeatPlayer, TableState } from '@/lib/poker/types'
+import type {
+  PlayerAvatarCelebration,
+  PlayerAvatarGlassesStyle,
+  PlayerAvatarHatStyle,
+  PlayerAvatarIdleTell,
+  PlayerAvatarJacketColor,
+  PlayerAvatarJacketStyle,
+} from '@/lib/profile'
 import type { SocialSnapshot } from '@/shared/protocol'
 import { REALISTIC_AVATAR_MODEL_KEYS, type RealisticAvatarModelKey } from './avatarModelCatalog'
 
@@ -35,21 +43,31 @@ export interface ThreeAvatarProfile {
   accessory: ThreeAvatarAccessory
   faceShape: ThreeAvatarFaceShape
   browWeight: ThreeAvatarBrowWeight
+  hat: PlayerAvatarHatStyle
+  glasses: PlayerAvatarGlassesStyle
+  jacket: PlayerAvatarJacketStyle
+  jacketColor: PlayerAvatarJacketColor
+  idleTell: PlayerAvatarIdleTell
+  celebration: PlayerAvatarCelebration
+  isCustomized: boolean
 }
 
 export interface ThreePlayerView {
   id: string
   nickname: string
   visualSeat: number
+  isHero: boolean
   stack: number
   bet: number
   status: SeatPlayer['status']
   isActing: boolean
   isWinner: boolean
+  winnerHandDescription?: string
   isOutOfHand: boolean
   isDealer: boolean
   blindRole: ThreeBlindRole
   hasCards: boolean
+  showCards: SeatPlayer['showCards']
   visibleCards: ThreeCardView[]
   accentColor: string
   avatarColor: string
@@ -57,8 +75,45 @@ export interface ThreePlayerView {
   avatarProfile: ThreeAvatarProfile
   actionCue: ThreeActionCue
   actionKey: string
+  actionAmount: number
+  wagerIntensity: number
   lastAction?: string
   lastActionId?: string
+}
+
+export interface ThreeVisibleCardSlots {
+  left: ThreeCardView | null
+  right: ThreeCardView | null
+}
+
+export function getThreeVisibleCardSlots(
+  showCards: SeatPlayer['showCards'],
+  visibleCards: ThreeCardView[]
+): ThreeVisibleCardSlots {
+  if (showCards === 'both') {
+    return {
+      left: visibleCards[0] ?? null,
+      right: visibleCards[1] ?? null,
+    }
+  }
+
+  if (showCards === 'left') {
+    return {
+      left: visibleCards[0] ?? null,
+      right: null,
+    }
+  }
+
+  if (showCards === 'right') {
+    return {
+      left: null,
+      right: visibleCards.length === 1
+        ? visibleCards[0] ?? null
+        : visibleCards[1] ?? null,
+    }
+  }
+
+  return { left: null, right: null }
 }
 
 export interface ThreeAllInAnnouncement {
@@ -82,6 +137,7 @@ export interface ThreeTableViewModel {
   communityCards: ThreeCardView[]
   heroCards: ThreeCardView[]
   pot: number
+  collectedPot: number
   currentBet: number
   smallBlind: number
   bigBlind: number
@@ -96,6 +152,15 @@ export interface ThreeEmoteReaction {
   senderId: string
   targetId: string
   emote: string
+  expiresAt: number
+  targeted: boolean
+}
+
+export interface ThreeChatMessage {
+  id: string
+  senderId: string
+  targetId: string
+  message: string
   expiresAt: number
   targeted: boolean
 }
@@ -160,15 +225,62 @@ const AVATAR_FACE_STYLES: ThreeAvatarFaceStyle[] = ['calm', 'focused', 'smirk']
 const AVATAR_ACCESSORIES: ThreeAvatarAccessory[] = ['none', 'glasses', 'mustache']
 const AVATAR_FACE_SHAPES: ThreeAvatarFaceShape[] = ['oval', 'round', 'square']
 const AVATAR_BROW_WEIGHTS: ThreeAvatarBrowWeight[] = ['low', 'medium', 'high']
+const AUTO_AVATAR_HATS: PlayerAvatarHatStyle[] = [
+  'none',
+  'none',
+  'fedora',
+  'cowboy',
+  'beanie',
+  'visor',
+]
+const AUTO_AVATAR_GLASSES: PlayerAvatarGlassesStyle[] = [
+  'none',
+  'none',
+  'round',
+  'aviator',
+  'shades',
+]
+const AUTO_AVATAR_JACKETS: PlayerAvatarJacketStyle[] = [
+  'none',
+  'tuxedo',
+  'leather',
+  'varsity',
+  'western',
+  'smoking',
+]
+const AUTO_AVATAR_JACKET_COLORS: PlayerAvatarJacketColor[] = [
+  'burgundy',
+  'midnight',
+  'emerald',
+  'ivory',
+  'gold',
+  'violet',
+]
+const AUTO_AVATAR_IDLE_TELLS: PlayerAvatarIdleTell[] = [
+  'calm',
+  'chip_shuffle',
+  'card_peek',
+  'table_drum',
+]
+const AUTO_AVATAR_CELEBRATIONS: PlayerAvatarCelebration[] = [
+  'wave',
+  'fist_pump',
+  'victory',
+  'slow_clap',
+]
 
 export function createThreeTableViewModel(state: TableState, yourId: string): ThreeTableViewModel {
   const heroPlayer = state.players.find(player => player.id === yourId) ?? null
   const heroSeatIndex = heroPlayer?.seatIndex ?? 0
-  const winnerIds = new Set((state.winners ?? []).map(winner => winner.playerId))
+  const winnersByPlayerId = new Map(
+    (state.winners ?? []).map(winner => [winner.playerId, winner])
+  )
   const players = state.players
     .map((player): ThreePlayerView => {
       const avatarProfile = createAvatarProfile(player)
       const actionCue = player.lastAction ? getActionCue(player.lastAction) : 'ready'
+      const actionAmount = getActionAmount(player)
+      const winner = winnersByPlayerId.get(player.id)
       const isOutOfHand = state.phase === 'in_hand' && (
         player.status === 'folded' ||
         player.status === 'sitting_out' ||
@@ -179,15 +291,18 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
         id: player.id,
         nickname: player.nickname,
         visualSeat: getVisualSeat(player.seatIndex, heroSeatIndex),
+        isHero: player.id === yourId,
         stack: player.stack,
         bet: player.bet,
         status: player.status,
         isActing: state.actingPlayerId === player.id,
-        isWinner: winnerIds.has(player.id),
+        isWinner: Boolean(winner),
+        winnerHandDescription: winner?.handDescription,
         isOutOfHand,
         isDealer: player.isDealer,
         blindRole: getBlindRole(player),
         hasCards: player.hasCards,
+        showCards: player.showCards,
         visibleCards: (player.holeCards ?? []).map((card, index) => (
           toThreeCard(card, `${player.id}-card-${index}`, true)
         )),
@@ -197,6 +312,8 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
         avatarProfile,
         actionCue,
         actionKey: getPlayerAnimationKey(player, actionCue, state),
+        actionAmount,
+        wagerIntensity: getWagerIntensity(actionCue, actionAmount, state.bigBlind),
         lastAction: player.lastAction,
         lastActionId: player.lastActionId,
       }
@@ -222,6 +339,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
     communityCards: state.communityCards.map((card, index) => toThreeCard(card, `board-${index}`, true)),
     heroCards: (heroPlayer?.holeCards ?? []).map((card, index) => toThreeCard(card, `hero-${index}`, true)),
     pot: state.totalPot,
+    collectedPot: state.pots.reduce((sum, pot) => sum + pot.amount, 0),
     currentBet: state.currentBet,
     smallBlind: state.smallBlind,
     bigBlind: state.bigBlind,
@@ -273,12 +391,49 @@ export function createThreeEmoteReactions(
   }, [])
 }
 
+export function createThreeChatMessages(
+  socialState: Pick<SocialSnapshot, 'active'>,
+  playerIds: Iterable<string>,
+  now = Date.now()
+): ThreeChatMessage[] {
+  const knownPlayerIds = new Set(playerIds)
+
+  return socialState.active.reduce<ThreeChatMessage[]>((acc, entry) => {
+    if (
+      !entry.message ||
+      !entry.messageExpiresAt ||
+      entry.messageExpiresAt <= now ||
+      !knownPlayerIds.has(entry.playerId)
+    ) {
+      return acc
+    }
+
+    const targetId = entry.messageTargetPlayerId?.trim() || entry.playerId
+    if (!knownPlayerIds.has(targetId)) {
+      return acc
+    }
+
+    acc.push({
+      id: `${entry.playerId}:${targetId}:${entry.messageExpiresAt}`,
+      senderId: entry.playerId,
+      targetId,
+      message: entry.message,
+      expiresAt: entry.messageExpiresAt,
+      targeted: targetId !== entry.playerId,
+    })
+
+    return acc
+  }, [])
+}
+
 function createAvatarProfile(player: SeatPlayer): ThreeAvatarProfile {
   const seed = hashPlayerIdentity(`${player.id}:${player.nickname}`)
   const shirt = pickSeeded(AVATAR_SHIRT_COLORS, seed + 11)
+  const customization = player.avatar
+  const legacyAccessory = pickSeeded(AVATAR_ACCESSORIES, seed + 31)
 
   return {
-    modelKey: pickSeeded(REALISTIC_AVATAR_MODEL_KEYS, seed + 43),
+    modelKey: customization?.modelKey ?? pickSeeded(REALISTIC_AVATAR_MODEL_KEYS, seed + 43),
     accentColor: pickSeeded(AVATAR_ACCENT_COLORS, seed),
     skinColor: pickSeeded(AVATAR_SKIN_COLORS, seed + 3),
     hairColor: pickSeeded(AVATAR_HAIR_COLORS, seed + 5),
@@ -290,10 +445,47 @@ function createAvatarProfile(player: SeatPlayer): ThreeAvatarProfile {
     hairStyle: pickSeeded(AVATAR_HAIR_STYLES, seed + 7),
     build: pickSeeded(AVATAR_BUILDS, seed + 13),
     faceStyle: pickSeeded(AVATAR_FACE_STYLES, seed + 17),
-    accessory: pickSeeded(AVATAR_ACCESSORIES, seed + 31),
+    accessory: legacyAccessory,
     faceShape: pickSeeded(AVATAR_FACE_SHAPES, seed + 37),
     browWeight: pickSeeded(AVATAR_BROW_WEIGHTS, seed + 41),
+    hat: customization?.hat ?? pickSeeded(AUTO_AVATAR_HATS, seed + 47),
+    glasses: customization?.glasses ?? (
+      legacyAccessory === 'glasses'
+        ? 'round'
+        : pickSeeded(AUTO_AVATAR_GLASSES, seed + 53)
+    ),
+    jacket: customization?.jacket ?? pickSeeded(AUTO_AVATAR_JACKETS, seed + 59),
+    jacketColor: customization?.jacketColor ?? pickSeeded(AUTO_AVATAR_JACKET_COLORS, seed + 61),
+    idleTell: customization?.idleTell ?? pickSeeded(AUTO_AVATAR_IDLE_TELLS, seed + 67),
+    celebration: customization?.celebration ?? pickSeeded(AUTO_AVATAR_CELEBRATIONS, seed + 71),
+    isCustomized: Boolean(customization),
   }
+}
+
+function getActionAmount(player: SeatPlayer): number {
+  const amountMatch = player.lastAction?.match(/\$([0-9][0-9,]*)/)
+  const parsedAmount = amountMatch?.[1]
+    ? Number(amountMatch[1].replaceAll(',', ''))
+    : Number.NaN
+
+  if (Number.isFinite(parsedAmount) && parsedAmount >= 0) {
+    return parsedAmount
+  }
+
+  return Math.max(0, player.bet)
+}
+
+function getWagerIntensity(
+  cue: ThreeActionCue,
+  amount: number,
+  bigBlind: number
+): number {
+  if (cue === 'all_in') return 1
+  if (cue !== 'call' && cue !== 'bet' && cue !== 'raise') return 0
+
+  const blind = Math.max(1, bigBlind)
+  const blindRatio = Math.max(0, amount) / blind
+  return Math.max(0.12, Math.min(1, Math.log2(blindRatio + 1) / 3.5))
 }
 
 function pickSeeded<T>(values: readonly T[], seed: number): T {
@@ -354,7 +546,7 @@ function createAllInAnnouncement(players: ThreePlayerView[]): ThreeAllInAnnounce
     nickname: latestPlayer.nickname,
     visualSeat: latestPlayer.visualSeat,
     amountLabel: getAllInAmountLabel(latestPlayer),
-    isHero: latestPlayer.visualSeat === 0,
+    isHero: latestPlayer.isHero,
   }
 }
 

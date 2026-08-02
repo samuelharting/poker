@@ -20,6 +20,7 @@ import {
 const PARTYKIT_HOST = process.env.NEXT_PUBLIC_PARTYKIT_HOST ?? 'localhost:1999'
 const PARTY_NAME = process.env.NEXT_PUBLIC_PARTY_NAME ?? 'main'
 const LOCAL_PARTYKIT_HOST_PATTERN = /^(localhost|127\.0\.0\.1)(:\d+)?$/i
+const BACKGROUND_RECONNECT_THRESHOLD_MS = 10_000
 
 function buildConnectionIssue(): string {
   if (LOCAL_PARTYKIT_HOST_PATTERN.test(PARTYKIT_HOST)) {
@@ -29,10 +30,63 @@ function buildConnectionIssue(): string {
   return `Can't reach the live table server at ${PARTYKIT_HOST}. Check that the PartyKit host is running and reachable, then retry.`
 }
 
-type SystemTone = 'info' | 'success' | 'error'
+function reconnectTokenStorageKey(roomCode: string): string {
+  return `poker_reconnect_${roomCode}`
+}
 
-interface UseRoomOptions {
-  onSystemMessage?: (message: string, tone: SystemTone) => void
+function getBrowserStorage(kind: 'localStorage' | 'sessionStorage'): Storage | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    return window[kind]
+  } catch {
+    return null
+  }
+}
+
+export function loadStoredReconnectToken(roomCode: string): string | null {
+  const key = reconnectTokenStorageKey(roomCode)
+  const persistentStorage = getBrowserStorage('localStorage')
+  const sessionStorage = getBrowserStorage('sessionStorage')
+
+  try {
+    const persistentToken = persistentStorage?.getItem(key)
+    if (persistentToken) {
+      return persistentToken
+    }
+
+    const legacySessionToken = sessionStorage?.getItem(key) ?? null
+    if (legacySessionToken) {
+      persistentStorage?.setItem(key, legacySessionToken)
+    }
+    return legacySessionToken
+  } catch {
+    return null
+  }
+}
+
+export function storeReconnectToken(roomCode: string, token: string): void {
+  const key = reconnectTokenStorageKey(roomCode)
+  for (const storage of [getBrowserStorage('localStorage'), getBrowserStorage('sessionStorage')]) {
+    try {
+      storage?.setItem(key, token)
+    } catch {
+      // Storage can be unavailable in private browsing; the in-memory ref still reconnects this tab.
+    }
+  }
+}
+
+export function clearStoredReconnectToken(roomCode: string): void {
+  const key = reconnectTokenStorageKey(roomCode)
+  for (const storage of [getBrowserStorage('localStorage'), getBrowserStorage('sessionStorage')]) {
+    try {
+      storage?.removeItem(key)
+    } catch {
+      // Leaving the room should still continue when browser storage is unavailable.
+    }
+  }
 }
 
 interface RoomSocket {
@@ -63,10 +117,11 @@ export interface RoomState {
 
 export function useRoom(
   roomCode: string,
-  profile: PlayerProfile,
-  options: UseRoomOptions = {}
+  profile: PlayerProfile
 ): RoomState {
   const socketRef = useRef<RoomSocket | null>(null)
+  const latestProfileRef = useRef(profile)
+  latestProfileRef.current = profile
   const reconnectTokenRef = useRef<string | null>(null)
   const hasSeated = useRef(false)
   const hasEverConnectedRef = useRef(false)
@@ -78,8 +133,6 @@ export function useRoom(
   const [isHost, setIsHost] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
   const [connectionIssue, setConnectionIssue] = useState<string | null>(null)
-  const { onSystemMessage } = options
-
   const sendMessage = useCallback((msg: C2SMessage) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(msg))
@@ -98,7 +151,7 @@ export function useRoom(
   }, [sendMessage])
 
   useEffect(() => {
-    if (!roomCode || !profile.nickname || !profile.email || !profile.venmoUsername) {
+    if (!roomCode || !profile.nickname) {
       return
     }
 
@@ -116,9 +169,9 @@ export function useRoom(
       connectionIssueTimerRef.current = null
     }
 
-    const tokenStorageKey = `poker_reconnect_${roomCode}`
-    reconnectTokenRef.current = sessionStorage.getItem(tokenStorageKey)
+    reconnectTokenRef.current = loadStoredReconnectToken(roomCode)
     let active = true
+    let removeLifecycleListeners: (() => void) | null = null
 
     ;(async () => {
       try {
@@ -136,6 +189,48 @@ export function useRoom(
         }) as unknown as RoomSocket
 
         socketRef.current = socket
+        let inactiveAt: number | null = document.visibilityState === 'hidden' ? Date.now() : null
+
+        const markInactive = () => {
+          inactiveAt ??= Date.now()
+        }
+        const refreshConnection = (force = false) => {
+          if (!active || socketRef.current !== socket) {
+            return
+          }
+
+          if (force || socket.readyState !== WebSocket.OPEN) {
+            socket.reconnect()
+          }
+        }
+        const markActive = () => {
+          const inactiveDuration = inactiveAt === null ? 0 : Date.now() - inactiveAt
+          inactiveAt = null
+          refreshConnection(inactiveDuration >= BACKGROUND_RECONNECT_THRESHOLD_MS)
+        }
+        const handleVisibilityChange = () => {
+          if (document.visibilityState === 'hidden') {
+            markInactive()
+          } else {
+            markActive()
+          }
+        }
+        const handleOnline = () => refreshConnection(true)
+        const handlePageShow = () => markActive()
+
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+        window.addEventListener('blur', markInactive)
+        window.addEventListener('focus', markActive)
+        window.addEventListener('online', handleOnline)
+        window.addEventListener('pageshow', handlePageShow)
+        removeLifecycleListeners = () => {
+          document.removeEventListener('visibilitychange', handleVisibilityChange)
+          window.removeEventListener('blur', markInactive)
+          window.removeEventListener('focus', markActive)
+          window.removeEventListener('online', handleOnline)
+          window.removeEventListener('pageshow', handlePageShow)
+        }
+
         connectionIssueTimerRef.current = setTimeout(() => {
           if (active && !hasEverConnectedRef.current) {
             setConnectionIssue(buildConnectionIssue())
@@ -150,11 +245,11 @@ export function useRoom(
           }
           setIsConnected(true)
           setConnectionIssue(null)
+          const latestProfile = latestProfileRef.current
           const joinMsg: C2SMessage = {
             type: 'join_room',
-            nickname: profile.nickname,
-            email: profile.email,
-            venmoUsername: profile.venmoUsername,
+            nickname: latestProfile.nickname,
+            avatar: latestProfile.avatar,
             reconnectToken: reconnectTokenRef.current ?? undefined,
           }
           socket.send(JSON.stringify(joinMsg))
@@ -164,7 +259,6 @@ export function useRoom(
           const payload = event as MessageEvent
           const msg = parseS2C(payload.data as string)
           if (!msg) {
-            onSystemMessage?.('Invalid server payload. Refreshing table state...', 'error')
             return
           }
 
@@ -195,23 +289,13 @@ export function useRoom(
               setYourId(msg.yourId)
               setIsHost(msg.isHost)
               reconnectTokenRef.current = msg.reconnectToken
-              sessionStorage.setItem(tokenStorageKey, msg.reconnectToken)
+              storeReconnectToken(roomCode, msg.reconnectToken)
               break
             }
 
-            case 'action_result': {
-              if (msg.message) {
-                onSystemMessage?.(msg.message, 'success')
-              }
-              break
-            }
-
+            case 'action_result':
             case 'action_failed':
-              onSystemMessage?.(msg.message, 'error')
-              break
-
             case 'error':
-              onSystemMessage?.(msg.message, 'error')
               break
           }
         })
@@ -235,13 +319,14 @@ export function useRoom(
         if (active) {
           setIsConnected(false)
           setConnectionIssue('Unable to load the live table connection.')
-          onSystemMessage?.('Unable to load the live table connection.', 'error')
         }
       }
     })()
 
     return () => {
       active = false
+      removeLifecycleListeners?.()
+      removeLifecycleListeners = null
       if (connectionIssueTimerRef.current) {
         clearTimeout(connectionIssueTimerRef.current)
         connectionIssueTimerRef.current = null
@@ -249,7 +334,7 @@ export function useRoom(
       socketRef.current?.close()
       socketRef.current = null
     }
-  }, [onSystemMessage, profile.email, profile.nickname, profile.venmoUsername, roomCode])
+  }, [profile.nickname, roomCode])
 
   useEffect(() => {
     if (!yourId || !tableState || !isConnected) {
@@ -383,6 +468,13 @@ function sanitizeSocialEntry(raw: unknown): PlayerSocialState | null {
     }
   }
 
+  if (typeof candidate.messageTargetPlayerId === 'string') {
+    const messageTargetPlayerId = candidate.messageTargetPlayerId.trim()
+    if (messageTargetPlayerId) {
+      entry.messageTargetPlayerId = messageTargetPlayerId
+    }
+  }
+
   const messageExpiresAt = typeof candidate.messageExpiresAt === 'number'
     ? candidate.messageExpiresAt
     : undefined
@@ -426,5 +518,9 @@ function sanitizeChatLog(raw: unknown): TableChatEntry | null {
     ? candidate.createdAt
     : Date.now()
 
-  return { id, playerId, nickname, message, createdAt }
+  const targetPlayerId = typeof candidate.targetPlayerId === 'string'
+    ? candidate.targetPlayerId.trim() || undefined
+    : undefined
+
+  return { id, playerId, nickname, message, createdAt, targetPlayerId }
 }

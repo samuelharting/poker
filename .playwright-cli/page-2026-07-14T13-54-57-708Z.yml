@@ -1,0 +1,46 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e24] [cursor=pointer]
+  - alert [ref=e28]
+  - generic [ref=e520]:
+    - generic [ref=e522]:
+      - button "Open table menu" [ref=e778] [cursor=pointer]
+      - generic [ref=e526]:
+        - generic [ref=e527]: NL Hold'em
+        - generic [ref=e531]: $10 / $20
+      - button "Open settings" [ref=e779] [cursor=pointer]
+    - generic [ref=e540]:
+      - region "Mobile poker field" [ref=e542]:
+        - generic:
+          - generic "Board cards":
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+        - generic "Players"
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=e780] [cursor=pointer]:
+          - generic [ref=e781]: ♣
+          - emphasis [ref=e782]: "1"
+      - generic [ref=e783]:
+        - generic [ref=e784]:
+          - generic [ref=e785]: Table controls
+          - generic [ref=e786]: Share the room code and fill the open seats to kick off the next hand.
+          - generic [ref=e787]:
+            - generic [ref=e788]: 0 seated
+            - generic [ref=e789]: Restoring seat
+        - generic [ref=e790]: Anyone at the table can deal as soon as the table is ready.
+        - generic [ref=e791]:
+          - button "Add bot" [ref=e792] [cursor=pointer]
+          - button "Fill seats" [ref=e793] [cursor=pointer]
+        - button "Start game" [disabled] [ref=e794]

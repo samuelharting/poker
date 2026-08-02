@@ -1,0 +1,83 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e49] [cursor=pointer]
+  - alert [ref=e53]
+  - generic [ref=e55]:
+    - generic [ref=e105]:
+      - button "Open table menu" [ref=e106] [cursor=pointer]
+      - generic [ref=e109]:
+        - generic [ref=e110]: NL Hold'em
+        - generic [ref=e114]: $10 / $20
+      - button "Open settings" [ref=e115] [cursor=pointer]
+    - generic "Table notifications":
+      - status [ref=e143]:
+        - generic [ref=e144]: Added 7 bots
+        - button "Dismiss notification" [ref=e145] [cursor=pointer]: x
+    - generic [ref=e76]:
+      - region "Mobile poker field" [ref=e124]:
+        - generic:
+          - generic "Board cards":
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+        - generic "Players":
+          - generic [ref=e126]:
+            - button "Target Sam for emojis" [ref=e127] [cursor=pointer]: "5"
+            - generic [ref=e128]:
+              - button "Sam" [ref=e129] [cursor=pointer]
+              - generic [ref=e130]: $1,000
+          - generic [ref=e147]:
+            - button "Target Bot Maverick for emojis" [ref=e148] [cursor=pointer]: "6"
+            - generic [ref=e149]:
+              - button "Maverick" [ref=e150] [cursor=pointer]
+              - generic [ref=e151]: $1,000
+          - generic [ref=e153]:
+            - button "Target Bot River for emojis" [ref=e154] [cursor=pointer]: "7"
+            - generic [ref=e155]:
+              - button "River" [ref=e156] [cursor=pointer]
+              - generic [ref=e157]: $1,000
+          - generic [ref=e159]:
+            - button "Target Bot Bluff for emojis" [ref=e160] [cursor=pointer]: "8"
+            - generic [ref=e161]:
+              - button "Bluff" [ref=e162] [cursor=pointer]
+              - generic [ref=e163]: $1,000
+          - generic [ref=e165]:
+            - button "Target Bot Ace for emojis" [ref=e166] [cursor=pointer]: "1"
+            - generic [ref=e167]:
+              - button "Ace" [ref=e168] [cursor=pointer]
+              - generic [ref=e169]: $1,000
+          - generic [ref=e171]:
+            - button "Target Bot Nova for emojis" [ref=e172] [cursor=pointer]: "2"
+            - generic [ref=e173]:
+              - button "Nova" [ref=e174] [cursor=pointer]
+              - generic [ref=e175]: $1,000
+          - generic [ref=e177]:
+            - button "Target Bot Dealer Dan for emojis" [ref=e178] [cursor=pointer]: "3"
+            - generic [ref=e179]:
+              - button "Dealer Dan" [ref=e180] [cursor=pointer]
+              - generic [ref=e181]: $1,000
+          - generic [ref=e183]:
+            - button "Target Bot Pocket for emojis" [ref=e184] [cursor=pointer]: "4"
+            - generic [ref=e185]:
+              - button "Pocket" [ref=e186] [cursor=pointer]
+              - generic [ref=e187]: $1,000
+      - generic [ref=e131]:
+        - generic [ref=e132]:
+          - generic [ref=e133]: Table controls
+          - generic [ref=e134]: The table is ready. Deal whenever everyone looks settled.
+          - generic [ref=e135]:
+            - generic [ref=e136]: 8 seated
+            - generic [ref=e137]: Stack $1,000
+        - generic [ref=e138]: Anyone at the table can deal as soon as the table is ready.
+        - button "Start game" [ref=e142] [cursor=pointer]

@@ -1,0 +1,133 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e50] [cursor=pointer]
+  - alert [ref=e54]
+  - generic [ref=e55]:
+    - generic [ref=e56]:
+      - generic [ref=e57]:
+        - generic [ref=e58]: Poker Night
+        - generic [ref=e59]:
+          - generic [ref=e60]: Room
+          - generic [ref=e61]: RF5JKT
+      - button "Open settings" [ref=e562] [cursor=pointer]:
+        - generic [ref=e70]: Settings
+    - generic [ref=e71]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [ref=e178] [cursor=pointer]:
+            - generic [ref=e182]:
+              - strong [ref=e184]: Bot Maverick
+              - generic [ref=e185]:
+                - generic [ref=e186]: $180
+                - generic [ref=e480]: Called $30
+          - button "Send a reaction to Bot River" [ref=e187] [cursor=pointer]:
+            - generic [ref=e191]:
+              - strong [ref=e193]: Bot River
+              - generic [ref=e194]:
+                - generic [ref=e195]: $4,740
+                - generic [ref=e481]: Won $1110
+          - button "Send a reaction to WatcherQA" [ref=e482] [cursor=pointer]:
+            - generic [ref=e489]:
+              - strong [ref=e491]: WatcherQA
+              - generic [ref=e492]:
+                - generic [ref=e493]: $1,200
+                - generic [ref=e494]: Folded
+          - button "Send a reaction to Bot Ace" [ref=e205] [cursor=pointer]:
+            - generic [ref=e209]:
+              - strong [ref=e211]: Bot Ace
+              - generic [ref=e212]:
+                - generic [ref=e213]: $980
+                - generic [ref=e498]: Raised $30
+          - button "Send a reaction to Bot Nova" [ref=e214] [cursor=pointer]:
+            - generic [ref=e218]:
+              - strong [ref=e220]: Bot Nova
+              - generic [ref=e221]:
+                - generic [ref=e222]: $180
+                - generic [ref=e499]: Called $30
+          - button "Send a reaction to Bot Dealer Dan" [ref=e223] [cursor=pointer]:
+            - generic [ref=e227]:
+              - strong [ref=e229]: Bot Dealer Dan
+              - generic [ref=e230]:
+                - generic [ref=e231]: $180
+                - generic [ref=e500]: Called $30
+          - button "Send a reaction to Bot Pocket" [ref=e232] [cursor=pointer]:
+            - generic [ref=e236]:
+              - generic [ref=e237]:
+                - strong [ref=e238]: Bot Pocket
+                - emphasis [ref=e501]: SB
+              - generic [ref=e239]:
+                - generic [ref=e240]: $1,230
+                - generic [ref=e502]: Called $30
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "6 of hearts":
+                    - generic:
+                      - generic: "6"
+                      - generic: "6"
+              - generic:
+                - generic:
+                  - generic "4 of spades":
+                    - generic:
+                      - generic: "4"
+                      - generic: "4"
+              - generic:
+                - generic:
+                  - generic "Q of diamonds":
+                    - generic:
+                      - generic: Q
+                      - generic: Q
+              - generic:
+                - generic:
+                  - generic "Q of clubs":
+                    - generic:
+                      - generic: Q
+                      - generic: Q
+              - generic:
+                - generic:
+                  - generic "J of diamonds":
+                    - generic:
+                      - generic: J
+                      - generic: J
+            - generic [ref=e416]:
+              - generic [ref=e417]: Pot
+              - generic [ref=e418]: $1,110
+            - status:
+              - generic [ref=e503]:
+                - generic [ref=e504]: Hand Winner
+                - generic [ref=e505]:
+                  - generic [ref=e506]: Bot River
+                  - generic [ref=e507]: Won $1,110
+                  - generic: $1.1K
+          - status "RootQA, chips $970":
+            - generic: RootQA
+            - generic: $970
+          - 'generic "Your hand: Pair of Queens"':
+            - status:
+              - generic: Pair of Queens
+            - generic:
+              - generic:
+                - generic:
+                  - generic "3 of clubs":
+                    - generic:
+                      - generic: "3"
+                      - generic: "3"
+              - generic:
+                - generic:
+                  - generic "10 of hearts":
+                    - generic:
+                      - generic: "10"
+                      - generic: "10"
+            - group "Choose which cards to reveal after this hand" [ref=e564]:
+              - button "Show left card" [ref=e565] [cursor=pointer]: L
+              - button "Show right card" [ref=e566] [cursor=pointer]: R
+              - button "Show both cards" [ref=e567] [cursor=pointer]: Both
+              - button "Muck both cards" [pressed] [ref=e568] [cursor=pointer]: Muck
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=e569] [cursor=pointer]:
+          - generic [ref=e570]: ♣
+          - strong [ref=e571]: Table talk

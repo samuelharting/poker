@@ -1,0 +1,305 @@
+- generic [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e24] [cursor=pointer]
+  - alert [ref=e28]
+  - generic [ref=e29]:
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e32]: Poker Night
+        - generic [ref=e33]:
+          - generic [ref=e34]: Room
+          - generic [ref=e35]: E9QXF5
+      - button "Close settings" [ref=e608] [cursor=pointer]:
+        - generic [ref=e44]: Close
+    - generic "Table notifications":
+      - status [ref=e880]:
+        - generic [ref=e881]: Added $100 to Bot Bluff.
+        - button "Dismiss notification" [ref=e882] [cursor=pointer]: x
+    - generic [ref=e45]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to test" [ref=e576] [cursor=pointer]:
+            - generic [ref=e583]:
+              - strong [ref=e585]: test
+              - generic [ref=e586]:
+                - generic [ref=e587]: $1,000
+                - generic [ref=e588]: Folded
+          - button "Send a reaction to Bot River" [ref=e486] [cursor=pointer]:
+            - generic [ref=e493]:
+              - generic [ref=e494]:
+                - strong [ref=e495]: Bot River
+                - emphasis [ref=e589]: SB
+              - generic [ref=e496]:
+                - generic [ref=e497]: $1,784
+                - generic [ref=e590]: Checked
+          - button "Send a reaction to LayoutAudit" [ref=e675] [cursor=pointer]:
+            - generic [ref=e679]:
+              - strong [ref=e681]: LayoutAudit
+              - generic [ref=e682]: $1,000
+          - button "Send a reaction to Bot Ace" [ref=e514] [cursor=pointer]:
+            - generic [ref=e521]:
+              - generic [ref=e522]:
+                - strong [ref=e523]: Bot Ace
+                - emphasis [ref=e594]: BB
+              - generic [ref=e525]:
+                - generic [ref=e526]: $1,376
+                - generic [ref=e595]: Checked
+          - button "Send a reaction to Bot Nova" [ref=e529] [cursor=pointer]:
+            - generic [ref=e536]:
+              - strong [ref=e538]: Bot Nova
+              - generic [ref=e540]:
+                - generic [ref=e541]: $4,050
+                - generic [ref=e596]: Won $300
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "9 of spades":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+              - generic:
+                - generic:
+                  - generic "A of spades":
+                    - generic:
+                      - generic: A
+                      - generic: A
+              - generic:
+                - generic:
+                  - generic "K of diamonds":
+                    - generic:
+                      - generic: K
+                      - generic: K
+              - generic:
+                - generic:
+                  - generic "6 of spades":
+                    - generic:
+                      - generic: "6"
+                      - generic: "6"
+              - generic:
+                - generic:
+                  - generic "9 of clubs":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+            - generic [ref=e572]:
+              - generic [ref=e573]: Pot
+              - generic [ref=e574]: $300
+            - status:
+              - generic [ref=e597]:
+                - generic [ref=e598]: Hand Winner
+                - generic [ref=e599]:
+                  - generic [ref=e600]: Bot Nova
+                  - generic [ref=e601]: Won $300
+                  - generic: $300
+          - status "FinalQA, chips $790":
+            - generic: FinalQA
+            - generic: $790
+          - 'generic "Your hand: Two Pair, Aces and Nines"':
+            - status:
+              - generic: Two Pair, Aces and Nines
+            - generic:
+              - generic:
+                - generic:
+                  - generic "A of hearts":
+                    - generic:
+                      - generic: A
+                      - generic: A
+              - generic:
+                - generic:
+                  - generic "6 of hearts":
+                    - generic:
+                      - generic: "6"
+                      - generic: "6"
+      - generic [ref=e610]:
+        - generic [ref=e611]:
+          - generic [ref=e612]:
+            - generic [ref=e613]: Table console
+            - generic [ref=e614]: Table settings and roster
+          - button "Close" [ref=e615] [cursor=pointer]
+        - generic [ref=e616]:
+          - button "Settings" [ref=e617] [cursor=pointer]
+          - button "Players (11)" [ref=e684] [cursor=pointer]
+        - generic [ref=e697]:
+          - generic [ref=e698]:
+            - generic [ref=e699]: 6 seated
+            - generic [ref=e700]: 4 spectating
+            - generic [ref=e701]: Players stay on the rail at 0 chips
+          - generic [ref=e702]:
+            - generic [ref=e703]:
+              - generic [ref=e704]:
+                - generic [ref=e705]:
+                  - generic [ref=e706]: Bot Ace
+                  - generic [ref=e707]:
+                    - generic [ref=e708]: Bot
+                    - generic [ref=e709]: Seated
+                - generic [ref=e710]: $1,376 · active
+              - generic [ref=e711]:
+                - generic [ref=e712]:
+                  - generic [ref=e713]: Chip amount
+                  - spinbutton "Chip amount" [ref=e714]: "100"
+                - button "Add $100 chips to Bot Ace" [ref=e715] [cursor=pointer]: Add chips
+                - button "Remove $100 chips from Bot Ace" [ref=e716] [cursor=pointer]: Remove chips
+                - button "Move Bot Ace to spectator mode" [ref=e717] [cursor=pointer]: Spectate player
+                - button "Kick Bot Ace from the table" [ref=e718] [cursor=pointer]: Kick player
+            - generic [ref=e719]:
+              - generic [ref=e720]:
+                - generic [ref=e721]:
+                  - generic [ref=e722]: Bot Nova
+                  - generic [ref=e723]:
+                    - generic [ref=e724]: Bot
+                    - generic [ref=e725]: Seated
+                - generic [ref=e726]: $4,050 · active
+              - generic [ref=e727]:
+                - generic [ref=e728]:
+                  - generic [ref=e729]: Chip amount
+                  - spinbutton "Chip amount" [ref=e730]: "100"
+                - button "Add $100 chips to Bot Nova" [ref=e731] [cursor=pointer]: Add chips
+                - button "Remove $100 chips from Bot Nova" [ref=e732] [cursor=pointer]: Remove chips
+                - button "Move Bot Nova to spectator mode" [ref=e733] [cursor=pointer]: Spectate player
+                - button "Kick Bot Nova from the table" [ref=e734] [cursor=pointer]: Kick player
+            - generic [ref=e735]:
+              - generic [ref=e736]:
+                - generic [ref=e737]:
+                  - generic [ref=e738]: Bot River
+                  - generic [ref=e739]:
+                    - generic [ref=e740]: Bot
+                    - generic [ref=e741]: Seated
+                - generic [ref=e742]: $1,784 · active
+              - generic [ref=e743]:
+                - generic [ref=e744]:
+                  - generic [ref=e745]: Chip amount
+                  - spinbutton "Chip amount" [ref=e746]: "100"
+                - button "Add $100 chips to Bot River" [ref=e747] [cursor=pointer]: Add chips
+                - button "Remove $100 chips from Bot River" [ref=e748] [cursor=pointer]: Remove chips
+                - button "Move Bot River to spectator mode" [ref=e749] [cursor=pointer]: Spectate player
+                - button "Kick Bot River from the table" [ref=e750] [cursor=pointer]: Kick player
+            - generic [ref=e751]:
+              - generic [ref=e752]:
+                - generic [ref=e753]:
+                  - generic [ref=e754]: FinalQA
+                  - generic [ref=e755]:
+                    - generic [ref=e756]: You
+                    - generic [ref=e757]: Seated
+                - generic [ref=e758]: $790 · folded
+              - generic [ref=e759]:
+                - generic [ref=e760]:
+                  - generic [ref=e761]: Chip amount
+                  - spinbutton "Chip amount" [ref=e762]: "100"
+                - button "Add $100 chips to FinalQA" [ref=e763] [cursor=pointer]: Add chips
+                - button "Remove $100 chips from FinalQA" [ref=e764] [cursor=pointer]: Remove chips
+                - button "Move FinalQA to spectator mode" [ref=e765] [cursor=pointer]: Spectate player
+                - generic [ref=e766]: Self removal blocked
+            - generic [ref=e767]:
+              - generic [ref=e768]:
+                - generic [ref=e769]:
+                  - generic [ref=e770]: LayoutAudit
+                  - generic [ref=e771]: Seated
+                - generic [ref=e773]: $1,000 · waiting
+              - generic [ref=e774]:
+                - generic [ref=e775]:
+                  - generic [ref=e776]: Chip amount
+                  - spinbutton "Chip amount" [ref=e777]: "100"
+                - button "Add $100 chips to LayoutAudit" [ref=e778] [cursor=pointer]: Add chips
+                - button "Remove $100 chips from LayoutAudit" [ref=e779] [cursor=pointer]: Remove chips
+                - button "Move LayoutAudit to spectator mode" [ref=e780] [cursor=pointer]: Spectate player
+                - button "Kick LayoutAudit from the table" [ref=e781] [cursor=pointer]: Kick player
+            - generic [ref=e782]:
+              - generic [ref=e783]:
+                - generic [ref=e784]:
+                  - generic [ref=e785]: test
+                  - generic [ref=e786]: Seated
+                - generic [ref=e788]: $1,000 · folded
+              - generic [ref=e789]:
+                - generic [ref=e790]:
+                  - generic [ref=e791]: Chip amount
+                  - spinbutton "Chip amount" [ref=e792]: "100"
+                - button "Add $100 chips to test" [ref=e793] [cursor=pointer]: Add chips
+                - button "Remove $100 chips from test" [ref=e794] [cursor=pointer]: Remove chips
+                - button "Move test to spectator mode" [ref=e795] [cursor=pointer]: Spectate player
+                - button "Kick test from the table" [ref=e796] [cursor=pointer]: Kick player
+            - generic [ref=e797]:
+              - generic [ref=e798]:
+                - generic [ref=e799]:
+                  - generic [ref=e800]: 3D QA
+                  - generic [ref=e801]: Away
+                - generic [ref=e803]: $0 · waiting
+              - generic [ref=e804]:
+                - generic [ref=e805]:
+                  - generic [ref=e806]: Chip amount
+                  - spinbutton "Chip amount" [ref=e807]: "100"
+                - button "Add $100 chips to 3D QA" [ref=e808] [cursor=pointer]: Add chips
+                - button "Remove $100 chips from 3D QA" [disabled] [ref=e809]: Remove chips
+                - button "Move 3D QA to spectator mode" [ref=e810] [cursor=pointer]: Spectate player
+                - button "Kick 3D QA from the table" [ref=e811] [cursor=pointer]: Kick player
+            - generic [ref=e812]:
+              - generic [ref=e813]:
+                - generic [ref=e814]:
+                  - generic [ref=e815]: Bot Bluff
+                  - generic [ref=e816]:
+                    - generic [ref=e817]: Bot
+                    - generic [ref=e818]: Spectator
+                    - generic [ref=e819]: Away
+                - generic [ref=e820]: $100 · spectating
+              - generic [ref=e821]:
+                - generic [ref=e822]:
+                  - generic [ref=e823]: Chip amount
+                  - spinbutton "Chip amount" [ref=e824]: "100"
+                - button "Add $100 chips to Bot Bluff" [active] [ref=e825] [cursor=pointer]: Add chips
+                - button "Remove $100 chips from Bot Bluff" [ref=e826] [cursor=pointer]: Remove chips
+                - button "Seat Bot Bluff" [ref=e827] [cursor=pointer]: Seat player
+                - button "Kick Bot Bluff from the table" [ref=e828] [cursor=pointer]: Kick player
+            - generic [ref=e829]:
+              - generic [ref=e830]:
+                - generic [ref=e831]:
+                  - generic [ref=e832]: Bot Dealer Dan
+                  - generic [ref=e833]:
+                    - generic [ref=e834]: Bot
+                    - generic [ref=e835]: Spectator
+                    - generic [ref=e836]: Away
+                - generic [ref=e837]: $0 · spectating
+              - generic [ref=e838]:
+                - generic [ref=e839]:
+                  - generic [ref=e840]: Chip amount
+                  - spinbutton "Chip amount" [ref=e841]: "100"
+                - button "Add $100 chips to Bot Dealer Dan" [ref=e842] [cursor=pointer]: Add chips
+                - button "Remove $100 chips from Bot Dealer Dan" [disabled] [ref=e843]: Remove chips
+                - button "Seat Bot Dealer Dan" [disabled] [ref=e844]: Seat player
+                - button "Kick Bot Dealer Dan from the table" [ref=e845] [cursor=pointer]: Kick player
+            - generic [ref=e846]:
+              - generic [ref=e847]:
+                - generic [ref=e848]:
+                  - generic [ref=e849]: Bot Maverick
+                  - generic [ref=e850]:
+                    - generic [ref=e851]: Bot
+                    - generic [ref=e852]: Spectator
+                    - generic [ref=e853]: Away
+                - generic [ref=e854]: $0 · spectating
+              - generic [ref=e855]:
+                - generic [ref=e856]:
+                  - generic [ref=e857]: Chip amount
+                  - spinbutton "Chip amount" [ref=e858]: "100"
+                - button "Add $100 chips to Bot Maverick" [ref=e859] [cursor=pointer]: Add chips
+                - button "Remove $100 chips from Bot Maverick" [disabled] [ref=e860]: Remove chips
+                - button "Seat Bot Maverick" [disabled] [ref=e861]: Seat player
+                - button "Kick Bot Maverick from the table" [ref=e862] [cursor=pointer]: Kick player
+            - generic [ref=e863]:
+              - generic [ref=e864]:
+                - generic [ref=e865]:
+                  - generic [ref=e866]: Bot Pocket
+                  - generic [ref=e867]:
+                    - generic [ref=e868]: Bot
+                    - generic [ref=e869]: Spectator
+                    - generic [ref=e870]: Away
+                - generic [ref=e871]: $0 · spectating
+              - generic [ref=e872]:
+                - generic [ref=e873]:
+                  - generic [ref=e874]: Chip amount
+                  - spinbutton "Chip amount" [ref=e875]: "100"
+                - button "Add $100 chips to Bot Pocket" [ref=e876] [cursor=pointer]: Add chips
+                - button "Remove $100 chips from Bot Pocket" [disabled] [ref=e877]: Remove chips
+                - button "Seat Bot Pocket" [disabled] [ref=e878]: Seat player
+                - button "Kick Bot Pocket from the table" [ref=e879] [cursor=pointer]: Kick player

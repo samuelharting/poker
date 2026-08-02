@@ -1,0 +1,89 @@
+- generic [active] [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - generic [ref=f1e3]:
+      - generic [ref=f1e4]:
+        - generic [ref=f1e5]: Poker Night
+        - generic [ref=f1e6]: RoomJGHJ7L
+      - button "Open settings" [ref=f1e332] [cursor=pointer]:
+        - generic [ref=f1e15]: Settings
+    - generic [ref=f1e16]:
+      - generic [ref=f1e18]:
+        - generic:
+          - generic [ref=f1e176]:
+            - generic [ref=f1e177]: Open seat
+            - generic [ref=f1e178]: Sit
+          - generic [ref=f1e180]:
+            - generic [ref=f1e181]: Open seat
+            - generic [ref=f1e182]: Sit
+          - generic [ref=f1e184]:
+            - generic [ref=f1e185]: Open seat
+            - generic [ref=f1e186]: Sit
+          - generic [ref=f1e188]:
+            - generic [ref=f1e189]: Open seat
+            - generic [ref=f1e190]: Sit
+          - generic [ref=f1e192]:
+            - generic [ref=f1e193]: Open seat
+            - generic [ref=f1e194]: Sit
+          - generic [ref=f1e196]:
+            - generic [ref=f1e197]: Open seat
+            - generic [ref=f1e198]: Sit
+          - generic [ref=f1e20]:
+            - generic: $40
+            - button "Target Bot Maverick for emojis" [ref=f1e21] [cursor=pointer]:
+              - generic [ref=f1e22]: BM
+              - generic [ref=f1e238]: SB
+            - button "Bot Maverick" [ref=f1e26] [cursor=pointer]
+            - generic [ref=f1e27]: $1,150
+            - generic [ref=f1e336]: Won $60
+        - generic [ref=f1e28]:
+          - generic "Board cards" [ref=f1e29]:
+            - generic "Face-down card" [ref=f1e212]
+            - generic "Face-down card" [ref=f1e213]
+            - generic "Face-down card" [ref=f1e214]
+            - generic "Face-down card" [ref=f1e215]
+            - generic "Face-down card" [ref=f1e52]
+          - generic [ref=f1e56]:
+            - generic [ref=f1e57]: Pot
+            - generic [ref=f1e58]: $60
+          - status "Your table bet $20":
+            - generic:
+              - generic: Bet
+              - generic: $20
+          - status:
+            - generic:
+              - generic: Hand Winner
+              - generic:
+                - generic: Bot Maverick
+                - generic: Won $60
+                - generic: $60
+        - 'generic "Your hand: Jack-high"':
+          - status:
+            - generic: Jack-high
+          - generic:
+            - generic:
+              - generic:
+                - generic "5 of spades":
+                  - generic:
+                    - generic: "5"
+                    - generic: "5"
+            - generic:
+              - generic:
+                - generic "J of clubs":
+                  - generic:
+                    - generic: J
+                    - generic: J
+          - group "Show folded cards" [ref=f1e338]:
+            - button "L" [ref=f1e339] [cursor=pointer]
+            - button "R" [ref=f1e340] [cursor=pointer]
+            - button "Both" [ref=f1e341] [cursor=pointer]
+      - region "Rabbit hunt controls" [ref=f1e342]:
+        - generic [ref=f1e343]:
+          - generic [ref=f1e344]: Folded hand
+          - generic [ref=f1e345]: See the board runout
+        - button "Rabbit hunt" [ref=f1e346] [cursor=pointer]
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f1e333] [cursor=pointer]:
+          - generic [ref=f1e334]: ♣
+          - strong [ref=f1e335]: Table talk
+  - button "Open Next.js Dev Tools" [ref=f1e89] [cursor=pointer]
+  - alert [ref=f1e93]

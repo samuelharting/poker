@@ -1,0 +1,80 @@
+- generic [active] [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - generic [ref=f1e3]:
+      - generic [ref=f1e4]:
+        - generic [ref=f1e5]: Poker Night
+        - generic [ref=f1e6]: RoomJGHJ7L
+      - button "Open settings" [ref=f1e332] [cursor=pointer]:
+        - generic [ref=f1e15]: Settings
+    - generic "Table notifications":
+      - status [ref=f1e326]:
+        - generic [ref=f1e327]: Table settings sent.
+        - button "Dismiss notification" [ref=f1e328] [cursor=pointer]: x
+      - status [ref=f1e329]:
+        - generic [ref=f1e330]: Updated table settings.
+        - button "Dismiss notification" [ref=f1e331] [cursor=pointer]: x
+    - generic [ref=f1e16]:
+      - generic [ref=f1e18]:
+        - generic [ref=f1e20]:
+          - generic: $40
+          - button "Target Bot Maverick for emojis" [ref=f1e21] [cursor=pointer]:
+            - generic [ref=f1e22]: BM
+            - generic [ref=f1e238]: SB
+          - button "Bot Maverick" [ref=f1e26] [cursor=pointer]
+          - generic [ref=f1e27]: $1,090
+        - generic [ref=f1e28]:
+          - generic "Board cards" [ref=f1e29]:
+            - generic "Face-down card" [ref=f1e212]
+            - generic "Face-down card" [ref=f1e213]
+            - generic "Face-down card" [ref=f1e214]
+            - generic "Face-down card" [ref=f1e215]
+            - generic "Face-down card" [ref=f1e52]
+          - generic [ref=f1e55]:
+            - generic [ref=f1e56]:
+              - generic [ref=f1e57]: Pot
+              - generic [ref=f1e58]: $60
+            - generic [ref=f1e241]: To call$20
+          - status "Your table bet $20":
+            - generic:
+              - generic: Bet
+              - generic: $20
+        - 'generic "Your hand: Jack-high"':
+          - status:
+            - generic: Jack-high
+          - generic:
+            - generic:
+              - generic:
+                - generic "5 of spades":
+                  - generic:
+                    - generic: "5"
+                    - generic: "5"
+            - generic:
+              - generic:
+                - generic "J of clubs":
+                  - generic:
+                    - generic: J
+                    - generic: J
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f1e333] [cursor=pointer]:
+          - generic [ref=f1e334]: ♣
+          - strong [ref=f1e335]: Table talk
+      - generic [ref=f1e305]:
+        - generic [ref=f1e306]:
+          - generic [ref=f1e307]: Your turn - Call $20
+          - generic [ref=f1e308]: Your turn
+        - generic [ref=f1e310]:
+          - generic [ref=f1e311]: Fold timer
+          - generic [ref=f1e312]: 32s left
+        - generic [ref=f1e315]:
+          - generic [ref=f1e316]:
+            - button "Min" [ref=f1e317] [cursor=pointer]
+            - button "1/4 Pot" [ref=f1e318] [cursor=pointer]
+          - slider [ref=f1e319]: "60"
+          - spinbutton [ref=f1e320]: "60"
+        - generic [ref=f1e321]:
+          - button "Call $20" [ref=f1e322] [cursor=pointer]: Call$20
+          - button "Raise to $60" [ref=f1e323] [cursor=pointer]: Raise to$60
+          - button "All-in $870" [ref=f1e324] [cursor=pointer]: All-in$870
+          - button "Fold" [ref=f1e325] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f1e89] [cursor=pointer]
+  - alert [ref=f1e93]

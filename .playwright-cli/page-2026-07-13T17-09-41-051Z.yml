@@ -1,0 +1,110 @@
+- generic [active] [ref=f1e1]:
+  - button "Open Next.js Dev Tools" [ref=f1e50] [cursor=pointer]
+  - alert [ref=f1e54]
+  - generic [ref=f1e55]:
+    - generic [ref=f1e56]:
+      - generic [ref=f1e57]:
+        - generic [ref=f1e58]: Poker Night
+        - generic [ref=f1e59]:
+          - generic [ref=f1e60]: Room
+          - generic [ref=f1e61]: DNA4SX
+      - button "Open settings" [ref=f1e62] [cursor=pointer]:
+        - generic [ref=f1e70]: Settings
+    - generic [ref=f1e71]:
+      - generic [ref=f1e72]:
+        - generic [ref=f1e75]:
+          - generic [ref=f1e76]: Poker Night
+          - generic [ref=f1e77]: Private table · DNA4SX
+        - generic [ref=f1e81]: PN
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [ref=f1e116] [cursor=pointer]:
+            - generic [ref=f1e120]:
+              - strong [ref=f1e122]: Bot Maverick
+              - generic [ref=f1e123]:
+                - generic [ref=f1e124]: $1,000
+                - generic [ref=f1e250]: Acting
+          - button "Send a reaction to Bot River" [ref=f1e125] [cursor=pointer]:
+            - generic [ref=f1e129]:
+              - generic [ref=f1e130]:
+                - strong [ref=f1e131]: Bot River
+                - emphasis [ref=f1e185]: SB
+              - generic [ref=f1e132]: $990
+            - generic [ref=f1e186]: $10
+          - button "Send a reaction to Bot Bluff" [ref=f1e134] [cursor=pointer]:
+            - generic [ref=f1e138]:
+              - generic [ref=f1e139]:
+                - strong [ref=f1e140]: Bot Bluff
+                - emphasis [ref=f1e190]: BB
+              - generic [ref=f1e141]: $980
+            - generic [ref=f1e191]: $20
+          - button "Send a reaction to Bot Ace" [ref=f1e143] [cursor=pointer]:
+            - generic [ref=f1e147]:
+              - strong [ref=f1e149]: Bot Ace
+              - generic [ref=f1e150]:
+                - generic [ref=f1e151]: $980
+                - generic [ref=f1e195]: Called $20
+            - generic [ref=f1e196]: $20
+          - button "Send a reaction to Bot Nova" [ref=f1e152] [cursor=pointer]:
+            - generic [ref=f1e156]:
+              - strong [ref=f1e158]: Bot Nova
+              - generic [ref=f1e159]:
+                - generic [ref=f1e160]: $980
+                - generic [ref=f1e200]: Called $20
+            - generic [ref=f1e201]: $20
+          - button "Send a reaction to Bot Dealer Dan" [ref=f1e161] [cursor=pointer]:
+            - generic [ref=f1e165]:
+              - strong [ref=f1e167]: Bot Dealer Dan
+              - generic [ref=f1e168]:
+                - generic [ref=f1e169]: $980
+                - generic [ref=f1e205]: Called $20
+            - generic [ref=f1e206]: $20
+          - button "Send a reaction to Bot Pocket" [ref=f1e170] [cursor=pointer]:
+            - generic [ref=f1e174]:
+              - strong [ref=f1e176]: Bot Pocket
+              - generic [ref=f1e177]:
+                - generic [ref=f1e178]: $980
+                - generic [ref=f1e210]: Called $20
+            - generic [ref=f1e211]: $20
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=f1e213]:
+              - generic [ref=f1e214]: Pot
+              - generic [ref=f1e215]: $110
+          - status "Sam, chips $1,000":
+            - generic: Sam
+            - generic: $1,000
+          - generic "Your hand":
+            - generic:
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: J
+                      - generic: J
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f1e93] [cursor=pointer]:
+          - generic [ref=f1e94]: ♣
+          - strong [ref=f1e95]: Table talk

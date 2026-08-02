@@ -5,6 +5,7 @@ import type { Card, SeatPlayer } from '@/lib/poker/types'
 import clsx from 'clsx'
 import { PlayingCard } from '@/components/ui/PlayingCard'
 import { ChipStack } from '@/components/ui/ChipStack'
+import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
 
 interface PlayerSeatProps {
   player: SeatPlayer
@@ -12,6 +13,8 @@ interface PlayerSeatProps {
   isWinner?: boolean
   winnerAmount?: number
   winnerVenmoUsername?: string
+  winnerHandDescription?: string
+  winningCards?: Card[]
   depthClass: 'seat-depth-near' | 'seat-depth-mid' | 'seat-depth-far' | 'seat-depth-top'
   opacityValue: number
   socialMessage?: string
@@ -19,6 +22,7 @@ interface PlayerSeatProps {
   socialEmote?: string
   socialEmoteExpiresAt?: number
   socialEmoteTargeted?: boolean
+  cardRevealControl?: React.ReactNode
   onNameClick?: (playerId: string) => void
 }
 
@@ -77,6 +81,8 @@ export function PlayerSeat({
   isWinner = false,
   winnerAmount,
   winnerVenmoUsername,
+  winnerHandDescription,
+  winningCards = [],
   depthClass,
   opacityValue,
   socialMessage,
@@ -84,11 +90,13 @@ export function PlayerSeat({
   socialEmote,
   socialEmoteExpiresAt,
   socialEmoteTargeted = false,
+  cardRevealControl,
   onNameClick,
 }: PlayerSeatProps) {
   const isFolded = player.status === 'folded'
   const isDisconnected = player.status === 'disconnected' || !player.isConnected
   const isAllIn = player.status === 'all_in'
+  const blindRole = player.isBB ? 'big' : player.isSB ? 'small' : null
   const displayAction = player.lastAction ?? STATUS_LABELS[player.status] ?? null
   const showAction = displayAction && player.status !== 'active' && player.status !== 'waiting'
   const showEquity = typeof player.equityPercent === 'number' && isFolded === false && isDisconnected === false
@@ -101,6 +109,7 @@ export function PlayerSeat({
     player.showCards,
     holeCards
   )
+  const hasVisibleHoleCards = Boolean(visibleLeftCard || visibleRightCard)
 
   const initials = player.nickname
     .split(' ')
@@ -113,8 +122,6 @@ export function PlayerSeat({
     <>
       <span className="player-seat-initials">{initials}</span>
       {player.isDealer && <span className="dealer-button">D</span>}
-      {player.isSB && !player.isDealer && <span className="blind-badge sb">SB</span>}
-      {player.isBB && <span className="blind-badge bb">BB</span>}
     </>
   )
 
@@ -152,19 +159,27 @@ export function PlayerSeat({
               )}
               style={{ ['--chat-ttl' as any]: `${socialEmoteTtl}ms` }}
             >
-              {socialEmote}
+              <EmojiGlyph emoji={socialEmote} />
             </div>
           )}
         </div>
       )}
 
       {player.hasCards && (
-        <div className={clsx('player-held-cards', holeCardCount > 0 && 'is-revealed', isWinner && 'is-winner')}>
+        <div className={clsx('player-held-cards', hasVisibleHoleCards && 'is-revealed', isWinner && 'is-winner')}>
           {holeCardCount > 0 ? (
             <>
               {visibleLeftCard ? (
                 <div className="player-card-face player-card-face-left">
-                  <PlayingCard card={visibleLeftCard} size="xs" highlighted={isWinner} />
+                  <PlayingCard
+                    card={visibleLeftCard}
+                    size="xs"
+                    highlighted={isWinner && (
+                      winningCards.length === 0 || winningCards.some(
+                        card => card.rank === visibleLeftCard.rank && card.suit === visibleLeftCard.suit
+                      )
+                    )}
+                  />
                 </div>
               ) : (
                 <div className="player-card-back player-card-back-left" />
@@ -172,7 +187,15 @@ export function PlayerSeat({
 
               {visibleRightCard ? (
                 <div className="player-card-face player-card-face-right">
-                  <PlayingCard card={visibleRightCard} size="xs" highlighted={isWinner} />
+                  <PlayingCard
+                    card={visibleRightCard}
+                    size="xs"
+                    highlighted={isWinner && (
+                      winningCards.length === 0 || winningCards.some(
+                        card => card.rank === visibleRightCard.rank && card.suit === visibleRightCard.suit
+                      )
+                    )}
+                  />
                 </div>
               ) : (
                 <div className="player-card-back player-card-back-right" />
@@ -185,6 +208,9 @@ export function PlayerSeat({
             </>
           )}
         </div>
+      )}
+      {cardRevealControl && (
+        <div className="player-card-reveal-control">{cardRevealControl}</div>
       )}
 
       {player.bet > 0 && (
@@ -228,6 +254,13 @@ export function PlayerSeat({
         )}
       </div>
 
+      {blindRole && (
+        <div className={`player-blind-role is-${blindRole}`}>
+          <strong>{blindRole === 'big' ? 'BB' : 'SB'}</strong>
+          <span>{blindRole === 'big' ? 'Big Blind' : 'Small Blind'}</span>
+        </div>
+      )}
+
       {!isFolded && (
         <div className={clsx('player-stack', isAllIn && 'text-yellow-400')}>
           ${player.stack.toLocaleString()}
@@ -236,7 +269,10 @@ export function PlayerSeat({
 
       {isWinner && typeof winnerAmount === 'number' && winnerAmount > 0 && (
         <div className="winner-payout-chip">
-          Won ${winnerAmount.toLocaleString()}{winnerVenmoUsername ? ` ${winnerVenmoUsername}` : ''}
+          <span>Won ${winnerAmount.toLocaleString()}{winnerVenmoUsername ? ` ${winnerVenmoUsername}` : ''}</span>
+          {winnerHandDescription && (
+            <small className="winner-hand-description">{winnerHandDescription}</small>
+          )}
         </div>
       )}
 

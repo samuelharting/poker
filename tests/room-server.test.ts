@@ -1,7 +1,9 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import type { Connection, Room } from 'partykit/server'
-import PokerRoom, { AUTO_FOLD_DELAY, AUTO_START_DELAY, BOT_ACTION_DELAY } from '@/partykit/room'
+import PokerRoom, { AUTO_FOLD_DELAY, AUTO_START_DELAY, BOT_ACTION_DELAY, HOST_DISCONNECT_GRACE_MS } from '@/partykit/room'
+import { getShowdownMinimumDurationMs } from '@/lib/poker/showdown'
 import type { C2SMessage, S2CMessage } from '@/shared/protocol'
+import type { PlayerAvatarCustomization } from '@/lib/profile'
 
 type TypedMessage<T extends S2CMessage['type']> = Extract<S2CMessage, { type: T }>
 
@@ -122,7 +124,11 @@ function joinPlayer(
   connectionId: string,
   nickname: string,
   reconnectToken?: string,
-  profile?: Partial<{ email: string; venmoUsername: string }>
+  profile?: Partial<{
+    email: string
+    venmoUsername: string
+    avatar: PlayerAvatarCustomization
+  }>
 ) {
   const connection = connect(server, room, connectionId)
   send(server, connection, {
@@ -130,6 +136,7 @@ function joinPlayer(
     nickname,
     email: profile?.email ?? `${connectionId}@example.com`,
     venmoUsername: profile?.venmoUsername ?? `@${connectionId}`,
+    avatar: profile?.avatar,
     reconnectToken,
   })
 
@@ -153,8 +160,266 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('PokerRoom avatar customization', () => {
+  const firstAvatar: PlayerAvatarCustomization = {
+    modelKey: 'adventurer',
+    hat: 'cowboy',
+    glasses: 'aviator',
+    jacket: 'western',
+    jacketColor: 'gold',
+    idleTell: 'card_peek',
+    celebration: 'victory',
+  }
+
+  const updatedAvatar: PlayerAvatarCustomization = {
+    modelKey: 'punk',
+    hat: 'crown',
+    glasses: 'shades',
+    jacket: 'leather',
+    jacketColor: 'violet',
+    idleTell: 'table_drum',
+    celebration: 'fist_pump',
+  }
+
+  it('publishes joined and updated avatar metadata for lobby and seated players', () => {
+    const { room, server } = createHarness()
+    const alice = joinPlayer(server, room, 'avatar-alice', 'Alice', undefined, {
+      avatar: firstAvatar,
+    })
+    const bob = joinPlayer(server, room, 'avatar-bob', 'Bob')
+
+    expect(
+      lastMessage(alice.connection, 'room_snapshot')?.state.lobbyPlayers
+        .find(player => player.id === alice.playerId)?.avatar
+    ).toEqual(firstAvatar)
+
+    seatPlayer(server, alice.connection, 0)
+    expect(
+      lastMessage(alice.connection, 'room_snapshot')?.state.players
+        .find(player => player.id === alice.playerId)?.avatar
+    ).toEqual(firstAvatar)
+
+    send(server, alice.connection, { type: 'update_avatar', avatar: updatedAvatar })
+    const updatedSnapshot = lastMessage(alice.connection, 'room_snapshot')?.state
+    expect(updatedSnapshot?.players.find(player => player.id === alice.playerId)?.avatar)
+      .toEqual(updatedAvatar)
+    expect(updatedSnapshot?.lobbyPlayers.find(player => player.id === alice.playerId)?.avatar)
+      .toEqual(updatedAvatar)
+    expect(
+      lastMessage(bob.connection, 'room_snapshot')?.state.players
+        .find(player => player.id === alice.playerId)?.avatar
+    ).toEqual(updatedAvatar)
+  })
+
+  it('keeps legacy metadata optional and refreshes supplied avatar data on reconnect', () => {
+    const { room, server } = createHarness()
+    const alice = joinPlayer(server, room, 'avatar-original', 'Alice')
+    expect(
+      lastMessage(alice.connection, 'room_snapshot')?.state.lobbyPlayers
+        .find(player => player.id === alice.playerId)?.avatar
+    ).toBeUndefined()
+
+    const reconnected = joinPlayer(
+      server,
+      room,
+      'avatar-reconnected',
+      'Alice',
+      alice.reconnectToken,
+      { avatar: updatedAvatar }
+    )
+
+    expect(reconnected.playerId).toBe(alice.playerId)
+    expect(
+      lastMessage(reconnected.connection, 'room_snapshot')?.state.lobbyPlayers
+        .find(player => player.id === alice.playerId)?.avatar
+    ).toEqual(updatedAvatar)
+  })
+})
+
+describe('PokerRoom run it twice consent', () => {
+  it('waits for both heads-up players to say yes before dealing two boards', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-15T12:00:00.000Z'))
+
+    const { room, server } = createHarness()
+    const alice = joinPlayer(server, room, 'twice-alice', 'Alice')
+    const bob = joinPlayer(server, room, 'twice-bob', 'Bob')
+    seatPlayer(server, alice.connection, 0)
+    seatPlayer(server, bob.connection, 1)
+    send(server, alice.connection, { type: 'start_game' })
+
+    const byPlayerId = new Map([
+      [alice.playerId, alice.connection],
+      [bob.playerId, bob.connection],
+    ])
+    const firstActorId = lastMessage(alice.connection, 'room_snapshot')?.state.actingPlayerId
+    if (!firstActorId) {
+      throw new Error('Missing first actor')
+    }
+
+    send(server, byPlayerId.get(firstActorId)!, {
+      type: 'player_action',
+      action: 'all_in',
+    })
+
+    const secondActorId = lastMessage(alice.connection, 'room_snapshot')?.state.actingPlayerId
+    if (!secondActorId) {
+      throw new Error('Missing second actor')
+    }
+    send(server, byPlayerId.get(secondActorId)!, {
+      type: 'player_action',
+      action: 'call',
+    })
+
+    const pending = lastMessage(alice.connection, 'room_snapshot')?.state
+    expect(pending?.runItTwice).toMatchObject({
+      status: 'voting',
+      votes: {},
+    })
+    expect(pending?.communityCards).toEqual([])
+
+    send(server, alice.connection, { type: 'run_it_twice_vote', vote: 'yes' })
+    const oneYes = lastMessage(alice.connection, 'room_snapshot')?.state
+    expect(oneYes?.runItTwice?.status).toBe('voting')
+    expect(oneYes?.runItTwice?.votes).toEqual({ [alice.playerId]: 'yes' })
+    expect(oneYes?.runItTwice?.boards).toBeUndefined()
+
+    send(server, bob.connection, { type: 'run_it_twice_vote', vote: 'yes' })
+    const accepted = lastMessage(alice.connection, 'room_snapshot')?.state
+    expect(accepted?.runItTwice?.status).toBe('accepted')
+    expect(accepted?.runItTwice?.boards).toHaveLength(2)
+    expect(accepted?.phase).toBe('between_hands')
+  })
+})
+
+describe('PokerRoom showdown pacing', () => {
+  it('holds auto-start through the full cinematic, including disconnected contenders', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-14T18:00:00.000Z'))
+
+    const { room, server } = createHarness()
+    const alice = joinPlayer(server, room, 'showdown-alice', 'Alice')
+    seatPlayer(server, alice.connection, 0)
+    const bob = joinPlayer(server, room, 'showdown-bob', 'Bob')
+    seatPlayer(server, bob.connection, 1)
+    send(server, alice.connection, { type: 'start_game' })
+
+    const internals = server as unknown as {
+      data: {
+        gameState: {
+          phase: 'between_hands' | 'in_hand' | 'waiting'
+          round: 'showdown' | string | null
+          showdownAt?: number
+          winners?: Array<{ playerId: string; amount: number }>
+          pots: Array<{ amount: number; eligiblePlayerIds: string[] }>
+          players: Array<{
+            id: string
+            status: string
+            holeCards: Array<{ rank: string; suit: string }>
+          }>
+        }
+        tableSettings: { autoStartDelay: number }
+      }
+      getAutoStartDelayMs: () => number
+    }
+    const state = internals.data.gameState
+    const showdownAt = Date.now()
+
+    state.phase = 'between_hands'
+    state.round = 'showdown'
+    state.showdownAt = showdownAt
+    state.winners = [{ playerId: alice.playerId, amount: 40 }]
+    state.pots = [{
+      amount: 40,
+      eligiblePlayerIds: [alice.playerId, bob.playerId],
+    }]
+    state.players.find(player => player.id === bob.playerId)!.status = 'disconnected'
+    internals.data.tableSettings.autoStartDelay = 500
+
+    const cinematicHold = getShowdownMinimumDurationMs(2)
+    expect(internals.getAutoStartDelayMs()).toBe(cinematicHold)
+
+    vi.setSystemTime(new Date(showdownAt + 250))
+    expect(internals.getAutoStartDelayMs()).toBe(cinematicHold - 250)
+  })
+
+  it('blocks manual dealing and keeps a departing all-in contender through the reveal', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-14T19:00:00.000Z'))
+
+    const { room, server } = createHarness()
+    const alice = joinPlayer(server, room, 'manual-showdown-alice', 'Alice')
+    seatPlayer(server, alice.connection, 0)
+    const bob = joinPlayer(server, room, 'manual-showdown-bob', 'Bob')
+    seatPlayer(server, bob.connection, 1)
+    const carol = joinPlayer(server, room, 'manual-showdown-carol', 'Carol')
+    seatPlayer(server, carol.connection, 2)
+    send(server, alice.connection, { type: 'start_game' })
+
+    const internals = server as unknown as {
+      data: {
+        gameState: {
+          phase: 'between_hands' | 'in_hand' | 'waiting'
+          round: 'showdown' | string | null
+          showdownAt?: number
+          winners?: Array<{ playerId: string; amount: number }>
+          pots: Array<{ amount: number; eligiblePlayerIds: string[] }>
+          players: Array<{
+            id: string
+            status: string
+            holeCards: Array<{ rank: string; suit: string }>
+          }>
+        }
+      }
+      finalizeState: () => void
+      broadcastState: () => void
+    }
+    const state = internals.data.gameState
+    const bobSeat = state.players.find(player => player.id === bob.playerId)!
+    bobSeat.status = 'all_in'
+    state.players.find(player => player.id === carol.playerId)!.status = 'folded'
+
+    send(server, alice.connection, {
+      type: 'set_player_spectator',
+      targetId: bob.playerId,
+      spectator: true,
+    })
+
+    const showdownAt = Date.now()
+    state.phase = 'between_hands'
+    state.round = 'showdown'
+    state.showdownAt = showdownAt
+    state.winners = [{ playerId: bob.playerId, amount: 60 }]
+    state.pots = [{
+      amount: 60,
+      eligiblePlayerIds: [alice.playerId, bob.playerId],
+    }]
+    internals.finalizeState()
+    internals.broadcastState()
+
+    const revealSnapshot = lastMessage(alice.connection, 'room_snapshot')
+    const revealedBob = revealSnapshot?.state.players.find(player => player.id === bob.playerId)
+    expect(revealedBob?.holeCards).toHaveLength(2)
+    expect(revealSnapshot?.state.winners?.[0]?.playerId).toBe(bob.playerId)
+
+    send(server, alice.connection, { type: 'start_game' })
+    expect(lastMessage(alice.connection, 'action_failed')?.message).toContain('Showdown in progress')
+    expect(internals.data.gameState.phase).toBe('between_hands')
+    expect(internals.data.gameState.players.some(player => player.id === bob.playerId)).toBe(true)
+
+    vi.setSystemTime(new Date(showdownAt + getShowdownMinimumDurationMs(2) + 1))
+    send(server, alice.connection, { type: 'start_game' })
+
+    const nextHandSnapshot = lastMessage(alice.connection, 'room_snapshot')
+    expect(nextHandSnapshot?.state.phase).toBe('in_hand')
+    expect(nextHandSnapshot?.state.players.some(player => player.id === bob.playerId)).toBe(false)
+    expect(nextHandSnapshot?.state.lobbyPlayers.find(player => player.id === bob.playerId)?.isSpectator)
+      .toBe(true)
+  })
+})
+
 describe('PokerRoom reconnect and session handling', () => {
-  it('rotates reconnect tokens, preserves the seat, and strips stale connections of private cards', () => {
+  it('keeps a stable reconnect token, preserves the seat, and strips stale connections of private cards', () => {
     const { room, server } = createHarness()
 
     const alice = joinPlayer(server, room, 'alice-1', 'Alice')
@@ -167,7 +432,7 @@ describe('PokerRoom reconnect and session handling', () => {
 
     const aliceReconnect = joinPlayer(server, room, 'alice-2', 'Alice', alice.reconnectToken)
     expect(aliceReconnect.playerId).toBe(alice.playerId)
-    expect(aliceReconnect.reconnectToken).not.toBe(alice.reconnectToken)
+    expect(aliceReconnect.reconnectToken).toBe(alice.reconnectToken)
 
     const staleSnapshot = lastMessage(alice.connection, 'room_snapshot')
     const staleAliceView = staleSnapshot?.state.players.find(player => player.id === alice.playerId)
@@ -202,6 +467,45 @@ describe('PokerRoom reconnect and session handling', () => {
 
     const hostId = (server as unknown as { data: { hostId: string | null } }).data.hostId
     expect(hostId).toBe(bob.playerId)
+  })
+
+  it('transfers host authority when the host disconnects without sending leave_room', () => {
+    vi.useFakeTimers()
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice', 'Alice')
+    const bob = joinPlayer(server, room, 'bob', 'Bob')
+
+    room.removeConnection(alice.connection.id)
+    server.onClose(alice.connection)
+
+    expect(lastMessage(bob.connection, 'private_session')?.isHost).toBe(false)
+    vi.advanceTimersByTime(HOST_DISCONNECT_GRACE_MS + 1)
+    expect(lastMessage(bob.connection, 'private_session')?.isHost).toBe(true)
+    send(server, bob.connection, { type: 'set_auto_start', enabled: true })
+    expect(lastMessage(bob.connection, 'action_result')).toBeDefined()
+
+    const hostId = (server as unknown as { data: { hostId: string | null } }).data.hostId
+    expect(hostId).toBe(bob.playerId)
+  })
+
+  it('restores leadership to the first player who reconnects to an empty room', () => {
+    vi.useFakeTimers()
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice', 'Alice')
+    room.removeConnection(alice.connection.id)
+    server.onClose(alice.connection)
+
+    const runtime = server as unknown as { data: { hostId: string | null } }
+    expect(runtime.data.hostId).toBe(alice.playerId)
+    vi.advanceTimersByTime(HOST_DISCONNECT_GRACE_MS + 1)
+    expect(runtime.data.hostId).toBeNull()
+
+    const reconnect = joinPlayer(server, room, 'alice-reconnect', 'Alice', alice.reconnectToken)
+    expect(reconnect.playerId).toBe(alice.playerId)
+    expect(lastMessage(reconnect.connection, 'private_session')?.isHost).toBe(true)
+    expect(runtime.data.hostId).toBe(alice.playerId)
   })
 })
 
@@ -275,7 +579,7 @@ describe('PokerRoom player profiles and stats', () => {
 
     const internals = server as unknown as {
       data: {
-        statsByEmail: Record<string, Record<string, unknown>>
+        statsByUsername: Record<string, Record<string, unknown>>
         gameState: {
           phase: 'between_hands'
           handNumber: number
@@ -314,7 +618,7 @@ describe('PokerRoom player profiles and stats', () => {
     expect(aliceSeat?.stats?.wins).toBe(2)
     expect(aliceSeat?.stats).not.toHaveProperty('currentWinStreak')
     expect(bobSeat?.stats).not.toHaveProperty('currentWinStreak')
-    expect(internals.data.statsByEmail['alice@example.com']).not.toHaveProperty('currentWinStreak')
+    expect(internals.data.statsByUsername.alice).not.toHaveProperty('currentWinStreak')
 
     internals.recordFold(alice.playerId)
     snapshot = internals.buildSnapshotFor(alice.connection.id)
@@ -344,7 +648,7 @@ describe('PokerRoom player profiles and stats', () => {
 
     const internals = server as unknown as {
       data: {
-        statsByEmail: Record<string, Record<string, unknown>>
+        statsByUsername: Record<string, Record<string, unknown>>
         gameState: {
           phase: 'between_hands'
           handNumber: number
@@ -383,7 +687,7 @@ describe('PokerRoom player profiles and stats', () => {
     expect(botSeat?.stats?.handsPlayed).toBe(2)
     expect(botSeat?.stats?.wins).toBe(2)
     expect(botSeat?.stats).not.toHaveProperty('currentWinStreak')
-    expect(internals.data.statsByEmail[`bot:${bot!.id}`]).not.toHaveProperty('currentWinStreak')
+    expect(internals.data.statsByUsername[`bot:${bot!.id}`]).not.toHaveProperty('currentWinStreak')
   })
 })
 
@@ -409,11 +713,11 @@ describe('PokerRoom timer handling', () => {
     const acting = actingPlayerId === alice.playerId ? alice : bob
     const waiting = actingPlayerId === alice.playerId ? bob : alice
 
-    vi.advanceTimersByTime(10_000)
+    vi.advanceTimersByTime(3_000)
     room.removeConnection((acting.connection as unknown as MockConnection).id)
     server.onClose(acting.connection)
 
-    vi.advanceTimersByTime(10_000)
+    vi.advanceTimersByTime(3_000)
     const reconnect = joinPlayer(server, room, 'reconnect', actingPlayerId === alice.playerId ? 'Alice' : 'Bob', acting.reconnectToken)
     expect(reconnect.playerId).toBe(acting.playerId)
 
@@ -525,7 +829,7 @@ describe('PokerRoom timer handling', () => {
     expect(lobbyGuest?.isSpectator).toBe(true)
   })
 
-  it('shows every hand to a player once they are moved into spectator mode', () => {
+  it('shows every hand to a player once they move into spectator mode', () => {
     const { room, server } = createHarness()
 
     const host = joinPlayer(server, room, 'host', 'Alice')
@@ -554,7 +858,71 @@ describe('PokerRoom timer handling', () => {
     expect(guestSeatForHost?.equityPercent).toBeUndefined()
   })
 
-  it('adds live odds for true spectators while the hand is still contested', () => {
+  it('keeps live opponents private after a seated player folds', () => {
+    const { room, server } = createHarness()
+
+    const host = joinPlayer(server, room, 'host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+
+    const guest = joinPlayer(server, room, 'guest', 'Bob')
+    seatPlayer(server, guest.connection, 1)
+
+    const third = joinPlayer(server, room, 'third', 'Carol')
+    seatPlayer(server, third.connection, 2)
+
+    const players = [host, guest, third]
+    send(server, host.connection, { type: 'start_game' })
+
+    const liveSnapshot = lastMessage(host.connection, 'room_snapshot')
+    const folder = players.find(player => player.playerId === liveSnapshot?.state.actingPlayerId)!
+    send(server, folder.connection, { type: 'player_action', action: 'fold' })
+
+    const foldedSnapshot = lastMessage(folder.connection, 'room_snapshot')
+    expect(foldedSnapshot?.state.phase).toBe('in_hand')
+    expect(foldedSnapshot?.state.players.find(player => player.id === folder.playerId)?.holeCards)
+      .toHaveLength(2)
+    expect(
+      foldedSnapshot?.state.players
+        .filter(player => player.id !== folder.playerId)
+        .every(player => player.holeCards === undefined)
+    ).toBe(true)
+    expect(foldedSnapshot?.state.players.every(player => player.showCards === 'none')).toBe(true)
+
+    const activeOpponentId = foldedSnapshot?.state.players.find(player => player.status === 'active')?.id
+    const activeOpponent = players.find(player => player.playerId === activeOpponentId)!
+    const activeSnapshot = lastMessage(activeOpponent.connection, 'room_snapshot')
+    expect(activeSnapshot?.state.players.find(player => player.id === activeOpponent.playerId)?.holeCards)
+      .toHaveLength(2)
+    expect(
+      activeSnapshot?.state.players
+        .filter(player => player.id !== activeOpponent.playerId)
+        .every(player => player.holeCards === undefined)
+    ).toBe(true)
+
+    const nextActor = players.find(
+      player => player.playerId === foldedSnapshot?.state.actingPlayerId
+    )!
+    send(server, nextActor.connection, { type: 'player_action', action: 'fold' })
+    expect(lastMessage(host.connection, 'room_snapshot')?.state.phase).toBe('between_hands')
+
+    send(server, host.connection, { type: 'start_game' })
+
+    const nextHandFolderSnapshot = lastMessage(folder.connection, 'room_snapshot')
+    expect(nextHandFolderSnapshot?.state.phase).toBe('in_hand')
+    expect(
+      nextHandFolderSnapshot?.state.players.find(player => player.id === folder.playerId)?.status
+    ).toBe('active')
+    expect(
+      nextHandFolderSnapshot?.state.players.find(player => player.id === folder.playerId)?.holeCards
+    ).toHaveLength(2)
+    expect(
+      nextHandFolderSnapshot?.state.players
+        .filter(player => player.id !== folder.playerId)
+        .every(player => player.holeCards === undefined)
+    ).toBe(true)
+  })
+
+  it('shows live cards and odds to true spectators', () => {
     const { room, server } = createHarness()
 
     const host = joinPlayer(server, room, 'host', 'Alice')
@@ -584,7 +952,99 @@ describe('PokerRoom timer handling', () => {
     expect(guestSeatForHost?.equityPercent).toBeUndefined()
   })
 
-  it('moves zero-chip showdown losers to the spectator rail and frees their seat', () => {
+  it('keeps fold-ended hands hidden from spectators until a player chooses to show', () => {
+    const { room, server } = createHarness()
+
+    const host = joinPlayer(server, room, 'host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+
+    const guest = joinPlayer(server, room, 'guest', 'Bob')
+    seatPlayer(server, guest.connection, 1)
+
+    const rail = joinPlayer(server, room, 'rail', 'Charlie')
+    send(server, host.connection, { type: 'set_player_spectator', targetId: rail.playerId, spectator: true })
+
+    send(server, host.connection, { type: 'start_game' })
+    const liveSnapshot = lastMessage(host.connection, 'room_snapshot')
+    const folder = liveSnapshot?.state.actingPlayerId === host.playerId ? host : guest
+
+    send(server, folder.connection, { type: 'player_action', action: 'fold' })
+
+    const hiddenSnapshot = lastMessage(rail.connection, 'room_snapshot')
+    expect(hiddenSnapshot?.state.phase).toBe('between_hands')
+    expect(hiddenSnapshot?.state.round).not.toBe('showdown')
+    expect(hiddenSnapshot?.state.players.every(player => player.holeCards === undefined)).toBe(true)
+    expect(hiddenSnapshot?.state.players.every(player => player.showCards === 'none')).toBe(true)
+
+    send(server, folder.connection, { type: 'set_show_cards', mode: 'both' })
+
+    const shownSnapshot = lastMessage(rail.connection, 'room_snapshot')
+    const shownFolder = shownSnapshot?.state.players.find(player => player.id === folder.playerId)
+    const hiddenOpponent = shownSnapshot?.state.players.find(player => player.id !== folder.playerId)
+
+    expect(shownFolder?.holeCards).toHaveLength(2)
+    expect(shownFolder?.showCards).toBe('both')
+    expect(hiddenOpponent?.holeCards).toBeUndefined()
+    expect(hiddenOpponent?.showCards).toBe('none')
+  })
+
+  it('automatically turns a full-table entrant into a spectator with access to every hand', () => {
+    const { room, server } = createHarness()
+    const seated = Array.from({ length: 8 }, (_, index) => {
+      const player = joinPlayer(server, room, `seat-${index}`, `Player ${index + 1}`)
+      seatPlayer(server, player.connection, index)
+      return player
+    })
+
+    send(server, seated[0]!.connection, { type: 'start_game' })
+
+    const watcher = joinPlayer(server, room, 'watcher', 'Watcher')
+    seatPlayer(server, watcher.connection)
+
+    expect(lastMessage(watcher.connection, 'action_result')?.message)
+      .toBe('Table is full. You are watching until a seat opens.')
+
+    const snapshot = lastMessage(watcher.connection, 'room_snapshot')
+    const lobbyWatcher = snapshot?.state.lobbyPlayers.find(player => player.id === watcher.playerId)
+    expect(lobbyWatcher?.isSpectator).toBe(true)
+    expect(lobbyWatcher?.stack).toBe(1_000)
+    expect(snapshot?.state.players).toHaveLength(8)
+    expect(snapshot?.state.players.every(player => player.holeCards?.length === 2)).toBe(true)
+    expect(snapshot?.state.players.every(player => player.showCards === 'both')).toBe(true)
+  })
+
+  it('seats a spectating bot immediately when the Players setting requests it', () => {
+    const { room, server } = createHarness()
+    const host = joinPlayer(server, room, 'host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+    send(server, host.connection, { type: 'add_bots', count: 1 })
+
+    const addedSnapshot = lastMessage(host.connection, 'room_snapshot')
+    const bot = addedSnapshot?.state.lobbyPlayers.find(player => player.isBot)
+    expect(bot).toBeDefined()
+
+    send(server, host.connection, {
+      type: 'set_player_spectator',
+      targetId: bot!.id,
+      spectator: true,
+    })
+    expect(lastMessage(host.connection, 'room_snapshot')?.state.players.some(player => player.id === bot!.id))
+      .toBe(false)
+
+    send(server, host.connection, {
+      type: 'set_player_spectator',
+      targetId: bot!.id,
+      spectator: false,
+    })
+
+    expect(lastMessage(host.connection, 'action_result')?.message).toBe(`Seated ${bot!.nickname}.`)
+    const reseated = lastMessage(host.connection, 'room_snapshot')?.state.players.find(player => player.id === bot!.id)
+    expect(reseated?.isBot).toBe(true)
+    expect(reseated?.status).toBe('waiting')
+    expect(reseated?.stack).toBe(1_000)
+  })
+
+  it('lets zero-chip showdown losers reveal before moving them to the rail for the next hand', () => {
     const { room, server } = createHarness()
 
     const host = joinPlayer(server, room, 'host', 'Alice')
@@ -592,6 +1052,9 @@ describe('PokerRoom timer handling', () => {
 
     const loser = joinPlayer(server, room, 'loser', 'Bob')
     seatPlayer(server, loser.connection, 1)
+
+    const third = joinPlayer(server, room, 'third', 'Carol')
+    seatPlayer(server, third.connection, 2)
 
     send(server, host.connection, { type: 'start_game' })
 
@@ -618,10 +1081,24 @@ describe('PokerRoom timer handling', () => {
 
     internals.broadcastState()
 
-    const snapshot = lastMessage(host.connection, 'room_snapshot')
-    const lobbyLoser = snapshot?.state.lobbyPlayers.find(player => player.id === loser.playerId)
+    const revealSnapshot = lastMessage(host.connection, 'room_snapshot')
+    const lobbyLoserDuringReveal = revealSnapshot?.state.lobbyPlayers.find(player => player.id === loser.playerId)
 
-    expect(snapshot?.state.players.some(player => player.id === loser.playerId)).toBe(false)
+    expect(revealSnapshot?.state.players.some(player => player.id === loser.playerId)).toBe(true)
+    expect(lobbyLoserDuringReveal?.isSpectator).toBe(false)
+
+    send(server, loser.connection, { type: 'set_show_cards', mode: 'both' })
+    const shownSnapshot = lastMessage(host.connection, 'room_snapshot')
+    const shownLoser = shownSnapshot?.state.players.find(player => player.id === loser.playerId)
+    expect(shownLoser?.showCards).toBe('both')
+    expect(shownLoser?.holeCards).toHaveLength(2)
+
+    send(server, host.connection, { type: 'start_game' })
+
+    const nextHandSnapshot = lastMessage(host.connection, 'room_snapshot')
+    const lobbyLoser = nextHandSnapshot?.state.lobbyPlayers.find(player => player.id === loser.playerId)
+    expect(nextHandSnapshot?.state.phase).toBe('in_hand')
+    expect(nextHandSnapshot?.state.players.some(player => player.id === loser.playerId)).toBe(false)
     expect(lobbyLoser?.isSpectator).toBe(true)
     expect(lobbyLoser?.status).toBe('spectating')
     expect(lobbyLoser?.stack).toBe(0)
@@ -709,6 +1186,8 @@ describe('PokerRoom timer handling', () => {
     internals.data.gameState.winners = [{ playerId: host.playerId, amount: 120 }]
     internals.broadcastState()
 
+    send(server, host.connection, { type: 'start_game' })
+
     send(server, busted.connection, { type: 'seat_me' })
     expect(lastMessage(busted.connection, 'action_failed')?.message).toContain('chips')
 
@@ -746,7 +1225,34 @@ describe('PokerRoom timer handling', () => {
 })
 
 describe('PokerRoom auto-start lifecycle', () => {
-  it('blocks auto-start while host is disconnected and resumes once host reconnects', () => {
+  it('waits for the creator to start the first hand after another player joins', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-31T12:00:00.000Z'))
+
+    const { room, server } = createHarness()
+    const host = joinPlayer(server, room, 'host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+
+    const guest = joinPlayer(server, room, 'guest', 'Bob')
+    seatPlayer(server, guest.connection, 1)
+
+    vi.advanceTimersByTime(AUTO_START_DELAY + 10)
+
+    const waitingSnapshot = lastMessage(host.connection, 'room_snapshot')
+    expect(waitingSnapshot?.state.phase).toBe('waiting')
+    expect(waitingSnapshot?.state.handNumber).toBe(0)
+    expect(
+      (server as unknown as { autoStartTimeout: ReturnType<typeof setTimeout> | null }).autoStartTimeout
+    ).toBeNull()
+
+    send(server, host.connection, { type: 'start_game' })
+
+    const startedSnapshot = lastMessage(host.connection, 'room_snapshot')
+    expect(startedSnapshot?.state.phase).toBe('in_hand')
+    expect(startedSnapshot?.state.handNumber).toBe(1)
+  })
+
+  it('preserves leadership when a disconnected host returns within the grace period', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-03-31T12:00:00.000Z'))
 
@@ -760,22 +1266,26 @@ describe('PokerRoom auto-start lifecycle', () => {
     send(server, host.connection, { type: 'set_auto_start', enabled: true })
     expect(lastMessage(host.connection, 'action_result')).toBeDefined()
 
-    ;(server as unknown as { data: { gameState: { phase: string }; autoStartEnabled: boolean } }).data.gameState.phase =
-      'between_hands'
+    const runtime = server as unknown as {
+      data: { gameState: { phase: string; handNumber: number }; autoStartEnabled: boolean }
+    }
+    runtime.data.gameState.phase = 'between_hands'
+    runtime.data.gameState.handNumber = 1
 
     room.removeConnection(host.connection.id)
     server.onClose(host.connection)
 
+    expect(lastMessage(guest.connection, 'private_session')?.isHost).toBe(false)
     vi.advanceTimersByTime(AUTO_START_DELAY + 10)
-    const blockedSnapshot = lastMessage(guest.connection, 'room_snapshot')
-    expect(blockedSnapshot?.state.phase).toBe('between_hands')
+    const transferredSnapshot = lastMessage(guest.connection, 'room_snapshot')
+    expect(transferredSnapshot?.state.phase).toBe('between_hands')
 
     const hostReconnect = joinPlayer(server, room, 'host-reconnect', 'Alice', host.reconnectToken)
     expect(hostReconnect.playerId).toBe(host.playerId)
+    expect(lastMessage(hostReconnect.connection, 'private_session')?.isHost).toBe(true)
 
     vi.advanceTimersByTime(AUTO_START_DELAY + 10)
-    const resumedSnapshot = lastMessage(hostReconnect.connection, 'room_snapshot')
-    expect(resumedSnapshot?.state.phase).toBe('in_hand')
+    expect(lastMessage(hostReconnect.connection, 'room_snapshot')?.state.phase).toBe('in_hand')
   })
 
   it('does not auto-start with fewer than 2 eligible active players', () => {
@@ -790,8 +1300,15 @@ describe('PokerRoom auto-start lifecycle', () => {
     expect(lastMessage(host.connection, 'action_result')).toBeDefined()
 
     ;(server as unknown as {
-      data: { gameState: { phase: 'between_hands' | 'waiting'; players: Array<{ id: string; stack: number; status: string }> } }
+      data: {
+        gameState: {
+          phase: 'between_hands' | 'waiting'
+          handNumber: number
+          players: Array<{ id: string; stack: number; status: string }>
+        }
+      }
     }).data.gameState.phase = 'between_hands'
+    ;(server as unknown as { data: { gameState: { handNumber: number } } }).data.gameState.handNumber = 1
     send(server, host.connection, { type: 'set_auto_start', enabled: true })
     expect(lastMessage(host.connection, 'action_result')).toBeDefined()
 
@@ -824,8 +1341,9 @@ describe('PokerRoom auto-start lifecycle', () => {
     seatPlayer(server, guest.connection, 1)
 
     ;(server as unknown as {
-      data: { gameState: { phase: 'between_hands' | 'waiting' } }
+      data: { gameState: { phase: 'between_hands' | 'waiting'; handNumber: number } }
     }).data.gameState.phase = 'between_hands'
+    ;(server as unknown as { data: { gameState: { handNumber: number } } }).data.gameState.handNumber = 1
 
     send(server, host.connection, { type: 'set_auto_start', enabled: true })
     vi.advanceTimersByTime(AUTO_START_DELAY + 10)
@@ -1019,7 +1537,7 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
     expect(Object.prototype.hasOwnProperty.call(hostSnapshot ?? {}, 'connectionToPlayer')).toBe(false)
   })
 
-  it('allows joined non-host clients to manage table controls', () => {
+  it('rejects every creator-only table control from non-host clients', () => {
     const { room, server } = createHarness()
     const host = joinPlayer(server, room, 'host', 'Alice')
     seatPlayer(server, host.connection, 0)
@@ -1028,32 +1546,66 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
     seatPlayer(server, nonHost.connection, 1)
 
     send(server, nonHost.connection, { type: 'set_auto_start', enabled: true })
-    expect(lastMessage(nonHost.connection, 'action_result')).toBeDefined()
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
 
     send(server, nonHost.connection, { type: 'update_table_settings', smallBlind: 25, bigBlind: 50 })
-    expect(lastMessage(nonHost.connection, 'action_result')?.message).toBe('Updated table settings.')
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
 
     send(server, nonHost.connection, { type: 'add_bots', count: 1 })
-    expect(lastMessage(nonHost.connection, 'action_result')?.message).toContain('Added 1 bot')
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
 
     send(server, nonHost.connection, { type: 'adjust_player_stack', targetId: host.playerId, amount: 125 })
-    expect(lastMessage(nonHost.connection, 'action_result')?.message).toContain('Added $125 to Alice')
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
 
     send(server, nonHost.connection, { type: 'set_player_spectator', targetId: host.playerId, spectator: true })
-    expect(lastMessage(nonHost.connection, 'action_result')).toBeDefined()
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
+
+    send(server, nonHost.connection, { type: 'remove_player', targetId: host.playerId })
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
+
+    send(server, nonHost.connection, { type: 'rebuy', amount: 500 })
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
+
+    send(server, nonHost.connection, { type: 'start_game' })
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
 
     const snapshot = lastMessage(nonHost.connection, 'room_snapshot')
     const hostInLobby = snapshot?.state.lobbyPlayers.find(player => player.id === host.playerId)
-    expect(snapshot?.state.smallBlind).toBe(25)
-    expect(snapshot?.state.bigBlind).toBe(50)
-    expect(hostInLobby?.isSpectator).toBe(true)
-
-    send(server, nonHost.connection, { type: 'start_game' })
-    expect(lastMessage(nonHost.connection, 'action_result')?.message).toBe('Dealing the first hand.')
-    expect(lastMessage(nonHost.connection, 'room_snapshot')?.state.phase).toBe('in_hand')
+    expect(snapshot?.state.smallBlind).toBe(10)
+    expect(snapshot?.state.bigBlind).toBe(20)
+    expect(snapshot?.state.players).toHaveLength(2)
+    expect(hostInLobby?.stack).toBe(1_000)
+    expect(hostInLobby?.isSpectator).toBe(false)
+    expect(snapshot?.state.phase).toBe('waiting')
   })
 
-  it('allows joined players to update table settings during a live hand', () => {
+  it('rejects invalid table-setting ranges and relationships', () => {
+    const { room, server } = createHarness()
+    const host = joinPlayer(server, room, 'host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+
+    send(server, host.connection, {
+      type: 'update_table_settings',
+      smallBlind: 100,
+      bigBlind: 50,
+      startingStack: 200,
+      actionTimerDuration: 1_000,
+      autoStartDelay: 60_000,
+      sevenTwoBountyPercent: 150,
+    })
+
+    expect(lastMessage(host.connection, 'action_failed')?.message)
+      .toContain('Use valid blinds')
+    const snapshot = lastMessage(host.connection, 'room_snapshot')
+    expect(snapshot?.state.smallBlind).toBe(10)
+    expect(snapshot?.state.bigBlind).toBe(20)
+    expect(snapshot?.state.startingStack).toBe(1_000)
+    expect(snapshot?.state.actionTimerDuration).toBe(10_000)
+    expect(snapshot?.state.autoStartDelay).toBe(5_000)
+    expect(snapshot?.state.sevenTwoBountyPercent).toBe(2)
+  })
+
+  it('queues table-setting changes during a live hand and applies them after it ends', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-03-31T12:00:00.000Z'))
 
@@ -1069,7 +1621,7 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
 
     vi.advanceTimersByTime(1_000)
 
-    send(server, nonHost.connection, {
+    send(server, host.connection, {
       type: 'update_table_settings',
       smallBlind: 50,
       bigBlind: 100,
@@ -1078,21 +1630,41 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
       rabbitHuntingEnabled: true,
     })
 
-    expect(lastMessage(nonHost.connection, 'action_result')?.message).toBe('Updated table settings.')
+    expect(lastMessage(host.connection, 'action_result')?.message)
+      .toBe('Settings saved. Changes will apply automatically next hand.')
 
     const snapshot = lastMessage(nonHost.connection, 'room_snapshot')
     expect(snapshot?.state.phase).toBe('in_hand')
-    expect(snapshot?.state.smallBlind).toBe(50)
-    expect(snapshot?.state.bigBlind).toBe(100)
-    expect(snapshot?.state.startingStack).toBe(2_000)
-    expect(snapshot?.state.actionTimerDuration).toBe(5_000)
-    expect(snapshot?.state.rabbitHuntingEnabled).toBe(true)
+    expect(snapshot?.state.smallBlind).toBe(10)
+    expect(snapshot?.state.bigBlind).toBe(20)
+    expect(snapshot?.state.startingStack).toBe(1_000)
+    expect(snapshot?.state.actionTimerDuration).toBe(10_000)
+    expect(snapshot?.state.rabbitHuntingEnabled).toBe(false)
+    expect(snapshot?.state.pendingTableSettings).toMatchObject({
+      smallBlind: 50,
+      bigBlind: 100,
+      startingStack: 2_000,
+      actionTimerDuration: 5_000,
+      rabbitHuntingEnabled: true,
+    })
 
     const runtime = server as unknown as {
       autoFoldDeadline: number | null
     }
-    expect(snapshot?.state.actionTimerStart).toBe(Date.now())
-    expect(runtime.autoFoldDeadline).toBe(Date.now() + 5_000)
+    expect(snapshot?.state.actionTimerStart).toBe(Date.now() - 1_000)
+    expect(runtime.autoFoldDeadline).toBe(Date.now() + 9_000)
+
+    const actingPlayer = snapshot?.state.actingPlayerId === host.playerId ? host : nonHost
+    send(server, actingPlayer.connection, { type: 'player_action', action: 'fold' })
+
+    const betweenHands = lastMessage(nonHost.connection, 'room_snapshot')
+    expect(betweenHands?.state.phase).toBe('between_hands')
+    expect(betweenHands?.state.smallBlind).toBe(50)
+    expect(betweenHands?.state.bigBlind).toBe(100)
+    expect(betweenHands?.state.startingStack).toBe(2_000)
+    expect(betweenHands?.state.actionTimerDuration).toBe(5_000)
+    expect(betweenHands?.state.rabbitHuntingEnabled).toBe(true)
+    expect(betweenHands?.state.pendingTableSettings).toBeUndefined()
   })
 })
 
@@ -1120,6 +1692,32 @@ describe('PokerRoom social protocol', () => {
       entry.playerId === alice.playerId &&
       entry.message === 'Welcome to the table!'
     )).toBe(true)
+  })
+
+  it('places a targeted message on the recipient seat and retains its target in chat history', () => {
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice', 'Alice')
+    seatPlayer(server, alice.connection, 0)
+
+    const bob = joinPlayer(server, room, 'bob', 'Bob')
+    seatPlayer(server, bob.connection, 1)
+
+    send(server, alice.connection, {
+      type: 'table_chat',
+      message: 'Nice hand',
+      targetId: bob.playerId,
+    })
+
+    const social = lastMessage(bob.connection, 'social_snapshot')
+    const activeMessage = social?.social.active.find(entry => entry.playerId === alice.playerId)
+    expect(activeMessage?.message).toBe('Nice hand')
+    expect(activeMessage?.messageTargetPlayerId).toBe(bob.playerId)
+    expect(social?.social.chatLog.some(entry => (
+      entry.playerId === alice.playerId &&
+      entry.targetPlayerId === bob.playerId &&
+      entry.message === 'Nice hand'
+    ))).toBe(true)
   })
 
   it('broadcasts live emotes and keeps target metadata for targeted emotes', () => {
@@ -1168,6 +1766,177 @@ describe('PokerRoom social protocol', () => {
       lastMessage(alice.connection, 'error')?.message ??
       lastMessage(alice.connection, 'action_failed')?.message
     ).toMatch(/Invalid message format|Unknown emote/)
+  })
+
+  it('reveals one hand only after consent and expires permission before the next hand', () => {
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice', 'Alice')
+    seatPlayer(server, alice.connection, 0)
+    const bob = joinPlayer(server, room, 'bob', 'Bob')
+    seatPlayer(server, bob.connection, 1)
+    const carol = joinPlayer(server, room, 'carol', 'Carol')
+    seatPlayer(server, carol.connection, 2)
+    const players = [alice, bob, carol]
+
+    send(server, alice.connection, { type: 'start_game' })
+    const liveSnapshot = lastMessage(alice.connection, 'room_snapshot')
+    const folder = players.find(player => player.playerId === liveSnapshot?.state.actingPlayerId)!
+    const [target, privatePlayer] = players.filter(player => player.playerId !== folder.playerId)
+
+    send(server, folder.connection, { type: 'player_action', action: 'fold' })
+    send(server, folder.connection, { type: 'request_card_reveal', targetId: target!.playerId })
+
+    const pendingTargetSnapshot = lastMessage(target!.connection, 'room_snapshot')
+    expect(pendingTargetSnapshot?.state.cardRevealRequests).toContainEqual(expect.objectContaining({
+      requesterId: folder.playerId,
+      targetId: target!.playerId,
+      status: 'pending',
+    }))
+    expect(lastMessage(folder.connection, 'action_result')?.message).toBeUndefined()
+
+    send(server, target!.connection, {
+      type: 'respond_card_reveal',
+      requesterId: folder.playerId,
+      allow: true,
+    })
+
+    const approvedRequesterSnapshot = lastMessage(folder.connection, 'room_snapshot')
+    expect(approvedRequesterSnapshot?.state.players.find(player => player.id === target!.playerId)?.holeCards)
+      .toHaveLength(2)
+    expect(approvedRequesterSnapshot?.state.players.find(player => player.id === target!.playerId)?.showCards)
+      .toBe('both')
+    expect(approvedRequesterSnapshot?.state.players.find(player => player.id === privatePlayer!.playerId)?.holeCards)
+      .toBeUndefined()
+    expect(lastMessage(target!.connection, 'action_result')?.message).toBeUndefined()
+
+    const unrelatedSnapshot = lastMessage(privatePlayer!.connection, 'room_snapshot')
+    expect(unrelatedSnapshot?.state.players.find(player => player.id === target!.playerId)?.holeCards)
+      .toBeUndefined()
+
+    const finalActorId = approvedRequesterSnapshot?.state.actingPlayerId
+    const finalFolder = players.find(player => player.playerId === finalActorId)!
+    send(server, finalFolder.connection, { type: 'player_action', action: 'fold' })
+
+    const endedSnapshot = lastMessage(folder.connection, 'room_snapshot')
+    expect(endedSnapshot?.state.phase).toBe('between_hands')
+    expect(endedSnapshot?.state.cardRevealRequests).toContainEqual(expect.objectContaining({
+      requesterId: folder.playerId,
+      targetId: target!.playerId,
+      status: 'approved',
+    }))
+    expect(endedSnapshot?.state.players.find(player => player.id === target!.playerId)?.holeCards)
+      .toHaveLength(2)
+
+    send(server, alice.connection, { type: 'start_game' })
+    const nextHandSnapshot = lastMessage(folder.connection, 'room_snapshot')
+    expect(nextHandSnapshot?.state.phase).toBe('in_hand')
+    expect(nextHandSnapshot?.state.cardRevealRequests).toEqual([])
+    expect(nextHandSnapshot?.state.players.find(player => player.id === target!.playerId)?.holeCards)
+      .toBeUndefined()
+  })
+
+  it('keeps cards hidden when the owner denies a request', () => {
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice', 'Alice')
+    seatPlayer(server, alice.connection, 0)
+    const bob = joinPlayer(server, room, 'bob', 'Bob')
+    seatPlayer(server, bob.connection, 1)
+    const carol = joinPlayer(server, room, 'carol', 'Carol')
+    seatPlayer(server, carol.connection, 2)
+    const players = [alice, bob, carol]
+
+    send(server, alice.connection, { type: 'start_game' })
+    const liveSnapshot = lastMessage(alice.connection, 'room_snapshot')
+    const folder = players.find(player => player.playerId === liveSnapshot?.state.actingPlayerId)!
+    const target = players.find(player => player.playerId !== folder.playerId)!
+
+    send(server, folder.connection, { type: 'player_action', action: 'fold' })
+    send(server, folder.connection, { type: 'request_card_reveal', targetId: target.playerId })
+    send(server, target.connection, {
+      type: 'respond_card_reveal',
+      requesterId: folder.playerId,
+      allow: false,
+    })
+
+    const deniedSnapshot = lastMessage(folder.connection, 'room_snapshot')
+    expect(deniedSnapshot?.state.cardRevealRequests).toContainEqual(expect.objectContaining({
+      targetId: target.playerId,
+      status: 'denied',
+    }))
+    expect(deniedSnapshot?.state.players.find(player => player.id === target.playerId)?.holeCards)
+      .toBeUndefined()
+
+    send(server, folder.connection, { type: 'request_card_reveal', targetId: target.playerId })
+    expect(lastMessage(folder.connection, 'action_failed')?.message).toContain('keep their cards hidden')
+  })
+
+  it('lets a heads-up folder request the winning hand during the reveal window', () => {
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice-heads-up-request', 'Alice')
+    seatPlayer(server, alice.connection, 0)
+    const bob = joinPlayer(server, room, 'bob-heads-up-request', 'Bob')
+    seatPlayer(server, bob.connection, 1)
+
+    send(server, alice.connection, { type: 'start_game' })
+    const liveSnapshot = lastMessage(alice.connection, 'room_snapshot')
+    const folder = liveSnapshot?.state.actingPlayerId === alice.playerId ? alice : bob
+    const winner = folder.playerId === alice.playerId ? bob : alice
+
+    send(server, folder.connection, { type: 'player_action', action: 'fold' })
+    expect(lastMessage(folder.connection, 'room_snapshot')?.state.phase).toBe('between_hands')
+
+    send(server, folder.connection, { type: 'request_card_reveal', targetId: winner.playerId })
+    expect(lastMessage(winner.connection, 'room_snapshot')?.state.cardRevealRequests)
+      .toContainEqual(expect.objectContaining({
+        requesterId: folder.playerId,
+        targetId: winner.playerId,
+        status: 'pending',
+      }))
+
+    send(server, winner.connection, {
+      type: 'respond_card_reveal',
+      requesterId: folder.playerId,
+      allow: true,
+    })
+
+    const approvedSnapshot = lastMessage(folder.connection, 'room_snapshot')
+    expect(approvedSnapshot?.state.players.find(player => player.id === winner.playerId)?.holeCards)
+      .toHaveLength(2)
+  })
+
+  it('immediately shows a bot hand when a folded player requests it', () => {
+    const { room, server } = createHarness()
+
+    const alice = joinPlayer(server, room, 'alice-bot-card-request', 'Alice')
+    seatPlayer(server, alice.connection, 0)
+    send(server, alice.connection, { type: 'add_bots', count: 2 })
+    send(server, alice.connection, { type: 'start_game' })
+
+    const liveSnapshot = lastMessage(alice.connection, 'room_snapshot')
+    const internals = server as unknown as {
+      data: { gameState: { actingPlayerId: string | null } }
+    }
+    internals.data.gameState.actingPlayerId = alice.playerId
+
+    send(server, alice.connection, { type: 'player_action', action: 'fold' })
+    const foldedSnapshot = lastMessage(alice.connection, 'room_snapshot')
+    const bot = foldedSnapshot?.state.players.find(player => player.isBot)
+    expect(bot).toBeDefined()
+
+    send(server, alice.connection, { type: 'request_card_reveal', targetId: bot!.id })
+
+    const shownSnapshot = lastMessage(alice.connection, 'room_snapshot')
+    expect(shownSnapshot?.state.cardRevealRequests).toContainEqual(expect.objectContaining({
+      requesterId: alice.playerId,
+      targetId: bot!.id,
+      status: 'approved',
+    }))
+    expect(shownSnapshot?.state.players.find(player => player.id === bot!.id)?.holeCards)
+      .toHaveLength(2)
+    expect(lastMessage(alice.connection, 'action_result')?.message).toBeUndefined()
   })
 
   it('lets a folded player show their cards to the table', () => {
@@ -1288,7 +2057,7 @@ describe('PokerRoom social protocol', () => {
 })
 
 describe('PokerRoom rabbit hunting', () => {
-  it('syncs the rabbit hunting setting through any player update', () => {
+  it('syncs the rabbit hunting setting through a creator update', () => {
     const { room, server } = createHarness()
 
     const host = joinPlayer(server, room, 'host', 'Alice')
@@ -1300,8 +2069,8 @@ describe('PokerRoom rabbit hunting', () => {
     const initialSnapshot = lastMessage(host.connection, 'room_snapshot')
     expect(initialSnapshot?.state.rabbitHuntingEnabled).toBe(false)
 
-    send(server, guest.connection, { type: 'update_table_settings', rabbitHuntingEnabled: true })
-    expect(lastMessage(guest.connection, 'action_result')?.message).toBe('Updated table settings.')
+    send(server, host.connection, { type: 'update_table_settings', rabbitHuntingEnabled: true })
+    expect(lastMessage(host.connection, 'action_result')?.message).toBe('Updated table settings.')
 
     const hostSnapshot = lastMessage(host.connection, 'room_snapshot')
     const guestSnapshot = lastMessage(guest.connection, 'room_snapshot')
@@ -1360,6 +2129,9 @@ describe('PokerRoom rabbit hunting', () => {
   })
 
   it('lets any joined player manually rabbit hunt after a folded hand', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-31T12:00:00.000Z'))
+
     const { room, server } = createHarness()
 
     const alice = joinPlayer(server, room, 'alice-manual-rabbit', 'Alice')
@@ -1397,6 +2169,7 @@ describe('PokerRoom rabbit hunting', () => {
     expect(foldedSnapshot?.state.phase).toBe('between_hands')
     expect(foldedSnapshot?.state.communityCards).toEqual([])
 
+    vi.advanceTimersByTime(AUTO_START_DELAY - 1)
     send(server, bob.connection, { type: 'rabbit_hunt' } as C2SMessage)
 
     const result = lastMessage(bob.connection, 'action_result')
@@ -1411,6 +2184,13 @@ describe('PokerRoom rabbit hunting', () => {
       { rank: '9', suit: 'hearts' },
     ])
     expect(finalSnapshot?.state.recentActions[0]).toContain('Rabbit hunt:')
+
+    vi.advanceTimersByTime(AUTO_START_DELAY - 1)
+    expect(lastMessage(alice.connection, 'room_snapshot')?.state.phase).toBe('between_hands')
+    expect(lastMessage(alice.connection, 'room_snapshot')?.state.communityCards).toHaveLength(5)
+
+    vi.advanceTimersByTime(2)
+    expect(lastMessage(alice.connection, 'room_snapshot')?.state.phase).toBe('in_hand')
   })
 })
 

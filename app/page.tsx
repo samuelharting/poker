@@ -8,14 +8,15 @@ import {
   validatePlayerProfile,
   type PlayerProfile,
 } from '@/lib/profile'
+import {
+  createRoomCode,
+  formatRoomCodeInput,
+  isValidRoomCode,
+  normalizeRoomCode,
+} from '@/lib/roomCode'
 
 function generateRoomCode(): string {
-  const storageKey = 'poker_room_counter'
-  const raw = typeof window === 'undefined' ? '' : window.localStorage.getItem(storageKey)
-  const current = raw ? parseInt(raw, 10) : 0
-  const next = Number.isFinite(current) && current > 0 ? current + 1 : 1
-  window.localStorage.setItem(storageKey, String(next))
-  return String(next)
+  return createRoomCode()
 }
 
 export default function LandingPage() {
@@ -56,11 +57,11 @@ export default function LandingPage() {
   }, [createProfile, router])
 
   const handleJoinTable = useCallback(() => {
-    const trimmedCode = joinCode.trim()
+    const trimmedCode = normalizeRoomCode(joinCode)
     const result = validatePlayerProfile(joinProfile)
 
-    if (!trimmedCode || !/^[0-9]+$/.test(trimmedCode)) {
-      setError('Please enter a valid room number')
+    if (!isValidRoomCode(trimmedCode)) {
+      setError('Please enter a valid room code')
       return
     }
     if (!result.ok) {
@@ -110,6 +111,8 @@ export default function LandingPage() {
           <div className="landing-mode-toggle" role="tablist" aria-label="Table entry mode">
             <button
               type="button"
+              role="tab"
+              aria-selected={!showJoinForm}
               className={!showJoinForm ? 'is-active' : ''}
               onClick={() => { setShowJoinForm(false); setError('') }}
             >
@@ -117,6 +120,8 @@ export default function LandingPage() {
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={showJoinForm}
               className={showJoinForm ? 'is-active' : ''}
               onClick={() => { setShowJoinForm(true); setError('') }}
             >
@@ -131,7 +136,7 @@ export default function LandingPage() {
           )}
 
           {!showJoinForm ? (
-            <div className="card-panel entry-panel">
+            <div className="card-panel entry-panel" role="tabpanel" aria-label="Create a table">
               <div className="entry-panel-header">
                 <span className="entry-panel-kicker">New table</span>
                 <h2>Start a private table</h2>
@@ -153,41 +158,12 @@ export default function LandingPage() {
                 />
               </label>
 
-              <label className="entry-field">
-                <span>Email</span>
-                <input
-                  type="email"
-                  className="input-dark"
-                  placeholder="you@example.com"
-                  value={createProfile.email}
-                  onChange={e => setCreateProfile(current => ({ ...current, email: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && handleCreateTable()}
-                  autoComplete="email"
-                  suppressHydrationWarning
-                />
-              </label>
-
-              <label className="entry-field">
-                <span>Venmo username</span>
-                <input
-                  type="text"
-                  className="input-dark"
-                  placeholder="@samvenmo"
-                  value={createProfile.venmoUsername}
-                  onChange={e => setCreateProfile(current => ({ ...current, venmoUsername: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && handleCreateTable()}
-                  maxLength={31}
-                  autoComplete="username"
-                  suppressHydrationWarning
-                />
-              </label>
-
               <button className="btn-gold" onClick={handleCreateTable}>
                 Create Table
               </button>
             </div>
           ) : (
-            <div className="card-panel entry-panel">
+            <div className="card-panel entry-panel" role="tabpanel" aria-label="Join a table">
               <div className="entry-panel-header">
                 <span className="entry-panel-kicker">Existing room</span>
                 <h2>Join a table</h2>
@@ -195,15 +171,15 @@ export default function LandingPage() {
 
               <label className="entry-field">
                 <span>Room code</span>
-                <input
-                  type="text"
-                  className="input-dark input-room-code"
-                  placeholder="1"
-                  value={joinCode}
-                  onChange={e => setJoinCode(e.target.value.replace(/[^0-9]/g, ''))}
-                  maxLength={20}
-                  autoFocus
-                  suppressHydrationWarning
+                  <input
+                    type="text"
+                    className="input-dark input-room-code"
+                    placeholder="AB23CD"
+                    value={joinCode}
+                    onChange={e => setJoinCode(formatRoomCodeInput(e.target.value))}
+                    maxLength={20}
+                    autoFocus
+                    suppressHydrationWarning
                 />
               </label>
 
@@ -218,35 +194,6 @@ export default function LandingPage() {
                   onKeyDown={e => e.key === 'Enter' && handleJoinTable()}
                   maxLength={20}
                   autoComplete="nickname"
-                  suppressHydrationWarning
-                />
-              </label>
-
-              <label className="entry-field">
-                <span>Email</span>
-                <input
-                  type="email"
-                  className="input-dark"
-                  placeholder="you@example.com"
-                  value={joinProfile.email}
-                  onChange={e => setJoinProfile(current => ({ ...current, email: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && handleJoinTable()}
-                  autoComplete="email"
-                  suppressHydrationWarning
-                />
-              </label>
-
-              <label className="entry-field">
-                <span>Venmo username</span>
-                <input
-                  type="text"
-                  className="input-dark"
-                  placeholder="@samvenmo"
-                  value={joinProfile.venmoUsername}
-                  onChange={e => setJoinProfile(current => ({ ...current, venmoUsername: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && handleJoinTable()}
-                  maxLength={31}
-                  autoComplete="username"
                   suppressHydrationWarning
                 />
               </label>

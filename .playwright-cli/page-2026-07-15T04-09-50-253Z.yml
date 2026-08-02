@@ -1,0 +1,71 @@
+- generic [ref=f3e1]:
+  - generic [ref=f3e19]:
+    - generic [ref=f3e20]:
+      - generic [ref=f3e21]:
+        - generic [ref=f3e22]: Poker Night
+        - generic [ref=f3e23]: RoomGBVNHQ
+      - generic [ref=f3e24]:
+        - button "Mute table sounds" [ref=f3e25] [cursor=pointer]:
+          - generic [ref=f3e30]: Sound
+        - button "Open settings" [ref=f3e31] [cursor=pointer]:
+          - generic [ref=f3e39]: Settings
+    - generic "Table notifications":
+      - status [ref=f3e77]:
+        - generic [ref=f3e78]: Added 1 bot
+        - button "Dismiss notification" [ref=f3e79] [cursor=pointer]: x
+    - generic [ref=f3e40]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [ref=f3e80] [cursor=pointer]:
+            - generic [ref=f3e84]:
+              - strong [ref=f3e86]: Bot Maverick
+              - generic [ref=f3e87]: $1,000
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=f3e41]:
+              - generic [ref=f3e42]: Ready for the next hand
+              - generic [ref=f3e43]: The table is ready. Deal whenever everyone looks settled.
+              - generic [ref=f3e44]:
+                - generic [ref=f3e45]: 2 seated
+                - generic [ref=f3e46]: 8 max
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f3e47] [cursor=pointer]:
+          - generic [ref=f3e48]: ♣
+          - strong [ref=f3e49]: Table talk
+      - generic [ref=f3e51]:
+        - generic [ref=f3e52]:
+          - generic [ref=f3e53]:
+            - generic [ref=f3e54]: Table controls
+            - generic [ref=f3e55]: Waiting for the next hand.
+          - generic [ref=f3e56]:
+            - generic [ref=f3e57]: 2 seated
+            - generic [ref=f3e58]: 6 open
+        - generic [ref=f3e59]:
+          - generic [ref=f3e60]: Blinds $10/$20
+          - generic [ref=f3e61]: Buy-in $1,000
+        - generic [ref=f3e62]: You are seated with $1,000 and blinds are $10/$20.
+        - generic [ref=f3e63]:
+          - button "Add bot" [active] [ref=f3e64] [cursor=pointer]
+          - button "Fill seats" [ref=f3e65] [cursor=pointer]
+          - button "Start game" [ref=f3e66] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f3e72] [cursor=pointer]
+  - alert [ref=f3e76]

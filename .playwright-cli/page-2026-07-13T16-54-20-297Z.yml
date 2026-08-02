@@ -1,0 +1,14 @@
+- generic [active] [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - generic [ref=f1e3]:
+      - generic [ref=f1e4]:
+        - generic [ref=f1e5]: Poker Night
+        - generic [ref=f1e6]:
+          - generic [ref=f1e7]: Room
+          - generic [ref=f1e8]: UFRUWW
+      - button "Open settings" [ref=f1e9] [cursor=pointer]:
+        - generic [ref=f1e17]: Settings
+    - generic [ref=f1e18]:
+      - generic [ref=f1e20]: Connecting...
+      - generic [ref=f1e21]: Opening a seat and restoring your last state.
+  - alert [ref=f1e22]

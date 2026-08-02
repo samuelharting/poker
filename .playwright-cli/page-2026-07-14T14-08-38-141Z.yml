@@ -1,0 +1,179 @@
+- generic [ref=f1e1]:
+  - button "Open Next.js Dev Tools" [ref=f1e50] [cursor=pointer]
+  - alert [ref=f1e54]
+  - generic [ref=f1e55]:
+    - generic [ref=f1e56]:
+      - generic [ref=f1e57]:
+        - generic [ref=f1e58]: Poker Night
+        - generic [ref=f1e59]:
+          - generic [ref=f1e60]: Room
+          - generic [ref=f1e61]: ZGBY92
+      - button "Close settings" [active] [ref=f1e365] [cursor=pointer]:
+        - generic [ref=f1e70]: Close
+    - generic [ref=f1e71]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [ref=f1e101] [cursor=pointer]:
+            - generic [ref=f1e105]:
+              - strong [ref=f1e107]: Bot Maverick
+              - generic [ref=f1e108]:
+                - generic [ref=f1e109]: $400
+                - generic [ref=f1e366]: Raised $20
+          - button "Send a reaction to Bot River" [ref=f1e110] [cursor=pointer]:
+            - generic [ref=f1e114]:
+              - strong [ref=f1e116]: Bot River
+              - generic [ref=f1e117]:
+                - generic [ref=f1e118]: $400
+                - generic [ref=f1e367]: Called $20
+          - button "Send a reaction to Bot Bluff" [ref=f1e119] [cursor=pointer]:
+            - generic [ref=f1e123]:
+              - strong [ref=f1e125]: Bot Bluff
+              - generic [ref=f1e126]:
+                - generic [ref=f1e127]: $400
+                - generic [ref=f1e368]: Called $20
+          - button "Send a reaction to Bot Ace" [ref=f1e128] [cursor=pointer]:
+            - generic [ref=f1e132]:
+              - strong [ref=f1e134]: Bot Ace
+              - generic [ref=f1e135]:
+                - generic [ref=f1e136]: $1,800
+                - generic [ref=f1e369]: Called $20
+          - button "Send a reaction to Bot Nova" [ref=f1e137] [cursor=pointer]:
+            - generic [ref=f1e141]:
+              - generic [ref=f1e142]:
+                - strong [ref=f1e143]: Bot Nova
+                - emphasis [ref=f1e284]: SB
+              - generic [ref=f1e144]:
+                - generic [ref=f1e145]: $1,940
+                - generic [ref=f1e370]: Acting
+          - button "Send a reaction to Bot Dealer Dan" [ref=f1e146] [cursor=pointer]:
+            - generic [ref=f1e150]:
+              - generic [ref=f1e151]:
+                - strong [ref=f1e152]: Bot Dealer Dan
+                - emphasis [ref=f1e330]: BB
+              - generic [ref=f1e153]:
+                - generic [ref=f1e154]: $400
+                - generic [ref=f1e371]: Called $20
+          - button "Send a reaction to Bot Pocket" [ref=f1e155] [cursor=pointer]:
+            - generic [ref=f1e159]:
+              - strong [ref=f1e161]: Bot Pocket
+              - generic [ref=f1e162]:
+                - generic [ref=f1e163]: $400
+                - generic [ref=f1e287]: Called $20
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "9 of clubs":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+              - generic:
+                - generic:
+                  - generic "K of hearts":
+                    - generic:
+                      - generic: K
+                      - generic: K
+              - generic:
+                - generic:
+                  - generic "6 of clubs":
+                    - generic:
+                      - generic: "6"
+                      - generic: "6"
+              - generic:
+                - generic:
+                  - generic "Q of diamonds":
+                    - generic:
+                      - generic: Q
+                      - generic: Q
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: "8"
+                      - generic: "8"
+            - generic [ref=f1e193]:
+              - generic [ref=f1e194]: Pot
+              - generic [ref=f1e195]: $1,260
+          - status "LayoutAudit, chips $1,000":
+            - generic: LayoutAudit
+            - generic: $1,000
+          - generic "Your hand":
+            - generic:
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: "10"
+                      - generic: "10"
+      - dialog "Table settings and roster" [ref=f1e373]:
+        - generic [ref=f1e374]:
+          - generic [ref=f1e375]:
+            - generic [ref=f1e376]: Table console
+            - generic [ref=f1e377]: Table settings and roster
+          - button "Close" [ref=f1e378] [cursor=pointer]
+        - generic [ref=f1e379]:
+          - button "Settings" [ref=f1e380] [cursor=pointer]
+          - button "Players (8)" [ref=f1e381] [cursor=pointer]
+        - generic [ref=f1e382]:
+          - generic [ref=f1e383]:
+            - generic [ref=f1e384]: Room actions
+            - generic [ref=f1e385]: "Room code: ZGBY92"
+            - generic [ref=f1e386]:
+              - button "Copy code" [ref=f1e387] [cursor=pointer]
+              - button "Share link" [ref=f1e388] [cursor=pointer]
+          - generic [ref=f1e389]:
+            - generic [ref=f1e390]: Cards
+            - generic [ref=f1e391]:
+              - button "2-color suits" [pressed] [ref=f1e392] [cursor=pointer]
+              - button "4-color suits" [ref=f1e393] [cursor=pointer]
+          - generic [ref=f1e394]:
+            - generic [ref=f1e395]: Game setup
+            - generic [ref=f1e396]:
+              - generic [ref=f1e397]:
+                - generic [ref=f1e398]: Small blind
+                - spinbutton "Small blind" [ref=f1e399]: "10"
+              - generic [ref=f1e400]:
+                - generic [ref=f1e401]: Big blind
+                - spinbutton "Big blind" [ref=f1e402]: "20"
+              - generic [ref=f1e403]:
+                - generic [ref=f1e404]: Starting stack
+                - spinbutton "Starting stack" [ref=f1e405]: "1000"
+          - generic [ref=f1e406]:
+            - generic [ref=f1e407]: Timing
+            - generic [ref=f1e408]:
+              - generic [ref=f1e409]:
+                - generic [ref=f1e410]: Action timer (seconds)
+                - spinbutton "Action timer (seconds)" [ref=f1e411]: "35"
+              - generic [ref=f1e412]:
+                - generic [ref=f1e413]: Next hand delay (seconds)
+                - spinbutton "Next hand delay (seconds)" [ref=f1e414]: "3"
+          - generic [ref=f1e415]:
+            - generic [ref=f1e416]: Rules
+            - generic [ref=f1e417]:
+              - generic [ref=f1e418]:
+                - generic [ref=f1e419]: Rabbit hunting
+                - generic [ref=f1e420]: Run out the board after fold-ended hands.
+              - generic [ref=f1e421]:
+                - button "On" [ref=f1e422] [cursor=pointer]
+                - button "Off" [pressed] [ref=f1e423] [cursor=pointer]
+            - generic [ref=f1e424]:
+              - generic [ref=f1e425]:
+                - generic [ref=f1e426]: 7 / 2 rule
+                - generic [ref=f1e427]: Winning 7-2 hands collect the configured bounty.
+              - generic [ref=f1e428]:
+                - button "On" [pressed] [ref=f1e429] [cursor=pointer]
+                - button "Off" [ref=f1e430] [cursor=pointer]
+                - button "Customize" [ref=f1e431] [cursor=pointer]
+          - generic [ref=f1e432]:
+            - button "Reset" [disabled] [ref=f1e433]
+            - button "Save table settings" [disabled] [ref=f1e434]

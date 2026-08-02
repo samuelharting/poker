@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { SocialSnapshot } from '@/shared/protocol'
 import type { SeatPlayer, TableState } from '@/lib/poker/types'
 import type { ThreeTableViewModel } from '@/components/three/tableViewModel'
+import { getShowdownTiming } from '@/lib/poker/showdown'
 
 function DesktopPokerRoom3DMock(props: {
   view: ThreeTableViewModel
@@ -17,6 +18,13 @@ function DesktopPokerRoom3DMock(props: {
   }>
   selectedTargetId?: string | null
   onSelectPlayer?: (playerId: string) => void
+  cardRevealActions?: Array<{
+    playerId: string
+    label: string
+    ariaLabel: string
+    disabled: boolean
+  }>
+  onRequestCardReveal?: (playerId: string) => void
 }) {
   const firstReaction = props.emoteReactions?.[0]
 
@@ -30,7 +38,20 @@ function DesktopPokerRoom3DMock(props: {
       data-first-targeted={firstReaction?.targeted ? 'true' : 'false'}
       data-has-select={typeof props.onSelectPlayer === 'function' ? 'true' : 'false'}
       data-selected-target={props.selectedTargetId ?? ''}
-    />
+    >
+      {props.cardRevealActions?.map(action => (
+        <button
+          key={action.playerId}
+          type="button"
+          className="card-reveal-seat-button cinematic-card-reveal-control"
+          aria-label={action.ariaLabel}
+          disabled={action.disabled}
+          onClick={() => props.onRequestCardReveal?.(action.playerId)}
+        >
+          {action.label}
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -222,7 +243,7 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).not.toContain('own-hand-bet-stack')
   })
 
-  it('keeps showdown winner UI at the winning seat and removes the host status panel', () => {
+  it('shows one unmistakable hand result with the payout and winning hand', () => {
     const socialState: SocialSnapshot = {
       active: [],
       chatLog: [],
@@ -246,7 +267,13 @@ describe('PokerTable desktop 3D gate', () => {
         stack: 1220,
       }),
     ]
-    state.winners = [{ playerId: 'bot-river', amount: 220 }]
+    state.winners = [{
+      playerId: 'bot-river',
+      amount: 220,
+      handDescription: 'Full House, Queens over Tens',
+    }]
+    state.showdownAt = 1_000
+    state.serverNow = state.showdownAt + getShowdownTiming(0).resultAtMs
 
     const markup = renderToStaticMarkup(
       <PokerTable
@@ -283,15 +310,78 @@ describe('PokerTable desktop 3D gate', () => {
     )
 
     expect(markup).toContain('table-seat-winner-announcements')
-    expect(markup).toContain('--winner-announcement-x:50%')
-    expect(markup).toContain('--winner-announcement-y:11.5%')
+    expect(markup.match(/table-hand-result-summary/g)).toHaveLength(1)
+    expect(markup).not.toContain('showdown-table-sequence')
+    expect(markup).toContain('Hand winner')
     expect(markup).toContain('Bot River')
-    expect(markup).toContain('Won $220')
+    expect(markup).toContain('+$220')
+    expect(markup.match(/\+\$220/g)).toHaveLength(1)
+    expect(markup).toContain('Full House, Queens over Tens')
+    expect(markup).not.toContain('table-center-winner-announcement')
+    expect(markup).not.toContain('--winner-announcement-x')
     expect(markup).not.toContain('status-panel')
     expect(markup).not.toContain('Deal next hand')
   })
 
-  it('keeps folded live hero cards face-down without local show-card controls before a winner', () => {
+  it('groups split-pot winners into the same result summary', () => {
+    const state = makeTableState()
+    state.phase = 'between_hands'
+    state.round = 'showdown'
+    state.players = [
+      makeSeatPlayer({ id: 'hero', nickname: 'Hero', seatIndex: 0, status: 'waiting' }),
+      makeSeatPlayer({ id: 'one', nickname: 'Ada', seatIndex: 2, status: 'waiting' }),
+      makeSeatPlayer({ id: 'two', nickname: 'Grace', seatIndex: 6, status: 'waiting' }),
+    ]
+    state.winners = [
+      { playerId: 'one', amount: 90, handDescription: 'Straight, Nine-high' },
+      { playerId: 'two', amount: 90 },
+    ]
+    state.showdownAt = 1_000
+    state.serverNow = state.showdownAt + getShowdownTiming(0).completeAtMs
+
+    const markup = renderToStaticMarkup(
+      <PokerTable
+        state={state}
+        socialState={{ active: [], chatLog: [] }}
+        yourId="hero"
+        isHost={false}
+        isConnected={true}
+        startingStackSetting={1000}
+        settingsOpen={false}
+        suitColorMode="two"
+        roomCode="123"
+        canShareRoom={false}
+        onAction={noop}
+        onStartGame={noop}
+        onAddBots={noop}
+        autoStartEnabled={true}
+        onSetAutoStart={noop}
+        onUpdateSettings={noop}
+        onRemovePlayer={noop}
+        onAdjustPlayerStack={noop}
+        onSetPlayerSpectator={noop}
+        onSeatMe={noop}
+        onSetShowCards={noop}
+        onSetSuitColorMode={noop}
+        onCloseSettings={noop}
+        onCopyRoom={noop}
+        onShareRoom={noop}
+        onSendEmote={noop}
+        onSendTargetEmote={noop}
+        onFeedback={noop}
+      />
+    )
+
+    expect(markup.match(/table-hand-result-summary/g)).toHaveLength(1)
+    expect(markup).toContain('Split pot')
+    expect(markup).toContain('Ada')
+    expect(markup).toContain('Grace')
+    expect(markup.match(/\+\$90/g)).toHaveLength(2)
+    expect(markup).toContain('Straight, Nine-high')
+    expect(markup).not.toContain('undefined')
+  })
+
+  it('keeps every dealt hand face-down for a folded viewer while play continues', () => {
     const socialState: SocialSnapshot = {
       active: [],
       chatLog: [],
@@ -304,7 +394,7 @@ describe('PokerTable desktop 3D gate', () => {
         nickname: 'Hero',
         status: 'folded',
         lastAction: 'Folded',
-        showCards: 'left',
+        showCards: 'both',
         holeCards: [
           { rank: 'A', suit: 'spades' },
           { rank: '7', suit: 'clubs' },
@@ -315,6 +405,11 @@ describe('PokerTable desktop 3D gate', () => {
         nickname: 'Villain',
         seatIndex: 1,
         status: 'active',
+        showCards: 'both',
+        holeCards: [
+          { rank: 'K', suit: 'hearts' },
+          { rank: 'Q', suit: 'diamonds' },
+        ],
       }),
     ]
     state.actingPlayerId = 'villain'
@@ -355,9 +450,218 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).toContain('own-hand-area')
     expect(markup).not.toContain('own-hand-show-cards')
     expect(markup).not.toContain('show-cards-toggle')
+    expect(markup).toContain('Ask Villain for permission to see their cards')
+    expect(markup).toContain('player-card-reveal-control')
+    expect(markup).not.toContain('card-reveal-request-panel')
+    expect(markup.match(/Face-down card/g)).toHaveLength(2)
     expect(markup).not.toContain('A of spades')
-    expect(markup).toContain('Face-down card')
+    expect(markup).not.toContain('7 of clubs')
+    expect(markup).not.toContain('K of hearts')
+    expect(markup).not.toContain('Q of diamonds')
     expect(markup).not.toContain('table-show-cards-panel')
+  })
+
+  it.each([
+    ['desktop 3D', { '(min-width: 1024px)': true }],
+    ['desktop 2D', { '(min-width: 1024px)': false, '(max-width: 768px)': false }],
+    ['mobile 2D', { '(max-width: 768px)': true }],
+  ])('keeps the card request control beside the opponent cards after a heads-up fold on %s', (label, media) => {
+    const state = makeTableState()
+    state.phase = 'between_hands'
+    state.winners = [{ playerId: 'villain', amount: 40 }]
+    state.players = [
+      makeSeatPlayer({
+        id: 'hero',
+        nickname: 'Hero',
+        status: 'folded',
+        holeCards: [
+          { rank: 'A', suit: 'spades' },
+          { rank: '7', suit: 'clubs' },
+        ],
+      }),
+      makeSeatPlayer({
+        id: 'villain',
+        nickname: 'Villain',
+        isBot: true,
+        seatIndex: 1,
+        status: 'active',
+      }),
+    ]
+
+    const markup = renderWithMedia(media, (
+      <PokerTable
+        state={state}
+        socialState={{ active: [], chatLog: [] }}
+        yourId="hero"
+        isHost={false}
+        isConnected={true}
+        startingStackSetting={1000}
+        settingsOpen={false}
+        suitColorMode="two"
+        roomCode="123"
+        canShareRoom={false}
+        onAction={noop}
+        onStartGame={noop}
+        onAddBots={noop}
+        autoStartEnabled={true}
+        onSetAutoStart={noop}
+        onUpdateSettings={noop}
+        onRemovePlayer={noop}
+        onAdjustPlayerStack={noop}
+        onSetPlayerSpectator={noop}
+        onSeatMe={noop}
+        onSetShowCards={noop}
+        onRequestCardReveal={noop}
+        onSetSuitColorMode={noop}
+        onCloseSettings={noop}
+        onCopyRoom={noop}
+        onShareRoom={noop}
+        onSendEmote={noop}
+        onSendTargetEmote={noop}
+        onFeedback={noop}
+      />
+    ))
+
+    expect(markup).toContain('aria-label="See Villain&#x27;s cards"')
+    expect(markup).not.toContain('card-reveal-request-panel')
+    expect(markup).toContain(label === 'desktop 3D'
+      ? 'cinematic-card-reveal-control'
+      : label === 'mobile 2D'
+        ? 'mobile-card-reveal-control'
+        : 'player-card-reveal-control')
+  })
+
+  it('asks the card owner to allow or deny a folded player request', () => {
+    const state = makeTableState()
+    state.phase = 'in_hand'
+    state.players = [
+      makeSeatPlayer({
+        id: 'hero',
+        nickname: 'Hero',
+        status: 'active',
+        holeCards: [
+          { rank: 'A', suit: 'spades' },
+          { rank: '7', suit: 'clubs' },
+        ],
+      }),
+      makeSeatPlayer({
+        id: 'villain',
+        nickname: 'Villain',
+        seatIndex: 1,
+        status: 'folded',
+      }),
+    ]
+    state.cardRevealRequests = [{
+      requesterId: 'villain',
+      targetId: 'hero',
+      handNumber: state.handNumber,
+      status: 'pending',
+    }]
+
+    const markup = renderToStaticMarkup(
+      <PokerTable
+        state={state}
+        socialState={{ active: [], chatLog: [] }}
+        yourId="hero"
+        isHost={false}
+        isConnected={true}
+        startingStackSetting={1000}
+        settingsOpen={false}
+        suitColorMode="two"
+        roomCode="123"
+        canShareRoom={false}
+        onAction={noop}
+        onStartGame={noop}
+        onAddBots={noop}
+        autoStartEnabled={true}
+        onSetAutoStart={noop}
+        onUpdateSettings={noop}
+        onRemovePlayer={noop}
+        onAdjustPlayerStack={noop}
+        onSetPlayerSpectator={noop}
+        onSeatMe={noop}
+        onSetShowCards={noop}
+        onSetSuitColorMode={noop}
+        onCloseSettings={noop}
+        onCopyRoom={noop}
+        onShareRoom={noop}
+        onSendEmote={noop}
+        onSendTargetEmote={noop}
+        onFeedback={noop}
+      />
+    )
+
+    expect(markup).toContain('role="alertdialog"')
+    expect(markup).toContain('Villain wants to see your cards')
+    expect(markup).toContain('permission expires after this hand')
+    expect(markup).toContain('>Keep hidden</button>')
+    expect(markup).toContain('>Allow this hand</button>')
+  })
+
+  it('keeps accidental opponent card data concealed from an active viewer', () => {
+    const state = makeTableState()
+    state.phase = 'in_hand'
+    state.players = [
+      makeSeatPlayer({
+        id: 'hero',
+        nickname: 'Hero',
+        status: 'active',
+        showCards: 'both',
+        holeCards: [
+          { rank: 'A', suit: 'spades' },
+          { rank: '7', suit: 'clubs' },
+        ],
+      }),
+      makeSeatPlayer({
+        id: 'villain',
+        nickname: 'Villain',
+        seatIndex: 1,
+        status: 'active',
+        showCards: 'both',
+        holeCards: [
+          { rank: 'K', suit: 'hearts' },
+          { rank: 'Q', suit: 'diamonds' },
+        ],
+      }),
+    ]
+
+    const markup = renderToStaticMarkup(
+      <PokerTable
+        state={state}
+        socialState={{ active: [], chatLog: [] }}
+        yourId="hero"
+        isHost={false}
+        isConnected={true}
+        startingStackSetting={1000}
+        settingsOpen={false}
+        suitColorMode="two"
+        roomCode="123"
+        canShareRoom={false}
+        onAction={noop}
+        onStartGame={noop}
+        onAddBots={noop}
+        autoStartEnabled={true}
+        onSetAutoStart={noop}
+        onUpdateSettings={noop}
+        onRemovePlayer={noop}
+        onAdjustPlayerStack={noop}
+        onSetPlayerSpectator={noop}
+        onSeatMe={noop}
+        onSetShowCards={noop}
+        onSetSuitColorMode={noop}
+        onCloseSettings={noop}
+        onCopyRoom={noop}
+        onShareRoom={noop}
+        onSendEmote={noop}
+        onSendTargetEmote={noop}
+        onFeedback={noop}
+      />
+    )
+
+    expect(markup).not.toContain('K of hearts')
+    expect(markup).not.toContain('Q of diamonds')
+    expect(markup).toContain('player-card-back player-card-back-left')
+    expect(markup).toContain('player-card-back player-card-back-right')
   })
 
   it('shows local show-card controls after the hand has a winner', () => {
@@ -421,7 +725,14 @@ describe('PokerTable desktop 3D gate', () => {
 
     expect(markup).toContain('own-hand-show-cards')
     expect(markup).toContain('show-cards-toggle')
-    expect(markup).toContain('A of spades')
+    expect(markup).toContain('aria-label="Choose which cards to reveal after this hand"')
+    expect(markup).toContain('aria-label="Muck both cards"')
+    expect(markup).toContain('Your cards are private')
+    expect(markup).toContain('>Left</button>')
+    expect(markup).toContain('>Right</button>')
+    expect(markup).toContain('>Muck</button>')
+    expect(markup.match(/Face-down card/g)).toHaveLength(2)
+    expect(markup).not.toContain('A of spades')
   })
 
   it('uses a separate fixed 2D hero summary in the desktop 3D card view', () => {
@@ -435,6 +746,7 @@ describe('PokerTable desktop 3D gate', () => {
       makeSeatPlayer({
         id: 'hero',
         nickname: 'Hero Player',
+        isSB: true,
         stack: 960,
         bet: 20,
         holeCards: [
@@ -446,15 +758,17 @@ describe('PokerTable desktop 3D gate', () => {
         id: 'villain',
         nickname: 'Villain',
         seatIndex: 4,
+        isBB: true,
         status: 'active',
       }),
     ]
     state.currentBet = 20
     state.totalPot = 40
+    state.actingPlayerId = 'villain'
 
     const markup = renderWithMedia(
       {
-        '(min-width: 1100px)': true,
+        '(min-width: 1024px)': true,
         '(max-width: 768px)': false,
       },
       <PokerTable
@@ -495,6 +809,9 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).toContain('hero-bottom-summary-stack')
     expect(markup).toContain('$960')
     expect(markup).not.toContain('class="seat-position seat-0 hero-seat-position"')
+    expect(markup).toContain('check-fold-pre-action-dock')
+    expect(markup).toContain('own-hand-pre-action-button')
+    expect(markup).not.toContain('own-hand-pre-action-mark')
   })
 
   it('does not expose two-hand streak companion eligibility to the desktop 3D stage', () => {
@@ -530,7 +847,7 @@ describe('PokerTable desktop 3D gate', () => {
 
     const markup = renderWithMedia(
       {
-        '(min-width: 1100px)': true,
+        '(min-width: 1024px)': true,
         '(max-width: 768px)': false,
       },
       <PokerTable
@@ -580,7 +897,7 @@ describe('PokerTable desktop 3D gate', () => {
       join(process.cwd(), 'components', 'three', 'tableViewModel.ts'),
       'utf8'
     )
-    expect(tableSource).toContain('view={threeTableView}')
+    expect(tableSource).toContain('view={presentedThreeTableView ?? threeTableView}')
     expect(roomSource).not.toContain('StreakCompanion')
     expect(viewModelSource).not.toContain('hasCompanion')
   })
@@ -597,7 +914,7 @@ describe('PokerTable desktop 3D gate', () => {
     expect(tableSource).toContain('onSelectPlayer={handleSelectEmoteTarget}')
   })
 
-  it('wires all-in actions to a table-level popup above the 3D stage', () => {
+  it('wires all-in actions to a table-level popup on every viewport', () => {
     const tableSource = readFileSync(
       join(process.cwd(), 'components', 'table', 'PokerTable.tsx'),
       'utf8'
@@ -607,22 +924,22 @@ describe('PokerTable desktop 3D gate', () => {
       'utf8'
     )
 
-    expect(tableSource).toContain('const latestAllInAnnouncement = threeTableView?.allInAnnouncement ?? null')
+    expect(tableSource).toContain('const latestAllInAnnouncement = allViewportTableView.allInAnnouncement')
+    expect(tableSource).toContain('const threeTableView = shouldRenderDesktopThree ? allViewportTableView : null')
     expect(tableSource).toContain('setActiveAllInAnnouncement(latestAllInAnnouncement)')
     expect(tableSource).toContain('<AllInAnnouncement')
     expect(tableSource).toContain('className="all-in-announcement"')
     expect(roomSource).toContain("data-all-in-action-key={view.allInAnnouncement?.actionKey ?? ''}")
   })
 
-  it('keeps folded live-hand opponents out of the 3D avatar mount tree', () => {
+  it('marks folded live-hand opponents as folded in the desktop seat layer', () => {
     const roomSource = readFileSync(
       join(process.cwd(), 'components', 'three', 'DesktopPokerRoom3D.tsx'),
       'utf8'
     )
 
-    expect(roomSource).toContain('{!isHero && !player.isOutOfHand && (')
-    expect(roomSource).not.toContain('{!isHero && (\r\n          <Avatar')
-    expect(roomSource).not.toContain('{!isHero && (\n          <Avatar')
+    expect(roomSource).toContain("player.isOutOfHand ? 'is-folded' : ''")
+    expect(roomSource).toContain("if (player.isOutOfHand) return 'Folded'")
   })
 
   it('shows clicked card reveals at the player seat after the hand', () => {
@@ -728,7 +1045,7 @@ describe('PokerTable desktop 3D gate', () => {
 
     const markup = renderWithMedia(
       {
-        '(min-width: 1100px)': true,
+        '(min-width: 1024px)': true,
         '(max-width: 768px)': false,
       },
       <PokerTable
@@ -774,6 +1091,75 @@ describe('PokerTable desktop 3D gate', () => {
     expect(tableSource).toContain('emoteReactions={threeEmoteReactions}')
   })
 
+  it('shows a targeted 3D reaction over the recipient own cards when their avatar is hidden', () => {
+    const state = makeTableState()
+    state.players = [
+      makeSeatPlayer({
+        id: 'hero',
+        nickname: 'Hero',
+        seatIndex: 0,
+        holeCards: [
+          { rank: 'A', suit: 'spades' },
+          { rank: 'K', suit: 'hearts' },
+        ],
+      }),
+      makeSeatPlayer({
+        id: 'sender',
+        nickname: 'Sender',
+        seatIndex: 3,
+      }),
+    ]
+
+    const markup = renderWithMedia(
+      {
+        '(min-width: 1024px)': true,
+        '(max-width: 768px)': false,
+      },
+      <PokerTable
+        state={state}
+        socialState={{
+          active: [{
+            playerId: 'sender',
+            emote: '\uD83D\uDE02',
+            emoteExpiresAt: Date.now() + 5_000,
+            targetPlayerId: 'hero',
+          }],
+          chatLog: [],
+        }}
+        yourId="hero"
+        isHost={true}
+        isConnected={true}
+        startingStackSetting={1000}
+        settingsOpen={false}
+        suitColorMode="two"
+        roomCode="123"
+        canShareRoom={false}
+        onAction={noop}
+        onStartGame={noop}
+        onAddBots={noop}
+        autoStartEnabled={true}
+        onSetAutoStart={noop}
+        onUpdateSettings={noop}
+        onRemovePlayer={noop}
+        onAdjustPlayerStack={noop}
+        onSetPlayerSpectator={noop}
+        onSeatMe={noop}
+        onSetShowCards={noop}
+        onSetSuitColorMode={noop}
+        onCloseSettings={noop}
+        onCopyRoom={noop}
+        onShareRoom={noop}
+        onSendEmote={noop}
+        onSendTargetEmote={noop}
+        onFeedback={noop}
+      />
+    )
+
+    expect(markup).toContain('data-desktop-three="true"')
+    expect(markup).toContain('own-hand-social')
+    expect(markup).toContain('player-emote-badge-targeted')
+  })
+
   it('uses a tableless mobile field instead of the table surface on phone viewports', () => {
     const socialState: SocialSnapshot = {
       active: [],
@@ -806,7 +1192,7 @@ describe('PokerTable desktop 3D gate', () => {
 
     const markup = renderWithMedia(
       {
-        '(min-width: 1100px)': false,
+        '(min-width: 1024px)': false,
         '(max-width: 768px)': true,
       },
       <PokerTable
@@ -845,6 +1231,9 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).toContain('mobile-board-zone')
     expect(markup).toContain('mobile-edge-seat')
     expect(markup).toContain('mobile-seat-number')
+    expect(markup).toContain('mobile-edge-seat-timer')
+    expect(markup).toContain('30s')
+    expect(markup).toContain('30 seconds left')
     expect(markup).toContain('You')
     expect(markup).toContain('Villain')
     expect(markup).toContain('community-cards')
@@ -855,6 +1244,10 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).not.toContain('table-seat-placeholder')
     expect(markup).not.toContain('player-action-badge')
     expect(markup).not.toContain('chip-stack')
+    expect(markup).toContain('check-fold-pre-action-dock')
+    expect(markup).toContain('own-hand-pre-action-button')
+    expect(markup).toContain('Queue check if possible, otherwise fold')
+    expect(markup).not.toContain('own-hand-pre-action-mark')
   })
 
   it('renders mobile betting controls as the reference three-button bottom panel', () => {
@@ -868,6 +1261,7 @@ describe('PokerTable desktop 3D gate', () => {
       makeSeatPlayer({
         id: 'hero',
         nickname: 'Hero Player',
+        isSB: true,
         stack: 960,
         bet: 20,
         holeCards: [
@@ -879,6 +1273,7 @@ describe('PokerTable desktop 3D gate', () => {
         id: 'villain',
         nickname: 'Villain',
         seatIndex: 4,
+        isBB: true,
         status: 'active',
         stack: 1240,
         bet: 40,
@@ -891,7 +1286,7 @@ describe('PokerTable desktop 3D gate', () => {
 
     const markup = renderWithMedia(
       {
-        '(min-width: 1100px)': false,
+        '(min-width: 1024px)': false,
         '(max-width: 768px)': true,
       },
       <PokerTable
@@ -933,9 +1328,14 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).toContain('mobile-raise-control')
     expect(markup).toContain('mobile-main-actions')
     expect(markup).toContain('FOLD')
-    expect(markup).toContain('CHECK / CALL')
+    expect(markup).toContain('CALL')
+    expect(markup).not.toContain('CHECK / CALL')
     expect(markup).toContain('BET / RAISE')
     expect(markup).toContain('$80')
+    expect(markup).toContain('Small Blind')
+    expect(markup).toContain('Big Blind')
+    expect(markup).toContain('mobile-blind-role is-small')
+    expect(markup).toContain('mobile-blind-role is-big')
     expect(markup).not.toContain('betting-tray-header')
   })
 
@@ -973,7 +1373,7 @@ describe('PokerTable desktop 3D gate', () => {
 
     const markup = renderWithMedia(
       {
-        '(min-width: 1100px)': false,
+        '(min-width: 1024px)': false,
         '(max-width: 768px)': true,
       },
       <PokerTable
@@ -1118,15 +1518,76 @@ describe('PokerTable table-management controls', () => {
 
     const desktopMarkup = renderTable(state, {
       '(max-width: 768px)': false,
-      '(min-width: 1100px)': false,
+      '(min-width: 1024px)': false,
     })
     const mobileMarkup = renderTable(state, {
       '(max-width: 768px)': true,
-      '(min-width: 1100px)': false,
+      '(min-width: 1024px)': false,
     })
 
     expect(desktopMarkup).toContain('Rabbit hunt')
     expect(mobileMarkup).toContain('Rabbit hunt')
+  })
+
+  it('sends the mobile payout chips to the winner compact rendered seat', () => {
+    const state = makeFoldEndedState()
+    state.players[0] = { ...state.players[0]!, status: 'folded' }
+    state.players[1] = { ...state.players[1]!, status: 'waiting' }
+    state.winners = [{ playerId: 'villain', amount: 30 }]
+
+    const mobileMarkup = renderTable(state, {
+      '(max-width: 768px)': true,
+      '(min-width: 1024px)': false,
+    })
+
+    expect(mobileMarkup).toContain('mobile-seat-position-4')
+    expect(mobileMarkup).toContain('table-center-winner-chip-trails mobile-winner-chip-trails')
+    expect(mobileMarkup).toContain('--winner-chip-x:50%;--winner-chip-y:11%')
+  })
+
+  it('sends hero payout chips to the hero lane regardless of their physical seat', () => {
+    const state = makeFoldEndedState()
+    state.players[0] = { ...state.players[0]!, seatIndex: 6 }
+    state.players[1] = { ...state.players[1]!, seatIndex: 7 }
+
+    const mobileMarkup = renderTable(state, {
+      '(max-width: 768px)': true,
+      '(min-width: 1024px)': false,
+    })
+    const desktopMarkup = renderTable(state, {
+      '(max-width: 768px)': false,
+      '(min-width: 1024px)': false,
+    })
+
+    expect(mobileMarkup).toContain('--winner-chip-x:50%;--winner-chip-y:85%')
+    expect(desktopMarkup).toContain('--winner-chip-x:50.5%;--winner-chip-y:88.2%')
+  })
+
+  it('clears the mobile and desktop 3D winner summaries after a rabbit runout so the board stays visible', () => {
+    const state = makeFoldEndedState()
+    state.communityCards = [
+      { rank: 'A', suit: 'spades' },
+      { rank: 'K', suit: 'hearts' },
+      { rank: 'Q', suit: 'diamonds' },
+      { rank: 'J', suit: 'clubs' },
+      { rank: 'T', suit: 'spades' },
+    ]
+    state.recentActions = ['Rabbit hunt: flop As Kh Qd | turn Jc | river 10s', ...state.recentActions]
+
+    const desktopThreeMarkup = renderTable(state, {
+      '(max-width: 768px)': false,
+      '(min-width: 1024px)': true,
+    })
+    const mobileMarkup = renderTable(state, {
+      '(max-width: 768px)': true,
+      '(min-width: 1024px)': false,
+    })
+
+    expect(desktopThreeMarkup).toContain('data-desktop-three="true"')
+    expect(desktopThreeMarkup).not.toContain('table-hand-result-summary')
+    expect(desktopThreeMarkup).toContain('class="community-cards"')
+    expect(mobileMarkup).not.toContain('mobile-edge-winners')
+    expect(mobileMarkup).toContain('class="community-cards"')
   })
 
   it('uses explicit, mobile-safe labels for player management controls', () => {

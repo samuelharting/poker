@@ -1,0 +1,19 @@
+- generic [ref=f4e4]:
+  - generic [ref=f4e5]:
+    - generic [ref=f4e6]: Room TWN742
+    - heading "Take your seat" [level=2] [ref=f4e7]
+  - generic [ref=f4e8]:
+    - generic [ref=f4e9]: Your nickname
+    - textbox "Your nickname" [active] [ref=f4e10]:
+      - /placeholder: e.g. PhilIvey
+  - generic [ref=f4e11]:
+    - generic [ref=f4e12]: Email
+    - textbox "Email" [ref=f4e13]:
+      - /placeholder: you@example.com
+  - generic [ref=f4e14]:
+    - generic [ref=f4e15]:
+      - text: Venmo username
+      - emphasis [ref=f4e16]: Optional
+    - textbox "Venmo username Optional" [ref=f4e17]:
+      - /placeholder: "@samvenmo"
+  - button "Enter Room" [ref=f4e18] [cursor=pointer]

@@ -1,0 +1,88 @@
+- generic [active] [ref=f1e1]:
+  - button "Open Next.js Dev Tools" [ref=f1e50] [cursor=pointer]
+  - alert [ref=f1e54]
+  - generic [ref=f1e55]:
+    - generic [ref=f1e56]:
+      - generic [ref=f1e57]:
+        - generic [ref=f1e58]: Poker Night
+        - generic [ref=f1e59]:
+          - generic [ref=f1e60]: Room
+          - generic [ref=f1e61]: ZGBY92
+      - button "Open settings" [ref=f1e479] [cursor=pointer]:
+        - generic [ref=f1e70]: Settings
+    - generic [ref=f1e71]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [ref=f1e101] [cursor=pointer]:
+            - generic [ref=f1e105]:
+              - strong [ref=f1e107]: Bot Maverick
+              - generic [ref=f1e108]:
+                - generic [ref=f1e109]: $400
+                - generic [ref=f1e647]: Acting
+          - button "Send a reaction to Bot River" [ref=f1e110] [cursor=pointer]:
+            - generic [ref=f1e114]:
+              - strong [ref=f1e116]: Bot River
+              - generic [ref=f1e117]: $310
+          - button "Send a reaction to Bot Bluff" [ref=f1e119] [cursor=pointer]:
+            - generic [ref=f1e123]:
+              - strong [ref=f1e125]: Bot Bluff
+              - generic [ref=f1e126]: $750
+          - button "Send a reaction to Bot Ace" [ref=f1e128] [cursor=pointer]:
+            - generic [ref=f1e132]:
+              - generic [ref=f1e133]:
+                - strong [ref=f1e134]: Bot Ace
+                - emphasis [ref=f1e573]: SB
+              - generic [ref=f1e135]: $1,910
+            - generic [ref=f1e613]: $10
+          - button "Send a reaction to Bot Nova" [ref=f1e137] [cursor=pointer]:
+            - generic [ref=f1e141]:
+              - generic [ref=f1e142]:
+                - strong [ref=f1e143]: Bot Nova
+                - emphasis [ref=f1e614]: BB
+              - generic [ref=f1e144]: $3,630
+            - generic [ref=f1e615]: $20
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=f1e193]:
+              - generic [ref=f1e194]: Pot
+              - generic [ref=f1e195]: $30
+          - status "LayoutAudit, chips $970":
+            - generic: LayoutAudit
+            - generic: $970
+          - generic "Your hand":
+            - generic:
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: "5"
+                      - generic: "5"
+              - generic:
+                - generic:
+                  - generic "Face-down card":
+                    - generic:
+                      - generic: "2"
+                      - generic: "2"
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f1e493] [cursor=pointer]:
+          - generic [ref=f1e494]: ♣
+          - strong [ref=f1e495]: Table talk

@@ -11,16 +11,24 @@ import type {
   TableChatEntry,
 } from '../shared/protocol'
 import type { ShowCardsMode } from '../lib/poker/types'
-import type { InternalGameState, InternalPlayer, LobbyPlayer, PlayerStats, SeatPlayer } from '../lib/poker/types'
+import type { CardRevealRequest, InternalGameState, InternalPlayer, LobbyPlayer, PlayerStats, SeatPlayer } from '../lib/poker/types'
+import { normalizePlayerUsername, type PlayerAvatarCustomization } from '../lib/profile'
 import {
   createInitialGameState,
   processAction,
+  resolveRunItTwiceDecision,
   runRabbitHunt,
+  setPlayerLastAction,
   startHand,
   toTableState,
+  voteRunItTwice,
 } from '../lib/poker/engine'
-import { calculateMinRaise } from '../lib/poker/betting'
 import { withVisibleHandOdds } from '../lib/poker/odds'
+import {
+  getShowdownMinimumDurationMs,
+  isTrueShowdown,
+  RUN_IT_TWICE_PRESENTATION_DURATION_MS,
+} from '../lib/poker/showdown'
 import { MAX_CHAT_LENGTH, parseC2S } from '../shared/protocol'
 
 interface TableSettings {
@@ -38,6 +46,7 @@ interface TableSettings {
 interface PlayerProfileRecord {
   email: string
   venmoUsername: string
+  avatar?: PlayerAvatarCustomization
 }
 
 interface TrackedPlayerStats {
@@ -55,7 +64,7 @@ interface RoomData {
   reconnectTokens: Record<string, string>
   playerNicknames: Record<string, string>
   playerProfiles: Record<string, PlayerProfileRecord>
-  statsByEmail: Record<string, TrackedPlayerStats>
+  statsByUsername: Record<string, TrackedPlayerStats>
   countedHandPlayers: Record<string, true>
   countedFolds: Record<string, true>
   countedWinHands: Record<number, true>
@@ -63,11 +72,13 @@ interface RoomData {
   spectatorStacks: Record<string, number>
   pendingRemovals: Record<string, true>
   pendingSpectators: Record<string, true>
+  cardRevealRequests: Record<string, CardRevealRequest>
   social: {
     activeByPlayer: Record<string, Omit<PlayerSocialState, 'playerId'>>
     chatLog: TableChatEntry[]
   }
   tableSettings: TableSettings
+  pendingTableSettings: Partial<TableSettings> | null
   autoStartEnabled: boolean
 }
 
@@ -89,8 +100,8 @@ const DEFAULT_SETTINGS: TableSettings = {
   bigBlind: 20,
   startingStack: 1000,
   maxPlayers: 8,
-  actionTimerDuration: 35000,
-  autoStartDelay: 3000,
+  actionTimerDuration: 10000,
+  autoStartDelay: 5000,
   rabbitHuntingEnabled: false,
   sevenTwoRuleEnabled: true,
   sevenTwoBountyPercent: 2,
@@ -102,6 +113,7 @@ const CHAT_BUBBLE_DURATION = 9000
 const EMOTE_DURATION = 6000
 const MAX_CHAT_HISTORY = 18
 export const AUTO_START_DELAY = DEFAULT_SETTINGS.autoStartDelay
+export const HOST_DISCONNECT_GRACE_MS = 30_000
 const BOT_NAMES = ['Maverick', 'River', 'Bluff', 'Ace', 'Nova', 'Dealer Dan', 'Pocket', 'Lucky', 'Tilt', 'Rook']
 
 function formatCurrency(amount: number): string {
@@ -123,6 +135,10 @@ export default class PokerRoom implements PartyServer {
   private autoStartTimeout: ReturnType<typeof setTimeout> | null = null
   private botActionTimeout: ReturnType<typeof setTimeout> | null = null
   private botActionPlayerId: string | null = null
+  private runItTwiceTimeout: ReturnType<typeof setTimeout> | null = null
+  private runItTwiceDeadline: number | null = null
+  private hostTransferTimeout: ReturnType<typeof setTimeout> | null = null
+  private disconnectedHostId: string | null = null
 
   constructor(readonly room: Room) {
     const roomCode = room.id.toUpperCase()
@@ -140,7 +156,7 @@ export default class PokerRoom implements PartyServer {
       reconnectTokens: {},
       playerNicknames: {},
       playerProfiles: {},
-      statsByEmail: {},
+      statsByUsername: {},
       countedHandPlayers: {},
       countedFolds: {},
       countedWinHands: {},
@@ -148,11 +164,13 @@ export default class PokerRoom implements PartyServer {
       spectatorStacks: {},
       pendingRemovals: {},
       pendingSpectators: {},
+      cardRevealRequests: {},
       social: {
         activeByPlayer: {},
         chatLog: [],
       },
       tableSettings: { ...DEFAULT_SETTINGS },
+      pendingTableSettings: null,
       autoStartEnabled: true,
     }
   }
@@ -172,7 +190,17 @@ export default class PokerRoom implements PartyServer {
     try {
       switch (msg.type) {
         case 'join_room':
-          this.handleJoinRoom(sender, msg.nickname, msg.email, msg.venmoUsername, msg.reconnectToken)
+          this.handleJoinRoom(
+            sender,
+            msg.nickname,
+            msg.email,
+            msg.venmoUsername,
+            msg.avatar,
+            msg.reconnectToken
+          )
+          break
+        case 'update_avatar':
+          this.handleUpdateAvatar(sender, msg.avatar)
           break
         case 'seat_me':
           this.handleSeatMe(sender, msg.seatIndex)
@@ -188,6 +216,9 @@ export default class PokerRoom implements PartyServer {
           break
         case 'rabbit_hunt':
           this.handleRabbitHunt(sender)
+          break
+        case 'run_it_twice_vote':
+          this.handleRunItTwiceVote(sender, msg.vote)
           break
         case 'player_action':
           this.handlePlayerAction(sender, msg.action, msg.amount)
@@ -213,8 +244,14 @@ export default class PokerRoom implements PartyServer {
         case 'set_show_cards':
           this.handleSetShowCards(sender, msg.mode)
           break
+        case 'request_card_reveal':
+          this.handleCardRevealRequest(sender, msg.targetId)
+          break
+        case 'respond_card_reveal':
+          this.handleCardRevealResponse(sender, msg.requesterId, msg.allow)
+          break
         case 'table_chat':
-          this.handleTableChat(sender, msg.message)
+          this.handleTableChat(sender, msg.message, msg.targetId)
           break
         case 'table_emote':
           this.handleTableEmote(sender, msg.emote, msg.targetId)
@@ -236,6 +273,10 @@ export default class PokerRoom implements PartyServer {
 
     this.detachConnection(conn.id)
 
+    if (this.data.hostId === playerId) {
+      this.scheduleDisconnectedHostTransfer(playerId)
+    }
+
     const player = this.getPlayer(playerId)
     if (player) {
       player.isConnected = false
@@ -252,6 +293,18 @@ export default class PokerRoom implements PartyServer {
 
   onAlarm() {
     const gameState = this.data.gameState
+    const runItTwice = gameState.runItTwice
+    if (runItTwice?.status === 'voting' && runItTwice.expiresAt) {
+      const remainingMs = runItTwice.expiresAt - Date.now()
+      if (remainingMs > 25) {
+        void this.room.storage.setAlarm(runItTwice.expiresAt)
+        return
+      }
+
+      this.expireRunItTwiceVote()
+      return
+    }
+
     const actingPlayerId = gameState.actingPlayerId
     if (
       gameState.phase !== 'in_hand' ||
@@ -279,8 +332,9 @@ export default class PokerRoom implements PartyServer {
   private handleJoinRoom(
     conn: Connection,
     nickname: string,
-    email: string,
-    venmoUsername: string,
+    email = '',
+    venmoUsername = '',
+    avatar?: PlayerAvatarCustomization,
     reconnectToken?: string
   ) {
     const trimmed = nickname.trim().slice(0, 20)
@@ -295,11 +349,16 @@ export default class PokerRoom implements PartyServer {
 
     if (reconnectPlayerId) {
       this.bindConnection(conn, reconnectPlayerId)
-      this.data.reconnectTokens[reconnectPlayerId] = generateReconnectToken()
-      if (!this.data.playerProfiles[reconnectPlayerId]) {
-        this.data.playerProfiles[reconnectPlayerId] = { email, venmoUsername }
+      this.cancelDisconnectedHostTransfer(reconnectPlayerId)
+      if (!this.data.hostId) {
+        this.data.hostId = reconnectPlayerId
       }
-      this.ensureStats(email)
+      if (!this.data.playerProfiles[reconnectPlayerId]) {
+        this.data.playerProfiles[reconnectPlayerId] = { email, venmoUsername, avatar }
+      } else if (avatar) {
+        this.data.playerProfiles[reconnectPlayerId].avatar = avatar
+      }
+      this.ensureStats(trimmed)
 
       const player = this.getPlayer(reconnectPlayerId)
       if (player) {
@@ -319,8 +378,8 @@ export default class PokerRoom implements PartyServer {
     this.bindConnection(conn, playerId)
     this.data.reconnectTokens[playerId] = generateReconnectToken()
     this.data.playerNicknames[playerId] = trimmed
-    this.data.playerProfiles[playerId] = { email, venmoUsername }
-    this.ensureStats(email)
+    this.data.playerProfiles[playerId] = { email, venmoUsername, avatar }
+    this.ensureStats(trimmed)
 
     if (!this.data.hostId) {
       this.data.hostId = playerId
@@ -350,10 +409,45 @@ export default class PokerRoom implements PartyServer {
       }
     }
 
+    const seatIndex = this.findAvailableSeat(preferredSeat)
+
+    if (seatIndex < 0) {
+      this.data.spectatorIds[playerId] = true
+      this.data.spectatorStacks[playerId] ??= this.data.tableSettings.startingStack
+      delete this.data.pendingSpectators[playerId]
+      this.sendActionResult(conn, 'Table is full. You are watching until a seat opens.')
+      this.broadcastState()
+      return
+    }
+
+    this.seatPlayerAt(playerId, seatIndex)
+
+    this.sendActionResult(conn)
+    this.broadcastState()
+  }
+
+  private handleUpdateAvatar(conn: Connection, avatar: PlayerAvatarCustomization) {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    if (!playerId) {
+      this.sendActionFailed(conn, 'Join the room before updating your avatar')
+      return
+    }
+
+    const profile = this.data.playerProfiles[playerId]
+    if (!profile) {
+      this.sendActionFailed(conn, 'Player profile not found')
+      return
+    }
+
+    profile.avatar = avatar
+    this.sendActionResult(conn, 'Avatar updated')
+    this.broadcastState()
+  }
+
+  private findAvailableSeat(preferredSeat?: number): number {
     const occupiedSeats = new Set(this.data.gameState.players.map(player => player.seatIndex))
     const maxPlayers = this.data.tableSettings.maxPlayers
 
-    let seatIndex = -1
     if (
       preferredSeat !== undefined &&
       Number.isInteger(preferredSeat) &&
@@ -361,29 +455,29 @@ export default class PokerRoom implements PartyServer {
       preferredSeat < maxPlayers &&
       !occupiedSeats.has(preferredSeat)
     ) {
-      seatIndex = preferredSeat
-    } else {
-      for (let i = 0; i < maxPlayers; i++) {
-        if (!occupiedSeats.has(i)) {
-          seatIndex = i
-          break
-        }
+      return preferredSeat
+    }
+
+    for (let seatIndex = 0; seatIndex < maxPlayers; seatIndex += 1) {
+      if (!occupiedSeats.has(seatIndex)) {
+        return seatIndex
       }
     }
 
-    if (seatIndex < 0) {
-      this.sendActionFailed(conn, 'Table is full')
-      return
-    }
+    return -1
+  }
 
+  private seatPlayerAt(playerId: string, seatIndex: number) {
     const nickname = this.data.playerNicknames[playerId] ?? 'Player'
     const stack = Math.max(
       0,
       Math.floor(this.data.spectatorStacks[playerId] ?? this.data.tableSettings.startingStack)
     )
+    const isBot = playerId.startsWith('bot_')
     const newPlayer: InternalPlayer = {
       id: playerId,
       nickname,
+      isBot,
       stack,
       bet: 0,
       totalInPot: 0,
@@ -393,47 +487,71 @@ export default class PokerRoom implements PartyServer {
       isBB: false,
       holeCards: [],
       showCards: 'none',
-      isConnected: true,
+      isConnected: isBot || Boolean(this.data.playerToConnection[playerId]),
       seatIndex,
       hasActedThisRound: false,
     }
 
     this.data.gameState.players.push(newPlayer)
     this.data.gameState.players.sort((a, b) => a.seatIndex - b.seatIndex)
-    if (wasSpectator) {
-      delete this.data.spectatorIds[playerId]
-    }
+    delete this.data.spectatorIds[playerId]
     delete this.data.spectatorStacks[playerId]
     delete this.data.pendingSpectators[playerId]
+  }
 
-    this.sendActionResult(conn)
-    this.broadcastState()
+  private requireGameCreator(conn: Connection, action: string): string | null {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    if (!playerId) {
+      this.sendActionFailed(conn, `Join the room before you ${action}`)
+      return null
+    }
+
+    if (this.data.hostId !== playerId) {
+      this.sendActionFailed(conn, `Only the game creator can ${action}.`)
+      return null
+    }
+
+    return playerId
   }
 
   private handleStartGame(conn: Connection) {
-    const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before starting the game')
+    if (!this.requireGameCreator(conn, 'start the game')) {
       return
     }
 
     this.finalizeState()
-
-    const seatedPlayers = this.data.gameState.players.filter(
-      player => player.stack > 0 && player.status !== 'disconnected'
-    )
-    if (seatedPlayers.length < 2) {
-      this.sendActionFailed(conn, 'Need at least 2 players with chips')
-      return
-    }
 
     if (this.data.gameState.phase === 'in_hand') {
       this.sendActionFailed(conn, 'Hand already in progress')
       return
     }
 
+    const showdownHoldRemaining = this.getShowdownRemainingDurationMs()
+    if (showdownHoldRemaining > 0) {
+      const secondsRemaining = Math.max(1, Math.ceil(showdownHoldRemaining / 1000))
+      this.sendActionFailed(
+        conn,
+        `Showdown in progress. Next hand is ready in ${secondsRemaining}s.`
+      )
+      return
+    }
+
+    this.flushPendingRemovals()
+    this.flushPendingSpectators()
+    this.moveZeroStackPlayersToSpectators()
+
+    const seatedPlayers = this.data.gameState.players.filter(
+      player => player.stack > 0 && player.status !== 'disconnected'
+    )
+    if (seatedPlayers.length < 2) {
+      this.sendActionFailed(conn, 'Need at least 2 players with chips')
+      this.broadcastState()
+      return
+    }
+
     try {
       this.clearAutoStart()
+      this.data.cardRevealRequests = {}
       this.data.gameState = startHand(this.data.gameState)
       this.recordHandsPlayedForCurrentHand()
       this.syncActionTimer(true)
@@ -446,9 +564,7 @@ export default class PokerRoom implements PartyServer {
   }
 
   private handleAddBots(conn: Connection, count: number) {
-    const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before adding bots')
+    if (!this.requireGameCreator(conn, 'add bots')) {
       return
     }
 
@@ -500,9 +616,7 @@ export default class PokerRoom implements PartyServer {
   }
 
   private handleSetAutoStart(conn: Connection, enabled: boolean) {
-    const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before changing auto-start settings')
+    if (!this.requireGameCreator(conn, 'change auto-deal settings')) {
       return
     }
 
@@ -548,63 +662,147 @@ export default class PokerRoom implements PartyServer {
     conn: Connection,
     msg: Extract<C2SMessage, { type: 'update_table_settings' }>
   ) {
-    const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before changing settings')
+    if (!this.requireGameCreator(conn, 'change table settings')) {
       return
     }
 
-    if (msg.smallBlind !== undefined) this.data.tableSettings.smallBlind = msg.smallBlind
-    if (msg.bigBlind !== undefined) this.data.tableSettings.bigBlind = msg.bigBlind
-    if (msg.startingStack !== undefined) this.data.tableSettings.startingStack = msg.startingStack
-    if (msg.actionTimerDuration !== undefined) {
+    const settingsPatch: Partial<TableSettings> = {}
+    if (msg.smallBlind !== undefined) settingsPatch.smallBlind = msg.smallBlind
+    if (msg.bigBlind !== undefined) settingsPatch.bigBlind = msg.bigBlind
+    if (msg.startingStack !== undefined) settingsPatch.startingStack = msg.startingStack
+    if (msg.actionTimerDuration !== undefined) settingsPatch.actionTimerDuration = msg.actionTimerDuration
+    if (msg.autoStartDelay !== undefined) settingsPatch.autoStartDelay = msg.autoStartDelay
+    if (msg.rabbitHuntingEnabled !== undefined) settingsPatch.rabbitHuntingEnabled = msg.rabbitHuntingEnabled
+    if (msg.sevenTwoRuleEnabled !== undefined) settingsPatch.sevenTwoRuleEnabled = msg.sevenTwoRuleEnabled
+    if (msg.sevenTwoBountyPercent !== undefined) settingsPatch.sevenTwoBountyPercent = msg.sevenTwoBountyPercent
+
+    const effectiveSettings = {
+      ...this.data.tableSettings,
+      ...this.data.pendingTableSettings,
+      ...settingsPatch,
+    }
+    const nextSmallBlind = effectiveSettings.smallBlind
+    const nextBigBlind = effectiveSettings.bigBlind
+    const nextStartingStack = effectiveSettings.startingStack
+    const nextActionTimerDuration = effectiveSettings.actionTimerDuration
+    const nextAutoStartDelay = effectiveSettings.autoStartDelay
+    const nextBountyPercent = effectiveSettings.sevenTwoBountyPercent
+    const settingsAreValid = (
+      Number.isSafeInteger(nextSmallBlind) && nextSmallBlind >= 1 && nextSmallBlind <= 1_000_000 &&
+      Number.isSafeInteger(nextBigBlind) && nextBigBlind >= nextSmallBlind && nextBigBlind <= 1_000_000 &&
+      Number.isSafeInteger(nextStartingStack) &&
+      nextStartingStack >= nextBigBlind * 10 &&
+      nextStartingStack <= 1_000_000_000 &&
+      Number.isSafeInteger(nextActionTimerDuration) &&
+      nextActionTimerDuration >= 5_000 &&
+      nextActionTimerDuration <= 60_000 &&
+      Number.isSafeInteger(nextAutoStartDelay) &&
+      nextAutoStartDelay >= 1_000 &&
+      nextAutoStartDelay <= 30_000 &&
+      Number.isFinite(nextBountyPercent) &&
+      nextBountyPercent >= 0 &&
+      nextBountyPercent <= 100
+    )
+    if (!settingsAreValid) {
+      this.sendActionFailed(
+        conn,
+        'Use valid blinds, a stack of at least 10 big blinds, timers within their displayed limits, and a bounty from 0 to 100%.'
+      )
+      return
+    }
+
+    if (this.data.gameState.phase === 'in_hand') {
+      this.data.pendingTableSettings = {
+        ...this.data.pendingTableSettings,
+        ...settingsPatch,
+      }
+      this.sendActionResult(conn, 'Settings saved. Changes will apply automatically next hand.')
+      this.broadcastState()
+      return
+    }
+
+    this.applyTableSettings(settingsPatch)
+    this.sendActionResult(conn, 'Updated table settings.')
+    this.broadcastState()
+  }
+
+  private handleRunItTwiceVote(conn: Connection, vote: 'yes' | 'no') {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    if (!playerId) {
+      this.sendActionFailed(conn, 'Join the room before voting')
+      return
+    }
+
+    try {
+      this.data.gameState = voteRunItTwice(this.data.gameState, playerId, vote)
+      this.recordCompletedHandStats()
+      this.finalizeState()
+      this.syncActionTimer()
+
+      const stillVoting = this.data.gameState.runItTwice?.status === 'voting'
+      this.sendActionResult(
+        conn,
+        stillVoting
+          ? 'Vote locked. Waiting for the other player.'
+          : vote === 'yes'
+            ? 'Both players agreed. Running it twice.'
+            : 'Running the board once.'
+      )
+      this.broadcastState()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Run it twice vote failed'
+      this.sendActionFailed(conn, message)
+    }
+  }
+
+  private applyTableSettings(settings: Partial<TableSettings>) {
+    if (settings.smallBlind !== undefined) this.data.tableSettings.smallBlind = settings.smallBlind
+    if (settings.bigBlind !== undefined) this.data.tableSettings.bigBlind = settings.bigBlind
+    if (settings.startingStack !== undefined) this.data.tableSettings.startingStack = settings.startingStack
+    if (settings.actionTimerDuration !== undefined) {
       this.data.tableSettings.actionTimerDuration = Math.min(
         60000,
-        Math.max(5000, Math.floor(msg.actionTimerDuration))
+        Math.max(5000, Math.floor(settings.actionTimerDuration))
       )
     }
-    if (msg.autoStartDelay !== undefined) {
+    if (settings.autoStartDelay !== undefined) {
       this.clearAutoStart()
       this.data.tableSettings.autoStartDelay = Math.min(
         30000,
-        Math.max(1000, Math.floor(msg.autoStartDelay))
+        Math.max(1000, Math.floor(settings.autoStartDelay))
       )
     }
-    if (msg.rabbitHuntingEnabled !== undefined) {
-      this.data.tableSettings.rabbitHuntingEnabled = msg.rabbitHuntingEnabled
+    if (settings.rabbitHuntingEnabled !== undefined) {
+      this.data.tableSettings.rabbitHuntingEnabled = settings.rabbitHuntingEnabled
     }
-    if (msg.sevenTwoRuleEnabled !== undefined) {
-      this.data.tableSettings.sevenTwoRuleEnabled = msg.sevenTwoRuleEnabled
+    if (settings.sevenTwoRuleEnabled !== undefined) {
+      this.data.tableSettings.sevenTwoRuleEnabled = settings.sevenTwoRuleEnabled
     }
-    if (msg.sevenTwoBountyPercent !== undefined) {
+    if (settings.sevenTwoBountyPercent !== undefined) {
       this.data.tableSettings.sevenTwoBountyPercent = Math.min(
         100,
-        Math.max(0, msg.sevenTwoBountyPercent)
+        Math.max(0, settings.sevenTwoBountyPercent)
       )
     }
 
     this.data.gameState.smallBlind = this.data.tableSettings.smallBlind
     this.data.gameState.bigBlind = this.data.tableSettings.bigBlind
     this.data.gameState.startingStack = this.data.tableSettings.startingStack
+    this.data.gameState.minRaise = this.data.tableSettings.bigBlind * 2
     this.data.gameState.actionTimerDuration = this.data.tableSettings.actionTimerDuration
     this.data.gameState.rabbitHuntingEnabled = this.data.tableSettings.rabbitHuntingEnabled
     this.data.gameState.sevenTwoRuleEnabled = this.data.tableSettings.sevenTwoRuleEnabled
     this.data.gameState.sevenTwoBountyPercent = this.data.tableSettings.sevenTwoBountyPercent
+  }
 
-    if (this.data.gameState.phase === 'in_hand') {
-      this.data.gameState.minRaise = calculateMinRaise(
-        this.data.gameState.currentBet,
-        this.data.gameState.lastRaiseSize,
-        this.data.gameState.bigBlind
-      )
-
-      if (msg.actionTimerDuration !== undefined) {
-        this.syncActionTimer(true)
-      }
+  private applyPendingTableSettings() {
+    if (!this.data.pendingTableSettings) {
+      return
     }
 
-    this.sendActionResult(conn, 'Updated table settings.')
-    this.broadcastState()
+    const pendingSettings = this.data.pendingTableSettings
+    this.data.pendingTableSettings = null
+    this.applyTableSettings(pendingSettings)
   }
 
   private handleRabbitHunt(conn: Connection) {
@@ -615,9 +813,12 @@ export default class PokerRoom implements PartyServer {
     }
 
     try {
-      this.data.gameState = runRabbitHunt(this.data.gameState)
+      const huntedState = runRabbitHunt(this.data.gameState)
+      this.clearAutoStart()
+      this.data.gameState = huntedState
       this.sendActionResult(conn, 'Rabbit hunt revealed the board.')
       this.broadcastState()
+      this.syncAutoStart()
     } catch (err) {
       const message = err instanceof Error
         ? err.message
@@ -632,15 +833,15 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
+    this.cancelDisconnectedHostTransfer(playerId)
     this.sendActionResult(conn)
     this.evictPlayer(playerId)
     this.broadcastState()
   }
 
   private handleRebuy(conn: Connection, amount: number) {
-    const playerId = this.data.connectionToPlayer[conn.id]
+    const playerId = this.requireGameCreator(conn, 'change player chip counts')
     if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before rebuying')
       return
     }
 
@@ -665,9 +866,8 @@ export default class PokerRoom implements PartyServer {
   }
 
   private handleRemovePlayer(conn: Connection, targetId: string) {
-    const playerId = this.data.connectionToPlayer[conn.id]
+    const playerId = this.requireGameCreator(conn, 'kick players')
     if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before removing players')
       return
     }
 
@@ -708,9 +908,7 @@ export default class PokerRoom implements PartyServer {
   }
 
   private handleAdjustPlayerStack(conn: Connection, targetId: string, amount: number) {
-    const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before changing player chips')
+    if (!this.requireGameCreator(conn, 'change player chip counts')) {
       return
     }
 
@@ -742,7 +940,7 @@ export default class PokerRoom implements PartyServer {
               this.recordCompletedHandStats()
             } catch {
               player.status = 'folded'
-              player.lastAction = 'Folded'
+              setPlayerLastAction(this.data.gameState, player, 'Folded')
               this.recordFold(targetId)
             }
 
@@ -753,12 +951,12 @@ export default class PokerRoom implements PartyServer {
               refreshedPlayer.status === 'active'
             ) {
               refreshedPlayer.status = 'all_in'
-              refreshedPlayer.lastAction = 'All-in'
+              setPlayerLastAction(this.data.gameState, refreshedPlayer, 'All-in')
               refreshedPlayer.hasActedThisRound = true
             }
           } else {
             player.status = 'all_in'
-            player.lastAction = 'All-in'
+            setPlayerLastAction(this.data.gameState, player, 'All-in')
             player.hasActedThisRound = true
           }
         }
@@ -788,9 +986,7 @@ export default class PokerRoom implements PartyServer {
   }
 
   private handleSetPlayerSpectator(conn: Connection, targetId: string, spectator: boolean) {
-    const playerId = this.data.connectionToPlayer[conn.id]
-    if (!playerId) {
-      this.sendActionFailed(conn, 'Join the room before changing spectator mode')
+    if (!this.requireGameCreator(conn, 'seat or spectate players')) {
       return
     }
 
@@ -814,11 +1010,12 @@ export default class PokerRoom implements PartyServer {
             this.recordCompletedHandStats()
           } catch {
             seatedPlayer.status = 'folded'
+            setPlayerLastAction(this.data.gameState, seatedPlayer, 'Folded')
             this.recordFold(targetId)
           }
         } else if (seatedPlayer.status === 'active') {
           seatedPlayer.status = 'folded'
-          seatedPlayer.lastAction = 'Folded'
+          setPlayerLastAction(this.data.gameState, seatedPlayer, 'Folded')
           this.recordFold(targetId)
         }
         this.finalizeState()
@@ -839,9 +1036,29 @@ export default class PokerRoom implements PartyServer {
     }
 
     const targetName = this.data.playerNicknames[targetId] ?? this.getPlayer(targetId)?.nickname ?? 'That player'
-    delete this.data.pendingSpectators[targetId]
-    delete this.data.spectatorIds[targetId]
-    this.sendActionResult(conn, `${targetName} can rejoin the table.`)
+    const seatedPlayer = this.getPlayer(targetId)
+    if (seatedPlayer) {
+      delete this.data.pendingSpectators[targetId]
+      delete this.data.spectatorIds[targetId]
+      this.sendActionResult(conn, `${targetName} will remain seated for the next hand.`)
+      this.broadcastState()
+      return
+    }
+
+    const spectatorStack = Math.max(0, Math.floor(this.data.spectatorStacks[targetId] ?? 0))
+    if (spectatorStack <= 0) {
+      this.sendActionFailed(conn, 'Add chips before seating this player')
+      return
+    }
+
+    const seatIndex = this.findAvailableSeat()
+    if (seatIndex < 0) {
+      this.sendActionFailed(conn, 'Table is full')
+      return
+    }
+
+    this.seatPlayerAt(targetId, seatIndex)
+    this.sendActionResult(conn, `Seated ${targetName}.`)
     this.broadcastState()
   }
 
@@ -868,7 +1085,87 @@ export default class PokerRoom implements PartyServer {
     this.broadcastState()
   }
 
-  private handleTableChat(conn: Connection, message: string) {
+  private handleCardRevealRequest(conn: Connection, targetId: string) {
+    const requesterId = this.data.connectionToPlayer[conn.id]
+    if (!requesterId) {
+      this.sendActionFailed(conn, 'Join the room before requesting cards')
+      return
+    }
+
+    const state = this.data.gameState
+    const requester = this.getPlayer(requesterId)
+    const isCardRevealWindow = state.phase === 'in_hand' || (
+      state.phase === 'between_hands' && Boolean(state.winners?.length)
+    )
+    if (!isCardRevealWindow || requester?.status !== 'folded') {
+      this.sendActionFailed(conn, 'You can only request cards after folding in the current hand.')
+      return
+    }
+
+    const target = this.getPlayer(targetId)
+    if (
+      !target ||
+      target.id === requesterId ||
+      target.holeCards.length !== 2 ||
+      target.status === 'waiting' ||
+      target.status === 'sitting_out' ||
+      target.status === 'disconnected'
+    ) {
+      this.sendActionFailed(conn, 'That player cannot share cards right now.')
+      return
+    }
+
+    const key = this.cardRevealRequestKey(state.handNumber, requesterId, targetId)
+    const existing = this.data.cardRevealRequests[key]
+    if (existing) {
+      const message = existing.status === 'pending'
+        ? `Waiting for ${target.nickname} to answer.`
+        : existing.status === 'approved'
+          ? `${target.nickname} already shared their cards for this hand.`
+          : `${target.nickname} chose to keep their cards hidden this hand.`
+      this.sendActionFailed(conn, message)
+      return
+    }
+
+    const status = target.isBot ? 'approved' : 'pending'
+    this.data.cardRevealRequests[key] = {
+      requesterId,
+      targetId,
+      handNumber: state.handNumber,
+      status,
+    }
+    this.sendActionResult(conn)
+    this.broadcastState()
+  }
+
+  private handleCardRevealResponse(conn: Connection, requesterId: string, allow: boolean) {
+    const targetId = this.data.connectionToPlayer[conn.id]
+    if (!targetId) {
+      this.sendActionFailed(conn, 'Join the room before answering card requests')
+      return
+    }
+
+    const state = this.data.gameState
+    const key = this.cardRevealRequestKey(state.handNumber, requesterId, targetId)
+    const request = this.data.cardRevealRequests[key]
+    const isCardRevealWindow = state.phase === 'in_hand' || (
+      state.phase === 'between_hands' && Boolean(state.winners?.length)
+    )
+    if (!isCardRevealWindow || !request || request.status !== 'pending') {
+      this.sendActionFailed(conn, 'That card request is no longer active.')
+      return
+    }
+
+    request.status = allow ? 'approved' : 'denied'
+    this.sendActionResult(conn)
+    this.broadcastState()
+  }
+
+  private cardRevealRequestKey(handNumber: number, requesterId: string, targetId: string): string {
+    return `${handNumber}:${requesterId}:${targetId}`
+  }
+
+  private handleTableChat(conn: Connection, message: string, targetId?: string) {
     const playerId = this.data.connectionToPlayer[conn.id]
     if (!playerId) {
       this.sendActionFailed(conn, 'Join the room before chatting')
@@ -882,15 +1179,24 @@ export default class PokerRoom implements PartyServer {
     }
 
     const nickname = this.data.playerNicknames[playerId] ?? this.getPlayer(playerId)?.nickname ?? 'Player'
+    const normalizedTargetId = typeof targetId === 'string' && targetId.trim().length > 0
+      ? targetId.trim()
+      : undefined
+
+    if (normalizedTargetId && !this.isKnownPlayer(normalizedTargetId)) {
+      this.sendActionFailed(conn, 'That player is not available to receive a message')
+      return
+    }
 
     const now = Date.now()
     this.data.social.activeByPlayer[playerId] = {
       ...this.data.social.activeByPlayer[playerId],
       message: trimmed,
       messageExpiresAt: now + CHAT_BUBBLE_DURATION,
+      messageTargetPlayerId: normalizedTargetId,
     }
 
-    this.appendChatEntry(playerId, nickname, trimmed, now)
+    this.appendChatEntry(playerId, nickname, trimmed, now, normalizedTargetId)
 
     this.broadcastState()
   }
@@ -941,13 +1247,20 @@ export default class PokerRoom implements PartyServer {
     this.broadcastState()
   }
 
-  private appendChatEntry(playerId: string, nickname: string, message: string, createdAt: number) {
+  private appendChatEntry(
+    playerId: string,
+    nickname: string,
+    message: string,
+    createdAt: number,
+    targetPlayerId?: string
+  ) {
     this.data.social.chatLog.unshift({
       id: generateId(12),
       playerId,
       nickname,
       message,
       createdAt,
+      targetPlayerId,
     })
     this.data.social.chatLog = this.data.social.chatLog.slice(0, MAX_CHAT_HISTORY)
   }
@@ -1085,11 +1398,19 @@ export default class PokerRoom implements PartyServer {
 
   private finalizeState() {
     if (this.data.gameState.phase !== 'in_hand') {
+      this.applyPendingTableSettings()
       this.clearAutoFold()
       this.data.gameState.actionTimerStart = null
-      this.flushPendingRemovals()
-      this.flushPendingSpectators()
-      this.moveZeroStackPlayersToSpectators()
+      const isPostHandRevealWindow = (
+        this.data.gameState.phase === 'between_hands' &&
+        Boolean(this.data.gameState.winners?.length)
+      )
+      if (!isPostHandRevealWindow) {
+        this.data.cardRevealRequests = {}
+        this.flushPendingRemovals()
+        this.flushPendingSpectators()
+        this.moveZeroStackPlayersToSpectators()
+      }
 
       for (const player of this.data.gameState.players) {
         if (!player.isConnected) {
@@ -1154,47 +1475,110 @@ export default class PokerRoom implements PartyServer {
     }
   }
 
-  private selectNextHost(): string | null {
-    const joinedIds = new Set(Object.keys(this.data.playerNicknames))
-    const seatedIds = this.data.gameState.players.map(player => player.id)
+  private selectNextHost(excludedPlayerId?: string): string | null {
+    const joinedIds = new Set(
+      Object.keys(this.data.playerNicknames).filter(playerId => playerId !== excludedPlayerId)
+    )
+    const seatedIds = this.data.gameState.players
+      .map(player => player.id)
+      .filter(playerId => playerId !== excludedPlayerId)
     const connectedIds = Object.keys(this.data.playerToConnection).filter(
-      playerId => joinedIds.has(playerId) && !this.isBotPlayer(playerId)
+      playerId => joinedIds.has(playerId) && playerId !== excludedPlayerId && !this.isBotPlayer(playerId)
     )
 
     const preferredOrder = [
       ...seatedIds.filter(playerId => connectedIds.includes(playerId)),
       ...connectedIds.filter(playerId => !seatedIds.includes(playerId)),
       ...seatedIds.filter(playerId => joinedIds.has(playerId)),
-      ...Object.keys(this.data.playerNicknames).filter(playerId => !seatedIds.includes(playerId)),
+      ...Object.keys(this.data.playerNicknames).filter(
+        playerId => joinedIds.has(playerId) && !seatedIds.includes(playerId)
+      ),
     ]
 
     return preferredOrder[0] ?? null
   }
 
+  private scheduleDisconnectedHostTransfer(playerId: string) {
+    this.cancelDisconnectedHostTransfer()
+    this.disconnectedHostId = playerId
+    this.hostTransferTimeout = setTimeout(() => {
+      this.hostTransferTimeout = null
+      this.disconnectedHostId = null
+
+      if (this.data.hostId !== playerId || this.data.playerToConnection[playerId]) {
+        return
+      }
+
+      this.data.hostId = this.selectNextHost(playerId)
+      this.finalizeState()
+      this.broadcastState()
+    }, HOST_DISCONNECT_GRACE_MS)
+  }
+
+  private cancelDisconnectedHostTransfer(playerId?: string) {
+    if (playerId && this.disconnectedHostId !== playerId) {
+      return
+    }
+
+    if (this.hostTransferTimeout) {
+      clearTimeout(this.hostTransferTimeout)
+    }
+    this.hostTransferTimeout = null
+    this.disconnectedHostId = null
+  }
+
   private buildSnapshotFor(connId: string): Extract<S2CMessage, { type: 'room_snapshot' }> {
     const playerId = this.data.connectionToPlayer[connId] ?? ''
-    const spectatorCanSeeAllHands = Boolean(
+    const isSpectatorViewer = Boolean(
       playerId && (this.data.spectatorIds[playerId] || this.data.pendingSpectators[playerId])
     )
-
+    const spectatorCanSeeLiveHands = (
+      isSpectatorViewer && this.data.gameState.phase === 'in_hand'
+    )
+    const isCardRevealWindow = this.data.gameState.phase === 'in_hand' || (
+      this.data.gameState.phase === 'between_hands' && Boolean(this.data.gameState.winners?.length)
+    )
+    const currentCardRevealRequests = isCardRevealWindow
+      ? Object.values(this.data.cardRevealRequests).filter(request => (
+          request.handNumber === this.data.gameState.handNumber &&
+          (request.requesterId === playerId || request.targetId === playerId)
+        ))
+      : []
+    const permittedHoleCardPlayerIds = spectatorCanSeeLiveHands
+      ? this.data.gameState.players.map(player => player.id)
+      : currentCardRevealRequests
+          .filter(request => request.requesterId === playerId && request.status === 'approved')
+          .map(request => request.targetId)
     const publicState = withVisibleHandOdds(
-      toTableState(this.data.gameState, playerId, {
-        revealAllHoleCards: spectatorCanSeeAllHands,
-      })
+      toTableState(this.data.gameState, playerId, { permittedHoleCardPlayerIds })
     )
     const winners = publicState.winners?.map(winner => ({
       ...winner,
       venmoUsername: this.data.playerProfiles[winner.playerId]?.venmoUsername,
     }))
+    const pendingTableSettings = this.data.pendingTableSettings
+      ? {
+          smallBlind: this.data.pendingTableSettings.smallBlind ?? this.data.tableSettings.smallBlind,
+          bigBlind: this.data.pendingTableSettings.bigBlind ?? this.data.tableSettings.bigBlind,
+          startingStack: this.data.pendingTableSettings.startingStack ?? this.data.tableSettings.startingStack,
+          actionTimerDuration: this.data.pendingTableSettings.actionTimerDuration ?? this.data.tableSettings.actionTimerDuration,
+          autoStartDelay: this.data.pendingTableSettings.autoStartDelay ?? this.data.tableSettings.autoStartDelay,
+          rabbitHuntingEnabled: this.data.pendingTableSettings.rabbitHuntingEnabled ?? this.data.tableSettings.rabbitHuntingEnabled,
+          sevenTwoRuleEnabled: this.data.pendingTableSettings.sevenTwoRuleEnabled ?? this.data.tableSettings.sevenTwoRuleEnabled,
+          sevenTwoBountyPercent: this.data.pendingTableSettings.sevenTwoBountyPercent ?? this.data.tableSettings.sevenTwoBountyPercent,
+        }
+      : undefined
 
     return {
       type: 'room_snapshot',
       state: {
         ...publicState,
+        cardRevealRequests: currentCardRevealRequests,
         players: publicState.players.map(player => this.withPublicPlayerMetadata(player)),
         winners,
         autoStartEnabled: true,
         autoStartDelay: this.data.tableSettings.autoStartDelay,
+        pendingTableSettings,
         lobbyPlayers: this.buildLobbyPlayers(),
       },
     }
@@ -1225,6 +1609,7 @@ export default class PokerRoom implements PartyServer {
         return {
           id,
           nickname: seatedPlayer?.nickname ?? this.data.playerNicknames[id] ?? 'Player',
+          avatar: this.data.playerProfiles[id]?.avatar,
           venmoUsername: this.data.playerProfiles[id]?.venmoUsername,
           stats: this.getPublicStats(id),
           stack: seatedPlayer?.stack ?? this.data.spectatorStacks[id] ?? 0,
@@ -1263,20 +1648,24 @@ export default class PokerRoom implements PartyServer {
   private withPublicPlayerMetadata(player: SeatPlayer): SeatPlayer {
     return {
       ...player,
+      avatar: this.data.playerProfiles[player.id]?.avatar,
       venmoUsername: this.data.playerProfiles[player.id]?.venmoUsername,
       stats: this.getPublicStats(player.id),
     }
   }
 
   private ensureStats(statsKey: string): TrackedPlayerStats {
-    this.data.statsByEmail[statsKey] ??= {
+    const normalizedKey = statsKey.startsWith('bot:')
+      ? statsKey
+      : normalizePlayerUsername(statsKey)
+    this.data.statsByUsername[normalizedKey] ??= {
       handsPlayed: 0,
       folds: 0,
       wins: 0,
       totalWon: 0,
     }
 
-    return this.data.statsByEmail[statsKey]!
+    return this.data.statsByUsername[normalizedKey]!
   }
 
   private getPlayerStatsKey(playerId: string): string | undefined {
@@ -1284,7 +1673,7 @@ export default class PokerRoom implements PartyServer {
       return `bot:${playerId}`
     }
 
-    return this.data.playerProfiles[playerId]?.email
+    return this.data.playerNicknames[playerId]
   }
 
   private ensurePlayerStats(playerId: string): TrackedPlayerStats | undefined {
@@ -1417,6 +1806,7 @@ export default class PokerRoom implements PartyServer {
 
   private broadcastState() {
     this.finalizeState()
+    this.syncRunItTwiceVote()
     const socialSnapshot = this.buildSocialSnapshotMessage()
 
     for (const conn of Array.from(this.room.getConnections())) {
@@ -1570,6 +1960,59 @@ export default class PokerRoom implements PartyServer {
     this.botActionPlayerId = null
   }
 
+  private syncRunItTwiceVote() {
+    const runItTwice = this.data.gameState.runItTwice
+    if (
+      runItTwice?.status !== 'voting' ||
+      !runItTwice.expiresAt
+    ) {
+      this.clearRunItTwiceVoteTimeout()
+      return
+    }
+
+    if (
+      this.runItTwiceTimeout &&
+      this.runItTwiceDeadline === runItTwice.expiresAt
+    ) {
+      return
+    }
+
+    this.clearRunItTwiceVoteTimeout()
+    this.runItTwiceDeadline = runItTwice.expiresAt
+    const remainingMs = Math.max(0, runItTwice.expiresAt - Date.now())
+    void this.room.storage.setAlarm(runItTwice.expiresAt)
+    this.runItTwiceTimeout = setTimeout(() => {
+      this.runItTwiceTimeout = null
+      this.runItTwiceDeadline = null
+      this.expireRunItTwiceVote()
+    }, remainingMs)
+  }
+
+  private expireRunItTwiceVote() {
+    if (this.data.gameState.runItTwice?.status !== 'voting') {
+      return
+    }
+
+    try {
+      this.data.gameState = resolveRunItTwiceDecision(this.data.gameState, false)
+      this.recordCompletedHandStats()
+      this.finalizeState()
+      this.syncActionTimer()
+      this.broadcastState()
+    } catch {
+      this.finalizeState()
+    }
+  }
+
+  private clearRunItTwiceVoteTimeout() {
+    if (this.runItTwiceTimeout) {
+      clearTimeout(this.runItTwiceTimeout)
+    }
+
+    this.runItTwiceTimeout = null
+    this.runItTwiceDeadline = null
+  }
+
   private chooseBotAction(playerId: string): {
     action: 'fold' | 'check' | 'call' | 'raise' | 'all_in'
     amount?: number
@@ -1636,6 +2079,12 @@ export default class PokerRoom implements PartyServer {
       return false
     }
 
+    // The creator must explicitly start the game. Auto-deal only owns the
+    // transition between hands after hand #1 has begun.
+    if (this.data.gameState.handNumber <= 0) {
+      return false
+    }
+
     if (this.data.gameState.phase === 'in_hand') {
       return false
     }
@@ -1668,6 +2117,14 @@ export default class PokerRoom implements PartyServer {
       }
 
       try {
+        this.flushPendingRemovals()
+        this.flushPendingSpectators()
+        this.moveZeroStackPlayersToSpectators()
+        if (!this.shouldAutoStartNow()) {
+          this.broadcastState()
+          return
+        }
+        this.data.cardRevealRequests = {}
         this.data.gameState = startHand(this.data.gameState)
         this.recordHandsPlayedForCurrentHand()
         this.clearAutoFold()
@@ -1676,7 +2133,55 @@ export default class PokerRoom implements PartyServer {
       } catch {
         this.syncAutoStart()
       }
-    }, this.data.tableSettings.autoStartDelay)
+    }, this.getAutoStartDelayMs())
+  }
+
+  private getAutoStartDelayMs(): number {
+    const configuredDelay = this.data.tableSettings.autoStartDelay
+    const state = this.data.gameState
+
+    if (!isTrueShowdown(state) || !state.showdownAt) {
+      return configuredDelay
+    }
+
+    const presentationDuration = this.getShowdownPresentationDurationMs()
+    const elapsed = Math.max(0, Date.now() - state.showdownAt)
+
+    return Math.max(0, Math.max(configuredDelay, presentationDuration) - elapsed)
+  }
+
+  private getShowdownRemainingDurationMs(): number {
+    const state = this.data.gameState
+    if (!isTrueShowdown(state) || !state.showdownAt) {
+      return 0
+    }
+
+    const presentationDuration = this.getShowdownPresentationDurationMs()
+    const elapsed = Math.max(0, Date.now() - state.showdownAt)
+    return Math.max(0, presentationDuration - elapsed)
+  }
+
+  private getShowdownParticipantCount(): number {
+    const state = this.data.gameState
+    const eligiblePlayerIds = new Set(state.pots.flatMap(pot => pot.eligiblePlayerIds))
+    return state.players.filter(player => (
+      player.holeCards.length === 2 &&
+      (
+        eligiblePlayerIds.has(player.id) ||
+        player.status === 'active' ||
+        player.status === 'all_in'
+      )
+    )).length
+  }
+
+  private getShowdownPresentationDurationMs(): number {
+    const standardDuration = getShowdownMinimumDurationMs(
+      this.getShowdownParticipantCount()
+    )
+
+    return this.data.gameState.runItTwice?.status === 'accepted'
+      ? Math.max(standardDuration, RUN_IT_TWICE_PRESENTATION_DURATION_MS)
+      : standardDuration
   }
 
   private clearAutoStart() {
@@ -1696,6 +2201,7 @@ export default class PokerRoom implements PartyServer {
       if (social.message && social.messageExpiresAt && social.messageExpiresAt > now) {
         nextState.message = social.message
         nextState.messageExpiresAt = social.messageExpiresAt
+        nextState.messageTargetPlayerId = social.messageTargetPlayerId
       }
 
       if (social.emote && social.emoteExpiresAt && social.emoteExpiresAt > now) {

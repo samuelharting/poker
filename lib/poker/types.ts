@@ -1,3 +1,5 @@
+import type { PlayerAvatarCustomization } from '../profile'
+
 export type Suit = 'spades' | 'hearts' | 'diamonds' | 'clubs'
 export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | 'T' | 'J' | 'Q' | 'K' | 'A'
 
@@ -28,6 +30,15 @@ export interface HandResult {
 
 export type ShowCardsMode = 'none' | 'left' | 'right' | 'both'
 
+export type CardRevealRequestStatus = 'pending' | 'approved' | 'denied'
+
+export interface CardRevealRequest {
+  requesterId: string
+  targetId: string
+  handNumber: number
+  status: CardRevealRequestStatus
+}
+
 export type PlayerStatus = 'waiting' | 'active' | 'folded' | 'all_in' | 'sitting_out' | 'disconnected'
 export type BettingRound = 'preflop' | 'flop' | 'turn' | 'river' | 'showdown'
 export type GamePhase = 'waiting' | 'in_hand' | 'between_hands'
@@ -52,6 +63,7 @@ export interface PlayerStats {
 export interface SeatPlayer {
   id: string
   nickname: string
+  avatar?: PlayerAvatarCustomization
   isBot?: boolean
   venmoUsername?: string
   stats?: PlayerStats
@@ -78,9 +90,35 @@ export interface Pot {
   eligiblePlayerIds: string[]
 }
 
+export interface HandWinner {
+  playerId: string
+  amount: number
+  handDescription?: string
+  winningCards?: Card[]
+  venmoUsername?: string
+}
+
+export type RunItTwiceVote = 'yes' | 'no'
+
+export interface RunItTwiceBoard {
+  cards: Card[]
+  winners: HandWinner[]
+}
+
+export interface RunItTwiceState {
+  status: 'voting' | 'declined' | 'accepted'
+  eligiblePlayerIds: string[]
+  votes: Record<string, RunItTwiceVote>
+  sharedCardCount?: number
+  expiresAt?: number
+  startedAt?: number
+  boards?: RunItTwiceBoard[]
+}
+
 export interface LobbyPlayer {
   id: string
   nickname: string
+  avatar?: PlayerAvatarCustomization
   venmoUsername?: string
   stats?: PlayerStats
   stack: number
@@ -89,6 +127,17 @@ export interface LobbyPlayer {
   isBot?: boolean
   isSeated: boolean
   isSpectator: boolean
+}
+
+export interface TableSettingsSnapshot {
+  smallBlind: number
+  bigBlind: number
+  startingStack: number
+  actionTimerDuration: number
+  autoStartDelay: number
+  rabbitHuntingEnabled: boolean
+  sevenTwoRuleEnabled: boolean
+  sevenTwoBountyPercent: number
 }
 
 export interface TableState {
@@ -114,11 +163,15 @@ export interface TableState {
   rabbitHuntingEnabled: boolean
   sevenTwoRuleEnabled: boolean
   sevenTwoBountyPercent: number
+  pendingTableSettings?: TableSettingsSnapshot
   handNumber: number
   actionSequence?: number
+  showdownAt?: number
+  runItTwice?: RunItTwiceState
+  cardRevealRequests?: CardRevealRequest[]
   recentActions: string[]
   lobbyPlayers: LobbyPlayer[]
-  winners?: Array<{ playerId: string; amount: number; handDescription?: string; venmoUsername?: string }>
+  winners?: HandWinner[]
   bounty?: BountyMetadata
 }
 
@@ -153,7 +206,9 @@ export interface InternalGameState {
   sevenTwoBountyPercent: number
   handNumber: number
   actionSequence?: number
+  showdownAt?: number
+  runItTwice?: RunItTwiceState
   recentActions: string[]
-  winners?: Array<{ playerId: string; amount: number; handDescription?: string; venmoUsername?: string }>
+  winners?: HandWinner[]
   bounty?: BountyMetadata
 }

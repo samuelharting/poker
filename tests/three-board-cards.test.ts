@@ -22,24 +22,53 @@ describe('desktop 3D board cards', () => {
 
   it('marks the table scene when the desktop 3D layer is active', () => {
     expect(table).toContain("data-desktop-three={threeTableView ? 'true' : 'false'}")
-    expect(table).toContain('<CommunityCards cards={state.communityCards} />')
+    expect(table).toContain('highlightedCards={highlightedWinningCards}')
   })
 
   it('removes the duplicate turn banner when the desktop 3D layer is active', () => {
     expect(table).toContain('{isInHand && actingPlayer && !threeTableView && !isMobileViewport && (')
   })
 
-  it('renders spectator-visible player cards inside the desktop 3D seat props', () => {
-    expect(renderer).toContain('<OpponentHoleCards3D cards={player.visibleCards}')
-    expect(renderer).toContain('function OpponentHoleCardFace')
-    expect(renderer).toContain('const hasVisibleFaces = cards.some(card => card.visible)')
+  it('renders spectator-visible player cards inside the desktop seat layer', () => {
+    expect(renderer).toContain("player.isHero ? 'is-local-player' : ''")
+    expect(renderer).toContain('!player.isOutOfHand || player.visibleCards.length > 0')
+    expect(renderer).toContain('player.visibleCards.length > 0')
+    expect(renderer).toContain('getThreeVisibleCardSlots(player.showCards, player.visibleCards)')
+    expect(renderer).toContain('<CinematicCardSlot card={slots.left} side="left" />')
+    expect(renderer).toContain('<CinematicCardSlot card={slots.right} side="right" />')
+    expect(renderer).toContain('aria-label={`${card.rank} of ${card.suit}`}')
+    expect(renderer).toContain('className={`is-face is-${card.suit} is-${side}`}')
+    expect(renderer).toContain('keepFoldedCardsVisible: player.visibleCards.length > 0')
+    expect(renderer).toContain('seat.cards.visible = seat.keepFoldedCardsVisible || (')
   })
 
-  it('keeps 3D pot and wager chip stacks off the table surface', () => {
-    expect(renderer).not.toContain('<DealerChipArea')
-    expect(renderer).not.toContain('<HeroChips')
-    expect(renderer).not.toContain('<CommittedWagerChips')
-    expect(renderer).not.toContain('ref={chipPushRef}')
-    expect(renderer).not.toContain('{player.bet > 0 && !isHero && (')
+  it('places folded-viewer card requests beside each 3D opponent hand', () => {
+    expect(table).toContain('cardRevealActions={cardRevealActions}')
+    expect(renderer).toContain('cardRevealActions.find(action => action.playerId === player.id)')
+    expect(renderer).toContain('className={`card-reveal-seat-button cinematic-card-reveal-control')
+    expect(renderer).toContain('onClick={() => onRequestCardReveal(player.id)}')
+    expect(renderer).toContain('player.visibleCards.length > 0 || cardRevealAction')
+  })
+
+  it('renders persistent world-space wager stacks and a physical pot mound', () => {
+    expect(renderer).toContain('function syncWagers')
+    expect(renderer).toContain('getTableWagerAnchor')
+    expect(renderer).toContain('getTableWagerStartPoint')
+    expect(renderer).toContain('interpolateWagerArc')
+    expect(renderer).toContain('committed-wager-')
+    expect(renderer).toContain('table-pot-chip-mound')
+    expect(renderer).toContain('view.collectedPot')
+    expect(renderer).toContain("view.phase === 'in_hand'")
+    expect(renderer).toContain('data-table-wager-count')
+    expect(renderer).toContain('data-pot-amount')
+  })
+
+  it('shares chip geometry and merges stripe details to control draw calls', () => {
+    expect(renderer).toContain("import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'")
+    expect(renderer).toContain('const chipBodyGeometry = new THREE.CylinderGeometry')
+    expect(renderer).toContain('const chipDetailGeometry = mergeGeometries(detailParts, false)')
+    expect(renderer).toContain('chipDetail.castShadow = false')
+    expect(renderer).toContain('chipBodyGeometry,')
+    expect(renderer).toContain('chipDetailGeometry,')
   })
 })

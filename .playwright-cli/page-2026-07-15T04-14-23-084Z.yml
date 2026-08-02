@@ -1,0 +1,80 @@
+- generic [active] [ref=f3e1]:
+  - button "Open Next.js Dev Tools" [ref=f3e72] [cursor=pointer]
+  - alert [ref=f3e76]
+  - generic [ref=f3e215]:
+    - generic [ref=f3e216]:
+      - generic [ref=f3e217]:
+        - generic [ref=f3e218]: Poker Night
+        - generic [ref=f3e219]: RoomGBVNHQ
+      - generic [ref=f3e220]:
+        - button "Unmute table sounds" [pressed] [ref=f3e221] [cursor=pointer]:
+          - generic [ref=f3e226]: Muted
+        - button "Open settings" [ref=f3e407] [cursor=pointer]:
+          - generic [ref=f3e235]: Settings
+    - generic [ref=f3e236]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [ref=f3e237] [cursor=pointer]:
+            - generic [ref=f3e244]:
+              - generic [ref=f3e245]:
+                - strong [ref=f3e246]: Bot Maverick
+                - emphasis [ref=f3e247]: BB
+              - generic [ref=f3e248]:
+                - generic [ref=f3e249]: $1,030
+                - generic [ref=f3e453]: Acting
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "2 of diamonds":
+                    - generic:
+                      - generic: "2"
+                      - generic: "2"
+              - generic:
+                - generic:
+                  - generic "Q of clubs":
+                    - generic:
+                      - generic: Q
+                      - generic: Q
+              - generic:
+                - generic:
+                  - generic "2 of clubs":
+                    - generic:
+                      - generic: "2"
+                      - generic: "2"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=f3e252]:
+              - generic [ref=f3e253]: Pot
+              - generic [ref=f3e254]: $40
+          - status "ShowdownQA, chips $930":
+            - generic: ShowdownQA
+            - generic: $930
+          - 'generic "Your hand: Pair of Twos"':
+            - status:
+              - generic: Pair of Twos
+            - generic:
+              - generic:
+                - generic:
+                  - generic "7 of clubs":
+                    - generic:
+                      - generic: "7"
+                      - generic: "7"
+              - generic:
+                - generic:
+                  - generic "A of clubs":
+                    - generic:
+                      - generic: A
+                      - generic: A
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f3e408] [cursor=pointer]:
+          - generic [ref=f3e409]: ♣
+          - strong [ref=f3e410]: Table talk

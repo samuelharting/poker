@@ -1,0 +1,42 @@
+- generic [ref=f2e1]:
+  - generic [ref=f2e19]:
+    - generic [ref=f2e21]:
+      - button "Open table menu" [ref=f2e22] [cursor=pointer]
+      - generic [ref=f2e25]:
+        - generic [ref=f2e26]: NL Hold'em
+        - generic [ref=f2e30]: $10 / $20
+      - button "Open settings" [ref=f2e31] [cursor=pointer]
+    - generic "Table notifications":
+      - status [ref=f2e72]:
+        - generic [ref=f2e73]: Added 1 bot
+        - button "Dismiss notification" [ref=f2e74] [cursor=pointer]: x
+    - generic [ref=f2e39]:
+      - region "Mobile poker field" [ref=f2e41]:
+        - generic "Players":
+          - generic [ref=f2e43]:
+            - button "Target FinalHost for emojis" [ref=f2e44] [cursor=pointer]: "5"
+            - generic [ref=f2e45]:
+              - button "FinalHost" [ref=f2e46] [cursor=pointer]
+              - generic [ref=f2e47]: $1,000
+          - generic [ref=f2e76]:
+            - button "Target Bot Maverick for emojis" [ref=f2e77] [cursor=pointer]: "6"
+            - generic [ref=f2e78]:
+              - button "Maverick" [ref=f2e79] [cursor=pointer]
+              - generic [ref=f2e80]: $1,000
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f2e48] [cursor=pointer]:
+          - generic [ref=f2e49]: ♣
+      - generic [ref=f2e50]:
+        - generic [ref=f2e51]:
+          - generic [ref=f2e52]: Table controls
+          - generic [ref=f2e53]: The table is ready. Deal whenever everyone looks settled.
+          - generic [ref=f2e54]:
+            - generic [ref=f2e55]: 2 seated
+            - generic [ref=f2e56]: Stack $1,000
+        - generic [ref=f2e57]: Anyone at the table can deal as soon as the table is ready.
+        - generic [ref=f2e58]:
+          - button "Add bot" [active] [ref=f2e59] [cursor=pointer]
+          - button "Fill seats" [ref=f2e60] [cursor=pointer]
+        - button "Start game" [ref=f2e61] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f2e67] [cursor=pointer]
+  - alert [ref=f2e71]

@@ -1,0 +1,151 @@
+- generic [ref=f6e1]:
+  - generic [ref=f6e19]:
+    - generic [ref=f6e613]:
+      - button "Open table menu" [ref=f6e614] [cursor=pointer]
+      - generic [ref=f6e617]:
+        - generic [ref=f6e618]: NL Hold'em
+        - generic [ref=f6e622]: $10 / $20
+      - button "Open settings" [ref=f6e623] [cursor=pointer]
+    - generic [ref=f6e35]:
+      - region "Mobile poker field" [ref=f6e736]:
+        - generic:
+          - generic:
+            - generic:
+              - generic: Pot
+              - generic: $50
+          - generic "Board cards":
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+        - generic "Players":
+          - generic [ref=f6e738]:
+            - button "Target Bot River for emojis" [ref=f6e739] [cursor=pointer]: "8"
+            - generic [ref=f6e740]:
+              - generic "Hidden card" [ref=f6e741]
+              - generic "Hidden card" [ref=f6e742]
+            - generic [ref=f6e743]:
+              - button "River" [ref=f6e744] [cursor=pointer]
+              - generic [ref=f6e745]: $3,650
+          - generic [ref=f6e747]:
+            - button "Target Bot Bluff for emojis" [ref=f6e748] [cursor=pointer]: "1"
+            - generic [ref=f6e749]:
+              - generic "Hidden card" [ref=f6e750]
+              - generic "Hidden card" [ref=f6e751]
+            - generic [ref=f6e752]:
+              - button "Bluff" [ref=f6e753] [cursor=pointer]
+              - generic [ref=f6e754]: $650
+          - generic [ref=f6e756]:
+            - button "Target Bot Dealer Dan for emojis" [ref=f6e757] [cursor=pointer]: "2"
+            - generic [ref=f6e758]:
+              - generic "Hidden card" [ref=f6e759]
+              - generic "Hidden card" [ref=f6e760]
+            - generic [ref=f6e761]:
+              - button "Dealer Dan" [ref=f6e762] [cursor=pointer]
+              - generic [ref=f6e763]: $2,880
+        - generic:
+          - generic:
+            - generic: "5"
+            - generic: D
+            - generic: You
+            - generic: $770
+          - 'generic "Your hand: Pair of Kings"':
+            - generic:
+              - generic:
+                - generic:
+                  - generic "K of clubs":
+                    - generic:
+                      - generic: K
+                      - generic: K
+              - generic:
+                - generic:
+                  - generic "K of hearts":
+                    - generic:
+                      - generic: K
+                      - generic: K
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f6e608] [cursor=pointer]:
+          - generic [ref=f6e609]: ♣
+          - emphasis [ref=f6e611]: "1"
+      - generic [ref=f6e812]:
+        - generic [ref=f6e813]:
+          - generic [ref=f6e814]:
+            - button "1/4" [ref=f6e815] [cursor=pointer]
+            - button "1/2" [ref=f6e816] [cursor=pointer]
+          - generic [ref=f6e817]: $100
+          - generic [ref=f6e818]:
+            - button "Pot" [ref=f6e819] [cursor=pointer]
+            - button "All In" [ref=f6e820] [cursor=pointer]
+        - generic [ref=f6e821]:
+          - button "Decrease bet" [ref=f6e822] [cursor=pointer]: −
+          - generic [ref=f6e823]:
+            - slider [ref=f6e824]: "100"
+            - generic [ref=f6e825]: 5 BB
+          - button "Increase bet" [ref=f6e826] [cursor=pointer]: +
+        - generic [ref=f6e827]:
+          - button "FOLD" [ref=f6e828] [cursor=pointer]
+          - button "CHECK / CALL $20" [ref=f6e830] [cursor=pointer]:
+            - generic [ref=f6e831]: CHECK / CALL
+            - strong [ref=f6e832]: $20
+          - button "BET / RAISE $100" [ref=f6e833] [cursor=pointer]:
+            - generic [ref=f6e834]: BET / RAISE
+            - strong [ref=f6e835]: $100
+      - complementary "Emoji reactions for Bot River" [ref=f6e786]:
+        - generic [ref=f6e787]:
+          - generic [ref=f6e788]:
+            - generic [ref=f6e789]: Opponent
+            - generic [ref=f6e790]: Send to Bot River
+          - button "Close target emote panel" [ref=f6e791] [cursor=pointer]: x
+        - button "Hide picker" [ref=f6e836] [cursor=pointer]
+        - complementary [ref=f6e838]:
+          - generic [ref=f6e839]:
+            - generic [ref=f6e840]:
+              - textbox "Type to search for an emoji" [active] [ref=f6e842]:
+                - /placeholder: Search emojis for Bot River
+              - generic [ref=f6e845]:
+                - button "Skin tone NEUTRAL" [pressed] [ref=f6e846] [cursor=pointer]
+                - button "Skin tone LIGHT" [ref=f6e847] [cursor=pointer]
+                - button "Skin tone MEDIUM_LIGHT" [ref=f6e848] [cursor=pointer]
+                - button "Skin tone MEDIUM" [ref=f6e849] [cursor=pointer]
+                - button "Skin tone MEDIUM_DARK" [ref=f6e850] [cursor=pointer]
+                - button "Skin tone DARK" [ref=f6e851] [cursor=pointer]
+            - tablist "Category navigation" [ref=f6e852]:
+              - tab "Frequently Used" [ref=f6e853] [cursor=pointer]
+              - tab "Smileys & People" [ref=f6e854] [cursor=pointer]
+              - tab "Animals & Nature" [ref=f6e855] [cursor=pointer]
+              - tab "Food & Drink" [ref=f6e856] [cursor=pointer]
+              - tab "Travel & Places" [ref=f6e857] [cursor=pointer]
+              - tab "Activities" [ref=f6e858] [cursor=pointer]
+              - tab "Objects" [ref=f6e859] [cursor=pointer]
+              - tab "Symbols" [ref=f6e860] [cursor=pointer]
+              - tab "Flags" [ref=f6e861] [cursor=pointer]
+          - list [ref=f6e863]:
+            - listitem "Smileys & People" [ref=f6e864]:
+              - heading "Smileys & People" [level=2] [ref=f6e865]
+            - listitem "Animals & Nature" [ref=f6e867]:
+              - heading "Animals & Nature" [level=2] [ref=f6e868]
+            - listitem "Food & Drink" [ref=f6e870]:
+              - heading "Food & Drink" [level=2] [ref=f6e871]
+            - listitem "Travel & Places" [ref=f6e873]:
+              - heading "Travel & Places" [level=2] [ref=f6e874]
+            - listitem "Activities" [ref=f6e876]:
+              - heading "Activities" [level=2] [ref=f6e877]
+            - listitem "Objects" [ref=f6e879]:
+              - heading "Objects" [level=2] [ref=f6e880]
+            - listitem "Symbols" [ref=f6e882]:
+              - heading "Symbols" [level=2] [ref=f6e883]
+            - listitem "Flags" [ref=f6e885]:
+              - heading "Flags" [level=2] [ref=f6e886]
+  - button "Open Next.js Dev Tools" [ref=f6e123] [cursor=pointer]
+  - alert [ref=f6e127]

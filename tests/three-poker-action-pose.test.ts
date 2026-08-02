@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   ACTION_ANIMATION_DURATION_MS,
+  derivePokerActionVariant,
+  deriveWagerIntensity,
   getHeroCardActionPose,
   getHeroChipActionPose,
   getHeroHandActionPose,
   getOpponentTableActionPose,
+  getPokerActionMotionProfile,
   getSeatedAvatarActionPose,
 } from '@/components/three/pokerActionPose'
 
@@ -165,6 +168,114 @@ describe('desktop 3D poker action pose animation', () => {
     expect(allIn.hand.position[2]).toBeLessThan(call.hand.position[2] - 0.08)
     expect(allIn.chipPush.position[2]).toBeLessThan(call.chipPush.position[2] - 0.12)
     expect(allIn.chipPush.opacity).toBeGreaterThanOrEqual(call.chipPush.opacity)
+  })
+
+  it('derives stable three-way action variants from action and player identity', () => {
+    const first = derivePokerActionVariant('hand-8:turn-14', 'player-a')
+    const repeated = derivePokerActionVariant('hand-8:turn-14', 'player-a')
+    const discoveredVariants = new Set(
+      Array.from({ length: 30 }, (_, index) => (
+        derivePokerActionVariant(`action-${index}`, `player-${index % 5}`)
+      ))
+    )
+
+    expect(first).toBe(repeated)
+    expect([...discoveredVariants].sort()).toEqual([0, 1, 2])
+    expect(derivePokerActionVariant()).toBe(0)
+  })
+
+  it('maps the three variants to distinct fold, check, and wager personalities', () => {
+    expect(getPokerActionMotionProfile('fold', { variant: 0 })).toMatchObject({
+      foldStyle: 'slide',
+      checkStyle: 'single',
+      wagerStyle: 'slide',
+    })
+    expect(getPokerActionMotionProfile('check', { variant: 1 })).toMatchObject({
+      foldStyle: 'snap',
+      checkStyle: 'double',
+      wagerStyle: 'flick',
+    })
+    expect(getPokerActionMotionProfile('raise', { variant: 2 })).toMatchObject({
+      foldStyle: 'toss',
+      checkStyle: 'knuckle',
+      wagerStyle: 'shove',
+    })
+  })
+
+  it('turns fold variants into a slide, snap, or airborne toss', () => {
+    const slide = getHeroCardActionPose('fold', 360, { variant: 0 })
+    const snap = getHeroCardActionPose('fold', 360, { variant: 1 })
+    const toss = getHeroCardActionPose('fold', 360, { variant: 2 })
+    const opponentSlide = getOpponentTableActionPose('fold', 430, { variant: 0 })
+    const opponentToss = getOpponentTableActionPose('fold', 430, { variant: 2 })
+
+    expect(snap.position[0]).toBeLessThan(slide.position[0] - 0.18)
+    expect(snap.position[2]).toBeLessThan(slide.position[2] - 0.15)
+    expect(toss.position[1]).toBeGreaterThan(slide.position[1] + 0.12)
+    expect(toss.rotation[2]).toBeLessThan(slide.rotation[2] - 0.55)
+    expect(opponentToss.cards.position[1]).toBeGreaterThan(opponentSlide.cards.position[1] + 0.1)
+  })
+
+  it('adds a readable second tap and a heavier knuckle check', () => {
+    const singleLate = getHeroHandActionPose('check', 'right', 525, { variant: 0 })
+    const doubleLate = getHeroHandActionPose('check', 'right', 525, { variant: 1 })
+    const singleTap = getOpponentTableActionPose('check', 250, { variant: 0 })
+    const knuckleTap = getOpponentTableActionPose('check', 250, { variant: 2 })
+    const doubleAvatar = getSeatedAvatarActionPose('check', 525, { variant: 1 })
+
+    expect(singleLate.position[1]).toBeGreaterThan(0)
+    expect(doubleLate.position[1]).toBeLessThan(-0.045)
+    expect(knuckleTap.hand.position[1]).toBeLessThan(singleTap.hand.position[1] - 0.012)
+    expect(knuckleTap.hand.rotation[0]).toBeGreaterThan(singleTap.hand.rotation[0] + 0.035)
+    expect(doubleAvatar.armPosition[1]).toBeLessThan(-0.035)
+  })
+
+  it('differentiates flick, slide, and shove wagers while scaling their commitment', () => {
+    const slide = getHeroChipActionPose('bet', 520, { variant: 0, wagerIntensity: 0.5 })
+    const flick = getHeroChipActionPose('bet', 520, { variant: 1, wagerIntensity: 0.5 })
+    const shove = getHeroChipActionPose('bet', 520, { variant: 2, wagerIntensity: 0.5 })
+    const tinyCall = getHeroHandActionPose('call', 'right', 560, { variant: 0, wagerIntensity: 0 })
+    const hugeCall = getHeroHandActionPose('call', 'right', 560, { variant: 0, wagerIntensity: 1 })
+
+    expect(flick.rotation[1]).toBeGreaterThan(slide.rotation[1] + 2)
+    expect(shove.position[0]).toBeLessThan(slide.position[0] - 0.2)
+    expect(shove.position[2]).toBeLessThan(slide.position[2] - 0.15)
+    expect(hugeCall.position[0]).toBeLessThan(tinyCall.position[0] - 0.6)
+    expect(hugeCall.position[2]).toBeLessThan(tinyCall.position[2] - 0.5)
+  })
+
+  it('normalizes raw wager sizes and applies intensity to every wager cue', () => {
+    const blindSized = deriveWagerIntensity(20, 20, 200)
+    const potSized = deriveWagerIntensity(200, 20, 200)
+
+    expect(deriveWagerIntensity(0, 20, 200)).toBe(0)
+    expect(potSized).toBeGreaterThan(blindSized)
+    expect(deriveWagerIntensity(Number.POSITIVE_INFINITY, 20, 200)).toBe(0)
+    expect(deriveWagerIntensity(1_000_000, 1, 0)).toBe(1)
+
+    for (const cue of ['call', 'bet', 'raise', 'all_in'] as const) {
+      const restrainedAvatar = getSeatedAvatarActionPose(cue, 620, {
+        variant: 0,
+        wagerIntensity: 0,
+      })
+      const dramaticAvatar = getSeatedAvatarActionPose(cue, 620, {
+        variant: 0,
+        wagerIntensity: 1,
+      })
+      const restrainedOpponent = getOpponentTableActionPose(cue, 620, {
+        variant: 0,
+        wagerIntensity: 0,
+      })
+      const dramaticOpponent = getOpponentTableActionPose(cue, 620, {
+        variant: 0,
+        wagerIntensity: 1,
+      })
+
+      expect(dramaticAvatar.armPosition[2]).toBeLessThan(restrainedAvatar.armPosition[2] - 0.04)
+      expect(dramaticOpponent.chipPush.position[2]).toBeLessThan(
+        restrainedOpponent.chipPush.position[2] - 0.15
+      )
+    }
   })
 
 })

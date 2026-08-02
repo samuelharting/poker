@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { formatWinnerPaymentLabel, getVisibleSeatCards } from '@/components/table/PlayerSeat'
 import { PlayerSeat } from '@/components/table/PlayerSeat'
+import { OwnHand } from '@/components/table/OwnHand'
 import type { Card, SeatPlayer } from '@/lib/poker/types'
 
 function makeSeatPlayer(overrides: Partial<SeatPlayer> = {}): SeatPlayer {
@@ -100,6 +101,32 @@ describe('PlayerSeat turn label', () => {
   })
 })
 
+describe('PlayerSeat blind roles', () => {
+  it('spells out the big and small blind instead of relying on initials', () => {
+    const bigBlindMarkup = renderToStaticMarkup(
+      <PlayerSeat
+        player={makeSeatPlayer({ status: 'active', isBB: true })}
+        isActing={false}
+        depthClass="seat-depth-mid"
+        opacityValue={1}
+      />
+    )
+    const smallBlindMarkup = renderToStaticMarkup(
+      <PlayerSeat
+        player={makeSeatPlayer({ status: 'active', isSB: true, isDealer: true })}
+        isActing={false}
+        depthClass="seat-depth-mid"
+        opacityValue={1}
+      />
+    )
+
+    expect(bigBlindMarkup).toContain('player-blind-role is-big')
+    expect(bigBlindMarkup).toContain('Big Blind')
+    expect(smallBlindMarkup).toContain('player-blind-role is-small')
+    expect(smallBlindMarkup).toContain('Small Blind')
+  })
+})
+
 describe('PlayerSeat folded presentation', () => {
   it('marks folded seats with a status hook and stronger inactive opacity', () => {
     const markup = renderToStaticMarkup(
@@ -132,5 +159,29 @@ describe('PlayerSeat target controls', () => {
 
     expect(markup).toContain('data-player-target-trigger="avatar"')
     expect(markup).toContain('Target Villain for emojis')
+  })
+})
+
+describe('OwnHand social overlays', () => {
+  it('shows targeted chat and emoji over the hero cards in 2D', () => {
+    const markup = renderToStaticMarkup(
+      <OwnHand
+        cards={[
+          { rank: 'A', suit: 'spades' },
+          { rank: 'K', suit: 'hearts' },
+        ]}
+        isActing={false}
+        socialMessage="Nice hand"
+        socialMessageExpiresAt={Date.now() + 5_000}
+        socialEmote={'\uD83D\uDE02'}
+        socialEmoteExpiresAt={Date.now() + 5_000}
+        socialEmoteTargeted
+      />
+    )
+
+    expect(markup).toContain('own-hand-social')
+    expect(markup).toContain('Nice hand')
+    expect(markup).toContain('player-emote-badge-targeted')
+    expect(markup).toContain('\uD83D\uDE02')
   })
 })

@@ -1,0 +1,50 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e50] [cursor=pointer]
+  - alert [ref=e54]
+  - generic [ref=e55]:
+    - generic [ref=e57]:
+      - button "Open table menu" [ref=e58] [cursor=pointer]
+      - generic [ref=e61]:
+        - generic [ref=e62]: NL Hold'em
+        - generic [ref=e66]: $10 / $20
+      - button "Open settings" [ref=e67] [cursor=pointer]
+    - generic [ref=e75]:
+      - region "Mobile poker field" [ref=e77]:
+        - generic:
+          - generic "Board cards":
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+            - generic:
+              - generic:
+                - generic "Face-down card"
+        - generic "Players":
+          - generic [ref=e79]:
+            - button "Target MobileQA for emojis" [ref=e80] [cursor=pointer]: "5"
+            - generic [ref=e81]:
+              - button "MobileQA" [ref=e82] [cursor=pointer]
+              - generic [ref=e83]: $1,000
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=e84] [cursor=pointer]:
+          - generic [ref=e85]: ♣
+      - generic [ref=e86]:
+        - generic [ref=e87]:
+          - generic [ref=e88]: Table controls
+          - generic [ref=e89]: Share the room code and fill the open seats to kick off the next hand.
+          - generic [ref=e90]:
+            - generic [ref=e91]: 1 seated
+            - generic [ref=e92]: Stack $1,000
+        - generic [ref=e93]: Anyone at the table can deal as soon as the table is ready.
+        - generic [ref=e94]:
+          - button "Add bot" [ref=e95] [cursor=pointer]
+          - button "Fill seats" [ref=e96] [cursor=pointer]
+        - button "Start game" [disabled] [ref=e97]

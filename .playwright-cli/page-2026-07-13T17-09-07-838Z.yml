@@ -1,0 +1,93 @@
+- generic [active] [ref=f1e1]:
+  - button "Open Next.js Dev Tools" [ref=f1e50] [cursor=pointer]
+  - alert [ref=f1e54]
+  - generic [ref=f1e55]:
+    - generic [ref=f1e56]:
+      - generic [ref=f1e57]:
+        - generic [ref=f1e58]: Poker Night
+        - generic [ref=f1e59]:
+          - generic [ref=f1e60]: Room
+          - generic [ref=f1e61]: DNA4SX
+      - button "Open settings" [ref=f1e62] [cursor=pointer]:
+        - generic [ref=f1e70]: Settings
+    - generic "Table notifications":
+      - status [ref=f1e113]:
+        - generic [ref=f1e114]: Added 7 bots
+        - button "Dismiss notification" [ref=f1e115] [cursor=pointer]: x
+    - generic [ref=f1e71]:
+      - generic [ref=f1e72]:
+        - generic [ref=f1e75]:
+          - generic [ref=f1e76]: Poker Night
+          - generic [ref=f1e77]: Private table · DNA4SX
+        - generic [ref=f1e81]: PN
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [ref=f1e116] [cursor=pointer]:
+            - generic [ref=f1e120]:
+              - strong [ref=f1e122]: Bot Maverick
+              - generic [ref=f1e123]: $1,000
+          - button "Send a reaction to Bot River" [ref=f1e125] [cursor=pointer]:
+            - generic [ref=f1e129]:
+              - strong [ref=f1e131]: Bot River
+              - generic [ref=f1e132]: $1,000
+          - button "Send a reaction to Bot Bluff" [ref=f1e134] [cursor=pointer]:
+            - generic [ref=f1e138]:
+              - strong [ref=f1e140]: Bot Bluff
+              - generic [ref=f1e141]: $1,000
+          - button "Send a reaction to Bot Ace" [ref=f1e143] [cursor=pointer]:
+            - generic [ref=f1e147]:
+              - strong [ref=f1e149]: Bot Ace
+              - generic [ref=f1e150]: $1,000
+          - button "Send a reaction to Bot Nova" [ref=f1e152] [cursor=pointer]:
+            - generic [ref=f1e156]:
+              - strong [ref=f1e158]: Bot Nova
+              - generic [ref=f1e159]: $1,000
+          - button "Send a reaction to Bot Dealer Dan" [ref=f1e161] [cursor=pointer]:
+            - generic [ref=f1e165]:
+              - strong [ref=f1e167]: Bot Dealer Dan
+              - generic [ref=f1e168]: $1,000
+          - button "Send a reaction to Bot Pocket" [ref=f1e170] [cursor=pointer]:
+            - generic [ref=f1e174]:
+              - strong [ref=f1e176]: Bot Pocket
+              - generic [ref=f1e177]: $1,000
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=f1e87]:
+              - generic [ref=f1e88]: Ready for the next hand
+              - generic [ref=f1e89]: The table is ready. Deal whenever everyone looks settled.
+              - generic [ref=f1e90]:
+                - generic [ref=f1e91]: 8 seated
+                - generic [ref=f1e92]: 8 max
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f1e93] [cursor=pointer]:
+          - generic [ref=f1e94]: ♣
+          - strong [ref=f1e95]: Table talk
+      - generic [ref=f1e97]:
+        - generic [ref=f1e98]:
+          - generic [ref=f1e99]:
+            - generic [ref=f1e100]: Table controls
+            - generic [ref=f1e101]: Waiting for the next hand.
+          - generic [ref=f1e102]:
+            - generic [ref=f1e103]: 8 seated
+            - generic [ref=f1e104]: 0 open
+        - generic [ref=f1e105]:
+          - generic [ref=f1e106]: Blinds $10/$20
+          - generic [ref=f1e107]: Buy-in $1,000
+        - generic [ref=f1e108]: You are seated with $1,000 and blinds are $10/$20.
+        - button "Start game" [ref=f1e112] [cursor=pointer]

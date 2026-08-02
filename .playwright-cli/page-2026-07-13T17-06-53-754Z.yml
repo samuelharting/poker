@@ -1,0 +1,119 @@
+- generic [ref=e1]:
+  - generic [ref=e19]:
+    - generic [ref=e20]:
+      - generic [ref=e21]:
+        - generic [ref=e22]: Poker Night
+        - generic [ref=e23]:
+          - generic [ref=e24]: Room
+          - generic [ref=e25]: GC5593
+      - button "Open settings" [ref=e26] [cursor=pointer]:
+        - generic [ref=e34]: Settings
+    - generic [ref=e35]:
+      - generic [ref=e58]:
+        - generic [ref=e61]:
+          - generic [ref=e62]: Poker Night
+          - generic [ref=e63]: Private table · GC5593
+        - generic [ref=e67]: PN
+        - generic "Poker players":
+          - button "Send a reaction to Sam" [ref=e73] [cursor=pointer]:
+            - generic [ref=e77]:
+              - strong [ref=e79]: Sam
+              - generic [ref=e80]: $1,000
+          - button "Send a reaction to Sam" [ref=e82] [cursor=pointer]:
+            - generic [ref=e89]:
+              - strong [ref=e91]: Sam
+              - generic [ref=e92]:
+                - generic [ref=e93]: $1,000
+                - generic [ref=e94]: Folded
+          - button "Send a reaction to Bot Maverick" [ref=e95] [cursor=pointer]:
+            - generic [ref=e102]:
+              - generic [ref=e103]:
+                - strong [ref=e104]: Bot Maverick
+                - emphasis [ref=e105]: SB
+              - generic [ref=e106]:
+                - generic [ref=e107]: $1,080
+                - generic [ref=e108]: Won $160
+          - button "Send a reaction to Bot River" [active] [ref=e109] [cursor=pointer]:
+            - generic [ref=e116]:
+              - generic [ref=e117]:
+                - strong [ref=e118]: Bot River
+                - emphasis [ref=e119]: BB
+              - generic [ref=e120]:
+                - generic [ref=e121]: $920
+                - generic [ref=e122]: Called $20
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "4 of hearts":
+                    - generic:
+                      - generic: "4"
+                      - generic: "4"
+              - generic:
+                - generic:
+                  - generic "Q of hearts":
+                    - generic:
+                      - generic: Q
+                      - generic: Q
+              - generic:
+                - generic:
+                  - generic "3 of spades":
+                    - generic:
+                      - generic: "3"
+                      - generic: "3"
+              - generic:
+                - generic:
+                  - generic "10 of spades":
+                    - generic:
+                      - generic: "10"
+                      - generic: "10"
+              - generic:
+                - generic:
+                  - generic "4 of clubs":
+                    - generic:
+                      - generic: "4"
+                      - generic: "4"
+            - generic [ref=e37]:
+              - generic [ref=e38]: Pot
+              - generic [ref=e39]: $160
+            - status:
+              - generic [ref=e40]:
+                - generic [ref=e41]: Hand Winner
+                - generic [ref=e42]:
+                  - generic [ref=e43]: Bot Maverick
+                  - generic [ref=e44]: Won $160
+                  - generic: $160
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=e45] [cursor=pointer]:
+          - generic [ref=e46]: ♣
+          - strong [ref=e47]: Table talk
+      - complementary [ref=e123]:
+        - generic [ref=e124]:
+          - generic [ref=e125]:
+            - generic [ref=e126]: Opponent
+            - generic [ref=e127]: Send to Bot River
+          - button "Close target emote panel" [ref=e128] [cursor=pointer]: x
+        - generic "Bot River stats" [ref=e129]:
+          - generic [ref=e130]:
+            - generic [ref=e131]: Fold
+            - strong [ref=e132]: 0%
+          - generic [ref=e133]:
+            - generic [ref=e134]: Games
+            - strong [ref=e135]: "1"
+          - generic [ref=e136]:
+            - generic [ref=e137]: Won
+            - strong [ref=e138]: "0"
+        - generic [ref=e139]:
+          - button "👋" [ref=e140] [cursor=pointer]
+          - button "👍" [ref=e141] [cursor=pointer]
+          - button "😂" [ref=e142] [cursor=pointer]
+          - button "😎" [ref=e143] [cursor=pointer]
+          - button "💀" [ref=e144] [cursor=pointer]
+          - button "😭" [ref=e145] [cursor=pointer]
+          - button "😡" [ref=e146] [cursor=pointer]
+          - button "🖕" [ref=e147] [cursor=pointer]
+          - button "Search all emojis" [ref=e148] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=e53] [cursor=pointer]
+  - alert [ref=e57]

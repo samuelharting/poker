@@ -1,0 +1,38 @@
+- generic [ref=f1e3]:
+  - generic [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - generic [ref=f1e6]: ♥
+      - generic [ref=f1e7]: ♠
+      - generic [ref=f1e8]: ♦
+      - generic [ref=f1e9]: ♣
+    - generic [ref=f1e10]: Private Texas Hold'em
+    - heading "Poker Night" [level=1] [ref=f1e11]
+    - paragraph [ref=f1e12]: Start a polished table for friends, then share the room code when seats are ready.
+    - generic "Table defaults" [ref=f1e13]:
+      - generic [ref=f1e14]: 8 max
+      - generic [ref=f1e15]: 10 / 20 blinds
+      - generic [ref=f1e16]: Live table
+    - generic [ref=f1e17]: $240
+  - generic [ref=f1e26]:
+    - tablist "Table entry mode" [ref=f1e27]:
+      - button "Create" [ref=f1e28] [cursor=pointer]
+      - button "Join" [ref=f1e29] [cursor=pointer]
+    - generic [ref=f1e30]:
+      - generic [ref=f1e31]:
+        - generic [ref=f1e32]: New table
+        - heading "Start a private table" [level=2] [ref=f1e33]
+      - generic [ref=f1e34]:
+        - generic [ref=f1e35]: Your nickname
+        - textbox "Your nickname" [active] [ref=f1e36]:
+          - /placeholder: e.g. PhilIvey
+      - generic [ref=f1e37]:
+        - generic [ref=f1e38]: Email
+        - textbox "Email" [ref=f1e39]:
+          - /placeholder: you@example.com
+      - generic [ref=f1e40]:
+        - generic [ref=f1e41]:
+          - text: Venmo username
+          - emphasis [ref=f1e42]: Optional
+        - textbox "Venmo username Optional" [ref=f1e43]:
+          - /placeholder: "@samvenmo"
+      - button "Create Table" [ref=f1e44] [cursor=pointer]

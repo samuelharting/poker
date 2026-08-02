@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildActiveSocialByPlayer,
   buildActionButtonDescriptors,
   buildPlayerManagementTags,
   canSaveTableSettings,
   formatPlayerStatsSummary,
   getSpectatorRailState,
+  getMobileCheckCallLabel,
   getVisibleOwnHandDescription,
+  resolveRaiseDraftAmount,
+  resolveCheckFoldPreAction,
+  updateTargetedQuickEmotes,
 } from '@/components/table/PokerTable'
 import type { Card, LobbyPlayer } from '@/lib/poker/types'
 
@@ -17,6 +22,55 @@ function cards(...specs: string[]): Card[] {
     return { rank, suit }
   })
 }
+
+describe('targeted quick emojis', () => {
+  it('starts with the requested defaults and promotes the newest picker choice', () => {
+    const defaults = updateTargetedQuickEmotes([], '')
+    expect(defaults).toEqual(['\uD83D\uDD95', '\uD83C\uDDEE\uD83C\uDDF1', '\uD83D\uDC12'])
+
+    expect(updateTargetedQuickEmotes(defaults, '\uD83D\uDE02')).toEqual([
+      '\uD83D\uDE02',
+      '\uD83D\uDD95',
+      '\uD83C\uDDEE\uD83C\uDDF1',
+    ])
+  })
+})
+
+describe('2D targeted table social overlays', () => {
+  it('places a targeted emoji only on the clicked player', () => {
+    const now = 10_000
+    const social = buildActiveSocialByPlayer([
+      {
+        playerId: 'sender',
+        emote: '\uD83D\uDE02',
+        emoteExpiresAt: now + 2_000,
+        targetPlayerId: 'target',
+      },
+    ], now)
+
+    expect(social.has('sender')).toBe(false)
+    expect(social.get('target')).toMatchObject({
+      emote: '\uD83D\uDE02',
+      emoteTargeted: true,
+    })
+  })
+
+  it('keeps untargeted reactions on the sender', () => {
+    const now = 10_000
+    const social = buildActiveSocialByPlayer([
+      {
+        playerId: 'sender',
+        emote: '\uD83D\uDC4B',
+        emoteExpiresAt: now + 2_000,
+      },
+    ], now)
+
+    expect(social.get('sender')).toMatchObject({
+      emote: '\uD83D\uDC4B',
+      emoteTargeted: false,
+    })
+  })
+})
 
 describe('PokerTable action button descriptors', () => {
   it('keeps wager actions easy to scan without changing legal action order', () => {
@@ -45,6 +99,58 @@ describe('PokerTable action button descriptors', () => {
       { key: 'all_in', label: 'All-in', amountLabel: '$1,000', className: 'btn-all-in' },
       { key: 'fold', label: 'Fold', className: 'btn-fold' },
     ])
+  })
+})
+
+describe('raise amount draft', () => {
+  it('resets a new betting decision to the legal minimum', () => {
+    expect(resolveRaiseDraftAmount({
+      currentAmount: 240,
+      effectiveMin: 80,
+      maxRaise: 960,
+      resetToMinimum: true,
+    })).toBe(80)
+  })
+
+  it('preserves a chosen size during the same decision while keeping it legal', () => {
+    expect(resolveRaiseDraftAmount({
+      currentAmount: 240,
+      effectiveMin: 80,
+      maxRaise: 960,
+      resetToMinimum: false,
+    })).toBe(240)
+
+    expect(resolveRaiseDraftAmount({
+      currentAmount: 240,
+      effectiveMin: 60,
+      maxRaise: 150,
+      resetToMinimum: false,
+    })).toBe(150)
+  })
+
+  it('uses the all-in maximum when it is below the normal minimum', () => {
+    expect(resolveRaiseDraftAmount({
+      currentAmount: 200,
+      effectiveMin: 35,
+      maxRaise: 35,
+      resetToMinimum: true,
+    })).toBe(35)
+  })
+})
+
+describe('check/fold pre-action', () => {
+  it('checks for free and folds when facing a bet', () => {
+    expect(resolveCheckFoldPreAction(['fold', 'check', 'raise'])).toBe('check')
+    expect(resolveCheckFoldPreAction(['fold', 'call', 'raise'])).toBe('fold')
+    expect(resolveCheckFoldPreAction([])).toBeNull()
+  })
+})
+
+describe('mobile check/call label', () => {
+  it('shows only the action that is currently legal', () => {
+    expect(getMobileCheckCallLabel('call')).toBe('CALL')
+    expect(getMobileCheckCallLabel('check')).toBe('CHECK')
+    expect(getMobileCheckCallLabel()).toBe('CHECK / CALL')
   })
 })
 
@@ -147,7 +253,7 @@ describe('settings and player management helpers', () => {
     })).toBe(true)
   })
 
-  it('allows table-setting saves during live hands', () => {
+  it('allows table-setting saves during a hand so the server can queue them', () => {
     expect(canSaveTableSettings({
       isConnected: true,
       hasSettingsChanges: true,

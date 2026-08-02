@@ -4,8 +4,8 @@ import { getAvatarHeadTurn, getTurnCameraPose } from '@/components/three/turnFoc
 describe('3D turn focus helpers', () => {
   it('keeps the default camera when nobody is acting', () => {
     expect(getTurnCameraPose(null)).toEqual({
-      position: [0, 2.45, 5.62],
-      lookAt: [0, 1.06, 0.18],
+      position: [0, 4.08, 6.26],
+      lookAt: [0, 0.92, 0.02],
     })
   })
 
@@ -23,7 +23,7 @@ describe('3D turn focus helpers', () => {
     expect(rightSeat.position[2]).toBeLessThan(defaultPose.position[2])
     expect(defaultPose.position[2] - leftSeat.position[2]).toBeLessThan(0.12)
     expect(defaultPose.position[2] - rightSeat.position[2]).toBeLessThan(0.12)
-    expect(heroSeat.position).toEqual([0, 2.45, 5.62])
+    expect(heroSeat.position).toEqual([0, 4.08, 6.26])
     expect(leftSeat.lookAt[0]).toBeLessThan(-0.3)
     expect(rightSeat.lookAt[0]).toBeGreaterThan(0.3)
     expect(Math.abs(leftSeat.lookAt[0])).toBeLessThan(0.45)

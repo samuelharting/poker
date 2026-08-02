@@ -2,19 +2,42 @@
 
 import dynamic from 'next/dynamic'
 import React, { type CSSProperties, useState, useMemo, useCallback, useEffect, useRef } from 'react'
-import type { Card, TableState, SeatPlayer, LobbyPlayer, ShowCardsMode, PlayerStats } from '@/lib/poker/types'
-import type { SocialSnapshot } from '@/shared/protocol'
+import type { Card, CardRevealRequest, TableState, SeatPlayer, LobbyPlayer, ShowCardsMode, PlayerStats } from '@/lib/poker/types'
+import {
+  isAllowedEmote,
+  type PlayerSocialState,
+  type SocialSnapshot,
+  type TableChatEntry,
+} from '@/shared/protocol'
 import { PlayerSeat, formatWinnerPaymentLabel, getVisibleSeatCards } from './PlayerSeat'
 import { CommunityCards } from './CommunityCards'
+import { RunItTwiceBoards, RunItTwicePrompt } from './RunItTwice'
 import { OwnHand } from './OwnHand'
 import { PotDisplay } from './PotDisplay'
+import { ShowdownCinematic, useShowdownPresentation } from './ShowdownCinematic'
 import { ChipStack } from '@/components/ui/ChipStack'
 import { PlayingCard } from '@/components/ui/PlayingCard'
 import { SearchableEmojiPicker } from '@/components/ui/SearchableEmojiPicker'
+import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
 import { evaluateHand } from '@/lib/poker/evaluator'
+import { getShowdownRevealMode } from '@/lib/poker/showdown'
+import type { PokerSoundCueKind } from '@/lib/poker/soundscape'
 import {
+  AVATAR_CELEBRATION_OPTIONS,
+  AVATAR_GLASSES_OPTIONS,
+  AVATAR_HAT_OPTIONS,
+  AVATAR_IDLE_TELL_OPTIONS,
+  AVATAR_JACKET_COLOR_OPTIONS,
+  AVATAR_JACKET_OPTIONS,
+  AVATAR_MODEL_KEYS,
+  DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
+  type PlayerAvatarCustomization,
+} from '@/lib/profile'
+import {
+  createThreeChatMessages,
   createThreeEmoteReactions,
   createThreeTableViewModel,
+  type ThreeChatMessage,
   type ThreeEmoteReaction,
   type ThreeTableViewModel,
 } from '@/components/three/tableViewModel'
@@ -26,12 +49,6 @@ type WinnerChipTrailStyle = CSSProperties & {
   '--winner-chip-y': string | number
   '--winner-chip-delay': string
 }
-type WinnerAnnouncementStyle = CSSProperties & {
-  '--winner-announcement-x': string | number
-  '--winner-announcement-y': string | number
-  '--winner-announcement-delay': string
-}
-
 export interface PokerActionButtonDescriptor {
   key: PokerAction
   label: string
@@ -48,6 +65,9 @@ interface PokerTableProps {
   startingStackSetting: number
   settingsOpen: boolean
   suitColorMode: 'two' | 'four'
+  soundMuted?: boolean
+  soundVolume?: number
+  avatarCustomization?: PlayerAvatarCustomization
   roomCode: string
   canShareRoom: boolean
   onAction: (
@@ -57,6 +77,7 @@ interface PokerTableProps {
   onStartGame: () => void
   onAddBots: (count: number) => void
   onRabbitHunt?: () => void
+  onRunItTwiceVote?: (vote: 'yes' | 'no') => void
   autoStartEnabled: boolean
   onSetAutoStart: (enabled: boolean) => void
   onUpdateSettings: (settings: {
@@ -74,10 +95,19 @@ interface PokerTableProps {
   onSetPlayerSpectator: (targetId: string, spectator: boolean) => void
   onSeatMe: () => void
   onSetShowCards: (mode: ShowCardsMode) => void
+  onRequestCardReveal?: (targetId: string) => void
+  onRespondCardReveal?: (requesterId: string, allow: boolean) => void
   onSetSuitColorMode: (mode: 'two' | 'four') => void
+  onSetSoundMuted?: (muted: boolean) => void
+  onSetSoundVolume?: (volume: number) => void
+  onUpdateAvatar?: (avatar: PlayerAvatarCustomization) => void
+  onSoundCue?: (cue: PokerSoundCueKind) => void
   onCloseSettings: () => void
   onCopyRoom: () => void
   onShareRoom: () => void
+  onLeaveGame?: () => void
+  onSendChat?: (message: string) => void
+  onSendTargetChat?: (targetId: string, message: string) => void
   onSendEmote: (emote: string) => void
   onSendTargetEmote: (targetId: string, emote: string) => void
   onFeedback: (message: string, tone?: FeedbackTone) => void
@@ -144,13 +174,32 @@ const EMOTE_OPTIONS = [
   { id: 'middle_finger', glyph: '\uD83D\uDD95', label: 'Middle finger' },
 ] as const
 
-type EmoteId = (typeof EMOTE_OPTIONS)[number]['id']
+const DEFAULT_TARGETED_QUICK_EMOTES = [
+  '\uD83D\uDD95',
+  '\uD83C\uDDEE\uD83C\uDDF1',
+  '\uD83D\uDC12',
+] as const
+const TARGETED_QUICK_EMOTES_STORAGE_KEY = 'poker-night:targeted-quick-emotes'
+
+export function updateTargetedQuickEmotes(current: readonly string[], emote: string): string[] {
+  const next = isAllowedEmote(emote) ? [emote] : []
+
+  for (const candidate of [...current, ...DEFAULT_TARGETED_QUICK_EMOTES]) {
+    if (isAllowedEmote(candidate) && !next.includes(candidate)) {
+      next.push(candidate)
+    }
+  }
+
+  return next.slice(0, 3)
+}
 
 type WinnerDisplay = {
   playerId: string
   nickname: string
   venmoUsername?: string
   amount: number
+  handDescription?: string
+  visualSeat: number
   targetX: string
   targetY: string
   delayMs: number
@@ -158,11 +207,22 @@ type WinnerDisplay = {
 
 type AllInAnnouncementView = NonNullable<ThreeTableViewModel['allInAnnouncement']>
 
+interface CardRevealSeatAction {
+  playerId: string
+  label: string
+  ariaLabel: string
+  status?: CardRevealRequest['status']
+  disabled: boolean
+}
+
 interface DesktopPokerRoom3DProps {
   view: ThreeTableViewModel
   emoteReactions: ThreeEmoteReaction[]
+  chatMessages: ThreeChatMessage[]
   selectedTargetId: string | null
   onSelectPlayer: (playerId: string) => void
+  cardRevealActions: CardRevealSeatAction[]
+  onRequestCardReveal: (playerId: string) => void
 }
 
 const DesktopPokerRoom3D = dynamic<DesktopPokerRoom3DProps>(
@@ -195,17 +255,62 @@ const MOBILE_WINNER_SEAT_TARGETS: Record<number, { x: string; y: string }> = {
 }
 
 const SHOW_CARD_OPTIONS: Array<{
-  mode: Exclude<ShowCardsMode, 'none'>
+  mode: ShowCardsMode
   label: string
   shortLabel: string
 }> = [
-  { mode: 'left', label: 'left card', shortLabel: 'L' },
-  { mode: 'right', label: 'right card', shortLabel: 'R' },
+  { mode: 'left', label: 'left card', shortLabel: 'Left' },
+  { mode: 'right', label: 'right card', shortLabel: 'Right' },
   { mode: 'both', label: 'both cards', shortLabel: 'Both' },
+  { mode: 'none', label: 'both cards', shortLabel: 'Muck' },
 ]
 
 function getEmoteGlyph(emote?: string): string | undefined {
   return EMOTE_OPTIONS.find(option => option.id === emote)?.glyph ?? emote
+}
+
+function getEmoteLabel(emote: string): string {
+  return EMOTE_OPTIONS.find(option => option.glyph === emote)?.label ?? 'Emoji'
+}
+
+interface ActiveSeatSocial {
+  message?: string
+  emote?: string
+  messageExpiresAt?: number
+  emoteExpiresAt?: number
+  emoteTargeted?: boolean
+}
+
+export function buildActiveSocialByPlayer(
+  activeSocial: PlayerSocialState[],
+  now = Date.now()
+): Map<string, ActiveSeatSocial> {
+  const entries = new Map<string, ActiveSeatSocial>()
+
+  for (const entry of activeSocial) {
+    if (entry.message && entry.messageExpiresAt && entry.messageExpiresAt > now) {
+      const messageSeatId = entry.messageTargetPlayerId?.trim() || entry.playerId
+      const current = entries.get(messageSeatId) ?? {}
+      entries.set(messageSeatId, {
+        ...current,
+        message: entry.message,
+        messageExpiresAt: entry.messageExpiresAt,
+      })
+    }
+
+    if (entry.emote && entry.emoteExpiresAt && entry.emoteExpiresAt > now) {
+      const targetSeatId = entry.targetPlayerId?.trim() || entry.playerId
+      const current = entries.get(targetSeatId) ?? {}
+      entries.set(targetSeatId, {
+        ...current,
+        emote: getEmoteGlyph(entry.emote),
+        emoteExpiresAt: entry.emoteExpiresAt,
+        emoteTargeted: targetSeatId !== entry.playerId,
+      })
+    }
+  }
+
+  return entries
 }
 
 function formatAmount(amount: number): string {
@@ -249,6 +354,35 @@ function HeroTableBet({ amount }: { amount: number }) {
   )
 }
 
+function MobileBetIndicator({
+  amount,
+  ownerLabel,
+  className,
+}: {
+  amount: number
+  ownerLabel: string
+  className: string
+}) {
+  if (amount <= 0) {
+    return null
+  }
+
+  const formattedAmount = formatAmount(amount)
+
+  return (
+    <div className={className}>
+      <div
+        className="mobile-bet-indicator"
+        role="status"
+        aria-label={`${ownerLabel} bet ${formattedAmount}`}
+      >
+        <span className="mobile-bet-token" aria-hidden="true" />
+        <strong>{formattedAmount}</strong>
+      </div>
+    </div>
+  )
+}
+
 function AllInAnnouncement({ announcement }: { announcement: AllInAnnouncementView }) {
   const amountCopy = announcement.amountLabel
     ? `${announcement.amountLabel} in the middle`
@@ -279,20 +413,29 @@ function MobileEdgeSeat({
   player,
   visualSeat,
   isActing,
+  secondsLeft,
   isWinner = false,
   winnerAmount,
+  winnerHandDescription,
+  winningCards = [],
+  cardRevealControl,
   onNameClick,
 }: {
   player: OpponentSeat
   visualSeat: number
   isActing: boolean
+  secondsLeft?: number
   isWinner?: boolean
   winnerAmount?: number
+  winnerHandDescription?: string
+  winningCards?: Card[]
+  cardRevealControl?: React.ReactNode
   onNameClick?: (playerId: string) => void
 }) {
   const isFolded = player.status === 'folded'
   const isDisconnected = player.status === 'disconnected' || !player.isConnected
   const isAllIn = player.status === 'all_in'
+  const blindRole = player.isBB ? 'big' : player.isSB ? 'small' : null
   const seatNumber = MOBILE_SEAT_NUMBERS_BY_VISUAL_SEAT[visualSeat] ?? visualSeat + 1
   const mobileSeatName = getMobileSeatName(player)
   const targetTitle = `Target ${player.nickname} for emojis`
@@ -301,6 +444,7 @@ function MobileEdgeSeat({
     player.showCards,
     holeCards
   )
+  const hasVisibleHoleCards = Boolean(visibleLeftCard || visibleRightCard)
   const statusLabel = isWinner && typeof winnerAmount === 'number' && winnerAmount > 0
     ? `Won ${formatAmount(winnerAmount)}`
     : isActing
@@ -318,6 +462,7 @@ function MobileEdgeSeat({
     isActing ? 'is-acting' : '',
     isFolded ? 'is-folded' : '',
     isWinner ? 'is-winner' : '',
+    hasVisibleHoleCards ? 'has-visible-cards' : '',
     isDisconnected ? 'is-disconnected' : '',
   ].filter(Boolean).join(' ')
 
@@ -339,19 +484,55 @@ function MobileEdgeSeat({
           {seatNumber}
         </div>
       )}
+      {isActing && typeof secondsLeft === 'number' && (
+        <div
+          className={`mobile-edge-seat-timer ${secondsLeft <= 5 ? 'is-low' : ''}`}
+          role="timer"
+          aria-label={`${secondsLeft} seconds left`}
+        >
+          {secondsLeft}s
+        </div>
+      )}
       {player.hasCards && (
-        <div className={`mobile-edge-seat-cards ${holeCards.length > 0 ? 'is-revealed' : ''}`}>
+        <div className={`mobile-edge-seat-cards ${hasVisibleHoleCards ? 'is-revealed' : ''}`}>
           {visibleLeftCard ? (
-            <PlayingCard card={visibleLeftCard} size="xs" highlighted={isWinner} />
+            <PlayingCard
+              card={visibleLeftCard}
+              size="xs"
+              highlighted={isWinner && (
+                winningCards.length === 0 || winningCards.some(
+                  card => card.rank === visibleLeftCard.rank && card.suit === visibleLeftCard.suit
+                )
+              )}
+            />
           ) : (
             <span className="mobile-edge-card-back" aria-label="Hidden card" />
           )}
           {visibleRightCard ? (
-            <PlayingCard card={visibleRightCard} size="xs" highlighted={isWinner} />
+            <PlayingCard
+              card={visibleRightCard}
+              size="xs"
+              highlighted={isWinner && (
+                winningCards.length === 0 || winningCards.some(
+                  card => card.rank === visibleRightCard.rank && card.suit === visibleRightCard.suit
+                )
+              )}
+            />
           ) : (
             <span className="mobile-edge-card-back" aria-label="Hidden card" />
           )}
         </div>
+      )}
+      {player.bet > 0 && (
+        <MobileBetIndicator
+          key={`${player.id}-${player.bet}`}
+          amount={player.bet}
+          ownerLabel={mobileSeatName}
+          className="mobile-edge-bet-anchor"
+        />
+      )}
+      {cardRevealControl && (
+        <div className="mobile-card-reveal-control">{cardRevealControl}</div>
       )}
 
       <div className="mobile-edge-seat-main">
@@ -369,9 +550,18 @@ function MobileEdgeSeat({
           <div className="mobile-edge-seat-name">{mobileSeatName}</div>
         )}
         <div className="mobile-edge-seat-stack">{formatAmount(player.stack)}</div>
+        {blindRole && (
+          <div className={`mobile-blind-role is-${blindRole}`}>
+            <strong>{blindRole === 'big' ? 'BB' : 'SB'}</strong>
+            <span>{blindRole === 'big' ? 'Big Blind' : 'Small Blind'}</span>
+          </div>
+        )}
       </div>
 
       {statusLabel && <div className="mobile-edge-seat-status">{statusLabel}</div>}
+      {isWinner && winnerHandDescription && (
+        <div className="mobile-edge-winner-hand">{winnerHandDescription}</div>
+      )}
     </div>
   )
 }
@@ -387,6 +577,8 @@ function MobileHeroSeat({
   isWinner: boolean
   status: string
 }) {
+  const blindRole = player.isBB ? 'big' : player.isSB ? 'small' : null
+
   return (
     <div className={`mobile-hero-seat ${isActing ? 'is-acting' : ''} ${isWinner ? 'is-winner' : ''}`}>
       <div className={`mobile-seat-number ${isActing ? 'is-acting' : ''}`}>
@@ -399,6 +591,12 @@ function MobileHeroSeat({
       {player.isDealer && <span className="mobile-hero-dealer-badge">D</span>}
       <div className="mobile-hero-seat-name">You</div>
       <div className="mobile-hero-seat-stack">{formatAmount(player.stack)}</div>
+      {blindRole && (
+        <div className={`mobile-blind-role is-${blindRole}`}>
+          <strong>{blindRole === 'big' ? 'BB' : 'SB'}</strong>
+          <span>{blindRole === 'big' ? 'Big Blind' : 'Small Blind'}</span>
+        </div>
+      )}
       <div className="mobile-hero-seat-status">{status}</div>
     </div>
   )
@@ -461,6 +659,26 @@ export function buildActionButtonDescriptors({
   }
 
   return buttons
+}
+
+export function resolveCheckFoldPreAction(legalActions: PokerAction[]): 'check' | 'fold' | null {
+  if (legalActions.includes('check')) {
+    return 'check'
+  }
+
+  return legalActions.includes('fold') ? 'fold' : null
+}
+
+export function getMobileCheckCallLabel(action?: PokerAction): 'CHECK' | 'CALL' | 'CHECK / CALL' {
+  if (action === 'call') {
+    return 'CALL'
+  }
+
+  if (action === 'check') {
+    return 'CHECK'
+  }
+
+  return 'CHECK / CALL'
 }
 
 function formatEquityPercent(value: number): string {
@@ -646,6 +864,29 @@ export function canSaveTableSettings({
   return isConnected && hasSettingsChanges
 }
 
+export function resolveRaiseDraftAmount({
+  currentAmount,
+  effectiveMin,
+  maxRaise,
+  resetToMinimum,
+}: {
+  currentAmount: number
+  effectiveMin: number
+  maxRaise: number
+  resetToMinimum: boolean
+}): number {
+  if (maxRaise <= 0) {
+    return 0
+  }
+
+  if (resetToMinimum) {
+    return effectiveMin
+  }
+
+  const nextAmount = Number.isFinite(currentAmount) ? currentAmount : effectiveMin
+  return Math.max(effectiveMin, Math.min(maxRaise, nextAmount))
+}
+
 export function canManualRabbitHunt(state: TableState): boolean {
   return (
     state.phase === 'between_hands' &&
@@ -688,12 +929,16 @@ export function PokerTable({
   startingStackSetting,
   settingsOpen,
   suitColorMode,
+  soundMuted = false,
+  soundVolume = 0.65,
+  avatarCustomization = DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
   roomCode,
   canShareRoom,
   onAction,
   onStartGame,
   onAddBots,
   onRabbitHunt,
+  onRunItTwiceVote = () => {},
   autoStartEnabled,
   onSetAutoStart,
   onUpdateSettings,
@@ -702,21 +947,108 @@ export function PokerTable({
   onSetPlayerSpectator,
   onSeatMe,
   onSetShowCards,
+  onRequestCardReveal = () => {},
+  onRespondCardReveal = () => {},
   onSetSuitColorMode,
+  onSetSoundMuted = () => {},
+  onSetSoundVolume = () => {},
+  onUpdateAvatar = () => {},
+  onSoundCue = () => {},
   onCloseSettings,
   onCopyRoom,
   onShareRoom,
+  onLeaveGame = () => {},
+  onSendChat = () => {},
+  onSendTargetChat = () => {},
   onSendEmote,
   onSendTargetEmote,
   onFeedback,
 }: PokerTableProps) {
   const isMobileViewport = useMediaQuery('(max-width: 768px)')
-  const shouldRenderDesktopThree = useMediaQuery('(min-width: 1100px)')
-  const threeTableView = useMemo(
-    () => shouldRenderDesktopThree ? createThreeTableViewModel(state, yourId) : null,
-    [shouldRenderDesktopThree, state, yourId]
+  const shouldRenderDesktopThree = useMediaQuery('(min-width: 1024px)')
+  const showdownView = useShowdownPresentation(state)
+  const showdownPresentation = showdownView.presentation
+  const runItTwiceVote = state.runItTwice?.status === 'voting' ? state.runItTwice : null
+  const acceptedRunItTwice = state.runItTwice?.status === 'accepted' ? state.runItTwice : null
+  const isSpectatorViewer = Boolean(
+    state.lobbyPlayers.find(player => player.id === yourId)?.isSpectator
   )
-  const latestAllInAnnouncement = threeTableView?.allInAnnouncement ?? null
+  const liveCardRevealTargetIds = useMemo(() => new Set(
+    (state.cardRevealRequests ?? [])
+      .filter(request => request.requesterId === yourId && request.status === 'approved')
+      .map(request => request.targetId)
+  ), [state.cardRevealRequests, yourId])
+  const privacyProtectedPlayers = useMemo(() => {
+    if (state.phase !== 'in_hand' || isSpectatorViewer) {
+      return state.players
+    }
+
+    return state.players.map(player => {
+      if (player.id === yourId || liveCardRevealTargetIds.has(player.id)) {
+        return player
+      }
+
+      return player.holeCards || player.showCards !== 'none'
+        ? { ...player, holeCards: undefined, showCards: 'none' as const }
+        : player
+    })
+  }, [isSpectatorViewer, liveCardRevealTargetIds, state.phase, state.players, yourId])
+  const showWinnerHighlights = !showdownPresentation.isShowdown || showdownPresentation.winningHandHighlighted
+  const showWinnerPayout = !showdownPresentation.isShowdown || showdownPresentation.payoutStarted
+  const showWinnerResults = !showdownPresentation.isShowdown || showdownPresentation.resultsVisible
+  const showdownPresentedPlayers = useMemo(() => {
+    if (!showdownPresentation.isShowdown) {
+      return privacyProtectedPlayers
+    }
+
+    return privacyProtectedPlayers.map(player => {
+      // Keep the local player's already-known hand in place. Every other live
+      // hand flips at its existing seat according to the shared timeline.
+      if (player.id === yourId) {
+        return player
+      }
+
+      const revealMode = getShowdownRevealMode(showdownPresentation, player.id)
+      return revealMode === null || revealMode === player.showCards
+        ? player
+        : { ...player, showCards: revealMode }
+    })
+  }, [privacyProtectedPlayers, showdownPresentation, yourId])
+  const showdownPresentedState = useMemo(
+    () => showdownPresentedPlayers === state.players
+      ? state
+      : { ...state, players: showdownPresentedPlayers },
+    [showdownPresentedPlayers, state]
+  )
+  const allViewportTableView = useMemo(
+    () => createThreeTableViewModel(showdownPresentedState, yourId),
+    [showdownPresentedState, yourId]
+  )
+  const threeTableView = shouldRenderDesktopThree ? allViewportTableView : null
+  const presentedThreeTableView = useMemo(() => {
+    if (!threeTableView) {
+      return threeTableView
+    }
+
+    const suppressWinnerEffects = !showWinnerHighlights
+    const clearCollectedPot = showdownPresentation.isShowdown && showdownPresentation.payoutStarted
+
+    if (!suppressWinnerEffects && !clearCollectedPot) {
+      return threeTableView
+    }
+
+    return {
+      ...threeTableView,
+      collectedPot: clearCollectedPot ? 0 : threeTableView.collectedPot,
+      players: suppressWinnerEffects
+        ? threeTableView.players.map(player => ({ ...player, isWinner: false }))
+        : threeTableView.players,
+      hero: suppressWinnerEffects && threeTableView.hero
+        ? { ...threeTableView.hero, isWinner: false }
+        : threeTableView.hero,
+    }
+  }, [showWinnerHighlights, showdownPresentation.isShowdown, showdownPresentation.payoutStarted, threeTableView])
+  const latestAllInAnnouncement = allViewportTableView.allInAnnouncement
   const latestAllInActionKey = latestAllInAnnouncement?.actionKey ?? ''
   const [activeAllInAnnouncement, setActiveAllInAnnouncement] = useState<AllInAnnouncementView | null>(null)
   const consumedAllInActionKeyRef = useRef<string | null>(latestAllInActionKey || null)
@@ -727,9 +1059,42 @@ export function PokerTable({
   const isInHand = state.phase === 'in_hand'
   const betweenHands = !isInHand
   const hasCompletedHandWinner = betweenHands && Boolean(state.winners?.length)
-  const isSpectator = Boolean(lobbyMe?.isSpectator)
+  const isSpectator = isSpectatorViewer
+  const isCompletedHandReveal = state.phase === 'between_hands' && Boolean(state.winners?.length)
+  const isFoldedViewer = me?.status === 'folded' && (isInHand || isCompletedHandReveal)
   const canShowRevealedCards = isSpectator || hasCompletedHandWinner
   const canAdjustShownCards = Boolean(me?.holeCards?.length) && hasCompletedHandWinner
+  const cardRevealRequests = state.cardRevealRequests ?? []
+  const pendingIncomingCardRequest = cardRevealRequests.find(request => (
+    request.targetId === yourId && request.status === 'pending'
+  ))
+  const incomingCardRequester = pendingIncomingCardRequest
+    ? state.players.find(player => player.id === pendingIncomingCardRequest.requesterId)
+    : undefined
+  const requestableCardPlayers = isFoldedViewer
+      ? state.players.filter(player => (
+        player.id !== yourId &&
+        player.hasCards &&
+        (player.status === 'active' || player.status === 'all_in' || player.status === 'folded')
+      ))
+    : []
+  const cardRevealActions = useMemo<CardRevealSeatAction[]>(() => {
+    if (settingsOpen) {
+      return []
+    }
+
+    return requestableCardPlayers.map(player => createCardRevealSeatAction(
+      player,
+      cardRevealRequests.find(request => (
+        request.requesterId === yourId && request.targetId === player.id
+      )),
+      isConnected
+    ))
+  }, [cardRevealRequests, isConnected, requestableCardPlayers, settingsOpen, yourId])
+  const cardRevealActionByPlayerId = useMemo(
+    () => new Map(cardRevealActions.map(action => [action.playerId, action])),
+    [cardRevealActions]
+  )
   const visibleOwnPlayer = (
     !isSpectator &&
     me &&
@@ -770,33 +1135,64 @@ export function PokerTable({
   const [socialTick, setSocialTick] = useState(() => Date.now())
   const [targetEmotePlayerId, setTargetEmotePlayerId] = useState<string | null>(null)
   const [targetEmotePickerOpen, setTargetEmotePickerOpen] = useState(false)
+  const [targetQuickEmotes, setTargetQuickEmotes] = useState<string[]>(() => (
+    [...DEFAULT_TARGETED_QUICK_EMOTES]
+  ))
+  const targetEmoteTriggerRef = useRef<HTMLElement | null>(null)
   const playerIds = useMemo(() => state.players.map(player => player.id), [state.players])
   const playerIdSet = useMemo(() => new Set(playerIds), [playerIds])
   const threeEmoteReactions = useMemo(
     () => createThreeEmoteReactions(socialState, playerIds, socialTick, getEmoteGlyph),
     [playerIds, socialState, socialTick]
   )
+  const threeChatMessages = useMemo(
+    () => createThreeChatMessages(socialState, playerIds, socialTick),
+    [playerIds, socialState, socialTick]
+  )
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(TARGETED_QUICK_EMOTES_STORAGE_KEY)
+      if (!stored) {
+        return
+      }
+
+      const parsed = JSON.parse(stored)
+      if (Array.isArray(parsed)) {
+        setTargetQuickEmotes(updateTargetedQuickEmotes(
+          parsed.filter((value): value is string => typeof value === 'string'),
+          ''
+        ))
+      }
+    } catch {
+      // Local storage is optional; defaults remain available when it is blocked.
+    }
+  }, [])
 
   const orderedOpponents = useMemo<OpponentSeat[]>(() => {
     if (isSpectator || !me) {
-      return state.players
+      return showdownPresentedPlayers
         .map(player => ({
           ...player,
-          showCards: canShowRevealedCards ? player.showCards : 'none',
+          showCards: canShowRevealedCards || (
+            isFoldedViewer && liveCardRevealTargetIds.has(player.id)
+          ) ? player.showCards : 'none',
           visualSeat: player.seatIndex,
         }))
         .sort((a, b) => a.visualSeat - b.visualSeat)
     }
 
     const mySeat = me.seatIndex
-    return state.players
+    return showdownPresentedPlayers
       .map(player => ({
         ...player,
-        showCards: canShowRevealedCards ? player.showCards : 'none',
+        showCards: canShowRevealedCards || (
+          isFoldedViewer && liveCardRevealTargetIds.has(player.id)
+        ) ? player.showCards : 'none',
         visualSeat: (player.seatIndex - mySeat + 8) % 8,
       }))
       .sort((a, b) => a.visualSeat - b.visualSeat)
-  }, [canShowRevealedCards, isSpectator, me, state.players, yourId])
+  }, [canShowRevealedCards, isFoldedViewer, isSpectator, liveCardRevealTargetIds, me, showdownPresentedPlayers])
 
   const occupiedVisualSeats = useMemo(() => {
     const occupied = new Set<number>()
@@ -858,21 +1254,74 @@ export function PokerTable({
     return actions
   }, [canCheck, isConnected, isMyTurn, me, toCall])
   const hasActionTray = isInHand && isMyTurn && Boolean(me) && legalActions.length > 0
+  const [queuedCheckFoldHand, setQueuedCheckFoldHand] = useState<number | null>(null)
+  const isCheckFoldQueued = queuedCheckFoldHand === state.handNumber
+  const canQueueCheckFold = Boolean(
+    isInHand &&
+    state.actingPlayerId &&
+    !isMyTurn &&
+    me?.status === 'active' &&
+    visibleOwnPlayer &&
+    isConnected &&
+    !settingsOpen
+  )
+  const showCheckFoldPreAction = canQueueCheckFold && (
+    isMobileViewport || Boolean(threeTableView)
+  )
+
+  useEffect(() => {
+    if (queuedCheckFoldHand === null) {
+      return
+    }
+
+    const queueIsStillValid =
+      queuedCheckFoldHand === state.handNumber &&
+      isInHand &&
+      me?.status === 'active' &&
+      isConnected &&
+      !settingsOpen
+
+    if (!queueIsStillValid) {
+      setQueuedCheckFoldHand(null)
+      return
+    }
+
+    if (!isMyTurn) {
+      return
+    }
+
+    const action = resolveCheckFoldPreAction(legalActions)
+    if (!action) {
+      return
+    }
+
+    setQueuedCheckFoldHand(null)
+    onAction(action)
+  }, [
+    isConnected,
+    isInHand,
+    isMyTurn,
+    legalActions,
+    me?.status,
+    onAction,
+    queuedCheckFoldHand,
+    settingsOpen,
+    state.handNumber,
+  ])
 
   const maxRaise = me ? me.stack + me.bet : 0
   const effectiveMin = Math.min(state.minRaise, maxRaise)
   const [raiseAmount, setRaiseAmount] = useState(effectiveMin)
+  const bettingDecisionKey = `${state.handNumber}:${state.round ?? 'none'}:${state.actingPlayerId ?? 'none'}`
 
   useEffect(() => {
-    if (maxRaise <= 0) {
-      return
-    }
-
-    setRaiseAmount(current => {
-      const nextAmount = Number.isFinite(current) ? current : effectiveMin
-      return Math.max(effectiveMin, Math.min(maxRaise, nextAmount))
-    })
-  }, [effectiveMin, maxRaise])
+    setRaiseAmount(current => resolveRaiseDraftAmount({
+      currentAmount: current,
+      effectiveMin,
+      maxRaise,
+      resetToMinimum: isMyTurn,
+    }))
+  }, [bettingDecisionKey, effectiveMin, isMyTurn, maxRaise])
 
   const quickBets = useMemo(() => {
     const bets: Array<{ label: string; amount: number }> = []
@@ -947,52 +1396,11 @@ export function PokerTable({
     return () => window.clearTimeout(timeout)
   }, [socialState])
 
-  const activeSocialByPlayer = useMemo(() => {
-    const entries = new Map<string, {
-      message?: string
-      emote?: string
-      messageExpiresAt?: number
-      emoteExpiresAt?: number
-      emoteTargeted?: boolean
-    }>()
-
-    for (const entry of socialState.active) {
-      if (entry.message && entry.messageExpiresAt && entry.messageExpiresAt > socialTick) {
-        const current = entries.get(entry.playerId) ?? {}
-        entries.set(entry.playerId, {
-          ...current,
-          message: entry.message,
-          messageExpiresAt: entry.messageExpiresAt,
-        })
-      }
-
-      if (entry.emote && entry.emoteExpiresAt && entry.emoteExpiresAt > socialTick) {
-        const senderId = entry.playerId
-        const targetSeatId = entry.targetPlayerId?.trim() ?? ''
-        const emote = getEmoteGlyph(entry.emote)
-
-        const senderCurrent = entries.get(senderId) ?? {}
-        entries.set(senderId, {
-          ...senderCurrent,
-          emote,
-          emoteExpiresAt: entry.emoteExpiresAt,
-          emoteTargeted: false,
-        })
-
-        if (targetSeatId && targetSeatId !== senderId) {
-          const targetCurrent = entries.get(targetSeatId) ?? {}
-          entries.set(targetSeatId, {
-            ...targetCurrent,
-            emote,
-            emoteExpiresAt: entry.emoteExpiresAt,
-            emoteTargeted: true,
-          })
-        }
-      }
-    }
-
-    return entries
-  }, [socialState.active, socialTick])
+  const activeSocialByPlayer = useMemo(
+    () => buildActiveSocialByPlayer(socialState.active, socialTick),
+    [socialState.active, socialTick]
+  )
+  const heroSocial = activeSocialByPlayer.get(yourId) ?? {}
 
   const targetedPlayer = targetEmotePlayerId
     ? state.players.find(player => player.id === targetEmotePlayerId)
@@ -1005,8 +1413,36 @@ export function PokerTable({
     () => new Map((state.winners ?? []).map(winner => [winner.playerId, winner.venmoUsername])),
     [state.winners]
   )
+  const winnerCardsByPlayer = useMemo(
+    () => new Map((state.winners ?? []).map(winner => [winner.playerId, winner.winningCards ?? []])),
+    [state.winners]
+  )
+  const winnerDescriptions = useMemo(
+    () => new Map((state.winners ?? []).map(winner => [winner.playerId, winner.handDescription])),
+    [state.winners]
+  )
+  const highlightedWinningCards = useMemo(
+    () => showWinnerHighlights
+      ? (state.winners ?? []).flatMap(winner => winner.winningCards ?? [])
+      : [],
+    [showWinnerHighlights, state.winners]
+  )
   const myWinnerAmount = winnerAmounts.get(yourId) ?? 0
-  const winnerSeatMap = useMemo(() => new Map(orderedOpponents.map(player => [player.id, player.visualSeat])), [orderedOpponents])
+  const winnerSeatMap = useMemo(() => {
+    if (isMobileViewport) {
+      return new Map(
+        [
+          [yourId, 0],
+          ...mobileEdgeOpponents.map(player => [player.id, player.mobileVisualSeat] as const),
+        ]
+      )
+    }
+
+    return new Map([
+      [yourId, 0],
+      ...orderedOpponents.map(player => [player.id, player.visualSeat] as const),
+    ])
+  }, [isMobileViewport, mobileEdgeOpponents, orderedOpponents, yourId])
   const winnerSeatTargets = isMobileViewport ? MOBILE_WINNER_SEAT_TARGETS : WINNER_SEAT_TARGETS
   const winnerDisplays = useMemo<WinnerDisplay[]>(() => {
     if (!betweenHands || !state.winners?.length) {
@@ -1030,6 +1466,8 @@ export function PokerTable({
           nickname: player.nickname,
           venmoUsername: winner.venmoUsername ?? player.venmoUsername,
           amount: winner.amount,
+          handDescription: winner.handDescription,
+          visualSeat: safeVisualSeat,
           targetX: target?.x ?? winnerSeatTargets[0]!.x,
           targetY: target?.y ?? winnerSeatTargets[0]!.y,
           delayMs: index * 180,
@@ -1040,6 +1478,10 @@ export function PokerTable({
   }, [betweenHands, state.winners, state.players, winnerSeatMap, winnerSeatTargets])
   const showDesktopWaitingBanner = betweenHands && !isMobileViewport && winnerDisplays.length === 0
   const showManualRabbitHunt = canManualRabbitHunt(state) && Boolean(onRabbitHunt)
+  const hasVisibleRabbitRunout = betweenHands &&
+    state.round !== 'showdown' &&
+    state.communityCards.length === 5 &&
+    state.recentActions[0]?.startsWith('Rabbit hunt:') === true
 
   const tableCenterLabel = me
       ? me.nickname.toUpperCase()
@@ -1047,13 +1489,13 @@ export function PokerTable({
   const mobileHeroStatus = !isConnected
     ? 'Reconnecting'
     : betweenHands
-      ? myWinnerAmount > 0
+      ? showWinnerResults && myWinnerAmount > 0
         ? `Won ${formatAmount(myWinnerAmount)}`
         : 'Waiting for next hand'
       : isMyTurn
         ? toCall > 0
           ? `To call ${formatAmount(toCall)}`
-          : 'Your turn'
+          : 'Check or raise'
         : actingPlayer
           ? `${actingPlayer.nickname}'s turn`
           : 'In hand'
@@ -1088,12 +1530,33 @@ export function PokerTable({
   const mobileRaiseBlindCount = state.bigBlind > 0
     ? Math.max(1, Math.round(raiseAmount / state.bigBlind))
     : raiseAmount
+  const checkFoldPreActionControl = showCheckFoldPreAction ? (
+    <button
+      type="button"
+      className={`own-hand-pre-action-button ${isCheckFoldQueued ? 'is-queued' : ''}`}
+      aria-label={isCheckFoldQueued
+        ? 'Cancel queued check or fold'
+        : 'Queue check if possible, otherwise fold'}
+      aria-pressed={isCheckFoldQueued}
+      title="Checks if checking is free; otherwise folds when action reaches you."
+      onClick={() => setQueuedCheckFoldHand(current => (
+        current === state.handNumber ? null : state.handNumber
+      ))}
+    >
+      <span className="own-hand-pre-action-copy">
+        <small>{isCheckFoldQueued ? 'Tap to cancel' : 'Pre-action'}</small>
+        <strong>Check / Fold</strong>
+      </span>
+    </button>
+  ) : null
 
   const tableWaitingCopy = !isConnected
     ? 'Restoring the room snapshot and reconnecting your seat.'
     : state.players.length < 2
       ? 'Share the room code and fill the open seats to kick off the next hand.'
-      : 'The table is ready. Deal whenever everyone looks settled.'
+      : isHost
+        ? 'The table is ready. Deal whenever everyone looks settled.'
+        : 'The table is ready. Waiting for the game creator to deal.'
   const waitingStatusText = getWaitingStatusText(state, lobbyMe, isConnected)
   const desktopWaitingBannerTitle = !isConnected
     ? 'Reconnecting'
@@ -1103,8 +1566,8 @@ export function PokerTable({
   const desktopWaitingBannerCopy = tableWaitingCopy
   const bettingTrayHeader = isMyTurn
     ? toCall > 0
-      ? `Your turn - Call ${formatAmount(toCall)}`
-      : 'Your turn'
+      ? `Call ${formatAmount(toCall)}`
+      : 'Check or raise'
     : toCall > 0
       ? `To call ${formatAmount(toCall)}`
       : 'Action live'
@@ -1116,25 +1579,56 @@ export function PokerTable({
       ? `${turnTimer.secondsLeft}s left`
       : 'Hand live'
 
+  const closeTargetedEmote = useCallback(() => {
+    setTargetEmotePlayerId(null)
+    setTargetEmotePickerOpen(false)
+
+    const trigger = targetEmoteTriggerRef.current
+    targetEmoteTriggerRef.current = null
+    if (trigger?.isConnected) {
+      trigger.focus({ preventScroll: true })
+    }
+  }, [])
+
   const handleTargetedEmote = useCallback((emote: string) => {
     if (!targetedPlayer) {
       onFeedback('Select a player before sending a targeted emote.', 'error')
       return
     }
 
+    setTargetQuickEmotes(current => {
+      const next = updateTargetedQuickEmotes(current, emote)
+      try {
+        window.localStorage.setItem(TARGETED_QUICK_EMOTES_STORAGE_KEY, JSON.stringify(next))
+      } catch {
+        // Sending a reaction should still work when storage is unavailable.
+      }
+      return next
+    })
     onSendTargetEmote(targetedPlayer.id, emote)
-    setTargetEmotePlayerId(null)
-    setTargetEmotePickerOpen(false)
-  }, [onFeedback, onSendTargetEmote, targetedPlayer])
+    closeTargetedEmote()
+  }, [closeTargetedEmote, onFeedback, onSendTargetEmote, targetedPlayer])
 
-  const closeTargetedEmote = useCallback(() => {
-    setTargetEmotePlayerId(null)
-    setTargetEmotePickerOpen(false)
-  }, [])
+  const handleTargetedMessage = useCallback((message: string) => {
+    if (!targetedPlayer) {
+      onFeedback('Select a player before sending a message.', 'error')
+      return
+    }
+
+    onSendTargetChat(targetedPlayer.id, message)
+    closeTargetedEmote()
+  }, [closeTargetedEmote, onFeedback, onSendTargetChat, targetedPlayer])
 
   const handleSelectEmoteTarget = useCallback((playerId: string) => {
     if (!playerIdSet.has(playerId)) {
       return
+    }
+
+    if (typeof document !== 'undefined' && typeof HTMLElement !== 'undefined') {
+      const activeElement = document.activeElement
+      if (activeElement instanceof HTMLElement && activeElement !== document.body) {
+        targetEmoteTriggerRef.current = activeElement
+      }
     }
 
     setTargetEmotePlayerId(playerId)
@@ -1151,13 +1645,41 @@ export function PokerTable({
       data-suit-colors={suitColorMode}
       data-tray-open={hasActionTray ? 'true' : 'false'}
       data-desktop-three={threeTableView ? 'true' : 'false'}
+      data-showdown={showdownPresentation.isShowdown ? 'true' : 'false'}
+      data-run-it-twice={state.runItTwice?.status ?? 'none'}
+      data-showdown-stage={showdownPresentation.stage}
+      data-settings-open={settingsOpen ? 'true' : 'false'}
     >
       {threeTableView ? (
         <DesktopPokerRoom3D
-          view={threeTableView}
+          view={presentedThreeTableView ?? threeTableView}
           emoteReactions={threeEmoteReactions}
+          chatMessages={threeChatMessages}
           selectedTargetId={targetEmotePlayerId}
           onSelectPlayer={handleSelectEmoteTarget}
+          cardRevealActions={cardRevealActions}
+          onRequestCardReveal={onRequestCardReveal}
+        />
+      ) : null}
+      <ShowdownCinematic
+        state={state}
+        presentation={showdownPresentation}
+        onSoundCue={onSoundCue}
+      />
+      {pendingIncomingCardRequest && incomingCardRequester && !settingsOpen ? (
+        <CardRevealConsentPrompt
+          requesterName={incomingCardRequester.nickname}
+          isConnected={isConnected}
+          onRespond={allow => onRespondCardReveal(pendingIncomingCardRequest.requesterId, allow)}
+        />
+      ) : null}
+      {runItTwiceVote && !settingsOpen ? (
+        <RunItTwicePrompt
+          runItTwice={runItTwiceVote}
+          players={state.players}
+          yourId={yourId}
+          isConnected={isConnected}
+          onVote={onRunItTwiceVote}
         />
       ) : null}
       {isInHand && actingPlayer && !threeTableView && !isMobileViewport && (
@@ -1167,7 +1689,7 @@ export function PokerTable({
           aria-live={isMyTurn ? 'assertive' : 'polite'}
         >
           <span className="turn-focus-kicker">
-            {isMyTurn ? 'Your turn' : 'Turn'}
+            {isMyTurn ? 'Action' : 'Turn'}
           </span>
           <span className="turn-focus-name">
             {isMyTurn ? 'You are up' : `${actingPlayer.nickname} is up`}
@@ -1185,7 +1707,14 @@ export function PokerTable({
                 currentBet={state.currentBet}
                 toCall={isMyTurn ? Math.max(0, toCall) : 0}
               />
-              <CommunityCards cards={state.communityCards} />
+              {acceptedRunItTwice ? (
+                <RunItTwiceBoards runItTwice={acceptedRunItTwice} players={state.players} />
+              ) : (
+                <CommunityCards
+                  cards={state.communityCards}
+                  highlightedCards={highlightedWinningCards}
+                />
+              )}
             </div>
 
             <div className="mobile-edge-seats" aria-label="Players">
@@ -1202,16 +1731,22 @@ export function PokerTable({
                         player={player}
                         visualSeat={player.mobileVisualSeat}
                         isActing={state.actingPlayerId === player.id}
-                        isWinner={betweenHands && winnerAmounts.has(player.id)}
+                        secondsLeft={state.actingPlayerId === player.id ? turnTimer.secondsLeft : undefined}
+                        isWinner={betweenHands && showWinnerHighlights && winnerAmounts.has(player.id)}
                         winnerAmount={winnerAmounts.get(player.id)}
-                        onNameClick={playerId => {
-                          setTargetEmotePlayerId(playerId)
-                          setTargetEmotePickerOpen(false)
-                        }}
+                        winnerHandDescription={winnerDescriptions.get(player.id)}
+                        winningCards={winnerCardsByPlayer.get(player.id)}
+                        cardRevealControl={cardRevealActionByPlayerId.has(player.id) ? (
+                          <CardRevealSeatButton
+                            action={cardRevealActionByPlayerId.get(player.id)!}
+                            onRequest={onRequestCardReveal}
+                          />
+                        ) : null}
+                        onNameClick={handleSelectEmoteTarget}
                       />
                       {(seatSocial.message || seatSocial.emote) && (
                         <div className="mobile-edge-social" aria-live="polite">
-                          {seatSocial.emote && <span>{seatSocial.emote}</span>}
+                          {seatSocial.emote && <EmojiGlyph emoji={seatSocial.emote} />}
                           {seatSocial.message && <span>{seatSocial.message}</span>}
                         </div>
                       )}
@@ -1220,11 +1755,42 @@ export function PokerTable({
                 })}
             </div>
 
-            {betweenHands && winnerDisplays.length > 0 && (
-              <div className="mobile-edge-winners" role="status" aria-live="polite">
+            {betweenHands && showWinnerPayout && winnerDisplays.length > 0 && (
+              <div
+                className="table-center-winner-chip-trails mobile-winner-chip-trails"
+                aria-hidden="true"
+              >
+                {winnerDisplays.map(winner => {
+                  const trailStyle: WinnerChipTrailStyle = {
+                    ['--winner-chip-x']: winner.targetX,
+                    ['--winner-chip-y']: winner.targetY,
+                    ['--winner-chip-delay']: `${winner.delayMs}ms`,
+                  }
+
+                  return (
+                    <div
+                      key={`${winner.playerId}-mobile-trail`}
+                      className="table-center-winner-chip-trail"
+                      style={trailStyle}
+                    >
+                      <ChipStack amount={winner.amount} compact showAmount={false} />
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {betweenHands && showWinnerResults && winnerDisplays.length > 0 && !hasVisibleRabbitRunout && !acceptedRunItTwice && (
+              <div className="mobile-edge-winners" role="status" aria-live="assertive" aria-atomic="true">
+                <div className="mobile-edge-winners-heading">
+                  {winnerDisplays.length > 1 ? 'Split pot' : 'Hand winner'}
+                </div>
                 {winnerDisplays.map(winner => (
                   <div key={winner.playerId} className="mobile-edge-winner-line">
-                    <span>{formatWinnerPaymentLabel(winner.nickname, winner.venmoUsername)}</span>
+                    <span>
+                      <b>{formatWinnerPaymentLabel(winner.nickname, winner.venmoUsername)}</b>
+                      {winner.handDescription && <small>{winner.handDescription}</small>}
+                    </span>
                     <strong>Won {formatAmount(winner.amount)}</strong>
                   </div>
                 ))}
@@ -1233,10 +1799,18 @@ export function PokerTable({
 
             {shouldShowOwnHand && visibleOwnPlayer && (
               <div className="mobile-hero-lane">
+                {visibleOwnPlayer.bet > 0 && (
+                  <MobileBetIndicator
+                    key={`${visibleOwnPlayer.id}-${visibleOwnPlayer.bet}`}
+                    amount={visibleOwnPlayer.bet}
+                    ownerLabel="Your"
+                    className="mobile-hero-bet-anchor"
+                  />
+                )}
                 <MobileHeroSeat
                   player={visibleOwnPlayer}
                   isActing={isMyTurn}
-                  isWinner={betweenHands && myWinnerAmount > 0}
+                  isWinner={betweenHands && showWinnerHighlights && myWinnerAmount > 0}
                   status={mobileHeroStatus}
                 />
 
@@ -1244,9 +1818,16 @@ export function PokerTable({
                   cards={ownHandCards}
                   isActing={isMyTurn}
                   isFolded={isOwnHandFolded}
-                  isWinner={betweenHands && myWinnerAmount > 0}
+                  isWinner={betweenHands && showWinnerHighlights && myWinnerAmount > 0}
+                  winningCards={winnerCardsByPlayer.get(yourId)}
                   handDescription={ownHandDescription}
                   showCardsMode={ownShowCardsMode}
+                  revealChoiceActive={canAdjustShownCards}
+                  socialMessage={heroSocial.message}
+                  socialMessageExpiresAt={heroSocial.messageExpiresAt}
+                  socialEmote={heroSocial.emote}
+                  socialEmoteExpiresAt={heroSocial.emoteExpiresAt}
+                  socialEmoteTargeted={heroSocial.emoteTargeted}
                   showCardsControl={
                     canAdjustShownCards && me && !isSpectator && !settingsOpen ? (
                       <ShowCardsControl
@@ -1292,9 +1873,11 @@ export function PokerTable({
                   <PlayerSeat
                     player={player}
                     isActing={state.actingPlayerId === player.id}
-                    isWinner={betweenHands && winnerAmounts.has(player.id)}
+                    isWinner={betweenHands && showWinnerHighlights && winnerAmounts.has(player.id)}
                     winnerAmount={winnerAmounts.get(player.id)}
                     winnerVenmoUsername={winnerVenmoUsernames.get(player.id) ?? player.venmoUsername}
+                    winnerHandDescription={winnerDescriptions.get(player.id)}
+                    winningCards={winnerCardsByPlayer.get(player.id)}
                     depthClass={layout.depthClass}
                     opacityValue={layout.opacity}
                     socialMessage={seatSocial.message}
@@ -1302,10 +1885,13 @@ export function PokerTable({
                     socialEmote={seatSocial.emote}
                     socialEmoteExpiresAt={seatSocial.emoteExpiresAt}
                     socialEmoteTargeted={seatSocial.emoteTargeted}
-                    onNameClick={playerId => {
-                      setTargetEmotePlayerId(playerId)
-                      setTargetEmotePickerOpen(false)
-                    }}
+                    cardRevealControl={cardRevealActionByPlayerId.has(player.id) ? (
+                      <CardRevealSeatButton
+                        action={cardRevealActionByPlayerId.get(player.id)!}
+                        onRequest={onRequestCardReveal}
+                      />
+                    ) : null}
+                    onNameClick={handleSelectEmoteTarget}
                   />
                 </div>
               )
@@ -1313,7 +1899,14 @@ export function PokerTable({
           </div>
 
           <div className="table-surface">
-            <CommunityCards cards={state.communityCards} />
+            {acceptedRunItTwice ? (
+              <RunItTwiceBoards runItTwice={acceptedRunItTwice} players={state.players} />
+            ) : (
+              <CommunityCards
+                cards={state.communityCards}
+                highlightedCards={highlightedWinningCards}
+              />
+            )}
 
             <PotDisplay
               totalPot={state.totalPot}
@@ -1339,59 +1932,55 @@ export function PokerTable({
               </div>
             )}
 
-            {betweenHands && winnerDisplays.length > 0 ? (
-              <div className="table-seat-winner-announcements" role="status" aria-live="polite">
-                {winnerDisplays.map(winner => {
-                  const announcementStyle: WinnerAnnouncementStyle = {
-                    ['--winner-announcement-x']: winner.targetX,
-                    ['--winner-announcement-y']: winner.targetY,
-                    ['--winner-announcement-delay']: `${winner.delayMs}ms`,
-                  }
-
-                  return (
-                    <div
-                      key={winner.playerId}
-                      className="table-center-winner-announcement"
-                      style={announcementStyle}
-                    >
-                      <div className="table-center-winner-title">Hand Winner</div>
-                      <div className="table-center-winner-line">
-                        <span className="table-center-winner-name">
-                          {formatWinnerPaymentLabel(winner.nickname, winner.venmoUsername)}
-                        </span>
-                        <span className="table-center-winner-amount">Won {formatAmount(winner.amount)}</span>
-                        <ChipStack amount={winner.amount} compact />
-                      </div>
+            {betweenHands && winnerDisplays.length > 0 && !acceptedRunItTwice && (showWinnerResults || showWinnerPayout) ? (
+              <div className="table-seat-winner-announcements" role="status" aria-live="assertive" aria-atomic="true">
+                {showWinnerResults && !hasVisibleRabbitRunout && (
+                  <div className="table-hand-result-summary">
+                    <span className="table-hand-result-kicker">
+                      {winnerDisplays.length > 1 ? 'Split pot' : 'Hand winner'}
+                    </span>
+                    <div className="table-hand-result-list">
+                      {winnerDisplays.map(winner => (
+                        <div key={`${winner.playerId}-result`} className="table-hand-result-row">
+                          <span className="table-hand-result-player">
+                            <strong>{formatWinnerPaymentLabel(winner.nickname, winner.venmoUsername)}</strong>
+                            {winner.handDescription && <small>{winner.handDescription}</small>}
+                          </span>
+                          <b className="table-hand-result-amount">+{formatAmount(winner.amount)}</b>
+                        </div>
+                      ))}
                     </div>
-                  )
-                })}
+                  </div>
+                )}
 
-                <div className="table-center-winner-chip-trails" aria-hidden="true">
-                  {winnerDisplays.map(winner => {
-                    const trailStyle: WinnerChipTrailStyle = {
-                      ['--winner-chip-x']: winner.targetX,
-                      ['--winner-chip-y']: winner.targetY,
-                      ['--winner-chip-delay']: `${winner.delayMs}ms`,
-                    }
+                {showWinnerPayout && (
+                  <div className="table-center-winner-chip-trails" aria-hidden="true">
+                    {winnerDisplays.map(winner => {
+                      const trailStyle: WinnerChipTrailStyle = {
+                        ['--winner-chip-x']: winner.targetX,
+                        ['--winner-chip-y']: winner.targetY,
+                        ['--winner-chip-delay']: `${winner.delayMs}ms`,
+                      }
 
-                    return (
-                      <div
-                        key={`${winner.playerId}-trail`}
-                        className="table-center-winner-chip-trail"
-                        style={trailStyle}
-                      >
-                        <ChipStack amount={winner.amount} compact showAmount={false} />
-                      </div>
-                    )
-                  })}
-                </div>
+                      return (
+                        <div
+                          key={`${winner.playerId}-trail`}
+                          className="table-center-winner-chip-trail"
+                          style={trailStyle}
+                        >
+                          <ChipStack amount={winner.amount} compact showAmount={false} />
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             ) : null}
           </div>
 
           {showHeroBottomSummary && visibleOwnPlayer && (
             <div
-              className={`hero-bottom-summary ${isMyTurn ? 'is-acting' : ''} ${betweenHands && myWinnerAmount > 0 ? 'is-winner' : ''}`}
+              className={`hero-bottom-summary ${isMyTurn ? 'is-acting' : ''} ${betweenHands && showWinnerHighlights && myWinnerAmount > 0 ? 'is-winner' : ''}`}
               role="status"
               aria-label={`${visibleOwnPlayer.nickname}, chips ${formatAmount(visibleOwnPlayer.stack)}`}
             >
@@ -1406,9 +1995,16 @@ export function PokerTable({
                 cards={ownHandCards}
                 isActing={isMyTurn}
                 isFolded={isOwnHandFolded}
-                isWinner={betweenHands && myWinnerAmount > 0}
+                isWinner={betweenHands && showWinnerHighlights && myWinnerAmount > 0}
+                winningCards={winnerCardsByPlayer.get(yourId)}
                 handDescription={ownHandDescription}
                 showCardsMode={ownShowCardsMode}
+                revealChoiceActive={canAdjustShownCards}
+                socialMessage={heroSocial.message}
+                socialMessageExpiresAt={heroSocial.messageExpiresAt}
+                socialEmote={heroSocial.emote}
+                socialEmoteExpiresAt={heroSocial.emoteExpiresAt}
+                socialEmoteTargeted={heroSocial.emoteTargeted}
                 showCardsControl={
                   canAdjustShownCards && me && !isSpectator && !settingsOpen ? (
                     <ShowCardsControl
@@ -1421,7 +2017,7 @@ export function PokerTable({
               />
 
               <div
-                className={`mobile-hero-summary ${isMyTurn ? 'is-acting' : ''} ${betweenHands && myWinnerAmount > 0 ? 'is-winner' : ''}`}
+                className={`mobile-hero-summary ${isMyTurn ? 'is-acting' : ''} ${betweenHands && showWinnerHighlights && myWinnerAmount > 0 ? 'is-winner' : ''}`}
               >
                 <div className="mobile-hero-summary-card">
                   <span className="mobile-hero-summary-name">{visibleOwnPlayer.nickname}</span>
@@ -1442,20 +2038,26 @@ export function PokerTable({
                 Eq {formatEquityPercent(me.equityPercent)}
               </span>
             )}
-            {betweenHands && myWinnerAmount > 0 && (
+            {betweenHands && showWinnerResults && myWinnerAmount > 0 && (
               <span className="table-chip winner-chip">
                 Won {formatAmount(myWinnerAmount)}
                 {me?.venmoUsername ? ` ${me.venmoUsername}` : ''}
               </span>
             )}
             {me.isDealer && <span className="table-chip">Dealer</span>}
-            {me.isSB && <span className="table-chip">SB</span>}
-            {me.isBB && <span className="table-chip">BB</span>}
+            {me.isSB && <span className="table-chip hero-blind-role is-small">Small Blind</span>}
+            {me.isBB && <span className="table-chip hero-blind-role is-big">Big Blind</span>}
             {isMyTurn && <span className="table-chip table-chip-soft">Your action</span>}
             {!isConnected && <span className="table-chip chip-warning">Reconnecting</span>}
           </div>
         )}
       </div>
+
+      {checkFoldPreActionControl && (
+        <div className="check-fold-pre-action-dock">
+          {checkFoldPreActionControl}
+        </div>
+      )}
 
       {activeAllInAnnouncement ? (
         <AllInAnnouncement
@@ -1475,19 +2077,36 @@ export function PokerTable({
         <SettingsModal
           state={state}
           yourId={yourId}
+          isHost={isHost}
           isConnected={isConnected}
           suitColorMode={suitColorMode}
+          soundMuted={soundMuted}
+          soundVolume={soundVolume}
+          avatarCustomization={avatarCustomization}
           roomCode={roomCode}
           canShareRoom={canShareRoom}
           onClose={onCloseSettings}
           onSetSuitColorMode={onSetSuitColorMode}
+          onSetSoundMuted={onSetSoundMuted}
+          onSetSoundVolume={onSetSoundVolume}
+          onUpdateAvatar={onUpdateAvatar}
           onUpdateSettings={onUpdateSettings}
           onRemovePlayer={onRemovePlayer}
           onAdjustPlayerStack={onAdjustPlayerStack}
           onSetPlayerSpectator={onSetPlayerSpectator}
           onCopyRoom={onCopyRoom}
           onShareRoom={onShareRoom}
+          onLeaveGame={onLeaveGame}
           onFeedback={onFeedback}
+        />
+      )}
+
+      {!settingsOpen && (
+        <TableSocialDock
+          chatLog={socialState.chatLog}
+          isConnected={isConnected}
+          onSendChat={onSendChat}
+          onSendEmote={onSendEmote}
         />
       )}
 
@@ -1496,6 +2115,7 @@ export function PokerTable({
           state={state}
           me={me}
           lobbyMe={lobbyMe}
+          isHost={isHost}
           isConnected={isConnected}
           copy={tableWaitingCopy}
           onStartGame={onStartGame}
@@ -1580,7 +2200,7 @@ export function PokerTable({
                 onClick={mobileCheckCallAction?.onClick}
                 disabled={!mobileCheckCallAction}
               >
-                <span>CHECK / CALL</span>
+                <span>{getMobileCheckCallLabel(mobileCheckCallAction?.key)}</span>
                 {toCall > 0 && <strong>{formatAmount(toCall)}</strong>}
               </button>
               <button
@@ -1601,11 +2221,6 @@ export function PokerTable({
               <span className="betting-tray-kicker">
                 {bettingTrayHeader}
               </span>
-              {isMyTurn && (
-                <span className="betting-tray-turn">
-                  Your turn
-                </span>
-              )}
             </div>
 
             <div className="timer-bar-shell">
@@ -1702,6 +2317,7 @@ export function PokerTable({
                 state={state}
                 me={me}
                 lobbyMe={lobbyMe}
+                isHost={isHost}
                 isConnected={isConnected}
                 onStartGame={onStartGame}
                 onAddBots={onAddBots}
@@ -1712,20 +2328,220 @@ export function PokerTable({
             </div>
           )}
 
-          <div className="table-side-panels chat-dock">
-            {targetedPlayer && (
-              <TargetedEmotePanel
-                target={targetedPlayer}
-                isConnected={isConnected}
-                onSendEmote={handleTargetedEmote}
-                onClose={closeTargetedEmote}
-                fullPickerOpen={targetEmotePickerOpen}
-                onToggleFullPicker={() => setTargetEmotePickerOpen(current => !current)}
-                emotes={EMOTE_OPTIONS}
-              />
+          {targetedPlayer && (
+            <TargetedEmotePanel
+              target={targetedPlayer}
+              isConnected={isConnected}
+              onSendEmote={handleTargetedEmote}
+              onSendMessage={handleTargetedMessage}
+              onClose={closeTargetedEmote}
+              fullPickerOpen={targetEmotePickerOpen}
+              onToggleFullPicker={() => setTargetEmotePickerOpen(current => !current)}
+              quickEmotes={targetQuickEmotes}
+            />
+          )}
+    </div>
+  )
+}
+
+function TableSocialDock({
+  chatLog,
+  isConnected,
+  onSendChat,
+  onSendEmote,
+}: {
+  chatLog: TableChatEntry[]
+  isConnected: boolean
+  onSendChat: (message: string) => void
+  onSendEmote: (emote: string) => void
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [message, setMessage] = useState('')
+  const recentMessages = chatLog.slice(-6)
+
+  const submitMessage = useCallback(() => {
+    const trimmed = message.trim()
+    if (!trimmed || !isConnected) {
+      return
+    }
+
+    onSendChat(trimmed)
+    setMessage('')
+  }, [isConnected, message, onSendChat])
+
+  return (
+    <aside className={`social-dock ${isOpen ? 'is-open' : ''}`} aria-label="Table chat and reactions">
+      {isOpen && (
+        <div className="social-dock-panel">
+          <div className="social-dock-header">
+            <div>
+              <span className="social-dock-kicker">Table talk</span>
+              <strong>Chat &amp; reactions</strong>
+            </div>
+            <button
+              type="button"
+              className="social-dock-close"
+              onClick={() => setIsOpen(false)}
+              aria-label="Close table chat"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="social-dock-messages" aria-live="polite">
+            {recentMessages.length > 0 ? recentMessages.map(entry => (
+              <div key={entry.id} className="social-dock-message">
+                <span>{entry.nickname}</span>
+                <p>{entry.message}</p>
+              </div>
+            )) : (
+              <div className="social-dock-empty">No table talk yet. Break the ice.</div>
             )}
           </div>
-    </div>
+
+          <div className="social-dock-reactions" aria-label="Quick reactions">
+            {EMOTE_OPTIONS.map(item => (
+              <button
+                key={item.id}
+                type="button"
+                disabled={!isConnected}
+                onClick={() => onSendEmote(item.glyph)}
+                aria-label={`Send ${item.label.toLowerCase()} reaction`}
+              >
+                <EmojiGlyph emoji={item.glyph} />
+              </button>
+            ))}
+          </div>
+
+          <div className="social-dock-compose">
+            <input
+              type="text"
+              value={message}
+              maxLength={160}
+              placeholder="Message the table"
+              disabled={!isConnected}
+              onChange={event => setMessage(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  submitMessage()
+                }
+              }}
+              aria-label="Table message"
+            />
+            <button
+              type="button"
+              disabled={!isConnected || !message.trim()}
+              onClick={submitMessage}
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      )}
+
+      <button
+        type="button"
+        className="social-dock-toggle"
+        onClick={() => setIsOpen(current => !current)}
+        aria-expanded={isOpen}
+        aria-label={isOpen ? 'Close table chat' : 'Open table chat and reactions'}
+      >
+        <span aria-hidden="true">♣</span>
+        <strong>Table talk</strong>
+        {chatLog.length > 0 && <em>{Math.min(chatLog.length, 99)}</em>}
+      </button>
+    </aside>
+  )
+}
+
+function CardRevealConsentPrompt({
+  requesterName,
+  isConnected,
+  onRespond,
+}: {
+  requesterName: string
+  isConnected: boolean
+  onRespond: (allow: boolean) => void
+}) {
+  return (
+    <aside
+      className="card-reveal-consent"
+      role="alertdialog"
+      aria-labelledby="card-reveal-consent-title"
+      aria-describedby="card-reveal-consent-description"
+    >
+      <span className="card-reveal-consent-kicker">Card request</span>
+      <strong id="card-reveal-consent-title">{requesterName} wants to see your cards</strong>
+      <p id="card-reveal-consent-description">
+        Only {requesterName} will see them, and permission expires after this hand.
+      </p>
+      <div className="card-reveal-consent-actions">
+        <button
+          type="button"
+          className="card-reveal-deny"
+          disabled={!isConnected}
+          onClick={() => onRespond(false)}
+        >
+          Keep hidden
+        </button>
+        <button
+          type="button"
+          className="card-reveal-allow"
+          disabled={!isConnected}
+          onClick={() => onRespond(true)}
+        >
+          Allow this hand
+        </button>
+      </div>
+    </aside>
+  )
+}
+
+function createCardRevealSeatAction(
+  player: SeatPlayer,
+  request: CardRevealRequest | undefined,
+  isConnected: boolean
+): CardRevealSeatAction {
+  const label = request?.status === 'pending'
+    ? 'Waiting'
+    : request?.status === 'approved'
+      ? 'Shown'
+      : request?.status === 'denied'
+        ? 'Hidden'
+        : player.isBot ? 'See' : 'Ask'
+
+  return {
+    playerId: player.id,
+    label,
+    ariaLabel: request
+      ? `${player.nickname}: ${label}`
+      : player.isBot
+        ? `See ${player.nickname}'s cards`
+        : `Ask ${player.nickname} for permission to see their cards`,
+    status: request?.status,
+    disabled: !isConnected || Boolean(request),
+  }
+}
+
+function CardRevealSeatButton({
+  action,
+  onRequest,
+}: {
+  action: CardRevealSeatAction
+  onRequest: (targetId: string) => void
+}) {
+  return (
+    <button
+      type="button"
+      className={`card-reveal-seat-button${action.status ? ` is-${action.status}` : ''}`}
+      disabled={action.disabled}
+      onClick={() => onRequest(action.playerId)}
+      aria-label={action.ariaLabel}
+      title={action.ariaLabel}
+    >
+      {action.label}
+    </button>
   )
 }
 
@@ -1739,9 +2555,21 @@ function ShowCardsControl({
   onChangeMode: (mode: ShowCardsMode) => void
 }) {
   return (
-    <div className="show-cards-toggle" role="group" aria-label="Show folded cards">
+    <div
+      className="show-cards-toggle"
+      role="group"
+      aria-label="Choose which cards to reveal after this hand"
+    >
+      <span className="show-cards-toggle-label">
+        {mode === 'none' ? 'Your cards are private' : 'Visible to the table'}
+      </span>
       {SHOW_CARD_OPTIONS.map(option => {
         const isActive = mode === option.mode
+        const buttonLabel = option.mode === 'none'
+          ? 'Muck both cards'
+          : isActive
+            ? `Stop showing ${option.label}`
+            : `Show ${option.label}`
 
         return (
           <button
@@ -1751,7 +2579,8 @@ function ShowCardsControl({
             onClick={() => onChangeMode(isActive ? 'none' : option.mode)}
             disabled={!isConnected}
             aria-pressed={isActive}
-            title={isActive ? `Hide ${option.label}` : `Show ${option.label}`}
+            aria-label={buttonLabel}
+            title={buttonLabel}
           >
             {option.shortLabel}
           </button>
@@ -1765,29 +2594,67 @@ function TargetedEmotePanel({
   target,
   isConnected,
   onSendEmote,
+  onSendMessage,
   onClose,
   fullPickerOpen,
   onToggleFullPicker,
-  emotes,
+  quickEmotes,
 }: {
   target: SeatPlayer
   isConnected: boolean
   onSendEmote: (emote: string) => void
+  onSendMessage: (message: string) => void
   onClose: () => void
   fullPickerOpen: boolean
   onToggleFullPicker: () => void
-  emotes: readonly { id: EmoteId; glyph: string; label: string }[]
+  quickEmotes: readonly string[]
 }) {
   const statSummary = formatPlayerStatsSummary(target.stats)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const [message, setMessage] = useState('')
+
+  const submitMessage = useCallback(() => {
+    const trimmed = message.trim()
+    if (!trimmed || !isConnected) {
+      return
+    }
+
+    onSendMessage(trimmed)
+    setMessage('')
+  }, [isConnected, message, onSendMessage])
+
+  useEffect(() => {
+    closeButtonRef.current?.focus({ preventScroll: true })
+  }, [target.id])
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return
+      }
+
+      event.preventDefault()
+      onClose()
+    }
+
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [onClose])
 
   return (
-    <aside className="table-panel targeted-emote-panel">
+    <aside
+      className={`table-panel targeted-emote-panel ${fullPickerOpen ? 'is-picker-open' : ''}`}
+      data-picker-open={fullPickerOpen ? 'true' : 'false'}
+      role="dialog"
+      aria-label={`Message or react to ${target.nickname}`}
+    >
       <div className="table-panel-header">
         <div>
           <div className="table-panel-kicker">Opponent</div>
           <div className="table-panel-title">Send to {target.nickname}</div>
         </div>
         <button
+          ref={closeButtonRef}
           type="button"
           className="targeted-emote-close"
           onClick={onClose}
@@ -1797,26 +2664,56 @@ function TargetedEmotePanel({
         </button>
       </div>
 
-      <div className="targeted-player-stats" aria-label={`${target.nickname} stats`}>
-        {statSummary.map(stat => (
-          <div key={stat.label} className="targeted-player-stat">
-            <span>{stat.label}</span>
-            <strong>{stat.value}</strong>
+      {!fullPickerOpen && (
+        <>
+          <div className="targeted-player-stats" aria-label={`${target.nickname} stats`}>
+            {statSummary.map(stat => (
+              <div key={stat.label} className="targeted-player-stat">
+                <span>{stat.label}</span>
+                <strong>{stat.value}</strong>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+
+          <div className="targeted-message-compose">
+            <input
+              type="text"
+              value={message}
+              maxLength={140}
+              placeholder={`Message ${target.nickname}`}
+              disabled={!isConnected}
+              onChange={event => setMessage(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  submitMessage()
+                }
+              }}
+              aria-label={`Message ${target.nickname}`}
+            />
+            <button
+              type="button"
+              disabled={!isConnected || !message.trim()}
+              onClick={submitMessage}
+            >
+              Send
+            </button>
+          </div>
+        </>
+      )}
 
       <div className="chat-emotes">
-        {emotes.map(item => (
+        {!fullPickerOpen && quickEmotes.map(emote => (
           <button
-            key={item.id}
+            key={emote}
             type="button"
             className="emote-button"
-            onClick={() => onSendEmote(item.glyph)}
+            onClick={() => onSendEmote(emote)}
             disabled={!isConnected}
-            title={`Send ${item.label.toLowerCase()} to ${target.nickname}`}
+            aria-label={`Send ${getEmoteLabel(emote).toLowerCase()} to ${target.nickname}`}
+            title={`Send ${getEmoteLabel(emote).toLowerCase()} to ${target.nickname}`}
           >
-            {item.glyph}
+            <EmojiGlyph emoji={emote} />
           </button>
         ))}
         <button
@@ -1825,7 +2722,7 @@ function TargetedEmotePanel({
           disabled={!isConnected}
           onClick={onToggleFullPicker}
         >
-          {fullPickerOpen ? 'Hide picker' : 'Search all emojis'}
+          {fullPickerOpen ? 'Back' : 'More emojis'}
         </button>
       </div>
 
@@ -1833,6 +2730,7 @@ function TargetedEmotePanel({
         <SearchableEmojiPicker
           className="targeted-emote-picker"
           isConnected={isConnected}
+          height="clamp(240px, calc(100dvh - 260px), 360px)"
           searchPlaceholder={`Search emojis for ${target.nickname}`}
           onSelect={emoji => onSendEmote(emoji)}
         />
@@ -1892,31 +2790,145 @@ function useTurnTimer(
   return timer
 }
 
-function SettingsModal({
+function formatAvatarChoice(value: string): string {
+  return value
+    .split('_')
+    .map(word => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+    .join(' ')
+}
+
+function buildAvatarSummary(avatar: PlayerAvatarCustomization): string {
+  const hat = avatar.hat === 'none' ? 'No hat' : formatAvatarChoice(avatar.hat)
+  const glasses = avatar.glasses === 'none' ? 'No glasses' : formatAvatarChoice(avatar.glasses)
+  const jacket = avatar.jacket === 'none'
+    ? 'No jacket'
+    : `${formatAvatarChoice(avatar.jacket)} in ${formatAvatarChoice(avatar.jacketColor)}`
+
+  return [
+    formatAvatarChoice(avatar.modelKey),
+    hat,
+    glasses,
+    jacket,
+    `${formatAvatarChoice(avatar.idleTell)} tell`,
+    `${formatAvatarChoice(avatar.celebration)} win`,
+  ].join(' \u00b7 ')
+}
+
+function AvatarChoiceGroup<T extends string>({
+  legend,
+  value,
+  options,
+  onChange,
+}: {
+  legend: string
+  value: T
+  options: readonly T[]
+  onChange: (value: T) => void
+}) {
+  return (
+    <fieldset className="avatar-choice-group">
+      <legend>{legend}</legend>
+      <div className="avatar-choice-options">
+        {options.map(option => (
+          <button
+            key={option}
+            type="button"
+            className={`avatar-choice ${value === option ? 'is-active' : ''}`}
+            data-option={option}
+            aria-pressed={value === option}
+            onClick={() => onChange(option)}
+          >
+            {formatAvatarChoice(option)}
+          </button>
+        ))}
+      </div>
+    </fieldset>
+  )
+}
+
+function AvatarLookPreview({ avatar }: { avatar: PlayerAvatarCustomization }) {
+  const summary = buildAvatarSummary(avatar)
+
+  return (
+    <div className="avatar-look-card">
+      <div
+        className="avatar-preview-figure"
+        role="img"
+        aria-label={`Avatar preview: ${summary}`}
+        data-model={avatar.modelKey}
+        data-hat={avatar.hat}
+        data-glasses={avatar.glasses}
+        data-jacket={avatar.jacket}
+        data-jacket-color={avatar.jacketColor}
+      >
+        <div className="avatar-preview-glow" aria-hidden="true" />
+        <div className="avatar-preview-person" aria-hidden="true">
+          <div className="avatar-preview-hat"><span /></div>
+          <div className="avatar-preview-head">
+            <div className="avatar-preview-hair" />
+            <div className="avatar-preview-glasses">
+              <i />
+              <b />
+              <i />
+            </div>
+          </div>
+          <div className="avatar-preview-neck" />
+          <div className="avatar-preview-torso">
+            <div className="avatar-preview-jacket avatar-preview-jacket-left" />
+            <div className="avatar-preview-shirt" />
+            <div className="avatar-preview-jacket avatar-preview-jacket-right" />
+          </div>
+        </div>
+      </div>
+      <div className="avatar-look-copy">
+        <span className="settings-section-title">Live look</span>
+        <strong>{formatAvatarChoice(avatar.modelKey)}</strong>
+        <p aria-live="polite">{summary}</p>
+      </div>
+    </div>
+  )
+}
+
+export function SettingsModal({
   state,
   yourId,
+  isHost,
   isConnected,
   suitColorMode,
+  soundMuted = false,
+  soundVolume = 0.65,
+  avatarCustomization = DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
   roomCode,
   canShareRoom,
   onClose,
   onSetSuitColorMode,
+  onSetSoundMuted = () => {},
+  onSetSoundVolume = () => {},
+  onUpdateAvatar = () => {},
   onUpdateSettings,
   onRemovePlayer,
   onAdjustPlayerStack,
   onSetPlayerSpectator,
   onCopyRoom,
   onShareRoom,
+  onLeaveGame = () => {},
   onFeedback,
 }: {
   state: TableState
   yourId: string
+  isHost: boolean
   isConnected: boolean
   suitColorMode: 'two' | 'four'
+  soundMuted?: boolean
+  soundVolume?: number
+  avatarCustomization?: PlayerAvatarCustomization
   roomCode: string
   canShareRoom: boolean
   onClose: () => void
   onSetSuitColorMode: (mode: 'two' | 'four') => void
+  onSetSoundMuted?: (muted: boolean) => void
+  onSetSoundVolume?: (volume: number) => void
+  onUpdateAvatar?: (avatar: PlayerAvatarCustomization) => void
   onUpdateSettings: (settings: {
     smallBlind?: number
     bigBlind?: number
@@ -1932,73 +2944,132 @@ function SettingsModal({
   onSetPlayerSpectator: (targetId: string, spectator: boolean) => void
   onCopyRoom: () => void
   onShareRoom: () => void
+  onLeaveGame?: () => void
   onFeedback: (message: string, tone?: FeedbackTone) => void
 }) {
-  const [activeTab, setActiveTab] = useState<'general' | 'players'>('general')
+  type NumericDraftValue = number | ''
+  type NumericSettingsDraftKey =
+    | 'smallBlind'
+    | 'bigBlind'
+    | 'startingStack'
+    | 'actionTimerSeconds'
+    | 'autoStartDelaySeconds'
+    | 'sevenTwoBountyPercent'
+
+  const [activeTab, setActiveTab] = useState<'general' | 'avatar' | 'players'>('general')
   const [showSevenTwoCustomize, setShowSevenTwoCustomize] = useState(false)
-  const [chipDrafts, setChipDrafts] = useState<Record<string, number>>({})
-  const [draft, setDraft] = useState(() => ({
-    smallBlind: state.smallBlind,
-    bigBlind: state.bigBlind,
-    startingStack: state.startingStack,
-    actionTimerSeconds: Math.max(1, Math.floor(state.actionTimerDuration / 1000)),
-    autoStartDelaySeconds: Math.max(1, Math.floor((state.autoStartDelay ?? 5000) / 1000)),
-    rabbitHuntingEnabled: state.rabbitHuntingEnabled,
-    sevenTwoRuleEnabled: state.sevenTwoRuleEnabled,
-    sevenTwoBountyPercent: state.sevenTwoBountyPercent,
+  const [chipDrafts, setChipDrafts] = useState<Record<string, NumericDraftValue>>({})
+  const [avatarDraft, setAvatarDraft] = useState<PlayerAvatarCustomization>(() => ({
+    ...avatarCustomization,
+  }))
+  const configuredSettings = {
+    smallBlind: state.pendingTableSettings?.smallBlind ?? state.smallBlind,
+    bigBlind: state.pendingTableSettings?.bigBlind ?? state.bigBlind,
+    startingStack: state.pendingTableSettings?.startingStack ?? state.startingStack,
+    actionTimerDuration: state.pendingTableSettings?.actionTimerDuration ?? state.actionTimerDuration,
+    autoStartDelay: state.pendingTableSettings?.autoStartDelay ?? state.autoStartDelay ?? 5000,
+    rabbitHuntingEnabled: state.pendingTableSettings?.rabbitHuntingEnabled ?? state.rabbitHuntingEnabled,
+    sevenTwoRuleEnabled: state.pendingTableSettings?.sevenTwoRuleEnabled ?? state.sevenTwoRuleEnabled,
+    sevenTwoBountyPercent: state.pendingTableSettings?.sevenTwoBountyPercent ?? state.sevenTwoBountyPercent,
+  }
+  const [draft, setDraft] = useState<{
+    smallBlind: NumericDraftValue
+    bigBlind: NumericDraftValue
+    startingStack: NumericDraftValue
+    actionTimerSeconds: NumericDraftValue
+    autoStartDelaySeconds: NumericDraftValue
+    rabbitHuntingEnabled: boolean
+    sevenTwoRuleEnabled: boolean
+    sevenTwoBountyPercent: NumericDraftValue
+  }>(() => ({
+    smallBlind: configuredSettings.smallBlind,
+    bigBlind: configuredSettings.bigBlind,
+    startingStack: configuredSettings.startingStack,
+    actionTimerSeconds: Math.max(1, Math.floor(configuredSettings.actionTimerDuration / 1000)),
+    autoStartDelaySeconds: Math.max(1, Math.floor(configuredSettings.autoStartDelay / 1000)),
+    rabbitHuntingEnabled: configuredSettings.rabbitHuntingEnabled,
+    sevenTwoRuleEnabled: configuredSettings.sevenTwoRuleEnabled,
+    sevenTwoBountyPercent: configuredSettings.sevenTwoBountyPercent,
   }))
 
   useEffect(() => {
     setDraft({
-      smallBlind: state.smallBlind,
-      bigBlind: state.bigBlind,
-      startingStack: state.startingStack,
-      actionTimerSeconds: Math.max(1, Math.floor(state.actionTimerDuration / 1000)),
-      autoStartDelaySeconds: Math.max(1, Math.floor((state.autoStartDelay ?? 5000) / 1000)),
-      rabbitHuntingEnabled: state.rabbitHuntingEnabled,
-      sevenTwoRuleEnabled: state.sevenTwoRuleEnabled,
-      sevenTwoBountyPercent: state.sevenTwoBountyPercent,
+      smallBlind: configuredSettings.smallBlind,
+      bigBlind: configuredSettings.bigBlind,
+      startingStack: configuredSettings.startingStack,
+      actionTimerSeconds: Math.max(1, Math.floor(configuredSettings.actionTimerDuration / 1000)),
+      autoStartDelaySeconds: Math.max(1, Math.floor(configuredSettings.autoStartDelay / 1000)),
+      rabbitHuntingEnabled: configuredSettings.rabbitHuntingEnabled,
+      sevenTwoRuleEnabled: configuredSettings.sevenTwoRuleEnabled,
+      sevenTwoBountyPercent: configuredSettings.sevenTwoBountyPercent,
     })
   }, [
-    state.actionTimerDuration,
-    state.autoStartDelay,
-    state.bigBlind,
-    state.rabbitHuntingEnabled,
-    state.sevenTwoBountyPercent,
-    state.sevenTwoRuleEnabled,
-    state.smallBlind,
-    state.startingStack,
+    configuredSettings.actionTimerDuration,
+    configuredSettings.autoStartDelay,
+    configuredSettings.bigBlind,
+    configuredSettings.rabbitHuntingEnabled,
+    configuredSettings.sevenTwoBountyPercent,
+    configuredSettings.sevenTwoRuleEnabled,
+    configuredSettings.smallBlind,
+    configuredSettings.startingStack,
+  ])
+
+  useEffect(() => {
+    setAvatarDraft({ ...avatarCustomization })
+  }, [
+    avatarCustomization.celebration,
+    avatarCustomization.glasses,
+    avatarCustomization.hat,
+    avatarCustomization.idleTell,
+    avatarCustomization.jacket,
+    avatarCustomization.jacketColor,
+    avatarCustomization.modelKey,
   ])
 
   const hasSettingsChanges =
-    draft.smallBlind !== state.smallBlind ||
-    draft.bigBlind !== state.bigBlind ||
-    draft.startingStack !== state.startingStack ||
-    draft.actionTimerSeconds * 1000 !== state.actionTimerDuration ||
-    draft.autoStartDelaySeconds * 1000 !== (state.autoStartDelay ?? 5000) ||
-    draft.rabbitHuntingEnabled !== state.rabbitHuntingEnabled ||
-    draft.sevenTwoRuleEnabled !== state.sevenTwoRuleEnabled ||
-    draft.sevenTwoBountyPercent !== state.sevenTwoBountyPercent
+    draft.smallBlind !== configuredSettings.smallBlind ||
+    draft.bigBlind !== configuredSettings.bigBlind ||
+    draft.startingStack !== configuredSettings.startingStack ||
+    Number(draft.actionTimerSeconds) * 1000 !== configuredSettings.actionTimerDuration ||
+    Number(draft.autoStartDelaySeconds) * 1000 !== configuredSettings.autoStartDelay ||
+    draft.rabbitHuntingEnabled !== configuredSettings.rabbitHuntingEnabled ||
+    draft.sevenTwoRuleEnabled !== configuredSettings.sevenTwoRuleEnabled ||
+    draft.sevenTwoBountyPercent !== configuredSettings.sevenTwoBountyPercent
+  const hasAvatarChanges =
+    avatarDraft.modelKey !== avatarCustomization.modelKey ||
+    avatarDraft.hat !== avatarCustomization.hat ||
+    avatarDraft.glasses !== avatarCustomization.glasses ||
+    avatarDraft.jacket !== avatarCustomization.jacket ||
+    avatarDraft.jacketColor !== avatarCustomization.jacketColor ||
+    avatarDraft.idleTell !== avatarCustomization.idleTell ||
+    avatarDraft.celebration !== avatarCustomization.celebration
   const canSaveSettings = canSaveTableSettings({
     isConnected,
     hasSettingsChanges,
     phase: state.phase,
   })
   const resetGeneralDraft = () => setDraft({
-    smallBlind: state.smallBlind,
-    bigBlind: state.bigBlind,
-    startingStack: state.startingStack,
-    actionTimerSeconds: Math.max(1, Math.floor(state.actionTimerDuration / 1000)),
-    autoStartDelaySeconds: Math.max(1, Math.floor((state.autoStartDelay ?? 5000) / 1000)),
-    rabbitHuntingEnabled: state.rabbitHuntingEnabled,
-    sevenTwoRuleEnabled: state.sevenTwoRuleEnabled,
-    sevenTwoBountyPercent: state.sevenTwoBountyPercent,
+    smallBlind: configuredSettings.smallBlind,
+    bigBlind: configuredSettings.bigBlind,
+    startingStack: configuredSettings.startingStack,
+    actionTimerSeconds: Math.max(1, Math.floor(configuredSettings.actionTimerDuration / 1000)),
+    autoStartDelaySeconds: Math.max(1, Math.floor(configuredSettings.autoStartDelay / 1000)),
+    rabbitHuntingEnabled: configuredSettings.rabbitHuntingEnabled,
+    sevenTwoRuleEnabled: configuredSettings.sevenTwoRuleEnabled,
+    sevenTwoBountyPercent: configuredSettings.sevenTwoBountyPercent,
   })
 
-  const getPlayerChipDraft = (playerId: string) => {
-    const draftValue = chipDrafts[playerId]
-    if (typeof draftValue === 'number' && Number.isFinite(draftValue) && draftValue > 0) {
-      return draftValue
+  const updateNumericDraft = (field: NumericSettingsDraftKey, value: string) => {
+    const parsedValue = value === '' ? '' : Number(value)
+    setDraft(current => ({
+      ...current,
+      [field]: typeof parsedValue === 'number' && !Number.isFinite(parsedValue) ? '' : parsedValue,
+    }))
+  }
+
+  const getPlayerChipDraft = (playerId: string): NumericDraftValue => {
+    if (Object.prototype.hasOwnProperty.call(chipDrafts, playerId)) {
+      return chipDrafts[playerId]
     }
 
     return Math.max(state.bigBlind, 100)
@@ -2009,7 +3080,6 @@ function SettingsModal({
     sevenTwoRuleEnabled?: boolean
   }) => {
     setDraft(current => ({ ...current, ...next }))
-    onUpdateSettings(next)
   }
 
   const saveGeneralSettings = () => {
@@ -2017,17 +3087,25 @@ function SettingsModal({
       return
     }
 
-    const smallBlind = Math.max(1, Math.floor(draft.smallBlind))
-    const bigBlind = Math.max(smallBlind, Math.floor(draft.bigBlind))
-    const startingStack = Math.max(bigBlind * 10, Math.floor(draft.startingStack))
-    const actionTimerDuration = Math.min(60000, Math.max(5000, Math.floor(draft.actionTimerSeconds) * 1000))
-    const autoStartDelay = Math.min(30000, Math.max(1000, Math.floor(draft.autoStartDelaySeconds) * 1000))
-    const sevenTwoBountyPercent = Math.min(100, Math.max(0, Number(draft.sevenTwoBountyPercent)))
-
-    if (!Number.isFinite(smallBlind) || !Number.isFinite(bigBlind) || !Number.isFinite(startingStack)) {
-      onFeedback('Enter valid blinds and stack sizes before saving.', 'error')
+    const numericDrafts = [
+      draft.smallBlind,
+      draft.bigBlind,
+      draft.startingStack,
+      draft.actionTimerSeconds,
+      draft.autoStartDelaySeconds,
+      draft.sevenTwoBountyPercent,
+    ]
+    if (numericDrafts.some(value => value === '' || !Number.isFinite(value))) {
+      onFeedback('Enter a number in every numeric setting before saving.', 'error')
       return
     }
+
+    const smallBlind = Math.max(1, Math.floor(Number(draft.smallBlind)))
+    const bigBlind = Math.max(smallBlind, Math.floor(Number(draft.bigBlind)))
+    const startingStack = Math.max(bigBlind * 10, Math.floor(Number(draft.startingStack)))
+    const actionTimerDuration = Math.min(60000, Math.max(5000, Math.floor(Number(draft.actionTimerSeconds)) * 1000))
+    const autoStartDelay = Math.min(30000, Math.max(1000, Math.floor(Number(draft.autoStartDelaySeconds)) * 1000))
+    const sevenTwoBountyPercent = Math.min(100, Math.max(0, Number(draft.sevenTwoBountyPercent)))
 
     onUpdateSettings({
       smallBlind,
@@ -2041,13 +3119,31 @@ function SettingsModal({
     })
   }
 
+  const saveAvatar = () => {
+    if (!isConnected) {
+      onFeedback('Reconnect to the table before saving your avatar.', 'error')
+      return
+    }
+    if (!hasAvatarChanges) {
+      return
+    }
+
+    onUpdateAvatar({ ...avatarDraft })
+  }
+
   return (
     <div className="settings-modal-overlay" onClick={onClose}>
-      <div className="settings-modal" onClick={event => event.stopPropagation()}>
+      <div
+        className="settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="table-settings-dialog-title"
+        onClick={event => event.stopPropagation()}
+      >
         <div className="settings-modal-header">
           <div>
             <div className="table-panel-kicker">Table console</div>
-            <div className="table-panel-title">Table settings and roster</div>
+            <div id="table-settings-dialog-title" className="table-panel-title">Table menu</div>
           </div>
           <button type="button" className="btn-subtle" onClick={onClose}>
             Close
@@ -2061,6 +3157,13 @@ function SettingsModal({
             onClick={() => setActiveTab('general')}
           >
             Settings
+          </button>
+          <button
+            type="button"
+            className={`settings-tab ${activeTab === 'avatar' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('avatar')}
+          >
+            Outfit
           </button>
           <button
             type="button"
@@ -2088,6 +3191,14 @@ function SettingsModal({
                 >
                   Share link
                 </button>
+                <button
+                  type="button"
+                  className="btn-subtle btn-subtle-danger"
+                  onClick={onLeaveGame}
+                  disabled={!isConnected}
+                >
+                  Leave game
+                </button>
               </div>
             </div>
 
@@ -2097,6 +3208,7 @@ function SettingsModal({
                 <button
                   type="button"
                   className={`settings-pill ${suitColorMode === 'two' ? 'is-active' : ''}`}
+                  aria-pressed={suitColorMode === 'two'}
                   onClick={() => onSetSuitColorMode('two')}
                 >
                   2-color suits
@@ -2104,6 +3216,7 @@ function SettingsModal({
                 <button
                   type="button"
                   className={`settings-pill ${suitColorMode === 'four' ? 'is-active' : ''}`}
+                  aria-pressed={suitColorMode === 'four'}
                   onClick={() => onSetSuitColorMode('four')}
                 >
                   4-color suits
@@ -2111,7 +3224,49 @@ function SettingsModal({
               </div>
             </div>
 
-            <>
+            <div className="settings-section settings-audio-section">
+              <div>
+                <div className="settings-section-title">Soundscape</div>
+                <div className="settings-section-copy">
+                  Card, chip, action, and showdown sounds play in both table views.
+                </div>
+              </div>
+              <div className="settings-rule-row settings-audio-controls">
+                <div className="settings-toggle-row">
+                  <button
+                    type="button"
+                    className={`settings-pill ${!soundMuted ? 'is-active' : ''}`}
+                    aria-pressed={!soundMuted}
+                    onClick={() => onSetSoundMuted(false)}
+                  >
+                    Sound on
+                  </button>
+                  <button
+                    type="button"
+                    className={`settings-pill ${soundMuted ? 'is-active' : ''}`}
+                    aria-pressed={soundMuted}
+                    onClick={() => onSetSoundMuted(true)}
+                  >
+                    Muted
+                  </button>
+                </div>
+                <label className="settings-volume-field">
+                  <span>Volume {Math.round(Math.max(0, Math.min(1, soundVolume)) * 100)}%</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={Math.round(Math.max(0, Math.min(1, soundVolume)) * 100)}
+                    aria-label="Table sound volume"
+                    onChange={event => onSetSoundVolume(Number(event.target.value) / 100)}
+                  />
+                </label>
+              </div>
+            </div>
+
+            {isHost ? (
+              <>
                 <div className="settings-section">
                   <div className="settings-section-title">Game setup</div>
                   <div className="settings-grid settings-grid-modal">
@@ -2122,7 +3277,7 @@ function SettingsModal({
                         min={1}
                         step={1}
                         value={draft.smallBlind}
-                        onChange={event => setDraft(current => ({ ...current, smallBlind: Number(event.target.value) || current.smallBlind }))}
+                        onChange={event => updateNumericDraft('smallBlind', event.target.value)}
                       />
                     </label>
                     <label className="settings-field">
@@ -2132,7 +3287,7 @@ function SettingsModal({
                         min={1}
                         step={1}
                         value={draft.bigBlind}
-                        onChange={event => setDraft(current => ({ ...current, bigBlind: Number(event.target.value) || current.bigBlind }))}
+                        onChange={event => updateNumericDraft('bigBlind', event.target.value)}
                       />
                     </label>
                     <label className="settings-field">
@@ -2142,7 +3297,7 @@ function SettingsModal({
                         min={10}
                         step={10}
                         value={draft.startingStack}
-                        onChange={event => setDraft(current => ({ ...current, startingStack: Number(event.target.value) || current.startingStack }))}
+                        onChange={event => updateNumericDraft('startingStack', event.target.value)}
                       />
                     </label>
                   </div>
@@ -2159,7 +3314,7 @@ function SettingsModal({
                         max={60}
                         step={1}
                         value={draft.actionTimerSeconds}
-                        onChange={event => setDraft(current => ({ ...current, actionTimerSeconds: Number(event.target.value) || current.actionTimerSeconds }))}
+                        onChange={event => updateNumericDraft('actionTimerSeconds', event.target.value)}
                       />
                     </label>
                     <label className="settings-field">
@@ -2170,7 +3325,7 @@ function SettingsModal({
                         max={30}
                         step={1}
                         value={draft.autoStartDelaySeconds}
-                        onChange={event => setDraft(current => ({ ...current, autoStartDelaySeconds: Number(event.target.value) || current.autoStartDelaySeconds }))}
+                        onChange={event => updateNumericDraft('autoStartDelaySeconds', event.target.value)}
                       />
                     </label>
                   </div>
@@ -2227,6 +3382,7 @@ function SettingsModal({
                       <button
                         type="button"
                         className={`settings-pill ${showSevenTwoCustomize ? 'is-active' : ''}`}
+                        aria-pressed={showSevenTwoCustomize}
                         onClick={() => setShowSevenTwoCustomize(current => !current)}
                       >
                         Customize
@@ -2243,10 +3399,7 @@ function SettingsModal({
                           max={100}
                           step={0.5}
                           value={draft.sevenTwoBountyPercent}
-                          onChange={event => setDraft(current => ({
-                            ...current,
-                            sevenTwoBountyPercent: Number(event.target.value) || 0,
-                          }))}
+                          onChange={event => updateNumericDraft('sevenTwoBountyPercent', event.target.value)}
                         />
                       </label>
                     </div>
@@ -2254,6 +3407,15 @@ function SettingsModal({
                 </div>
 
                 <div className="settings-footer">
+                  {state.phase === 'in_hand' && (
+                    <span className="settings-save-status" role="status">
+                      {state.pendingTableSettings && !hasSettingsChanges
+                        ? 'Settings saved. They’ll apply automatically next hand.'
+                        : state.pendingTableSettings
+                          ? 'Save to replace the settings queued for next hand.'
+                          : 'Save now and changes will apply automatically next hand.'}
+                    </span>
+                  )}
                   <button
                     type="button"
                     className="btn-subtle"
@@ -2268,10 +3430,108 @@ function SettingsModal({
                     disabled={!canSaveSettings}
                     onClick={saveGeneralSettings}
                   >
-                    Save table settings
+                    {state.phase === 'in_hand'
+                      ? state.pendingTableSettings && !hasSettingsChanges
+                        ? 'Saved for next hand'
+                        : 'Save for next hand'
+                      : 'Save table settings'}
                   </button>
                 </div>
               </>
+            ) : (
+              <div className="settings-section">
+                <div className="settings-section-title">Table settings</div>
+                <div className="settings-section-copy">
+                  Only the game creator can change blinds, stacks, timing, and table rules.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'avatar' && (
+          <div className="settings-modal-body avatar-settings-body">
+            <section className="settings-section avatar-settings-intro">
+              <div>
+                <div className="settings-section-title">Make the seat yours</div>
+                <div className="settings-section-copy">
+                  Build a table look, choose a natural idle tell, and pick how you celebrate a win.
+                  Nothing changes for the room until you save.
+                </div>
+              </div>
+              <AvatarLookPreview avatar={avatarDraft} />
+            </section>
+
+            <section className="settings-section avatar-customizer-section" aria-label="Avatar options">
+              <AvatarChoiceGroup
+                legend="Base look"
+                value={avatarDraft.modelKey}
+                options={AVATAR_MODEL_KEYS}
+                onChange={modelKey => setAvatarDraft(current => ({ ...current, modelKey }))}
+              />
+              <AvatarChoiceGroup
+                legend="Hat"
+                value={avatarDraft.hat}
+                options={AVATAR_HAT_OPTIONS}
+                onChange={hat => setAvatarDraft(current => ({ ...current, hat }))}
+              />
+              <AvatarChoiceGroup
+                legend="Glasses"
+                value={avatarDraft.glasses}
+                options={AVATAR_GLASSES_OPTIONS}
+                onChange={glasses => setAvatarDraft(current => ({ ...current, glasses }))}
+              />
+              <AvatarChoiceGroup
+                legend="Jacket"
+                value={avatarDraft.jacket}
+                options={AVATAR_JACKET_OPTIONS}
+                onChange={jacket => setAvatarDraft(current => ({ ...current, jacket }))}
+              />
+              <AvatarChoiceGroup
+                legend="Jacket color"
+                value={avatarDraft.jacketColor}
+                options={AVATAR_JACKET_COLOR_OPTIONS}
+                onChange={jacketColor => setAvatarDraft(current => ({ ...current, jacketColor }))}
+              />
+              <AvatarChoiceGroup
+                legend="Idle tell"
+                value={avatarDraft.idleTell}
+                options={AVATAR_IDLE_TELL_OPTIONS}
+                onChange={idleTell => setAvatarDraft(current => ({ ...current, idleTell }))}
+              />
+              <AvatarChoiceGroup
+                legend="Win celebration"
+                value={avatarDraft.celebration}
+                options={AVATAR_CELEBRATION_OPTIONS}
+                onChange={celebration => setAvatarDraft(current => ({ ...current, celebration }))}
+              />
+
+              <div className="settings-footer avatar-settings-footer">
+                <span className="settings-save-status" role="status">
+                  {!isConnected
+                    ? 'Reconnect to save this look to the table.'
+                    : hasAvatarChanges
+                      ? 'Previewing unsaved changes.'
+                      : 'Your saved look is live at the table.'}
+                </span>
+                <button
+                  type="button"
+                  className="btn-subtle"
+                  disabled={!hasAvatarChanges}
+                  onClick={() => setAvatarDraft({ ...avatarCustomization })}
+                >
+                  Reset avatar
+                </button>
+                <button
+                  type="button"
+                  className="btn-subtle btn-subtle-gold"
+                  disabled={!hasAvatarChanges || !isConnected}
+                  onClick={saveAvatar}
+                >
+                  {hasAvatarChanges ? 'Save avatar' : 'Avatar saved'}
+                </button>
+              </div>
+            </section>
           </div>
         )}
 
@@ -2282,16 +3542,22 @@ function SettingsModal({
               <span className="table-chip table-chip-soft">
                 {state.lobbyPlayers.filter(player => player.isSpectator).length} spectating
               </span>
-              <span className="table-chip table-chip-soft">Players stay on the rail at 0 chips</span>
+              <span className="table-chip table-chip-soft">
+                {isHost ? 'Players stay on the rail at 0 chips' : 'Only the game creator can manage players'}
+              </span>
             </div>
 
             <div className="settings-player-list">
               {state.lobbyPlayers.map(player => {
-                const manageAmount = Math.max(state.bigBlind, Math.floor(getPlayerChipDraft(player.id)))
+                const chipDraft = getPlayerChipDraft(player.id)
+                const hasValidChipDraft = typeof chipDraft === 'number' && Number.isFinite(chipDraft) && chipDraft > 0
+                const manageAmount = hasValidChipDraft
+                  ? Math.max(state.bigBlind, Math.floor(chipDraft))
+                  : Math.max(state.bigBlind, 100)
                 const tags = buildPlayerManagementTags(player, {
                   yourId,
                 })
-                const canRemoveChips = isConnected && player.stack > 0
+                const canRemoveChips = isConnected && player.stack > 0 && hasValidChipDraft
                 const canToggleSpectator = isConnected && (
                   !player.isSpectator || player.stack > 0
                 )
@@ -2311,21 +3577,21 @@ function SettingsModal({
                         {formatAmount(player.stack)} {'\u00b7'} {getLobbyStatusLabel(state, player)}
                       </div>
                     </div>
-                    <div className="settings-player-actions">
+                    {isHost && <div className="settings-player-actions">
                       <label className="settings-field settings-player-chip-input">
                         <span>Chip amount</span>
                         <input
                           type="number"
                           min={state.bigBlind}
                           step={state.bigBlind}
-                          value={getPlayerChipDraft(player.id)}
+                          value={chipDraft}
                           onChange={event => {
-                            const nextValue = Number(event.target.value)
+                            const nextValue = event.target.value === '' ? '' : Number(event.target.value)
                             setChipDrafts(current => ({
                               ...current,
-                              [player.id]: Number.isFinite(nextValue) && nextValue > 0
-                                ? nextValue
-                                : state.bigBlind,
+                              [player.id]: typeof nextValue === 'number' && !Number.isFinite(nextValue)
+                                ? ''
+                                : nextValue,
                             }))
                           }}
                         />
@@ -2334,7 +3600,7 @@ function SettingsModal({
                         type="button"
                         className="btn-subtle btn-chip-add"
                         aria-label={`Add ${formatAmount(manageAmount)} chips to ${player.nickname}`}
-                        disabled={!isConnected}
+                        disabled={!isConnected || !hasValidChipDraft}
                         onClick={() => onAdjustPlayerStack(player.id, manageAmount)}
                       >
                         Add chips
@@ -2371,7 +3637,7 @@ function SettingsModal({
                       ) : (
                         <span className="table-chip table-chip-soft">Self removal blocked</span>
                       )}
-                    </div>
+                    </div>}
                   </div>
                 )
               })}
@@ -2412,6 +3678,7 @@ function WaitingPanel({
   state,
   me,
   lobbyMe,
+  isHost,
   isConnected,
   onStartGame,
   onAddBots,
@@ -2421,6 +3688,7 @@ function WaitingPanel({
   state: TableState
   me?: SeatPlayer
   lobbyMe?: LobbyPlayer
+  isHost: boolean
   isConnected: boolean
   onStartGame: () => void
   onAddBots: (count: number) => void
@@ -2429,8 +3697,8 @@ function WaitingPanel({
 }) {
   const statusText = getWaitingStatusText(state, lobbyMe, isConnected)
   const seatedCount = state.players.length
-  const canStart = seatedCount >= 2 && isConnected
-  const canAddBots = isConnected && seatedCount < 8
+  const canStart = isHost && seatedCount >= 2 && isConnected
+  const canAddBots = isHost && isConnected && seatedCount < 8
   const openSeats = Math.max(0, 8 - seatedCount)
   const spectatorRail = getSpectatorRailState(lobbyMe, isConnected)
 
@@ -2454,9 +3722,11 @@ function WaitingPanel({
       <div className="table-panel-note">
         {spectatorRail
           ? spectatorRail.message
-          : me
-          ? `You are seated with ${formatAmount(me.stack)} and blinds are ${formatAmount(state.smallBlind)}/${formatAmount(state.bigBlind)}.`
-          : 'Seat assignment is being restored.'}
+          : !isHost
+            ? 'The game creator manages players and starts the table.'
+            : me
+              ? `You are seated with ${formatAmount(me.stack)} and blinds are ${formatAmount(state.smallBlind)}/${formatAmount(state.bigBlind)}.`
+              : 'Seat assignment is being restored.'}
       </div>
       {spectatorRail && (
         <div className="spectator-rail-actions">
@@ -2489,21 +3759,23 @@ function WaitingPanel({
             )}
           </>
         )}
-        <button
-          type="button"
-          className="btn-gold"
-          disabled={!canStart}
-          onClick={() => {
-            if (!canStart) {
-              onFeedback('You need at least two connected players with chips to deal.', 'error')
-              return
-            }
+        {isHost && (
+          <button
+            type="button"
+            className="btn-gold"
+            disabled={!canStart}
+            onClick={() => {
+              if (!canStart) {
+                onFeedback('You need at least two connected players with chips to deal.', 'error')
+                return
+              }
 
-            onStartGame()
-          }}
-        >
-          {state.phase === 'between_hands' ? 'Deal next hand' : 'Start game'}
-        </button>
+              onStartGame()
+            }}
+          >
+            {state.phase === 'between_hands' ? 'Deal next hand' : 'Start game'}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -2513,6 +3785,7 @@ function MobileBetweenHandsDock({
   state,
   me,
   lobbyMe,
+  isHost,
   isConnected,
   copy,
   onStartGame,
@@ -2523,6 +3796,7 @@ function MobileBetweenHandsDock({
   state: TableState
   me?: SeatPlayer
   lobbyMe?: LobbyPlayer
+  isHost: boolean
   isConnected: boolean
   copy: string
   onStartGame: () => void
@@ -2531,9 +3805,10 @@ function MobileBetweenHandsDock({
   onFeedback: (message: string, tone?: FeedbackTone) => void
 }) {
   const seatedCount = state.players.length
-  const canStart = seatedCount >= 2 && isConnected
-  const canAddBots = isConnected && seatedCount < 8
+  const canStart = isHost && seatedCount >= 2 && isConnected
+  const canAddBots = isHost && isConnected && seatedCount < 8
   const openSeats = Math.max(0, 8 - seatedCount)
+  const actionCount = (canAddBots ? (openSeats > 1 ? 2 : 1) : 0) + (isHost ? 1 : 0)
   const infoChip = lobbyMe?.isSpectator
       ? 'Watching only'
       : me
@@ -2558,7 +3833,9 @@ function MobileBetweenHandsDock({
           <div className="mobile-between-hands-note">
             {spectatorRail
               ? spectatorRail.message
-              : 'Anyone at the table can deal as soon as the table is ready.'}
+              : isHost
+                ? 'Deal as soon as the table is ready.'
+                : 'The game creator manages players and starts the table.'}
           </div>
           {spectatorRail?.canTakeSeat && (
             <button
@@ -2569,9 +3846,10 @@ function MobileBetweenHandsDock({
               {spectatorRail.actionLabel}
             </button>
           )}
-          <>
-            {canAddBots && (
-              <div className="mobile-between-hands-actions">
+          {actionCount > 0 && (
+            <div className="mobile-between-hands-actions" data-count={actionCount}>
+              {canAddBots && (
+                <>
                 <button
                   type="button"
                   className="mobile-between-hands-btn mobile-between-hands-btn-secondary"
@@ -2588,25 +3866,27 @@ function MobileBetweenHandsDock({
                     Fill seats
                   </button>
                 )}
-              </div>
-            )}
+                </>
+              )}
+              {isHost && (
+                <button
+                  type="button"
+                  className="mobile-between-hands-btn mobile-between-hands-btn-primary"
+                  disabled={!canStart}
+                  onClick={() => {
+                    if (!canStart) {
+                      onFeedback('You need at least two connected players with chips to deal.', 'error')
+                      return
+                    }
 
-            <button
-              type="button"
-              className="mobile-between-hands-btn mobile-between-hands-btn-primary"
-              disabled={!canStart}
-              onClick={() => {
-                if (!canStart) {
-                  onFeedback('You need at least two connected players with chips to deal.', 'error')
-                  return
-                }
-
-                onStartGame()
-              }}
-            >
-              {state.phase === 'between_hands' ? 'Deal next hand' : 'Start game'}
-            </button>
-          </>
+                    onStartGame()
+                  }}
+                >
+                  {state.phase === 'between_hands' ? 'Deal next hand' : 'Start game'}
+                </button>
+              )}
+            </div>
+          )}
         </>
       </div>
     </div>

@@ -45,4 +45,36 @@ describe('OwnHand strength badge', () => {
     expect(markup).toContain('own-hand-show-cards')
     expect(markup).toContain('R')
   })
+
+  it('starts an optional post-hand reveal face-down and flips only the selected card', () => {
+    const cards = [
+      { rank: 'A' as const, suit: 'spades' as const },
+      { rank: 'K' as const, suit: 'diamonds' as const },
+    ]
+
+    const hiddenMarkup = renderToStaticMarkup(
+      <OwnHand
+        cards={cards}
+        isActing={false}
+        revealChoiceActive
+        showCardsMode="none"
+      />
+    )
+    const leftMarkup = renderToStaticMarkup(
+      <OwnHand
+        cards={cards}
+        isActing={false}
+        revealChoiceActive
+        showCardsMode="left"
+      />
+    )
+
+    expect(hiddenMarkup.match(/Face-down card/g)).toHaveLength(2)
+    expect(hiddenMarkup).not.toContain('A of spades')
+    expect(hiddenMarkup).not.toContain('K of diamonds')
+    expect(leftMarkup).toContain('A of spades')
+    expect(leftMarkup).not.toContain('K of diamonds')
+    expect(leftMarkup).toContain('own-card-slot-left is-shown')
+    expect(leftMarkup).toContain('own-card-slot-right is-face-down')
+  })
 })

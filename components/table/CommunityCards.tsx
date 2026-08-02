@@ -8,6 +8,7 @@ import { PlayingCard } from '@/components/ui/PlayingCard'
 
 interface CommunityCardsProps {
   cards: Card[]
+  highlightedCards?: Card[]
 }
 
 const CARD_REVEAL_STAGGER_MS = 180
@@ -17,7 +18,7 @@ export function getVisibleCommunityCardCount(cards: Card[]): number {
   return Math.min(cards.length, 5)
 }
 
-export function CommunityCards({ cards }: CommunityCardsProps) {
+export function CommunityCards({ cards, highlightedCards = [] }: CommunityCardsProps) {
   const visibleCount = getVisibleCommunityCardCount(cards)
   const [revealedCount, setRevealedCount] = useState(visibleCount)
   const [revealingIndexes, setRevealingIndexes] = useState<number[]>([])
@@ -68,7 +69,11 @@ export function CommunityCards({ cards }: CommunityCardsProps) {
   }, [visibleCount])
 
   return (
-    <div className="community-cards" aria-label="Board cards">
+    <div
+      className="community-cards"
+      aria-label="Board cards"
+      data-visible-count={visibleCount}
+    >
       {Array.from({ length: 5 }, (_, i) => {
         const card = cards[i]
         const isBoardCard = i < visibleCount && card !== undefined
@@ -89,6 +94,9 @@ export function CommunityCards({ cards }: CommunityCardsProps) {
               faceDown={!isRevealed}
               size="xl"
               className="community-card"
+              highlighted={Boolean(card && highlightedCards.some(
+                highlighted => highlighted.rank === card.rank && highlighted.suit === card.suit
+              ))}
             />
           </div>
         )

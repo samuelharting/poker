@@ -68,7 +68,7 @@ export function PlayingCard({
     : 'Face-down card'
 
   return (
-    <div className={clsx('card-container', className)}>
+    <div className={clsx('card-container', animateIn && 'card-deal-anim', className)}>
       <div
         className={clsx(
           'card',
@@ -77,7 +77,6 @@ export function PlayingCard({
           size === 'xs' && 'card-xs',
           size === 'sm' && 'card-sm',
           showFaceDown && 'face-down',
-          animateIn && 'card-deal-anim',
           highlighted && 'card-highlighted'
         )}
         aria-label={ariaLabel}

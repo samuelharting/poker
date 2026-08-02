@@ -14,6 +14,8 @@ partykit.json.bak
 dev-*.log
 *.log
 test-results/
+.playwright-cli/
+output/
 *.pid
 .codex-tmp/
 .codex-run/

@@ -4,19 +4,33 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import { PokerTable } from '@/components/table/PokerTable'
 import { RoomHud } from '@/components/ui/RoomHud'
-import { useRoom } from '@/hooks/useRoom'
+import { clearStoredReconnectToken, useRoom } from '@/hooks/useRoom'
 import { isAllowedEmote, sanitizeText } from '@/shared/protocol'
 import {
+  DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
   loadStoredPlayerProfile,
+  normalizePlayerAvatarCustomization,
   saveStoredPlayerProfile,
   validatePlayerProfile,
+  type PlayerAvatarCustomization,
   type PlayerProfile,
 } from '@/lib/profile'
+import { normalizeRoomCode } from '@/lib/roomCode'
 import type { ShowCardsMode } from '@/lib/poker/types'
+import {
+  DEFAULT_POKER_SOUND_PREFERENCES,
+  loadPokerSoundPreferences,
+  normalizePokerSoundPreferences,
+  savePokerSoundPreferences,
+  type PokerSoundPreferences,
+} from '@/lib/poker/soundscape'
+import { usePokerSoundscape } from '@/hooks/usePokerSoundscape'
+
+const ignoreFeedback = () => {}
 
 export default function RoomPage() {
   const params = useParams()
-  const code = (typeof params.code === 'string' ? params.code : '').toUpperCase()
+  const code = normalizeRoomCode(typeof params.code === 'string' ? params.code : '')
 
   const [profile, setProfile] = useState<PlayerProfile | null>(null)
   const [profileInput, setProfileInput] = useState<PlayerProfile>({
@@ -95,35 +109,6 @@ export default function RoomPage() {
               />
             </label>
 
-            <label className="entry-field">
-              <span>Email</span>
-              <input
-                type="email"
-                className="input-dark"
-                placeholder="you@example.com"
-                value={profileInput.email}
-                onChange={e => setProfileInput(current => ({ ...current, email: e.target.value }))}
-                onKeyDown={e => e.key === 'Enter' && handleSetProfile()}
-                autoComplete="email"
-                suppressHydrationWarning
-              />
-            </label>
-
-            <label className="entry-field">
-              <span>Venmo username</span>
-              <input
-                type="text"
-                className="input-dark"
-                placeholder="@samvenmo"
-                value={profileInput.venmoUsername}
-                onChange={e => setProfileInput(current => ({ ...current, venmoUsername: e.target.value }))}
-                onKeyDown={e => e.key === 'Enter' && handleSetProfile()}
-                maxLength={31}
-                autoComplete="username"
-                suppressHydrationWarning
-              />
-            </label>
-
             <button className="btn-gold" onClick={handleSetProfile}>
               Enter Room
             </button>
@@ -137,15 +122,39 @@ export default function RoomPage() {
 }
 
 function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProfile }) {
+  const [currentProfile, setCurrentProfile] = useState<PlayerProfile>(() => ({
+    ...profile,
+    avatar: normalizePlayerAvatarCustomization(profile.avatar),
+  }))
   const [shareUrl, setShareUrl] = useState('')
   const [startingStackSetting, setStartingStackSetting] = useState(1000)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [suitColorMode, setSuitColorMode] = useState<'two' | 'four'>('two')
+  const [soundPreferences, setSoundPreferences] = useState<PokerSoundPreferences>({
+    ...DEFAULT_POKER_SOUND_PREFERENCES,
+  })
+  const [soundPreferencesReady, setSoundPreferencesReady] = useState(false)
 
   const { tableState, socialState, yourId, isHost, sendAction, seatMe, sendMessage, isConnected, connectionIssue } = useRoom(
     roomCode,
-    profile
+    currentProfile
   )
+  const { playCue: playSoundCue } = usePokerSoundscape(tableState ?? undefined, yourId, {
+    enabled: soundPreferencesReady,
+    connected: isConnected,
+    muted: soundPreferences.muted,
+    volume: soundPreferences.volume,
+  })
+
+  const handleLeaveGame = useCallback(() => {
+    if (!window.confirm('Leave this game and return home?')) {
+      return
+    }
+
+    sendMessage({ type: 'leave_room' })
+    clearStoredReconnectToken(roomCode)
+    window.setTimeout(() => window.location.assign('/'), 100)
+  }, [roomCode, sendMessage])
 
   useEffect(() => {
     setShareUrl(window.location.href)
@@ -168,6 +177,11 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     }
   }, [])
 
+  useEffect(() => {
+    setSoundPreferences(loadPokerSoundPreferences())
+    setSoundPreferencesReady(true)
+  }, [])
+
   const canShareRoom = typeof navigator !== 'undefined' && (
     typeof navigator.share === 'function' ||
     typeof navigator.clipboard?.writeText === 'function'
@@ -183,11 +197,19 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     sessionStorage.setItem('poker_suit_color_mode', mode)
   }, [])
 
+  const updateSoundPreferences = useCallback((update: Partial<PokerSoundPreferences>) => {
+    setSoundPreferences(current => {
+      const next = normalizePokerSoundPreferences({ ...current, ...update })
+      savePokerSoundPreferences(next)
+      return next
+    })
+  }, [])
+
   const handleCopyRoom = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(roomCode)
     } catch {
-      // Notification toasts removed.
+      // Copy failures stay silent so the room never displays popup notifications.
     }
   }, [roomCode])
 
@@ -208,7 +230,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
 
       await navigator.clipboard.writeText(shareUrl)
     } catch {
-      // Notification toasts removed.
+      // Sharing failures and cancellations stay silent by design.
     }
   }, [roomCode, shareUrl])
 
@@ -227,6 +249,21 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     }
     sendMessage({ type: 'update_table_settings', ...settings })
   }, [rememberStartingStack, sendMessage])
+
+  const handleUpdateAvatar = useCallback((avatar: PlayerAvatarCustomization) => {
+    const normalizedAvatar = normalizePlayerAvatarCustomization(avatar)
+    const savedProfile = saveStoredPlayerProfile({
+      ...currentProfile,
+      avatar: normalizedAvatar,
+    })
+
+    if (!savedProfile) {
+      return
+    }
+
+    setCurrentProfile(savedProfile)
+    sendMessage({ type: 'update_avatar', avatar: normalizedAvatar })
+  }, [currentProfile, sendMessage])
 
   const handleSendChat = useCallback((message: string) => {
     const sanitized = sanitizeText(message)
@@ -255,13 +292,9 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
         phase={tableState?.phase ?? null}
         settingsOpen={settingsOpen}
         onToggleSettings={() => setSettingsOpen(current => !current)}
+        soundMuted={soundPreferences.muted}
+        onToggleSound={() => updateSoundPreferences({ muted: !soundPreferences.muted })}
       />
-
-      {!isConnected && tableState && (
-        <div className="room-connection-banner">
-          Rejoining the table. Your seat and chips stay reserved while we reconnect.
-        </div>
-      )}
 
       {tableState ? (
         <PokerTable
@@ -273,12 +306,16 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           startingStackSetting={startingStackSetting}
           settingsOpen={settingsOpen}
           suitColorMode={suitColorMode}
+          soundMuted={soundPreferences.muted}
+          soundVolume={soundPreferences.volume}
+          avatarCustomization={currentProfile.avatar ?? DEFAULT_PLAYER_AVATAR_CUSTOMIZATION}
           roomCode={roomCode}
           canShareRoom={canShareRoom}
           onAction={sendAction}
           onStartGame={() => sendMessage({ type: 'start_game' })}
           onAddBots={(count: number) => sendMessage({ type: 'add_bots', count })}
           onRabbitHunt={() => sendMessage({ type: 'rabbit_hunt' })}
+          onRunItTwiceVote={vote => sendMessage({ type: 'run_it_twice_vote', vote })}
           autoStartEnabled={tableState.autoStartEnabled ?? true}
           onSetAutoStart={enabled => sendMessage({ type: 'set_auto_start', enabled })}
           onUpdateSettings={handleUpdateSettings}
@@ -289,10 +326,26 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
             sendMessage({ type: 'set_player_spectator', targetId, spectator })}
           onSeatMe={seatMe}
           onSetShowCards={(mode: ShowCardsMode) => sendMessage({ type: 'set_show_cards', mode })}
+          onRequestCardReveal={(targetId: string) => sendMessage({ type: 'request_card_reveal', targetId })}
+          onRespondCardReveal={(requesterId: string, allow: boolean) =>
+            sendMessage({ type: 'respond_card_reveal', requesterId, allow })}
           onSetSuitColorMode={handleSuitColorMode}
+          onSetSoundMuted={muted => updateSoundPreferences({ muted })}
+          onSetSoundVolume={volume => updateSoundPreferences({ volume })}
+          onUpdateAvatar={handleUpdateAvatar}
+          onSoundCue={playSoundCue}
           onCloseSettings={() => setSettingsOpen(false)}
           onCopyRoom={handleCopyRoom}
           onShareRoom={handleShareRoom}
+          onLeaveGame={handleLeaveGame}
+          onSendChat={handleSendChat}
+          onSendTargetChat={(targetId: string, message: string) => {
+            const sanitized = sanitizeText(message)
+            if (!sanitized) {
+              return
+            }
+            sendMessage({ type: 'table_chat', targetId, message: sanitized })
+          }}
           onSendEmote={handleSendEmote}
           onSendTargetEmote={(targetId: string, emote: string) => {
             if (!isAllowedEmote(emote)) {
@@ -300,7 +353,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
             }
             sendMessage({ type: 'table_emote', targetId, emote })
           }}
-          onFeedback={() => {}}
+          onFeedback={ignoreFeedback}
         />
       ) : (
         <div className="room-loading-state">

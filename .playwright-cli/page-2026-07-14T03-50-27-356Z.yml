@@ -1,0 +1,127 @@
+- generic [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e50] [cursor=pointer]
+  - alert [ref=e54]
+  - generic [ref=e55]:
+    - generic [ref=e56]:
+      - generic [ref=e57]:
+        - generic [ref=e58]: Poker Night
+        - generic [ref=e59]:
+          - generic [ref=e60]: Room
+          - generic [ref=e61]: 6AK2K9
+      - button "Open settings" [ref=e62] [cursor=pointer]:
+        - generic [ref=e70]: Settings
+    - generic [ref=e71]:
+      - generic [ref=e72]:
+        - generic "Animated 3D poker room" [ref=e73]
+        - generic [ref=e74]: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Maverick" [active] [ref=e105] [cursor=pointer]:
+            - generic [ref=e109]:
+              - generic [ref=e110]:
+                - strong [ref=e111]: Bot Maverick
+                - emphasis [ref=e117]: BB
+              - generic [ref=e112]: $980
+            - generic [ref=e118]: $20
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+              - generic:
+                - generic:
+                  - generic "Face-down card"
+            - generic [ref=e119]:
+              - generic [ref=e120]:
+                - generic [ref=e121]: Pot
+                - generic [ref=e122]: $30
+              - generic [ref=e123]:
+                - generic [ref=e124]: To call
+                - generic [ref=e125]: $10
+            - status "Your table bet $10":
+              - generic:
+                - generic: Bet
+                - generic: $10
+          - status "Emoji QA, chips $990":
+            - generic: Emoji QA
+            - generic: $990
+          - 'generic "Your hand: Seven-high"':
+            - status:
+              - generic: Seven-high
+            - generic:
+              - generic:
+                - generic:
+                  - generic "3 of hearts":
+                    - generic:
+                      - generic: "3"
+                      - generic: "3"
+              - generic:
+                - generic:
+                  - generic "7 of hearts":
+                    - generic:
+                      - generic: "7"
+                      - generic: "7"
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=e82] [cursor=pointer]:
+          - generic [ref=e83]: ♣
+          - strong [ref=e84]: Table talk
+      - generic [ref=e126]:
+        - generic [ref=e127]:
+          - generic [ref=e128]: Your turn - Call $10
+          - generic [ref=e129]: Your turn
+        - generic [ref=e131]:
+          - generic [ref=e132]: Fold timer
+          - generic [ref=e133]: 21s left
+        - generic [ref=e136]:
+          - generic [ref=e137]:
+            - button "Min" [ref=e138] [cursor=pointer]
+            - button "1/4 Pot" [ref=e139] [cursor=pointer]
+          - slider [ref=e140]: "40"
+          - spinbutton [ref=e141]: "40"
+        - generic [ref=e142]:
+          - button "Call $10" [ref=e143] [cursor=pointer]:
+            - generic [ref=e144]: Call
+            - generic [ref=e145]: $10
+          - button "Raise to $40" [ref=e146] [cursor=pointer]:
+            - generic [ref=e147]: Raise to
+            - generic [ref=e148]: $40
+          - button "All-in $1,000" [ref=e149] [cursor=pointer]:
+            - generic [ref=e150]: All-in
+            - generic [ref=e151]: $1,000
+          - button "Fold" [ref=e152] [cursor=pointer]
+      - complementary "Emoji reactions for Bot Maverick" [ref=e154]:
+        - generic [ref=e155]:
+          - generic [ref=e156]:
+            - generic [ref=e157]: Opponent
+            - generic [ref=e158]: Send to Bot Maverick
+          - button "Close target emote panel" [ref=e159] [cursor=pointer]: x
+        - generic "Bot Maverick stats" [ref=e160]:
+          - generic [ref=e161]:
+            - generic [ref=e162]: Fold
+            - strong [ref=e163]: 0%
+          - generic [ref=e164]:
+            - generic [ref=e165]: Games
+            - strong [ref=e166]: "1"
+          - generic [ref=e167]:
+            - generic [ref=e168]: Won
+            - strong [ref=e169]: "0"
+        - generic [ref=e170]:
+          - button "👋" [ref=e171] [cursor=pointer]
+          - button "👍" [ref=e172] [cursor=pointer]
+          - button "😂" [ref=e173] [cursor=pointer]
+          - button "😎" [ref=e174] [cursor=pointer]
+          - button "💀" [ref=e175] [cursor=pointer]
+          - button "😭" [ref=e176] [cursor=pointer]
+          - button "😡" [ref=e177] [cursor=pointer]
+          - button "🖕" [ref=e178] [cursor=pointer]
+          - button "Search all emojis" [ref=e179] [cursor=pointer]

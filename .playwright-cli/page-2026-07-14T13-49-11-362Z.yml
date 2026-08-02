@@ -1,0 +1,100 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e24] [cursor=pointer]
+  - alert [ref=e28]
+  - generic [ref=e29]:
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e32]: Poker Night
+        - generic [ref=e33]:
+          - generic [ref=e124]: Room
+          - generic [ref=e125]: E9QXF5
+      - button "Open settings" [ref=e190] [cursor=pointer]:
+        - generic [ref=e42]: Settings
+    - generic [ref=e43]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot Ace" [ref=e44] [cursor=pointer]:
+            - generic [ref=e51]:
+              - generic [ref=e52]:
+                - strong [ref=e53]: Bot Ace
+                - emphasis [ref=e54]: BB
+              - generic [ref=e55]:
+                - generic [ref=e56]: $1,376
+                - generic [ref=e57]: Checked
+          - button "Send a reaction to Bot Nova" [ref=e58] [cursor=pointer]:
+            - generic [ref=e65]:
+              - strong [ref=e67]: Bot Nova
+              - generic [ref=e68]:
+                - generic [ref=e69]: $4,050
+                - generic [ref=e70]: Won $300
+          - button "Send a reaction to FinalQA" [ref=e71] [cursor=pointer]:
+            - generic [ref=e78]:
+              - strong [ref=e80]: FinalQA
+              - generic [ref=e81]:
+                - generic [ref=e82]: $790
+                - generic [ref=e83]: Folded
+          - button "Send a reaction to test" [ref=e84] [cursor=pointer]:
+            - generic [ref=e91]:
+              - strong [ref=e93]: test
+              - generic [ref=e94]:
+                - generic [ref=e95]: $1,000
+                - generic [ref=e96]: Folded
+          - button "Send a reaction to Bot River" [ref=e97] [cursor=pointer]:
+            - generic [ref=e104]:
+              - generic [ref=e105]:
+                - strong [ref=e106]: Bot River
+                - emphasis [ref=e107]: SB
+              - generic [ref=e108]:
+                - generic [ref=e109]: $1,784
+                - generic [ref=e110]: Checked
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "9 of spades":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+              - generic:
+                - generic:
+                  - generic "A of spades":
+                    - generic:
+                      - generic: A
+                      - generic: A
+              - generic:
+                - generic:
+                  - generic "K of diamonds":
+                    - generic:
+                      - generic: K
+                      - generic: K
+              - generic:
+                - generic:
+                  - generic "6 of spades":
+                    - generic:
+                      - generic: "6"
+                      - generic: "6"
+              - generic:
+                - generic:
+                  - generic "9 of clubs":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+            - generic [ref=e112]:
+              - generic [ref=e113]: Pot
+              - generic [ref=e114]: $300
+            - status:
+              - generic [ref=e115]:
+                - generic [ref=e116]: Hand Winner
+                - generic [ref=e117]:
+                  - generic [ref=e118]: Bot Nova
+                  - generic [ref=e119]: Won $300
+                  - generic: $300
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=e191] [cursor=pointer]:
+          - generic [ref=e192]: ♣
+          - strong [ref=e193]: Table talk
+          - emphasis [ref=e194]: "1"

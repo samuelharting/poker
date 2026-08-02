@@ -1,0 +1,110 @@
+- generic [active] [ref=f6e1]:
+  - generic [ref=f6e19]:
+    - generic [ref=f6e20]:
+      - generic [ref=f6e21]:
+        - generic [ref=f6e22]: Poker Night
+        - generic [ref=f6e23]:
+          - generic [ref=f6e24]: Room
+          - generic [ref=f6e25]: E9QXF5
+      - button "Open settings" [ref=f6e26] [cursor=pointer]:
+        - generic [ref=f6e34]: Settings
+    - generic [ref=f6e35]:
+      - generic:
+        - generic "Animated 3D poker room"
+        - generic: Live 3D
+        - generic "Poker players":
+          - button "Send a reaction to Bot River" [ref=f6e36] [cursor=pointer]:
+            - generic [ref=f6e43]:
+              - strong [ref=f6e45]: Bot River
+              - generic [ref=f6e47]:
+                - generic [ref=f6e48]: $3,780
+                - generic [ref=f6e341]: Won $120
+          - button "Send a reaction to Bot Bluff" [ref=f6e50] [cursor=pointer]:
+            - generic [ref=f6e57]:
+              - generic [ref=f6e58]:
+                - strong [ref=f6e59]: Bot Bluff
+                - emphasis [ref=f6e306]: SB
+              - generic [ref=f6e60]:
+                - generic [ref=f6e61]: $790
+                - generic [ref=f6e342]: Called $20
+          - button "Send a reaction to Bot Dealer Dan" [ref=f6e64] [cursor=pointer]:
+            - generic [ref=f6e71]:
+              - generic [ref=f6e72]:
+                - strong [ref=f6e73]: Bot Dealer Dan
+                - emphasis [ref=f6e343]: BB
+              - generic [ref=f6e74]:
+                - generic [ref=f6e75]: $2,580
+                - generic [ref=f6e344]: Raised $20
+      - generic:
+        - generic:
+          - generic:
+            - generic "Board cards":
+              - generic:
+                - generic:
+                  - generic "4 of hearts":
+                    - generic:
+                      - generic: "4"
+                      - generic: "4"
+              - generic:
+                - generic:
+                  - generic "9 of clubs":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+              - generic:
+                - generic:
+                  - generic "10 of clubs":
+                    - generic:
+                      - generic: "10"
+                      - generic: "10"
+              - generic:
+                - generic:
+                  - generic "2 of hearts":
+                    - generic:
+                      - generic: "2"
+                      - generic: "2"
+              - generic:
+                - generic:
+                  - generic "9 of diamonds":
+                    - generic:
+                      - generic: "9"
+                      - generic: "9"
+            - generic [ref=f6e79]:
+              - generic [ref=f6e80]: Pot
+              - generic [ref=f6e81]: $120
+            - status:
+              - generic [ref=f6e345]:
+                - generic [ref=f6e346]: Hand Winner
+                - generic [ref=f6e347]:
+                  - generic [ref=f6e348]: Bot River
+                  - generic [ref=f6e349]: Won $120
+                  - generic: $120
+          - status "3D QA, chips $850":
+            - generic: 3D QA
+            - generic: $850
+          - 'generic "Your hand: Pair of Nines"':
+            - status:
+              - generic: Pair of Nines
+            - generic:
+              - generic:
+                - generic:
+                  - generic "7 of hearts":
+                    - generic:
+                      - generic: "7"
+                      - generic: "7"
+              - generic:
+                - generic:
+                  - generic "5 of clubs":
+                    - generic:
+                      - generic: "5"
+                      - generic: "5"
+            - group "Show folded cards" [ref=f6e351]:
+              - button "L" [ref=f6e352] [cursor=pointer]
+              - button "R" [ref=f6e353] [cursor=pointer]
+              - button "Both" [ref=f6e354] [cursor=pointer]
+      - complementary "Table chat and reactions":
+        - button "Open table chat and reactions" [ref=f6e85] [cursor=pointer]:
+          - generic [ref=f6e86]: ♣
+          - strong [ref=f6e87]: Table talk
+  - button "Open Next.js Dev Tools" [ref=f6e123] [cursor=pointer]
+  - alert [ref=f6e127]
