@@ -433,7 +433,7 @@ describe('SettingsModal', () => {
     const view = renderModal(makeProps({ avatarCustomization, onUpdateAvatar }))
 
     act(() => {
-      findButton(view.root, 'Avatar').props.onClick()
+      findButton(view.root, 'Outfit').props.onClick()
     })
 
     expect(findButton(view.root, 'Avatar saved').props.disabled).toBe(true)
@@ -477,7 +477,7 @@ describe('SettingsModal', () => {
     const view = renderModal(makeProps({ onUpdateAvatar }))
 
     act(() => {
-      findButton(view.root, 'Avatar').props.onClick()
+      findButton(view.root, 'Outfit').props.onClick()
     })
     act(() => {
       findButton(view.root, 'Cowboy').props.onClick()

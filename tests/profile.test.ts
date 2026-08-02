@@ -11,6 +11,7 @@ import {
   PROFILE_STORAGE_KEY,
   loadStoredPlayerProfile,
   normalizeEmail,
+  normalizePlayerUsername,
   normalizePlayerAvatarCustomization,
   normalizeVenmoUsername,
   saveStoredPlayerProfile,
@@ -28,6 +29,21 @@ describe('player profile helpers', () => {
     expect(validatePlayerProfile({ nickname: '', email: 'sam@example.com', venmoUsername: '@sam' }).ok).toBe(false)
     expect(validatePlayerProfile({ nickname: 'Sam', email: 'bad', venmoUsername: '@sam' }).ok).toBe(false)
     expect(validatePlayerProfile({ nickname: 'Sam', email: 'sam@example.com', venmoUsername: '@' }).ok).toBe(false)
+  })
+
+  it('normalizes fold-stat usernames without changing display casing', () => {
+    expect(normalizePlayerUsername('  SaM Hart  ')).toBe('sam hart')
+  })
+
+  it('accepts a nickname-only profile for table entry', () => {
+    expect(validatePlayerProfile({ nickname: 'River' })).toEqual({
+      ok: true,
+      profile: {
+        nickname: 'River',
+        email: '',
+        venmoUsername: '',
+      },
+    })
   })
 
   it('exports every supported avatar customization option', () => {

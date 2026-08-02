@@ -579,7 +579,7 @@ describe('PokerRoom player profiles and stats', () => {
 
     const internals = server as unknown as {
       data: {
-        statsByEmail: Record<string, Record<string, unknown>>
+        statsByUsername: Record<string, Record<string, unknown>>
         gameState: {
           phase: 'between_hands'
           handNumber: number
@@ -618,7 +618,7 @@ describe('PokerRoom player profiles and stats', () => {
     expect(aliceSeat?.stats?.wins).toBe(2)
     expect(aliceSeat?.stats).not.toHaveProperty('currentWinStreak')
     expect(bobSeat?.stats).not.toHaveProperty('currentWinStreak')
-    expect(internals.data.statsByEmail['alice@example.com']).not.toHaveProperty('currentWinStreak')
+    expect(internals.data.statsByUsername.alice).not.toHaveProperty('currentWinStreak')
 
     internals.recordFold(alice.playerId)
     snapshot = internals.buildSnapshotFor(alice.connection.id)
@@ -648,7 +648,7 @@ describe('PokerRoom player profiles and stats', () => {
 
     const internals = server as unknown as {
       data: {
-        statsByEmail: Record<string, Record<string, unknown>>
+        statsByUsername: Record<string, Record<string, unknown>>
         gameState: {
           phase: 'between_hands'
           handNumber: number
@@ -687,7 +687,7 @@ describe('PokerRoom player profiles and stats', () => {
     expect(botSeat?.stats?.handsPlayed).toBe(2)
     expect(botSeat?.stats?.wins).toBe(2)
     expect(botSeat?.stats).not.toHaveProperty('currentWinStreak')
-    expect(internals.data.statsByEmail[`bot:${bot!.id}`]).not.toHaveProperty('currentWinStreak')
+    expect(internals.data.statsByUsername[`bot:${bot!.id}`]).not.toHaveProperty('currentWinStreak')
   })
 })
 

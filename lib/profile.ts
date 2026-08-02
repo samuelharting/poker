@@ -98,6 +98,11 @@ export function normalizeEmail(value: string): string {
   return value.trim().toLowerCase()
 }
 
+/** Stable identity key for player statistics. Display casing stays untouched. */
+export function normalizePlayerUsername(value: string): string {
+  return value.trim().toLowerCase()
+}
+
 export function normalizeVenmoUsername(value: string): string {
   const trimmed = value.trim()
   if (!trimmed) {
@@ -146,8 +151,8 @@ function includesOption<const T extends readonly string[]>(
 
 export function validatePlayerProfile(input: {
   nickname: string
-  email: string
-  venmoUsername: string
+  email?: string
+  venmoUsername?: string
   avatar?: unknown
 }): PlayerProfileValidation {
   const nickname = input.nickname.trim().slice(0, 20)
@@ -155,12 +160,12 @@ export function validatePlayerProfile(input: {
     return { ok: false, error: 'Please enter your nickname' }
   }
 
-  const email = normalizeEmail(input.email)
-  if (!EMAIL_RE.test(email)) {
+  const email = normalizeEmail(input.email ?? '')
+  if (email && !EMAIL_RE.test(email)) {
     return { ok: false, error: 'Please enter a valid email' }
   }
 
-  const venmoUsername = normalizeVenmoUsername(input.venmoUsername)
+  const venmoUsername = normalizeVenmoUsername(input.venmoUsername ?? '')
   if (venmoUsername && !VENMO_RE.test(venmoUsername)) {
     return { ok: false, error: 'Please enter a valid Venmo username' }
   }

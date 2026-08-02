@@ -158,35 +158,6 @@ export default function LandingPage() {
                 />
               </label>
 
-              <label className="entry-field">
-                <span>Email</span>
-                <input
-                  type="email"
-                  className="input-dark"
-                  placeholder="you@example.com"
-                  value={createProfile.email}
-                  onChange={e => setCreateProfile(current => ({ ...current, email: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && handleCreateTable()}
-                  autoComplete="email"
-                  suppressHydrationWarning
-                />
-              </label>
-
-              <label className="entry-field">
-                <span>Venmo username <em>Optional</em></span>
-                <input
-                  type="text"
-                  className="input-dark"
-                  placeholder="@samvenmo"
-                  value={createProfile.venmoUsername}
-                  onChange={e => setCreateProfile(current => ({ ...current, venmoUsername: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && handleCreateTable()}
-                  maxLength={31}
-                  autoComplete="username"
-                  suppressHydrationWarning
-                />
-              </label>
-
               <button className="btn-gold" onClick={handleCreateTable}>
                 Create Table
               </button>
@@ -223,35 +194,6 @@ export default function LandingPage() {
                   onKeyDown={e => e.key === 'Enter' && handleJoinTable()}
                   maxLength={20}
                   autoComplete="nickname"
-                  suppressHydrationWarning
-                />
-              </label>
-
-              <label className="entry-field">
-                <span>Email</span>
-                <input
-                  type="email"
-                  className="input-dark"
-                  placeholder="you@example.com"
-                  value={joinProfile.email}
-                  onChange={e => setJoinProfile(current => ({ ...current, email: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && handleJoinTable()}
-                  autoComplete="email"
-                  suppressHydrationWarning
-                />
-              </label>
-
-              <label className="entry-field">
-                <span>Venmo username <em>Optional</em></span>
-                <input
-                  type="text"
-                  className="input-dark"
-                  placeholder="@samvenmo"
-                  value={joinProfile.venmoUsername}
-                  onChange={e => setJoinProfile(current => ({ ...current, venmoUsername: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && handleJoinTable()}
-                  maxLength={31}
-                  autoComplete="username"
                   suppressHydrationWarning
                 />
               </label>

@@ -151,7 +151,7 @@ export function useRoom(
   }, [sendMessage])
 
   useEffect(() => {
-    if (!roomCode || !profile.nickname || !profile.email) {
+    if (!roomCode || !profile.nickname) {
       return
     }
 
@@ -249,8 +249,6 @@ export function useRoom(
           const joinMsg: C2SMessage = {
             type: 'join_room',
             nickname: latestProfile.nickname,
-            email: latestProfile.email,
-            venmoUsername: latestProfile.venmoUsername,
             avatar: latestProfile.avatar,
             reconnectToken: reconnectTokenRef.current ?? undefined,
           }
@@ -336,7 +334,7 @@ export function useRoom(
       socketRef.current?.close()
       socketRef.current = null
     }
-  }, [profile.email, profile.nickname, profile.venmoUsername, roomCode])
+  }, [profile.nickname, roomCode])
 
   useEffect(() => {
     if (!yourId || !tableState || !isConnected) {

@@ -3143,7 +3143,7 @@ export function SettingsModal({
         <div className="settings-modal-header">
           <div>
             <div className="table-panel-kicker">Table console</div>
-            <div id="table-settings-dialog-title" className="table-panel-title">Table, avatar, and roster</div>
+            <div id="table-settings-dialog-title" className="table-panel-title">Table menu</div>
           </div>
           <button type="button" className="btn-subtle" onClick={onClose}>
             Close
@@ -3163,7 +3163,7 @@ export function SettingsModal({
             className={`settings-tab ${activeTab === 'avatar' ? 'is-active' : ''}`}
             onClick={() => setActiveTab('avatar')}
           >
-            Avatar
+            Outfit
           </button>
           <button
             type="button"
@@ -3808,6 +3808,7 @@ function MobileBetweenHandsDock({
   const canStart = isHost && seatedCount >= 2 && isConnected
   const canAddBots = isHost && isConnected && seatedCount < 8
   const openSeats = Math.max(0, 8 - seatedCount)
+  const actionCount = (canAddBots ? (openSeats > 1 ? 2 : 1) : 0) + (isHost ? 1 : 0)
   const infoChip = lobbyMe?.isSpectator
       ? 'Watching only'
       : me
@@ -3845,9 +3846,10 @@ function MobileBetweenHandsDock({
               {spectatorRail.actionLabel}
             </button>
           )}
-          <>
-            {canAddBots && (
-              <div className="mobile-between-hands-actions">
+          {actionCount > 0 && (
+            <div className="mobile-between-hands-actions" data-count={actionCount}>
+              {canAddBots && (
+                <>
                 <button
                   type="button"
                   className="mobile-between-hands-btn mobile-between-hands-btn-secondary"
@@ -3864,27 +3866,27 @@ function MobileBetweenHandsDock({
                     Fill seats
                   </button>
                 )}
-              </div>
-            )}
+                </>
+              )}
+              {isHost && (
+                <button
+                  type="button"
+                  className="mobile-between-hands-btn mobile-between-hands-btn-primary"
+                  disabled={!canStart}
+                  onClick={() => {
+                    if (!canStart) {
+                      onFeedback('You need at least two connected players with chips to deal.', 'error')
+                      return
+                    }
 
-            {isHost && (
-              <button
-                type="button"
-                className="mobile-between-hands-btn mobile-between-hands-btn-primary"
-                disabled={!canStart}
-                onClick={() => {
-                  if (!canStart) {
-                    onFeedback('You need at least two connected players with chips to deal.', 'error')
-                    return
-                  }
-
-                  onStartGame()
-                }}
-              >
-                {state.phase === 'between_hands' ? 'Deal next hand' : 'Start game'}
-              </button>
-            )}
-          </>
+                    onStartGame()
+                  }}
+                >
+                  {state.phase === 'between_hands' ? 'Deal next hand' : 'Start game'}
+                </button>
+              )}
+            </div>
+          )}
         </>
       </div>
     </div>

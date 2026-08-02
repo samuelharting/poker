@@ -2,6 +2,19 @@ import { describe, expect, it } from 'vitest'
 import { parseC2S } from '@/shared/protocol'
 
 describe('join_room profile protocol', () => {
+  it('accepts nickname-only joins', () => {
+    expect(parseC2S(JSON.stringify({
+      type: 'join_room',
+      nickname: 'River',
+    }))).toEqual({
+      type: 'join_room',
+      nickname: 'River',
+      email: '',
+      venmoUsername: '',
+      reconnectToken: undefined,
+    })
+  })
+
   it('accepts sanitized profile fields on join', () => {
     expect(parseC2S(JSON.stringify({
       type: 'join_room',

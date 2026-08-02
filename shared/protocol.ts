@@ -37,8 +37,9 @@ export type C2SMessage =
   | {
     type: 'join_room'
     nickname: string
-    email: string
-    venmoUsername: string
+    /** Legacy profile fields accepted for older clients, but no longer collected. */
+    email?: string
+    venmoUsername?: string
     avatar?: PlayerAvatarCustomization
     reconnectToken?: string
   }

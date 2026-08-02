@@ -109,35 +109,6 @@ export default function RoomPage() {
               />
             </label>
 
-            <label className="entry-field">
-              <span>Email</span>
-              <input
-                type="email"
-                className="input-dark"
-                placeholder="you@example.com"
-                value={profileInput.email}
-                onChange={e => setProfileInput(current => ({ ...current, email: e.target.value }))}
-                onKeyDown={e => e.key === 'Enter' && handleSetProfile()}
-                autoComplete="email"
-                suppressHydrationWarning
-              />
-            </label>
-
-            <label className="entry-field">
-              <span>Venmo username <em>Optional</em></span>
-              <input
-                type="text"
-                className="input-dark"
-                placeholder="@samvenmo"
-                value={profileInput.venmoUsername}
-                onChange={e => setProfileInput(current => ({ ...current, venmoUsername: e.target.value }))}
-                onKeyDown={e => e.key === 'Enter' && handleSetProfile()}
-                maxLength={31}
-                autoComplete="username"
-                suppressHydrationWarning
-              />
-            </label>
-
             <button className="btn-gold" onClick={handleSetProfile}>
               Enter Room
             </button>

@@ -12,7 +12,7 @@ import type {
 } from '../shared/protocol'
 import type { ShowCardsMode } from '../lib/poker/types'
 import type { CardRevealRequest, InternalGameState, InternalPlayer, LobbyPlayer, PlayerStats, SeatPlayer } from '../lib/poker/types'
-import type { PlayerAvatarCustomization } from '../lib/profile'
+import { normalizePlayerUsername, type PlayerAvatarCustomization } from '../lib/profile'
 import {
   createInitialGameState,
   processAction,
@@ -64,7 +64,7 @@ interface RoomData {
   reconnectTokens: Record<string, string>
   playerNicknames: Record<string, string>
   playerProfiles: Record<string, PlayerProfileRecord>
-  statsByEmail: Record<string, TrackedPlayerStats>
+  statsByUsername: Record<string, TrackedPlayerStats>
   countedHandPlayers: Record<string, true>
   countedFolds: Record<string, true>
   countedWinHands: Record<number, true>
@@ -156,7 +156,7 @@ export default class PokerRoom implements PartyServer {
       reconnectTokens: {},
       playerNicknames: {},
       playerProfiles: {},
-      statsByEmail: {},
+      statsByUsername: {},
       countedHandPlayers: {},
       countedFolds: {},
       countedWinHands: {},
@@ -332,8 +332,8 @@ export default class PokerRoom implements PartyServer {
   private handleJoinRoom(
     conn: Connection,
     nickname: string,
-    email: string,
-    venmoUsername: string,
+    email = '',
+    venmoUsername = '',
     avatar?: PlayerAvatarCustomization,
     reconnectToken?: string
   ) {
@@ -358,7 +358,7 @@ export default class PokerRoom implements PartyServer {
       } else if (avatar) {
         this.data.playerProfiles[reconnectPlayerId].avatar = avatar
       }
-      this.ensureStats(email)
+      this.ensureStats(trimmed)
 
       const player = this.getPlayer(reconnectPlayerId)
       if (player) {
@@ -379,7 +379,7 @@ export default class PokerRoom implements PartyServer {
     this.data.reconnectTokens[playerId] = generateReconnectToken()
     this.data.playerNicknames[playerId] = trimmed
     this.data.playerProfiles[playerId] = { email, venmoUsername, avatar }
-    this.ensureStats(email)
+    this.ensureStats(trimmed)
 
     if (!this.data.hostId) {
       this.data.hostId = playerId
@@ -1655,14 +1655,17 @@ export default class PokerRoom implements PartyServer {
   }
 
   private ensureStats(statsKey: string): TrackedPlayerStats {
-    this.data.statsByEmail[statsKey] ??= {
+    const normalizedKey = statsKey.startsWith('bot:')
+      ? statsKey
+      : normalizePlayerUsername(statsKey)
+    this.data.statsByUsername[normalizedKey] ??= {
       handsPlayed: 0,
       folds: 0,
       wins: 0,
       totalWon: 0,
     }
 
-    return this.data.statsByEmail[statsKey]!
+    return this.data.statsByUsername[normalizedKey]!
   }
 
   private getPlayerStatsKey(playerId: string): string | undefined {
@@ -1670,7 +1673,7 @@ export default class PokerRoom implements PartyServer {
       return `bot:${playerId}`
     }
 
-    return this.data.playerProfiles[playerId]?.email
+    return this.data.playerNicknames[playerId]
   }
 
   private ensurePlayerStats(playerId: string): TrackedPlayerStats | undefined {
