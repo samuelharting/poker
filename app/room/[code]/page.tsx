@@ -2,8 +2,11 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 import { PokerTable } from '@/components/table/PokerTable'
 import { RoomHud } from '@/components/ui/RoomHud'
+import { LandingHeroArt } from '@/components/ui/LandingHeroArt'
+import { NicknameField } from '@/components/ui/NicknameField'
 import { clearStoredReconnectToken, useRoom } from '@/hooks/useRoom'
 import { isAllowedEmote, sanitizeText } from '@/shared/protocol'
 import {
@@ -68,53 +71,56 @@ export default function RoomPage() {
 
   if (!code) {
     return (
-      <div className="landing-bg">
-        <div className="card-panel entry-panel entry-panel-compact">
-          <div className="entry-panel-header">
-            <span className="entry-panel-kicker">Room unavailable</span>
-            <h2>Invalid room code</h2>
-          </div>
-        </div>
-      </div>
+      <main className="landing-bg landing-gate">
+        <section className="card-panel gate-panel" aria-labelledby="gate-title">
+          <span className="landing-kicker">Room unavailable</span>
+          <h1 id="gate-title" className="gate-title">Invalid room code</h1>
+          <p className="gate-copy">Double-check the code with your host, or start a new table.</p>
+          <Link className="btn-gold entry-submit" href="/">Back to Poker Night</Link>
+        </section>
+      </main>
     )
   }
 
   if (!profile) {
     return (
-      <div className="landing-bg">
-        <div className="landing-panel-wrap entry-panel-compact">
-          <div className="card-panel entry-panel">
-            <div className="entry-panel-header">
-              <span className="entry-panel-kicker">Room {code}</span>
-              <h2>Take your seat</h2>
-            </div>
+      <main className="landing-bg landing-gate">
+        <section className="card-panel gate-panel" aria-labelledby="gate-title">
+          <LandingHeroArt compact />
+          <span className="landing-kicker">Poker Night</span>
+          <h1 id="gate-title" className="gate-title">Take your seat</h1>
+          <div className="gate-room-code" role="group" aria-label={`Room ${code}`}>
+            <span className="gate-room-code-label" aria-hidden="true">Room</span>
+            <span className="gate-room-code-tiles" aria-hidden="true">
+              {code.split('').map((character, index) => (
+                <b key={`${character}-${index}`}>{character}</b>
+              ))}
+            </span>
+          </div>
+
+          <div className="entry-panel">
+            <NicknameField
+              value={profileInput.nickname}
+              placeholder="e.g. PhilIvey"
+              autoFocus
+              onChange={nickname => setProfileInput(current => ({ ...current, nickname }))}
+              onSubmit={handleSetProfile}
+            />
 
             {profileError && (
               <div className="entry-error" role="alert">{profileError}</div>
             )}
 
-            <label className="entry-field">
-              <span>Your nickname</span>
-              <input
-                type="text"
-                className="input-dark"
-                placeholder="e.g. PhilIvey"
-                value={profileInput.nickname}
-                onChange={e => setProfileInput(current => ({ ...current, nickname: e.target.value }))}
-                onKeyDown={e => e.key === 'Enter' && handleSetProfile()}
-                maxLength={20}
-                autoComplete="nickname"
-                autoFocus
-                suppressHydrationWarning
-              />
-            </label>
-
-            <button className="btn-gold" onClick={handleSetProfile}>
+            <button className="btn-gold entry-submit" onClick={handleSetProfile}>
               Enter Room
             </button>
           </div>
-        </div>
-      </div>
+          <p className="landing-footnote">
+            <span>No sign-up</span>
+            <span>Play money</span>
+          </p>
+        </section>
+      </main>
     )
   }
 
@@ -356,8 +362,12 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           onFeedback={ignoreFeedback}
         />
       ) : (
-        <div className="room-loading-state">
-          <div className="room-loading-orb" />
+        <div className="room-loading-state" data-issue={connectionIssue ? 'true' : 'false'}>
+          <div className="room-loading-deal" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </div>
           <div className="room-loading-copy">
             {connectionIssue
               ? 'Live table unavailable'
@@ -374,8 +384,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           </div>
           {connectionIssue && (
             <button
-              className="btn-gold"
-              style={{ marginTop: '1.5rem' }}
+              className="btn-gold room-loading-retry"
               onClick={() => window.location.reload()}
             >
               Retry Connection

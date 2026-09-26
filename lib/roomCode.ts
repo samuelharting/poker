@@ -43,3 +43,12 @@ export function isValidRoomCode(raw: string): boolean {
   const code = normalizeRoomCode(raw)
   return SAFE_ROOM_CODE_RE.test(code) || LEGACY_NUMERIC_ROOM_CODE_RE.test(code)
 }
+
+/**
+ * Join-field input: accepts a bare code or a pasted room link
+ * (https://host/room/AB23CD?x=1) and returns the formatted code.
+ */
+export function extractRoomCodeInput(raw: string): string {
+  const linkMatch = raw.match(/\/room\/([^/?#\s]+)/i)
+  return formatRoomCodeInput(linkMatch ? linkMatch[1] : raw)
+}

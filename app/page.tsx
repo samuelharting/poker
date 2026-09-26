@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 import { useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
@@ -10,10 +10,12 @@ import {
 } from '@/lib/profile'
 import {
   createRoomCode,
-  formatRoomCodeInput,
+  extractRoomCodeInput,
   isValidRoomCode,
   normalizeRoomCode,
 } from '@/lib/roomCode'
+import { LandingHeroArt } from '@/components/ui/LandingHeroArt'
+import { NicknameField } from '@/components/ui/NicknameField'
 
 function generateRoomCode(): string {
   return createRoomCode()
@@ -32,6 +34,9 @@ export default function LandingPage() {
     email: '',
     venmoUsername: '',
   })
+  // A returning player gets a one-tap "Create table as Sam" until they ask to change name.
+  const [savedName, setSavedName] = useState('')
+  const [editingName, setEditingName] = useState(false)
   const [showJoinForm, setShowJoinForm] = useState(false)
   const [error, setError] = useState('')
 
@@ -40,8 +45,11 @@ export default function LandingPage() {
     if (stored) {
       setCreateProfile(stored)
       setJoinProfile(stored)
+      setSavedName(stored.nickname)
     }
   }, [])
+
+  const useSavedName = Boolean(savedName) && !editingName
 
   const handleCreateTable = useCallback(() => {
     const result = validatePlayerProfile(createProfile)
@@ -75,139 +83,140 @@ export default function LandingPage() {
   }, [joinCode, joinProfile, router])
 
   return (
-    <div className="landing-bg">
+    <main className="landing-bg" data-mode={showJoinForm ? 'join' : 'create'}>
       <div className="landing-frame">
+        <LandingHeroArt />
+
         <div className="landing-copy">
-          <div className="landing-suits" aria-hidden="true">
-            <span className="suit-red">&#x2665;</span>
-            <span>&#x2660;</span>
-            <span className="suit-red">&#x2666;</span>
-            <span>&#x2663;</span>
-          </div>
-          <div className="landing-kicker">Private Texas Hold'em</div>
-          <h1 className="landing-title gold-text">Poker Night</h1>
-          <p className="landing-subtitle">
-            Start a polished table for friends, then share the room code when seats are ready.
-          </p>
-          <div className="landing-status-strip" aria-label="Table defaults">
-            <span>8 max</span>
-            <span>10 / 20 blinds</span>
-            <span>Live table</span>
-          </div>
-          <div className="landing-table-preview" aria-hidden="true">
-            <div className="landing-preview-table">
-              <span className="landing-preview-pot">$240</span>
-              <span className="landing-preview-card landing-preview-card-a" />
-              <span className="landing-preview-card landing-preview-card-b" />
-              <span className="landing-preview-card landing-preview-card-c" />
-              <span className="landing-preview-seat landing-preview-seat-one" />
-              <span className="landing-preview-seat landing-preview-seat-two" />
-              <span className="landing-preview-seat landing-preview-seat-three" />
-            </div>
-          </div>
-        </div>
+          <header className="landing-brand">
+            <span className="landing-kicker">Private Texas Hold&apos;em</span>
+            <h1 className="landing-title">Poker Night</h1>
+            <p className="landing-subtitle">
+              Deal a private table for your crew. Share the code, grab a seat, shuffle up.
+            </p>
+          </header>
 
-        <div className="landing-panel-wrap">
-          <div className="landing-mode-toggle" role="tablist" aria-label="Table entry mode">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={!showJoinForm}
-              className={!showJoinForm ? 'is-active' : ''}
-              onClick={() => { setShowJoinForm(false); setError('') }}
-            >
-              Create
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={showJoinForm}
-              className={showJoinForm ? 'is-active' : ''}
-              onClick={() => { setShowJoinForm(true); setError('') }}
-            >
-              Join
-            </button>
-          </div>
-
-          {error && (
-            <div className="entry-error" role="alert">
-              {error}
-            </div>
-          )}
-
-          {!showJoinForm ? (
-            <div className="card-panel entry-panel" role="tabpanel" aria-label="Create a table">
-              <div className="entry-panel-header">
-                <span className="entry-panel-kicker">New table</span>
-                <h2>Start a private table</h2>
-              </div>
-
-              <label className="entry-field">
-                <span>Your nickname</span>
-                <input
-                  type="text"
-                  className="input-dark"
-                  placeholder="e.g. PhilIvey"
-                  value={createProfile.nickname}
-                  onChange={e => setCreateProfile(current => ({ ...current, nickname: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && handleCreateTable()}
-                  maxLength={20}
-                  autoComplete="nickname"
-                  autoFocus
-                  suppressHydrationWarning
-                />
-              </label>
-
-              <button className="btn-gold" onClick={handleCreateTable}>
-                Create Table
+          <section className="landing-panel-wrap card-panel" aria-label="Get a seat">
+            <div className="landing-mode-toggle" role="tablist" aria-label="Table entry mode">
+              <button
+                type="button"
+                role="tab"
+                id="landing-tab-create"
+                aria-selected={!showJoinForm}
+                aria-controls="landing-panel-create"
+                className={!showJoinForm ? 'is-active' : ''}
+                onClick={() => { setShowJoinForm(false); setError('') }}
+              >
+                Create
               </button>
+              <button
+                type="button"
+                role="tab"
+                id="landing-tab-join"
+                aria-selected={showJoinForm}
+                aria-controls="landing-panel-join"
+                className={showJoinForm ? 'is-active' : ''}
+                onClick={() => { setShowJoinForm(true); setError('') }}
+              >
+                Join
+              </button>
+              <span className="landing-mode-thumb" aria-hidden="true" />
             </div>
-          ) : (
-            <div className="card-panel entry-panel" role="tabpanel" aria-label="Join a table">
-              <div className="entry-panel-header">
-                <span className="entry-panel-kicker">Existing room</span>
-                <h2>Join a table</h2>
-              </div>
 
-              <label className="entry-field">
-                <span>Room code</span>
+            {!showJoinForm ? (
+              <div
+                className="entry-panel"
+                role="tabpanel"
+                id="landing-panel-create"
+                aria-label="Create a table"
+              >
+                <h2 className="landing-sr-only">Start a private table</h2>
+
+                <NicknameField
+                  savedName={useSavedName ? savedName : ''}
+                  value={createProfile.nickname}
+                  placeholder="e.g. PhilIvey"
+                  autoFocus
+                  onChange={nickname => setCreateProfile(current => ({ ...current, nickname }))}
+                  onSubmit={handleCreateTable}
+                  onChangeName={() => setEditingName(true)}
+                />
+
+                {error && (
+                  <div className="entry-error" role="alert">
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  className="btn-gold entry-submit"
+                  onClick={handleCreateTable}
+                  autoFocus={useSavedName}
+                >
+                  {useSavedName ? `Create table as ${savedName}` : 'Create Table'}
+                </button>
+              </div>
+            ) : (
+              <div
+                className="entry-panel"
+                role="tabpanel"
+                id="landing-panel-join"
+                aria-label="Join a table"
+              >
+                <h2 className="landing-sr-only">Join a table</h2>
+
+                <div className="entry-field">
+                  <label htmlFor="landing-room-code">Room code</label>
                   <input
+                    id="landing-room-code"
                     type="text"
                     className="input-dark input-room-code"
                     placeholder="AB23CD"
                     value={joinCode}
-                    onChange={e => setJoinCode(formatRoomCodeInput(e.target.value))}
-                    maxLength={20}
+                    onChange={e => setJoinCode(extractRoomCodeInput(e.target.value))}
+                    onKeyDown={e => e.key === 'Enter' && handleJoinTable()}
+                    autoComplete="off"
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    enterKeyHint="go"
+                    aria-describedby="landing-room-code-hint"
                     autoFocus
                     suppressHydrationWarning
-                />
-              </label>
+                  />
+                  <p id="landing-room-code-hint" className="entry-hint">
+                    Paste the code or the whole room link.
+                  </p>
+                </div>
 
-              <label className="entry-field">
-                <span>Your nickname</span>
-                <input
-                  type="text"
-                  className="input-dark"
-                  placeholder="e.g. DanielN"
+                <NicknameField
+                  savedName={useSavedName ? savedName : ''}
                   value={joinProfile.nickname}
-                  onChange={e => setJoinProfile(current => ({ ...current, nickname: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && handleJoinTable()}
-                  maxLength={20}
-                  autoComplete="nickname"
-                  suppressHydrationWarning
+                  placeholder="e.g. DanielN"
+                  onChange={nickname => setJoinProfile(current => ({ ...current, nickname }))}
+                  onSubmit={handleJoinTable}
+                  onChangeName={() => setEditingName(true)}
                 />
-              </label>
 
-              <button className="btn-gold" onClick={handleJoinTable}>
-                Join Table
-              </button>
-            </div>
-          )}
+                {error && (
+                  <div className="entry-error" role="alert">
+                    {error}
+                  </div>
+                )}
+
+                <button className="btn-gold entry-submit" onClick={handleJoinTable}>
+                  {useSavedName ? `Join table as ${savedName}` : 'Join Table'}
+                </button>
+              </div>
+            )}
+
+            <p className="landing-footnote">
+              <span>Play money</span>
+              <span>Up to 8 seats</span>
+              <span>No sign-up</span>
+            </p>
+          </section>
         </div>
       </div>
-    </div>
+    </main>
   )
 }
-
-
-

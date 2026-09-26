@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ROOM_CODE_LENGTH,
   createRoomCode,
+  extractRoomCodeInput,
   formatRoomCodeInput,
   isValidRoomCode,
   normalizeRoomCode,
@@ -30,5 +31,12 @@ describe('room code helpers', () => {
     expect(formatRoomCodeInput(' ab23-cd ')).toBe('AB23CD')
     expect(formatRoomCodeInput('00123')).toBe('00123')
     expect(formatRoomCodeInput('abc!def!12345678901234567890')).toBe('ABCDEF12345678901234')
+  })
+
+  it('pulls the code out of a pasted room link', () => {
+    expect(extractRoomCodeInput('https://poker.example.com/room/AB23CD')).toBe('AB23CD')
+    expect(extractRoomCodeInput('http://localhost:3000/room/ab23cd?ref=chat#seat')).toBe('AB23CD')
+    expect(extractRoomCodeInput('poker.example.com/room/AB23CD/')).toBe('AB23CD')
+    expect(extractRoomCodeInput(' ab23-cd ')).toBe('AB23CD')
   })
 })
