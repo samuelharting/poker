@@ -42,6 +42,12 @@ import { applyBlink, getBlinkAmount, stylizeAvatar, type StylizedAvatar } from '
 import { createAvatarFace, disposeAvatarFace, updateAvatarFace, type AvatarFaceRig, type FaceMood } from './avatarFace'
 import { createDrinkProp, disposeDrinkProp, DRINK_DURATION, type DrinkProp } from './drinkProps'
 import {
+  createFirstPersonDrink,
+  disposeFirstPersonDrink,
+  updateFirstPersonDrink,
+  type FirstPersonDrink,
+} from './firstPersonDrink'
+import {
   animateConfetti,
   animateLightCone,
   animateShockwave,
@@ -175,6 +181,7 @@ interface SeatRuntime {
   face: AvatarFaceRig | null
   drinkProp: DrinkProp | null
   drinkId: string
+  isHero: boolean
   drinkStartedAt: number
   drunkLevel: number
   passedOut: boolean
@@ -264,6 +271,8 @@ interface SceneRuntime {
   overlayElements: Map<string, HTMLElement>
   /** Lady Luck, the win-streak companion. */
   companion: CompanionRuntime | null
+  /** The local player's own drink, seen first-person (their avatar is hidden). */
+  firstPersonDrink: FirstPersonDrink
   effects: { cone: LightCone; confetti: Confetti; shockwave: Shockwave; winnerKey: string; allInKey: string }
   /** Scene time when community cards last landed. */
   boardRevealAt: number
@@ -1044,6 +1053,7 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     face: null,
     drinkProp: null,
     drinkId: player.drinks?.lastDrink?.id ?? '',
+    isHero: player.isHero,
     drinkStartedAt: Number.NEGATIVE_INFINITY,
     drunkLevel: player.drinks?.level ?? 0,
     passedOut: player.drinks?.passedOut ?? false,
@@ -1296,6 +1306,7 @@ function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number) {
   // sit between the camera and their DOM-rendered hole cards, so keep that seat
   // out of the 3D scene while retaining its readable fixed hand and stack HUD.
   seat.root.visible = !player.isHero
+  seat.isHero = player.isHero
 
   seat.acting = player.isActing
   seat.winner = player.isWinner
@@ -1998,16 +2009,16 @@ function placeDrinkProp(seat: SeatRuntime, pose: AvatarPose, time: number) {
   prop.group.visible = seat.root.visible
   if (!seat.root.visible) return
   const elapsed = time - seat.drinkStartedAt
-  const inHand = elapsed > 0.32 && elapsed < DRINK_DURATION - 0.3 && !seat.passedOut
-  if (!inHand) {
-    drinkWristWorld.set(...seat.anchors.drinkRest)
-    seat.root.localToWorld(drinkWristWorld)
-    prop.group.position.copy(drinkWristWorld)
-    prop.group.position.y = FELT_TOP_Y
-    prop.group.rotation.set(0, seat.root.rotation.y, 0)
-    prop.group.scale.setScalar(seat.root.scale.x * 1.35)
+  // Glasses only exist while someone drinks: they pop into the hand on the
+  // reach and pop out as it is set down.
+  const inStart = 0.3
+  const inEnd = DRINK_DURATION - 0.28
+  if (elapsed < inStart || elapsed > inEnd || seat.passedOut) {
+    prop.group.visible = false
     return
   }
+  const pop = Math.min(1, (elapsed - inStart) / 0.14, (inEnd - elapsed) / 0.14)
+  const popScale = 1 - Math.pow(1 - pop, 3)
   const wrist = seat.avatar?.bones.get('WristR')
   const knuckle = seat.avatar?.bones.get('Middle1R')
   if (!wrist) {
@@ -2026,7 +2037,7 @@ function placeDrinkProp(seat: SeatRuntime, pose: AvatarPose, time: number) {
   prop.group.position.y -= 0.14 * scale * (1 - pose.drinkLift * 0.6)
   prop.group.rotation.set(0, seat.root.rotation.y, 0)
   prop.group.rotateX(pose.drinkLift * 1.35)
-  prop.group.scale.setScalar(scale * 1.35)
+  prop.group.scale.setScalar(scale * 1.35 * popScale)
 }
 
 /** Rosy cheeks creep in as the beers go down. */
@@ -2505,6 +2516,25 @@ function precompileScene(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
   }
 }
 
+/** Drives the hero's own first-person drink; returns the head-tilt amount. */
+function updateHeroDrink(runtime: SceneRuntime, view: ThreeTableViewModel, time: number, reducedMotion: boolean) {
+  let heroSeat: SeatRuntime | null = null
+  for (const seat of runtime.seats.values()) {
+    if (seat.isHero) heroSeat = seat
+  }
+  const hero = view.players.find(player => player.isHero)
+  const elapsed = heroSeat && heroSeat.drinkProp && !heroSeat.passedOut ? time - heroSeat.drinkStartedAt : null
+  return updateFirstPersonDrink(runtime.firstPersonDrink, {
+    elapsed,
+    kind: heroSeat?.drinkProp?.kind ?? 'beer',
+    skinColor: hero?.avatarProfile.skinColor ?? '#d9a27c',
+    sleeveColor: hero?.avatarProfile.sleeveColor ?? '#2b2f3a',
+    drunkLevel: heroSeat?.drunkLevel ?? 0,
+    time,
+    reducedMotion,
+  })
+}
+
 const companionBubbleWorld = new THREE.Vector3()
 
 /** Drives Lady Luck beside her owner's seat and floats her speech bubble. */
@@ -2605,6 +2635,9 @@ function createSceneRuntime(
     winnerKey: '',
     allInKey: '',
   }
+  // The camera joins the scene so the first-person drink can ride on it.
+  scene.add(camera)
+  const firstPersonDrink = createFirstPersonDrink(camera)
   try {
     companion = createCompanion(scene)
   } catch (error) {
@@ -2639,6 +2672,7 @@ function createSceneRuntime(
     neonMaterials,
     overlayElements: new Map<string, HTMLElement>(),
     companion,
+    firstPersonDrink,
     effects,
     boardRevealAt: Number.NEGATIVE_INFINITY,
     anyWinner: false,
@@ -2800,6 +2834,9 @@ function createSceneRuntime(
       }
     }
     camera.lookAt(cameraLookAt)
+    const headTilt = updateHeroDrink(runtime, viewRef.current, time, reducedMotion)
+    // Tip the head back with the sip.
+    if (headTilt > 0 && !runtime.debugCamera) camera.rotateX(headTilt * 0.13)
     camera.updateMatrixWorld()
 
     updateLadyLuck(runtime, viewRef.current, host, time, delta, reducedMotion, viewportWidth, viewportHeight)
@@ -2855,6 +2892,7 @@ function createSceneRuntime(
     }
     runtime.board.slots.forEach(slot => disposeCardMesh(slot.card))
     if (runtime.companion) disposeCompanion(runtime.companion)
+    disposeFirstPersonDrink(runtime.firstPersonDrink)
     disposeLightCone(runtime.effects.cone)
     disposeConfetti(runtime.effects.confetti)
     disposeShockwave(runtime.effects.shockwave)

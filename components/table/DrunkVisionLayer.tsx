@@ -145,10 +145,8 @@ export function DrunkVisionLayer() {
       )}
 
       {sip && (
-        <div key={sip.id} className={`drunk-sip is-${sip.kind}`}>
-          <span className="drunk-sip-glass">{sip.kind === 'beer' ? '🍺' : '🥛'}</span>
-          <span className="drunk-sip-copy">{sip.kind === 'beer' ? 'glug glug' : 'hydrating…'}</span>
-        </div>
+        // The glass itself is drawn in 3D (firstPersonDrink.ts); this is just a warm wash.
+        <div key={sip.id} className={`drunk-sip is-${sip.kind}`} aria-hidden="true" />
       )}
 
       {passedOut && (
