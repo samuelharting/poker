@@ -2130,23 +2130,21 @@
   border-radius: var(--r-md);
 }
 
-.emoji-picker-shell .EmojiPickerReact {
-  --epr-bg-color: var(--c-ink-900);
-  --epr-category-label-bg-color: color-mix(in srgb, var(--c-ink-900) 94%, transparent);
-  --epr-text-color: var(--c-text-1);
-  --epr-picker-border-color: var(--line);
-  --epr-picker-border-radius: var(--r-md);
-  --epr-search-input-bg-color: var(--c-ink-950);
-  --epr-search-input-bg-color-active: var(--c-ink-950);
+.emoji-picker-shell .EmojiPickerReact.EmojiPickerReact {
+  --epr-dark-bg-color: var(--c-ink-900);
+  --epr-dark-category-label-bg-color: color-mix(in srgb, var(--c-ink-900) 94%, transparent);
+  --epr-dark-text-color: var(--c-text-1);
+  --epr-dark-picker-border-color: var(--line);
+  --epr-dark-search-input-bg-color: var(--c-ink-950);
+  --epr-dark-search-input-bg-color-active: var(--c-ink-950);
+  --epr-dark-hover-bg-color: var(--c-ink-600);
+  --epr-dark-focus-bg-color: var(--c-ink-600);
+  --epr-dark-highlight-color: var(--c-brass-400);
+  --epr-dark-category-icon-active-color: var(--c-brass-400);
+  --epr-search-border-color: var(--c-brass-400);
   --epr-search-input-text-color: var(--c-text-1);
   --epr-search-input-placeholder-color: var(--c-text-3);
-  --epr-search-border-color: var(--c-brass-400);
-  --epr-hover-bg-color: var(--c-ink-600);
-  --epr-focus-bg-color: var(--c-ink-600);
-  --epr-highlight-color: var(--c-brass-400);
-  --epr-category-icon-active-color: var(--c-brass-400);
-  --epr-emoji-size: 26px;
-  --epr-emoji-padding: 5px;
+  --epr-picker-border-radius: var(--r-md);
   font-family: var(--font-ui);
 }
 
@@ -2980,7 +2978,7 @@
   }
 
   .settings-tab {
-    min-height: 40px;
+    min-height: 44px;
   }
 
   .settings-modal-body {
@@ -3023,8 +3021,13 @@
   }
 
   .settings-pill {
-    min-height: 40px;
+    min-height: 44px;
     padding: 0 var(--sp-2);
+  }
+
+  .settings-field input,
+  .settings-player-chip-input input {
+    min-height: 44px;
   }
 
   .settings-volume-field span {
@@ -3060,7 +3063,7 @@
   }
 
   .avatar-choice {
-    min-height: 40px;
+    min-height: 44px;
   }
 
   .avatar-settings-footer {
