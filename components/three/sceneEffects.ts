@@ -1,17 +1,14 @@
 import * as THREE from 'three'
 
 /**
- * Cinematic effects for the lounge: a volumetric light cone over the felt,
- * drifting dust motes, confetti bursts for winners, and an all-in shockwave.
+ * Cinematic effects for the lounge: a soft light cone over the felt,
+ * confetti bursts for winners, and an all-in shockwave.
  * Everything is pooled and allocation-free per frame.
  */
 
 export interface LightCone {
   mesh: THREE.Mesh
   material: THREE.ShaderMaterial
-  dust: THREE.Points
-  dustMaterial: THREE.PointsMaterial
-  dustSeeds: Float32Array
 }
 
 /** A soft additive cone from the overhead lamp down to the felt. */
@@ -63,65 +60,17 @@ export function createLightCone(scene: THREE.Scene, apex: THREE.Vector3, baseY: 
   mesh.renderOrder = 5
   scene.add(mesh)
 
-  const count = 220
-  const positions = new Float32Array(count * 3)
-  const dustSeeds = new Float32Array(count * 3)
-  let seed = 0xd057
-  const random = () => {
-    seed = (seed * 1664525 + 1013904223) >>> 0
-    return seed / 0x100000000
-  }
-  for (let index = 0; index < count; index += 1) {
-    dustSeeds[index * 3] = random() * Math.PI * 2
-    dustSeeds[index * 3 + 1] = Math.sqrt(random())
-    dustSeeds[index * 3 + 2] = random()
-  }
-  const dustGeometry = new THREE.BufferGeometry()
-  dustGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  const dustMaterial = new THREE.PointsMaterial({
-    color: '#ffe9c4',
-    size: 0.018,
-    transparent: true,
-    opacity: 0.32,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  })
-  const dust = new THREE.Points(dustGeometry, dustMaterial)
-  dust.name = 'dust-motes'
-  dust.frustumCulled = false
-  scene.add(dust)
-
-  return { mesh, material, dust, dustMaterial, dustSeeds }
+  return { mesh, material }
 }
 
 export function animateLightCone(cone: LightCone, time: number, reducedMotion: boolean, boost: number) {
   cone.material.uniforms.intensity!.value = 0.14 + boost * 0.12 + (reducedMotion ? 0 : Math.sin(time * 0.7) * 0.012)
-  const position = cone.dust.geometry.getAttribute('position') as THREE.BufferAttribute
-  const apex = cone.mesh.position
-  const height = cone.material.uniforms.height!.value as number
-  for (let index = 0; index < position.count; index += 1) {
-    const angle = cone.dustSeeds[index * 3]! + (reducedMotion ? 0 : time * 0.04)
-    const radial = cone.dustSeeds[index * 3 + 1]!
-    const heightSeed = cone.dustSeeds[index * 3 + 2]!
-    const along = (heightSeed + (reducedMotion ? 0 : time * 0.012)) % 1
-    const radius = (1.4 + along * 2.4) * radial * 0.8
-    position.setXYZ(
-      index,
-      apex.x + Math.cos(angle) * radius,
-      apex.y - 3.2 - along * (height - 3.6),
-      apex.z + Math.sin(angle) * radius
-    )
-  }
-  position.needsUpdate = true
 }
 
 export function disposeLightCone(cone: LightCone) {
   cone.mesh.removeFromParent()
   cone.mesh.geometry.dispose()
   cone.material.dispose()
-  cone.dust.removeFromParent()
-  cone.dust.geometry.dispose()
-  cone.dustMaterial.dispose()
 }
 
 const CONFETTI_COUNT = 260
