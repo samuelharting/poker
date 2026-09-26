@@ -40,6 +40,14 @@ export interface AvatarAnchors {
   chin: Vec3
   shoulderR: Vec3
   shoulderL: Vec3
+  /** The player's own chip stack on the felt. */
+  stack: Vec3
+  /** Where their bets land (the wager anchor). */
+  betSpot: Vec3
+  /** Felt spot for check taps. */
+  tap: Vec3
+  /** Centre of the community cards. */
+  board: Vec3
 }
 
 export interface AvatarPose {
@@ -89,6 +97,10 @@ export interface AvatarAnimatorInput {
   passedOut?: boolean
   /** A flick-off aimed at another seat: seconds elapsed and the target in seat space. */
   flipOff?: { elapsed: number; target: Vec3 } | null
+  /** Seconds since new community cards landed (everyone looks at the board). */
+  boardRevealAge?: number
+  /** Someone else just won the pot (table reacts). */
+  otherWinner?: boolean
 }
 
 interface Spring {
@@ -113,10 +125,17 @@ export interface AvatarAnimatorState {
   lastHeat: number
   thinkingStyle: 0 | 1 | 2
   loserStyle: 0 | 1
+  nextBigIdleAt: number
+  bigIdleStartedAt: number
+  bigIdleKind: 0 | 1 | 2 | 3
+  reactionSince: number
+  reactionKind: 0 | 1 | 2
   initialized: boolean
 }
 
 const BONE_CHANNELS = ANIMATED_BONES.length * 3
+/** Channel index of bodyPosition in writeChannels (after bones, hands and fingers). */
+const BODY_CHANNEL_START = BONE_CHANNELS + 3 + 3 + 2
 const CHANNEL_COUNT = BONE_CHANNELS + 3 + 3 + 2 + 3 + 3 + 1 + 1 + 1
 export const FLIP_OFF_SECONDS = 2.4
 const DRINK_SECONDS = 2.6
@@ -151,6 +170,11 @@ export function createAvatarAnimatorState(seedSource: string): AvatarAnimatorSta
     lastHeat: 0,
     thinkingStyle: Math.floor(random() * 3) as 0 | 1 | 2,
     loserStyle: random() > 0.5 ? 1 : 0,
+    nextBigIdleAt: 12 + random() * 20,
+    bigIdleStartedAt: Number.NEGATIVE_INFINITY,
+    bigIdleKind: 0,
+    reactionSince: Number.NEGATIVE_INFINITY,
+    reactionKind: 0,
     initialized: false,
   }
 }
@@ -382,27 +406,184 @@ export function computeAvatarTargetPose(
     pose.bodyPosition[2] -= 0.05 * think
   }
 
-  // 7. The action itself (fold slide, check tap, chip push), retargeted onto
-  // the spine plus a hand path relative to the rail rest.
+  // 7. The action itself, choreographed against real table spots: reach to
+  // the chip stack, push chips to the bet line, knuckle-tap the felt, flick the
+  // cards to the muck, or shove the whole stack in with both hands.
   if (input.cueActive) {
     const avatarPose = getSeatedAvatarActionPose(input.cue, input.cueElapsedMs, actionPoseOptions)
-    const tablePose = getOpponentTableActionPose(input.cue, input.cueElapsedMs, actionPoseOptions)
-    add(bones.Chest, avatarPose.bodyRotation[0] * 1.8, avatarPose.bodyRotation[1] * 1.4, avatarPose.bodyRotation[2])
-    add(bones.Head, avatarPose.headRotation[0], avatarPose.headRotation[1], avatarPose.headRotation[2])
-    const [hx, hy, hz] = tablePose.hand.position
-    const handPath: Vec3 = [hx * 1.4, hy * 1.8, hz * 2.1]
-    if (input.cue === 'fold') {
-      // Pick up the cards, then flick them toward the muck.
-      blendTo(pose.handR, offset(anchors.cards, 0.06, 0.06, 0.1), smoothStep(input.cueElapsedMs / 220))
+    add(bones.Chest, avatarPose.bodyRotation[0] * 1.6, avatarPose.bodyRotation[1] * 1.2, avatarPose.bodyRotation[2])
+    add(bones.Head, avatarPose.headRotation[0] * 0.6, avatarPose.headRotation[1], avatarPose.headRotation[2])
+    add(pose.bodyPosition, avatarPose.bodyPosition[0], avatarPose.bodyPosition[1], avatarPose.bodyPosition[2], 1.4)
+    const t = clamp01(input.cueElapsedMs / 980)
+    const rail = anchors.railR
+    switch (input.cue) {
+      case 'check': {
+        // Two crisp knuckle taps on the felt in front of the cards.
+        const reach = envelope(t, 1, 0.16, 0.22)
+        const tap = Math.max(0, Math.sin(clamp01((t - 0.18) / 0.16) * Math.PI), Math.sin(clamp01((t - 0.4) / 0.16) * Math.PI))
+        blendTo(pose.handR, offset(anchors.tap, 0, 0.1 - 0.1 * tap, 0), reach)
+        add(bones.WristR, 0.5 * tap, 0, 0, reach)
+        pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + reach
+        add(bones.Head, 0.12 * reach, 0, 0)
+        break
+      }
+      case 'call':
+      case 'bet':
+      case 'raise': {
+        // Reach → grab from the stack → slide to the bet line → release → return.
+        const reach = smoothStep(t / 0.22)
+        const push = smoothStep((t - 0.25) / 0.4)
+        const release = smoothStep((t - 0.68) / 0.12)
+        const back = smoothStep((t - 0.8) / 0.2)
+        const grabbed = offset(anchors.stack, 0, 0.04, 0.02)
+        const pushed: Vec3 = [
+          grabbed[0] + (anchors.betSpot[0] - grabbed[0]) * 0.8,
+          grabbed[1] + Math.sin(push * Math.PI) * 0.06,
+          grabbed[2] + (anchors.betSpot[2] - grabbed[2]) * 0.8,
+        ]
+        const path: Vec3 = [
+          grabbed[0] + (pushed[0] - grabbed[0]) * push,
+          grabbed[1] + (pushed[1] - grabbed[1]) * push + 0.05 * release,
+          grabbed[2] + (pushed[2] - grabbed[2]) * push,
+        ]
+        blendTo(pose.handR, path, reach * (1 - back))
+        add(bones.WristR, -0.2 * push, 0, 0, reach * (1 - back))
+        pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + (0.95 - 0.8 * release) * reach
+        add(bones.Chest, 0.16 * push * (1 - back), 0, 0)
+        add(bones.Head, 0.1 * push * (1 - back), 0, 0)
+        if (input.cue === 'raise') add(bones.Head, -0.08 * release * (1 - back), 0.1 * release * (1 - back), 0)
+        void rail
+        break
+      }
+      case 'all_in': {
+        // Both hands wrap the stack and shove it in, then a palms-up "I'm in".
+        const grip = smoothStep(t / 0.2)
+        const shove = smoothStep((t - 0.2) / 0.38)
+        const flourish = smoothStep((t - 0.62) / 0.18)
+        const fromR = offset(anchors.stack, 0.14, 0.04, 0.06)
+        const fromL = offset(anchors.stack, -0.18, 0.04, 0.06)
+        const toX = anchors.betSpot[0] - anchors.stack[0]
+        const toZ = anchors.betSpot[2] - anchors.stack[2]
+        const drive = shove * 0.85
+        blendTo(pose.handR, offset(fromR, toX * drive, 0.03 * Math.sin(shove * Math.PI), toZ * drive), grip * (1 - flourish))
+        blendTo(pose.handL, offset(fromL, toX * drive, 0.03 * Math.sin(shove * Math.PI), toZ * drive), grip * (1 - flourish))
+        blendTo(pose.handR, offset(anchors.shoulderR, 0.3, 0.05, -0.38), flourish)
+        blendTo(pose.handL, offset(anchors.shoulderL, -0.3, 0.05, -0.38), flourish)
+        add(bones.WristR, 0, 0, -0.8 * flourish)
+        add(bones.WristL, 0, 0, 0.8 * flourish)
+        pose.fingerCurlR = 0.9 * grip * (1 - flourish)
+        pose.fingerCurlL = 0.9 * grip * (1 - flourish)
+        add(bones.Chest, 0.26 * shove * (1 - flourish) - 0.12 * flourish, 0, 0)
+        add(bones.Head, -0.12 * flourish, 0, 0)
+        pose.bodyPosition[2] -= 0.12 * shove * (1 - flourish)
+        break
+      }
+      case 'fold': {
+        // Pick up the cards, flick them toward the middle, sit back.
+        const reach = smoothStep(t / 0.22)
+        const flick = smoothStep((t - 0.28) / 0.18)
+        const back = smoothStep((t - 0.6) / 0.3)
+        const toward: Vec3 = [
+          anchors.cards[0] + (anchors.board[0] - anchors.cards[0]) * 0.18,
+          anchors.cards[1] + 0.12,
+          anchors.cards[2] + (anchors.board[2] - anchors.cards[2]) * 0.18,
+        ]
+        blendTo(pose.handR, offset(anchors.cards, 0.06, 0.04, 0.08), reach * (1 - back))
+        blendTo(pose.handR, toward, flick * (1 - back))
+        add(bones.WristR, -0.6 * flick, 0, 0.3 * flick, 1 - back)
+        pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + (0.8 - 0.7 * flick) * reach
+        add(bones.Head, 0.05, -0.2 * back, 0)
+        break
+      }
+      default:
+        break
     }
-    add(pose.handR, handPath[0], handPath[1], handPath[2])
-    add(bones.WristR, tablePose.hand.rotation[0] * 0.6, tablePose.hand.rotation[1] * 0.6, tablePose.hand.rotation[2] * 0.5)
-    pose.fingerCurlR += tablePose.hand.fingerCurl * 0.8
-    if (input.cue === 'all_in') {
-      add(pose.handL, -handPath[0], handPath[1], handPath[2])
-      pose.fingerCurlL += tablePose.hand.fingerCurl * 0.8
+  }
+
+  // 7b. New board cards: everyone glances at the board and leans in.
+  const boardAge = input.boardRevealAge ?? Number.POSITIVE_INFINITY
+  const boardLook = envelope(boardAge, 1.8, 0.2, 0.6) * motion
+  if (boardLook > 0 && !input.passedOut) {
+    const bx = anchors.board[0]
+    const bz = anchors.board[2]
+    const boardYaw = Math.atan2(-bx, -bz)
+    add(bones.Neck, 0.1 * boardLook, 0.35 * boardYaw * boardLook, 0)
+    add(bones.Head, 0.14 * boardLook, 0.55 * boardYaw * boardLook, 0)
+    add(bones.Chest, 0.08 * boardLook, 0, 0)
+    pose.bodyPosition[2] -= 0.05 * boardLook
+  }
+
+  // 7c. Big idles now and then: stretch, hands behind the head, knuckle crack, chip spin.
+  if (canIdle && time >= state.nextBigIdleAt && !Number.isFinite(state.bigIdleStartedAt) && !Number.isFinite(state.peekStartedAt)) {
+    state.bigIdleStartedAt = time
+    state.bigIdleKind = Math.floor(state.random() * 4) as 0 | 1 | 2 | 3
+  }
+  if (Number.isFinite(state.bigIdleStartedAt)) {
+    const elapsed = time - state.bigIdleStartedAt
+    const duration = state.bigIdleKind === 1 ? 4.2 : 2.8
+    const w = canIdle ? envelope(elapsed, duration, 0.5, 0.6) * motion : 0
+    if (elapsed > duration || !canIdle) {
+      state.bigIdleStartedAt = Number.NEGATIVE_INFINITY
+      state.nextBigIdleAt = time + 16 + state.random() * 22
     }
-    add(pose.bodyPosition, avatarPose.bodyPosition[0], avatarPose.bodyPosition[1], avatarPose.bodyPosition[2], 1.6)
+    switch (state.bigIdleKind) {
+      case 0: // stretch
+        blendTo(pose.handR, offset(anchors.shoulderR, 0.1, 0.62, 0.05), w)
+        blendTo(pose.handL, offset(anchors.shoulderL, -0.1, 0.62, 0.05), w)
+        add(bones.Chest, -0.2, 0, 0, w)
+        add(bones.Head, -0.2, 0, 0, w)
+        pose.fingerCurlR *= 1 - w
+        pose.fingerCurlL *= 1 - w
+        break
+      case 1: // lean back, hands behind the head
+        blendTo(pose.handR, offset(anchors.chin, 0.1, 0.22, 0.28), w)
+        blendTo(pose.handL, offset(anchors.chin, -0.1, 0.22, 0.28), w)
+        add(bones.Chest, -0.22, 0, 0, w)
+        add(bones.Head, -0.08, 0.05, 0, w)
+        pose.bodyPosition[2] += 0.1 * w
+        break
+      case 2: { // interlace and crack the knuckles
+        const pushOut = Math.sin(clamp01((elapsed - 0.8) / 1.2) * Math.PI)
+        const mid = offset(anchors.chest, 0, -0.05, -0.28 - 0.14 * pushOut)
+        blendTo(pose.handR, offset(mid, 0.05, 0, 0), w)
+        blendTo(pose.handL, offset(mid, -0.05, 0, 0), w)
+        add(bones.WristR, 0, 0, -0.6 * pushOut, w)
+        add(bones.WristL, 0, 0, 0.6 * pushOut, w)
+        add(bones.Chest, 0.06, 0, 0, w)
+        break
+      }
+      default: { // spin a chip on the felt by the stack
+        const spin = Math.sin(elapsed * 14) * motion
+        blendTo(pose.handR, offset(anchors.stack, -0.12, 0.06, 0.06), w)
+        add(bones.WristR, 0.2, 0.5 * spin, 0, w)
+        pose.fingerCurlR = pose.fingerCurlR * (1 - w) + 0.5 * w
+        add(bones.Head, 0.25, 0, 0, w)
+        break
+      }
+    }
+  }
+
+  // 7d. Somebody else scooped the pot: some clap, some nod, some grumble.
+  if (input.otherWinner && !input.winner && !input.loser && !input.passedOut) {
+    if (!Number.isFinite(state.reactionSince)) {
+      state.reactionSince = time + state.random() * 0.5
+      state.reactionKind = Math.floor(state.random() * 3) as 0 | 1 | 2
+    }
+    const w = envelope(time - state.reactionSince, 2.4, 0.3, 0.6) * motion
+    if (state.reactionKind === 0) {
+      const clap = 0.5 + 0.5 * Math.sin((time - state.reactionSince) * 16)
+      blendTo(pose.handR, offset(anchors.chest, 0.03 + 0.1 * clap, 0.05, -0.3), w)
+      blendTo(pose.handL, offset(anchors.chest, -0.03 - 0.1 * clap, 0.05, -0.3), w)
+      pose.fingerCurlR *= 1 - w
+      pose.fingerCurlL *= 1 - w
+    } else if (state.reactionKind === 1) {
+      add(bones.Head, 0.12 * Math.sin((time - state.reactionSince) * 7), 0, 0, w)
+    } else {
+      add(bones.Head, 0.1, 0.25 * Math.sin((time - state.reactionSince) * 9), 0, w)
+      add(bones.Chest, -0.08, 0, 0, w)
+    }
+  } else {
+    state.reactionSince = Number.NEGATIVE_INFINITY
   }
 
   // 8. Folded: sit back and fold the arms, eyes drifting off the action.
@@ -563,6 +744,20 @@ export function computeAvatarTargetPose(
     pose.bodyPosition[2] -= 0.05 * pump * raise
   }
 
+  // Keep faces visible: clamp the stacked downward pitch of neck + head, and
+  // keep the body close to the chair no matter what stacks up.
+  const totalPitch = bones.Neck[0] + bones.Head[0]
+  const maxPitch = input.passedOut ? 0.9 : 0.34
+  if (totalPitch > maxPitch) {
+    const scale = maxPitch / totalPitch
+    bones.Neck[0] *= scale
+    bones.Head[0] *= scale
+  }
+  bones.Chest[0] = Math.max(-0.45, Math.min(input.passedOut ? 1 : 0.4, bones.Chest[0]))
+  for (let axis = 0; axis < 3; axis += 1) {
+    pose.bodyPosition[axis] = Math.max(-0.3, Math.min(0.3, pose.bodyPosition[axis]!))
+  }
+
   pose.fingerCurlR = clamp01(pose.fingerCurlR)
   pose.fingerCurlL = clamp01(pose.fingerCurlL)
   return pose
@@ -625,14 +820,26 @@ export function updateAvatarAnimator(
     return target
   }
 
-  const omega = input.cueActive ? 20 : input.winner ? 13 : 9
-  const dt = Math.min(0.05, Math.max(0.0001, input.delta))
+  // Semi-implicit spring integration with fixed substeps: unconditionally
+  // stable at any frame rate (a slow frame can never launch an avatar).
+  const omega = input.cueActive ? 18 : input.winner ? 12 : 9
+  const dt = Math.min(0.1, Math.max(0.0001, input.delta))
+  const steps = Math.max(1, Math.ceil(dt / (1 / 120)))
+  const h = dt / steps
   const values: number[] = new Array(CHANNEL_COUNT)
   state.springs.forEach((spring, index) => {
     const goal = scratchTarget[index]!
-    const acceleration = -2 * omega * spring.velocity - omega * omega * (spring.value - goal)
-    spring.velocity += acceleration * dt
-    spring.value += spring.velocity * dt
+    // Spine and body settle with a little overshoot for weight; hands track tightly.
+    const zeta = index < 6 || (index >= BODY_CHANNEL_START && index < BODY_CHANNEL_START + 3) ? 0.62 : 0.95
+    for (let step = 0; step < steps; step += 1) {
+      const acceleration = -2 * zeta * omega * spring.velocity - omega * omega * (spring.value - goal)
+      spring.velocity += acceleration * h
+      spring.value += spring.velocity * h
+    }
+    if (!Number.isFinite(spring.value)) {
+      spring.value = goal
+      spring.velocity = 0
+    }
     values[index] = spring.value
   })
   return readChannels(values)

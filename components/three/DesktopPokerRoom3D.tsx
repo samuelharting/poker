@@ -98,6 +98,7 @@ import {
   getFeltEdgeToward,
   RAIL_PEAK_Y,
   RAIL_WIDTH,
+  BOARD_Z,
 } from './tableArt'
 import type {
   ThreeActionCue,
@@ -115,6 +116,7 @@ import {
   interpolateWagerArc,
   TABLE_SEAT_POSITIONS,
   TABLE_SEAT_SCALES,
+  TABLE_WAGER_Y,
   type TableVisualSeat,
 } from './tableWagerLayout'
 import { getAvatarHeadTurn } from './turnFocus'
@@ -162,6 +164,9 @@ interface SeatRuntime {
   cardLocalZ: number
   animator: AvatarAnimatorState
   chair: THREE.Group
+  /** The player's own chip stack in front of them. */
+  stack: ReturnType<typeof createChipSet>
+  stackCount: number
   /** How far the chair and body slide in toward the rail (seat-local Z). */
   seatShiftZ: number
   anchors: AvatarAnchors
@@ -259,6 +264,9 @@ interface SceneRuntime {
   /** Lady Luck, the win-streak companion. */
   companion: CompanionRuntime | null
   effects: { cone: LightCone; confetti: Confetti; shockwave: Shockwave; winnerKey: string; allInKey: string }
+  /** Scene time when community cards last landed. */
+  boardRevealAt: number
+  anyWinner: boolean
   /** Development-only camera override used by scripts/snap-3d.mjs close-ups. */
   debugCamera: { position: Vec3; lookAt: Vec3; fov?: number } | null
   feltMaterial: THREE.MeshStandardMaterial
@@ -747,6 +755,10 @@ function createDefaultAnchors(): AvatarAnchors {
     chin: [0, 1.4, -0.3],
     shoulderR: [0.24, 1.2, -0.1],
     shoulderL: [-0.24, 1.2, -0.1],
+    stack: [0.5, 0.5, -1.5],
+    betSpot: [0, 0.5, -2.4],
+    tap: [0.15, 0.5, -1.3],
+    board: [0, 0.5, -4],
   }
 }
 
@@ -789,8 +801,19 @@ function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
   seat.cardLocalZ = cardSpot[2]
   seat.anchors.cards = [0, cardSpot[1] + 0.02, cardSpot[2]]
   seat.cards.userData.restY = cardSpot[1]
-  // Dealer puck lies on the felt to the right of the dealer's hole cards.
-  seat.dealerButton.position.set(0.62, cardSpot[1] + 0.03 / scale, cardSpot[2] + 0.12)
+  // The player's own chips sit to the right of their cards, just inside the rail.
+  const stackSpot = at(-0.26, FELT_TOP_Y)
+  seat.anchors.stack = [0.62 / scale, stackSpot[1] + 0.06, stackSpot[2]]
+  seat.stack.group.position.set(0.62 / scale, stackSpot[1], stackSpot[2])
+  seat.stack.group.scale.setScalar(1 / scale)
+  const tapSpot = at(-0.18, FELT_TOP_Y + 0.02)
+  seat.anchors.tap = [0.16 / scale, tapSpot[1], tapSpot[2]]
+  const betWorld = getTableWagerAnchor(safeSeat)
+  const betLocal = toSeatLocal(seat, betWorld[0], betWorld[1] + 0.05, betWorld[2])
+  seat.anchors.betSpot = betLocal
+  seat.anchors.board = toSeatLocal(seat, 0, FELT_TOP_Y + 0.1, BOARD_Z)
+  // Dealer puck lies on the felt to the left of the dealer's hole cards.
+  seat.dealerButton.position.set(-0.62, cardSpot[1] + 0.03 / scale, cardSpot[2] + 0.12)
   // Selection ring sits on the carpet under the chair.
   seat.ring.position.set(0, (-2 - position[1]) / scale + 0.03, 0.25)
   seat.cards.position.set(0, cardSpot[1], cardSpot[2])
@@ -841,6 +864,9 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
   const chair = createStylizedChair(chairMaterial.color, trimMaterial.color)
   root.add(chair.group)
   const chairGroup = chair.group
+  const personalStack = createChipSet(20)
+  personalStack.group.name = `personal-stack-${player.id}`
+  root.add(personalStack.group)
   materials.push(...chair.materials)
 
   const body = new THREE.Group()
@@ -996,6 +1022,8 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     cardLocalZ: -1.02,
     animator: createAvatarAnimatorState(player.id),
     chair: chairGroup,
+    stack: personalStack,
+    stackCount: 0,
     seatShiftZ: 0,
     anchors: createDefaultAnchors(),
     anchorsFromRig: false,
@@ -1328,6 +1356,13 @@ function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
       runtime.scene.add(seat.root)
     }
     syncSeat(seat, player, now)
+    // Personal chip stack: denser for deeper stacks, capped for readability.
+    const bigBlind = Math.max(1, view.bigBlind)
+    seat.stackCount = player.stack <= 0 ? 0 : Math.min(20, Math.max(2, Math.round(Math.log2(player.stack / bigBlind + 1) * 3.2)))
+    seat.stack.group.visible = seat.stackCount > 0
+    seat.stack.chipMeshes.forEach((chip, index) => {
+      chip.visible = index < seat.stackCount
+    })
     // Anyone who reached the showdown and didn't win reacts to the loss.
     seat.loser = hasWinner && !player.isWinner && !player.isOutOfHand && player.hasCards
 
@@ -1475,7 +1510,14 @@ function syncWagers(runtime: SceneRuntime, view: ThreeTableViewModel) {
     const actionChanged = Boolean(player.actionKey) && wager.actionKey !== player.actionKey
     const amountIncreased = player.bet > wager.amount
     wager.visualSeat = visualSeat
-    wager.start.copy(toVector3(getTableWagerStartPoint(visualSeat)))
+    const ownerSeat = runtime.seats.get(player.id)
+    if (ownerSeat && ownerSeat.root.visible) {
+      // Chips leave the player's own stack (where the hand grabs them).
+      ownerSeat.stack.group.getWorldPosition(wager.start)
+      wager.start.y = TABLE_WAGER_Y
+    } else {
+      wager.start.copy(toVector3(getTableWagerStartPoint(visualSeat)))
+    }
     wager.target.copy(toVector3(getTableWagerAnchor(visualSeat)))
 
     if (seatChanged) {
@@ -1483,7 +1525,8 @@ function syncWagers(runtime: SceneRuntime, view: ThreeTableViewModel) {
       wager.group.position.copy(wager.target)
       resetChipTransforms(wager.chipMeshes, wager.chipBasePositions)
     } else if (actionChanged && amountIncreased && isWagerAction(player.actionCue)) {
-      wager.startedAt = now
+      // Give the hand ~0.25s to reach the stack before the chips move.
+      wager.startedAt = now + 0.25
       wager.animating = true
       wager.group.position.copy(wager.start)
       resetChipTransforms(wager.chipMeshes, wager.chipBasePositions)
@@ -1855,7 +1898,9 @@ function animateSeat(
   actingVisualSeat: number | null,
   reducedMotion: boolean,
   tableHeat = 0,
-  runtimeSeats: ReadonlyMap<string, SeatRuntime> = new Map()
+  runtimeSeats: ReadonlyMap<string, SeatRuntime> = new Map(),
+  boardRevealAge = Number.POSITIVE_INFINITY,
+  anyWinner = false
 ) {
   // Furniture and table props stay grounded. Only the player breathes, shifts,
   // and reacts to action playback.
@@ -1903,6 +1948,8 @@ function animateSeat(
     drunkLevel: seat.drunkLevel,
     passedOut: seat.passedOut,
     flipOff: getFlipOffInput(seat, time, runtimeSeats),
+    boardRevealAge,
+    otherWinner: anyWinner && !seat.winner,
   })
   seat.lastPose = pose
 
@@ -2308,6 +2355,12 @@ function updateLadyLuck(
     ownerSeat,
     ownerIsHero: Boolean(owner?.isHero),
     ownerFolded: owner?.status === 'folded',
+    table: {
+      ownerActionKey: owner?.actionKey,
+      ownerActionCue: owner?.actionCue,
+      otherPlayerNames: view.players.filter(player => player.id !== owner?.id).map(player => player.nickname),
+      allIn: view.allInAnnouncement,
+    },
   })
 
   const bubble = host.querySelector<HTMLElement>('.lady-luck-bubble-3d')
@@ -2407,6 +2460,8 @@ function createSceneRuntime(
     overlayElements: new Map<string, HTMLElement>(),
     companion,
     effects,
+    boardRevealAt: Number.NEGATIVE_INFINITY,
+    anyWinner: false,
     debugCamera: null as SceneRuntime['debugCamera'],
     feltMaterial,
     startTime: performance.now(),
@@ -2474,7 +2529,7 @@ function createSceneRuntime(
     const { heat, sourceId } = getTableHeat(runtime, time)
     let winnerSeat: SeatRuntime | null = null
     for (const seat of runtime.seats.values()) {
-      animateSeat(seat, time, delta, actingSeat, reducedMotion, seat.playerId === sourceId ? 0 : heat, runtime.seats)
+      animateSeat(seat, time, delta, actingSeat, reducedMotion, seat.playerId === sourceId ? 0 : heat, runtime.seats, time - runtime.boardRevealAt, runtime.anyWinner)
       if (seat.winner && seat.root.visible && !winnerSeat) winnerSeat = seat
     }
     animateWagers(runtime, time, reducedMotion)
@@ -2713,6 +2768,9 @@ export function DesktopPokerRoom3D({
     syncPlayers(runtimeRef.current, view)
     syncWagers(runtimeRef.current, view)
     syncPot(runtimeRef.current, view)
+    const runtimeNow = (performance.now() - runtimeRef.current.startTime) / 1000
+    if (view.communityCards.length > runtimeRef.current.board.visibleCount) runtimeRef.current.boardRevealAt = runtimeNow
+    runtimeRef.current.anyWinner = view.players.some(player => player.isWinner)
     syncBoardRuntime(
       runtimeRef.current.board,
       view.communityCards,

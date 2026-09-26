@@ -16,6 +16,10 @@ const anchors = {
   chin: [0, 1.5, -0.35] as [number, number, number],
   shoulderR: [0.25, 1.35, -0.15] as [number, number, number],
   shoulderL: [-0.25, 1.35, -0.15] as [number, number, number],
+  stack: [0.5, 0.5, -1.5] as [number, number, number],
+  betSpot: [0, 0.5, -2.4] as [number, number, number],
+  tap: [0.15, 0.5, -1.3] as [number, number, number],
+  board: [0, 0.5, -4] as [number, number, number],
 }
 
 function input(overrides: Partial<AvatarAnimatorInput> = {}): AvatarAnimatorInput {
@@ -92,6 +96,32 @@ describe('avatar animator', () => {
       pose = updateAvatarAnimator(state, input({ ...base, winner: true, time: 0.016 * (frame + 2) }))
     }
     expect(pose.handR[1]).toBeGreaterThan(anchors.shoulderR[1] + 0.3)
+  })
+})
+
+describe('animator stability', () => {
+  it('never launches the avatar at low frame rates during actions', () => {
+    const state = createAvatarAnimatorState('slow-frames')
+    let time = 0
+    for (let frame = 0; frame < 400; frame += 1) {
+      const delta = frame % 7 === 0 ? 0.1 : 0.05
+      time += delta
+      const cue = (['call', 'raise', 'all_in', 'check', 'fold'] as const)[Math.floor(frame / 40) % 5]!
+      const pose = updateAvatarAnimator(state, input({
+        reducedMotion: false,
+        time,
+        delta,
+        cue,
+        cueActive: frame % 40 < 20,
+        cueElapsedMs: (frame % 40) * delta * 1000,
+        acting: frame % 80 < 40,
+      }))
+      for (const value of [...pose.bodyPosition, ...pose.handR, ...pose.handL]) {
+        expect(Number.isFinite(value)).toBe(true)
+        expect(Math.abs(value)).toBeLessThan(6)
+      }
+      expect(Math.abs(pose.bodyPosition[2])).toBeLessThanOrEqual(0.45)
+    }
   })
 })
 
