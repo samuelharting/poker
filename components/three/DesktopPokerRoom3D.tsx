@@ -2671,6 +2671,7 @@ function createSceneRuntime(
 
   let lastTime = (performance.now() - runtime.startTime) / 1000
   let frameIndex = 0
+  let postFxFadeStartedAt = -1
   const targetCamera = new THREE.Vector3()
   const targetLook = new THREE.Vector3()
   const winnerFocus = new THREE.Vector3()
@@ -2686,8 +2687,11 @@ function createSceneRuntime(
 
     frameIndex += 1
     if (frameIndex % 2 === 0) renderer.shadowMap.needsUpdate = true
-    if (runtime.postFx && runtime.frameBudget.push(delta)) {
-      // Sustained slow frames: drop post effects and keep the table responsive.
+    if (runtime.postFx && postFxFadeStartedAt < 0 && runtime.frameBudget.push(delta)) {
+      // Sustained slow frames: fade the bloom out over a second, then drop post.
+      postFxFadeStartedAt = time
+    }
+    if (runtime.postFx && postFxFadeStartedAt >= 0 && time - postFxFadeStartedAt > 1) {
       runtime.postFx.dispose()
       runtime.postFx = null
       host.dataset.postFx = 'off'
@@ -2784,7 +2788,8 @@ function createSceneRuntime(
     updateChipInstances(runtime.chipInstancer, scene)
 
     if (runtime.postFx) {
-      runtime.postFx.bloom.strength = 0.22 + (winnerSeat ? 0.12 : 0) + allInImpact.strength * 0.12
+      const fade = postFxFadeStartedAt >= 0 ? Math.max(0, 1 - (time - postFxFadeStartedAt)) : 1
+      runtime.postFx.bloom.strength = (0.22 + (winnerSeat ? 0.12 : 0) + allInImpact.strength * 0.12) * fade
       runtime.postFx.composer.render(delta)
     } else {
       renderer.render(scene, camera)
