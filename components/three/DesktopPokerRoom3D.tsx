@@ -230,6 +230,8 @@ interface WagerRuntime {
   /** End-of-street sweep into the pot. */
   collectStartedAt: number
   collectCount: number
+  /** Where the sweep goes: the pot mid-hand, or the winner when the hand ends. */
+  collectDest: THREE.Vector3 | null
   motionProfile: PokerActionMotionProfile
 }
 
@@ -1565,6 +1567,7 @@ function createWagerRuntime(
     animating: false,
     collectStartedAt: Number.NEGATIVE_INFINITY,
     collectCount: 0,
+    collectDest: null,
     motionProfile: getPokerActionMotionProfile(player.actionCue, {
       actionKey: player.actionKey,
       playerId: player.id,
@@ -1620,8 +1623,18 @@ function syncWagers(runtime: SceneRuntime, view: ThreeTableViewModel) {
       wager.group.position.copy(wager.target)
     }
 
-    if (wager.amount > 0 && player.bet === 0 && view.phase === 'in_hand') {
-      // The street closed: sweep this stack into the pot instead of popping it.
+    if (wager.amount > 0 && player.bet === 0) {
+      // The street closed: sweep this stack into the pot, or straight to the
+      // winner when everyone else folded, instead of popping it away.
+      const winner = view.players.find(candidate => candidate.isWinner)
+      const winnerSeat = winner ? runtime.seats.get(winner.id) : undefined
+      wager.collectDest = null
+      if (view.phase !== 'in_hand' && winner) {
+        wager.collectDest = new THREE.Vector3()
+        if (winnerSeat?.root.visible) winnerSeat.stack.group.getWorldPosition(wager.collectDest)
+        else wager.collectDest.set(...getTableWagerStartPoint(toVisualSeat(winner.visualSeat)))
+        wager.collectDest.y = TABLE_WAGER_Y
+      }
       wager.collectStartedAt = now
       wager.collectCount = getWagerChipCount(wager.amount, view.bigBlind, wager.chipMeshes.length)
       wager.animating = false
@@ -1671,7 +1684,7 @@ function animateWagers(runtime: SceneRuntime, time: number, reducedMotion: boole
   for (const wager of runtime.wagers.values()) {
     const collectProgress = (time - wager.collectStartedAt) / WAGER_COLLECT_SECONDS
     if (collectProgress >= 0 && collectProgress < 1 && !reducedMotion) {
-      const potPosition = runtime.pot.group.position
+      const potPosition = wager.collectDest ?? runtime.pot.group.position
       const position = interpolateWagerArc(
         [wager.target.x, wager.target.y, wager.target.z],
         [potPosition.x, potPosition.y, potPosition.z],
@@ -1799,7 +1812,15 @@ function syncPot(runtime: SceneRuntime, view: ThreeTableViewModel) {
     pot.payoutKey = winnerKey
     pot.payoutStartedAt = now
     pot.payoutCount = Math.max(pot.visibleChipCount, count, 6)
-    pot.payoutTargets = winners.map(winner => toVector3(getTableWagerStartPoint(toVisualSeat(winner.visualSeat))))
+    pot.payoutTargets = winners.map(winner => {
+      const winnerSeat = runtime.seats.get(winner.id)
+      if (winnerSeat?.root.visible) {
+        const target = winnerSeat.stack.group.getWorldPosition(new THREE.Vector3())
+        target.y = FELT_TOP_Y
+        return target
+      }
+      return toVector3(getTableWagerStartPoint(toVisualSeat(winner.visualSeat)))
+    })
   } else if (winners.length === 0) {
     pot.payoutKey = ''
     pot.payoutTargets = []
