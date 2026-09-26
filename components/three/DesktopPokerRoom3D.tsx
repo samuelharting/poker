@@ -2786,6 +2786,12 @@ function createSceneRuntime(
     // Nameplates are re-projected every frame, so they stay attached.
     targetCamera.copy(baseCameraPosition)
     targetLook.copy(baseCameraLookAt)
+    if (viewRef.current.players.some(player => player.visualSeat === 0 && !player.isHero)) {
+      // Full-table spectator: stand up behind the near player instead of sitting in their head.
+      targetCamera.y += 1.35
+      targetCamera.z += 1.2
+      targetLook.y -= 0.2
+    }
     if (!reducedMotion) {
       // Seated breathing: a gentle head sway rather than a floating camera.
       targetCamera.x += Math.sin(time * 0.13) * 0.07

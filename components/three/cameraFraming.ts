@@ -6,6 +6,7 @@ export type CameraPoint = readonly [number, number, number]
  */
 export const DESKTOP_CAMERA_FRAMING = {
   fov: 60,
-  position: [0, 2.45, 6.35] as CameraPoint,
-  lookAt: [0, 0.6, -1.25] as CameraPoint,
+  // Eye level just above the seated opponents' eyes, right behind the hero's cards.
+  position: [0, 1.95, 6.05] as CameraPoint,
+  lookAt: [0, 0.5, -1.4] as CameraPoint,
 } as const

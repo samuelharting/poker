@@ -72,8 +72,8 @@ describe('createThreeTableViewModel', () => {
     expect(view.hero?.id).toBe('hero')
     expect(view.players.map(player => [player.id, player.visualSeat])).toEqual([
       ['hero', 0],
-      ['left', 1],
-      ['across', 4],
+      ['left', 3],
+      ['across', 5],
     ])
   })
 
@@ -186,7 +186,8 @@ describe('createThreeTableViewModel', () => {
     const bob = view.players.find(player => player.id === 'bob')
 
     expect(view.hero).toBeNull()
-    expect(alice?.visualSeat).toBe(0)
+    // Spectators take an empty chair, so seated players spread round the horseshoe.
+    expect(alice?.visualSeat).not.toBe(0)
     expect(alice?.isHero).toBe(false)
     expect(bob?.isHero).toBe(false)
     expect(alice?.showCards).toBe('both')
@@ -518,7 +519,7 @@ describe('createThreeTableViewModel', () => {
 
     expect(view.actingPlayerId).toBe('villain')
     expect(view.actingPlayerName).toBe('Maya')
-    expect(view.actingVisualSeat).toBe(5)
+    expect(view.actingVisualSeat).toBe(4)
     expect(view.isHeroTurn).toBe(false)
   })
 
@@ -742,5 +743,14 @@ describe('createThreeTableViewModel', () => {
         targeted: true,
       },
     ])
+  })
+})
+
+describe('spreadVisualSeats', () => {
+  it('seats a heads-up opponent straight across and spreads bigger tables evenly', async () => {
+    const { spreadVisualSeats } = await import('@/components/three/tableViewModel')
+    expect([...spreadVisualSeats([0, 1]).entries()]).toEqual([[0, 0], [1, 4]])
+    expect([...spreadVisualSeats([0, 2, 6]).entries()]).toEqual([[0, 0], [2, 3], [6, 5]])
+    expect([...spreadVisualSeats([0, 1, 2, 3, 4, 5, 6, 7]).values()]).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
   })
 })

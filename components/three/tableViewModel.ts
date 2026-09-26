@@ -314,9 +314,15 @@ const AUTO_AVATAR_CELEBRATIONS: PlayerAvatarCelebration[] = [
 
 export function createThreeTableViewModel(state: TableState, yourId: string): ThreeTableViewModel {
   const heroPlayer = state.players.find(player => player.id === yourId) ?? null
-  const heroSeatIndex = heroPlayer?.seatIndex ?? 0
+  // Spectators sit in an empty chair when there is one, so nobody's back fills the view.
+  const occupiedSeats = new Set(state.players.map(player => player.seatIndex))
+  const firstEmptySeat = [0, 1, 2, 3, 4, 5, 6, 7].find(seat => !occupiedSeats.has(seat))
+  const heroSeatIndex = heroPlayer?.seatIndex ?? firstEmptySeat ?? 0
   const winnersByPlayerId = new Map(
     (state.winners ?? []).map(winner => [winner.playerId, winner])
+  )
+  const visualSeatByRelative = spreadVisualSeats(
+    state.players.map(player => getVisualSeat(player.seatIndex, heroSeatIndex))
   )
   const players = state.players
     .map((player): ThreePlayerView => {
@@ -333,7 +339,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
       return {
         id: player.id,
         nickname: player.nickname,
-        visualSeat: getVisualSeat(player.seatIndex, heroSeatIndex),
+        visualSeat: visualSeatByRelative.get(getVisualSeat(player.seatIndex, heroSeatIndex)) ?? 0,
         isHero: player.id === yourId,
         stack: player.stack,
         bet: player.bet,
@@ -636,6 +642,28 @@ function getBlindRole(player: SeatPlayer): ThreeBlindRole {
 
 function getVisualSeat(playerSeatIndex: number, heroSeatIndex: number): number {
   return (playerSeatIndex - heroSeatIndex + 8) % 8
+}
+
+/**
+ * Spreads however many opponents there are evenly around the horseshoe
+ * (heads-up sits straight across), keeping clockwise table order.
+ */
+const SPREAD_SEATS: Record<number, number[]> = {
+  1: [4],
+  2: [3, 5],
+  3: [2, 4, 6],
+  4: [1, 3, 5, 7],
+  5: [1, 2, 4, 6, 7],
+  6: [1, 2, 3, 5, 6, 7],
+  7: [1, 2, 3, 4, 5, 6, 7],
+}
+
+export function spreadVisualSeats(relativeSeats: number[]): Map<number, number> {
+  const opponents = [...new Set(relativeSeats.filter(seat => seat !== 0))].sort((a, b) => a - b)
+  const slots = SPREAD_SEATS[opponents.length] ?? opponents
+  const mapping = new Map<number, number>([[0, 0]])
+  opponents.forEach((seat, index) => mapping.set(seat, slots[index] ?? seat))
+  return mapping
 }
 
 function toThreeCard(card: Card, prefix: string, visible: boolean): ThreeCardView {

@@ -4,29 +4,33 @@ export type TableVisualSeat = (typeof TABLE_VISUAL_SEATS)[number]
 export type TableVec3 = readonly [number, number, number]
 
 /**
- * Canonical desktop seat layout. Keep the renderer and wager geometry on this
+ * Canonical desktop seat layout: the hero sits at the near edge and the seven
+ * opponents form a horseshoe around the far half, all inside the first-person
+ * camera's field of view (nobody sits beside the camera, off-screen).
+ * Opponents are spaced every 24° around the felt ellipse from 198° to 342°. Keep the renderer and wager geometry on this
  * shared coordinate system so committed chips cannot drift away from a seat.
  */
 export const TABLE_SEAT_POSITIONS = {
   0: [0, -0.08, 4.48],
-  1: [-4.35, -0.02, 3.05],
-  2: [-5.55, 0.02, 0.38],
-  3: [-4.28, 0.02, -2.78],
-  4: [0, 0.02, -4.12],
-  5: [4.28, 0.02, -2.78],
-  6: [5.55, 0.02, 0.38],
-  7: [4.35, -0.02, 3.05],
+  1: [-5.28, 0.02, -1.27],
+  2: [-4.12, 0.02, -2.75],
+  3: [-2.26, 0.02, -3.75],
+  4: [0, 0.02, -4.11],
+  5: [2.26, 0.02, -3.75],
+  6: [4.12, 0.02, -2.75],
+  7: [5.28, 0.02, -1.27],
 } as const satisfies Record<TableVisualSeat, TableVec3>
 
 export const TABLE_SEAT_SCALES = {
-  0: 1.03,
-  1: 0.93,
-  2: 0.88,
-  3: 0.82,
-  4: 0.78,
-  5: 0.82,
-  6: 0.88,
-  7: 0.93,
+  // Real perspective already shrinks the far seats; don't make them dolls.
+  0: 1,
+  1: 1,
+  2: 1,
+  3: 1,
+  4: 1,
+  5: 1,
+  6: 1,
+  7: 1,
 } as const satisfies Record<TableVisualSeat, number>
 
 /** The visible felt is a radius-2.96 cylinder stretched 1.56x on X. */
