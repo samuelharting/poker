@@ -4,29 +4,20 @@ import {
   applyLadyLuckHandOutcome,
   classifyLadyLuckResult,
   createLadyLuckTracker,
+  getOutrightWinner,
   getVisibleLadyLuck,
-  isLadyLuckBigWin,
+  muteLadyLuck,
   type LadyLuckHandPlayer,
   type LadyLuckTracker,
 } from '@/lib/poker/ladyLuck'
 
-const BB = 20
-
-function player(id: string, overrides: Partial<LadyLuckHandPlayer> = {}): LadyLuckHandPlayer {
-  return {
-    id,
-    dealtIn: true,
-    folded: false,
-    allIn: false,
-    totalInPot: 40,
-    forcedBlind: 0,
-    ...overrides,
-  }
-}
-
 const SEATED = new Set(['ann', 'bob', 'cat'])
 
-/** Plays hand `n`: deal (advance), then resolve with the given result. */
+function dealt(...ids: string[]): LadyLuckHandPlayer[] {
+  return ids.map(id => ({ id, dealtIn: true }))
+}
+
+/** Deals hand `n`, then resolves it with the given winners. */
 function hand(
   tracker: LadyLuckTracker,
   n: number,
@@ -35,125 +26,113 @@ function hand(
   seated: ReadonlySet<string> = SEATED
 ) {
   const started = advanceLadyLuckForNewHand(tracker, n, seated, n * 1000)
-  return applyLadyLuckHandOutcome(started, { handNumber: n, bigBlind: BB, now: n * 1000 + 500, players, winners })
+  return applyLadyLuckHandOutcome(started, { handNumber: n, now: n * 1000 + 500, players, winners })
 }
 
-/** Heads-up showdown between ann and bob for a small pot won by `winner`. */
-function smallShowdown(tracker: LadyLuckTracker, n: number, winner: string) {
-  return hand(tracker, n, [player('ann'), player('bob')], [{ playerId: winner, amount: 80 }])
-}
+const win = (tracker: LadyLuckTracker, n: number, winner: string, players = dealt('ann', 'bob', 'cat')) =>
+  hand(tracker, n, players, [{ playerId: winner, amount: 80 }])
 
 describe('Lady Luck hand classification', () => {
-  it('treats collecting chips as a win and a showdown loss as a loss', () => {
-    expect(classifyLadyLuckResult(player('a'), 80)).toBe('won')
-    expect(classifyLadyLuckResult(player('a'), 0)).toBe('lost')
+  it('only counts a sole winner as a win; a chop has no winner', () => {
+    expect(getOutrightWinner([{ playerId: 'ann', amount: 80 }])).toBe('ann')
+    expect(getOutrightWinner([{ playerId: 'ann', amount: 40 }, { playerId: 'ann', amount: 20 }])).toBe('ann')
+    expect(getOutrightWinner([{ playerId: 'ann', amount: 40 }, { playerId: 'bob', amount: 40 }])).toBeNull()
   })
 
-  it('treats a free fold or a fold after only the blind as neutral, but a fold after betting as a loss', () => {
-    expect(classifyLadyLuckResult(player('a', { folded: true, totalInPot: 0 }), 0)).toBe('neutral')
-    expect(classifyLadyLuckResult(player('a', { folded: true, totalInPot: 20, forcedBlind: 20 }), 0)).toBe('neutral')
-    expect(classifyLadyLuckResult(player('a', { folded: true, totalInPot: 60, forcedBlind: 20 }), 0)).toBe('lost')
-    expect(classifyLadyLuckResult(player('a', { dealtIn: false, totalInPot: 0 }), 0)).toBe('neutral')
-  })
-
-  it('flags a 20 big blind pot or a contested all-in win as a big win', () => {
-    const players = [player('a'), player('b')]
-    expect(isLadyLuckBigWin(players[0]!, 20 * BB, { bigBlind: BB, players })).toBe(true)
-    expect(isLadyLuckBigWin(players[0]!, 20 * BB - 1, { bigBlind: BB, players })).toBe(false)
-
-    const allIn = [player('a'), player('b', { allIn: true })]
-    expect(isLadyLuckBigWin(allIn[0]!, 100, { bigBlind: BB, players: allIn })).toBe(true)
-
-    // Shoving and taking the blinds uncontested is not a big win.
-    const uncontested = [player('a', { allIn: true }), player('b', { folded: true, totalInPot: 0 })]
-    expect(isLadyLuckBigWin(uncontested[0]!, 30, { bigBlind: BB, players: uncontested })).toBe(false)
+  it('breaks the streak of every dealt-in non-winner and ignores players not dealt in', () => {
+    expect(classifyLadyLuckResult({ id: 'ann', dealtIn: true }, 'ann')).toBe('won')
+    expect(classifyLadyLuckResult({ id: 'bob', dealtIn: true }, 'ann')).toBe('broke')
+    expect(classifyLadyLuckResult({ id: 'bob', dealtIn: true }, null)).toBe('broke')
+    expect(classifyLadyLuckResult({ id: 'cat', dealtIn: false }, 'ann')).toBe('not_dealt')
   })
 })
 
 describe('Lady Luck appearance', () => {
-  it('does not appear after a single small win but arrives on the second win in a row', () => {
-    let tracker = smallShowdown(createLadyLuckTracker(), 1, 'ann')
+  it('does not appear after one win, even a huge one, and arrives on the second straight win', () => {
+    let tracker = hand(createLadyLuckTracker(), 1, dealt('ann', 'bob'), [{ playerId: 'ann', amount: 5000 }])
     expect(tracker.companion).toBeNull()
 
-    tracker = smallShowdown(tracker, 2, 'ann')
-    expect(tracker.companion).toMatchObject({ ownerId: 'ann', reason: 'streak', streak: 2, mood: 'arrive' })
+    tracker = win(tracker, 2, 'ann')
+    expect(tracker.companion).toMatchObject({ ownerId: 'ann', reason: 'streak', streak: 2, mood: 'arrive', muted: false })
     expect(getVisibleLadyLuck(tracker, SEATED)?.ownerId).toBe('ann')
   })
 
-  it('arrives immediately for a big pot', () => {
-    const tracker = hand(createLadyLuckTracker(), 1, [player('ann'), player('bob')], [{ playerId: 'bob', amount: 500 }])
-    expect(tracker.companion).toMatchObject({ ownerId: 'bob', reason: 'big_win', streak: 1, mood: 'arrive' })
+  it('does not count a split pot as a win', () => {
+    let tracker = win(createLadyLuckTracker(), 1, 'ann')
+    tracker = hand(tracker, 2, dealt('ann', 'bob'), [{ playerId: 'ann', amount: 40 }, { playerId: 'bob', amount: 40 }])
+    expect(tracker.streaks.ann).toBe(0)
+    tracker = win(tracker, 3, 'ann')
+    expect(tracker.companion).toBeNull()
   })
 
-  it('keeps a streak across a neutral free fold', () => {
-    let tracker = smallShowdown(createLadyLuckTracker(), 1, 'ann')
-    tracker = hand(
-      tracker,
-      2,
-      [player('ann', { folded: true, totalInPot: 0 }), player('bob'), player('cat')],
-      [{ playerId: 'bob', amount: 80 }]
-    )
-    tracker = smallShowdown(tracker, 3, 'ann')
+  it('breaks a streak on a fold but keeps it through hands the player sat out', () => {
+    let tracker = win(createLadyLuckTracker(), 1, 'ann')
+    tracker = win(tracker, 2, 'bob', dealt('ann', 'bob'))
+    expect(tracker.streaks.ann).toBe(0)
+
+    tracker = win(tracker, 3, 'ann')
+    tracker = win(tracker, 4, 'bob', dealt('bob', 'cat')) // ann sat out
+    tracker = win(tracker, 5, 'ann')
     expect(tracker.companion).toMatchObject({ ownerId: 'ann', streak: 2 })
   })
 
   it('settles into flirting when the next hand is dealt, then cheers when the owner wins again', () => {
-    let tracker = smallShowdown(createLadyLuckTracker(), 1, 'ann')
-    tracker = smallShowdown(tracker, 2, 'ann')
+    let tracker = win(createLadyLuckTracker(), 1, 'ann')
+    tracker = win(tracker, 2, 'ann')
     const id = tracker.companion!.id
 
-    const dealt = advanceLadyLuckForNewHand(tracker, 3, SEATED, 3000)
-    expect(dealt.companion).toMatchObject({ id, mood: 'flirt', since: 3000 })
+    const dealtHand = advanceLadyLuckForNewHand(tracker, 3, SEATED, 3000)
+    expect(dealtHand.companion).toMatchObject({ id, mood: 'flirt', since: 3000 })
 
-    tracker = smallShowdown(tracker, 3, 'ann')
+    tracker = win(tracker, 3, 'ann')
     expect(tracker.companion).toMatchObject({ id, mood: 'cheer', streak: 3 })
   })
 
   it('is idempotent for repeated outcome and deal calls', () => {
-    let tracker = smallShowdown(createLadyLuckTracker(), 1, 'ann')
-    tracker = smallShowdown(tracker, 2, 'ann')
+    let tracker = win(createLadyLuckTracker(), 1, 'ann')
+    tracker = win(tracker, 2, 'ann')
     const again = applyLadyLuckHandOutcome(tracker, {
       handNumber: 2,
-      bigBlind: BB,
       now: 9999,
-      players: [player('ann'), player('bob')],
+      players: dealt('ann', 'bob'),
       winners: [{ playerId: 'ann', amount: 80 }],
     })
     expect(again).toBe(tracker)
-    const dealt = advanceLadyLuckForNewHand(tracker, 3, SEATED, 1)
-    expect(advanceLadyLuckForNewHand(dealt, 3, SEATED, 2)).toBe(dealt)
+    const dealtHand = advanceLadyLuckForNewHand(tracker, 3, SEATED, 1)
+    expect(advanceLadyLuckForNewHand(dealtHand, 3, SEATED, 2)).toBe(dealtHand)
   })
 })
 
 describe('Lady Luck leaving', () => {
-  it('sulks off when her owner loses a hand, then is gone at the next deal', () => {
-    let tracker = smallShowdown(createLadyLuckTracker(), 1, 'ann')
-    tracker = smallShowdown(tracker, 2, 'ann')
+  it('sulks off as soon as her owner does not win, then is gone at the next deal', () => {
+    let tracker = win(createLadyLuckTracker(), 1, 'ann')
+    tracker = win(tracker, 2, 'ann')
     const id = tracker.companion!.id
 
-    tracker = hand(tracker, 3, [player('ann'), player('bob'), player('cat')], [{ playerId: 'cat', amount: 60 }])
+    tracker = win(tracker, 3, 'cat')
     expect(tracker.companion).toMatchObject({ id, ownerId: 'ann', mood: 'sulk_leave', streak: 0 })
-    expect(tracker.streaks.ann).toBe(0)
 
     tracker = advanceLadyLuckForNewHand(tracker, 4, SEATED, 4000)
     expect(tracker.companion).toBeNull()
   })
 
-  it('stays when her owner folds for free', () => {
-    let tracker = smallShowdown(createLadyLuckTracker(), 1, 'ann')
-    tracker = smallShowdown(tracker, 2, 'ann')
-    tracker = hand(
-      tracker,
-      3,
-      [player('ann', { folded: true, totalInPot: 0 }), player('bob'), player('cat')],
-      [{ playerId: 'bob', amount: 60 }]
-    )
+  it('leaves when her owner folds, even for free', () => {
+    let tracker = win(createLadyLuckTracker(), 1, 'ann')
+    tracker = win(tracker, 2, 'ann')
+    tracker = win(tracker, 3, 'bob') // ann was dealt in and folded
+    expect(tracker.companion?.mood).toBe('sulk_leave')
+  })
+
+  it('stays while her owner sits a hand out', () => {
+    let tracker = win(createLadyLuckTracker(), 1, 'ann')
+    tracker = win(tracker, 2, 'ann')
+    tracker = win(tracker, 3, 'bob', dealt('bob', 'cat'))
     expect(tracker.companion).toMatchObject({ ownerId: 'ann', mood: 'flirt' })
   })
 
   it('is hidden immediately and dropped at the next deal when her owner leaves the table', () => {
-    let tracker = smallShowdown(createLadyLuckTracker(), 1, 'ann')
-    tracker = smallShowdown(tracker, 2, 'ann')
+    let tracker = win(createLadyLuckTracker(), 1, 'ann')
+    tracker = win(tracker, 2, 'ann')
     const withoutAnn = new Set(['bob', 'cat'])
     expect(getVisibleLadyLuck(tracker, withoutAnn)).toBeNull()
     tracker = advanceLadyLuckForNewHand(tracker, 3, withoutAnn, 3000)
@@ -163,50 +142,44 @@ describe('Lady Luck leaving', () => {
 })
 
 describe('Lady Luck switching', () => {
-  it('switches straight to the player who beat her owner when that player qualifies', () => {
-    let tracker = smallShowdown(createLadyLuckTracker(), 1, 'ann')
-    tracker = smallShowdown(tracker, 2, 'ann')
-    const firstId = tracker.companion!.id
-
-    // Bob stacks Ann in a huge pot: Ann loses, Bob qualifies with a big win.
-    tracker = hand(tracker, 3, [player('ann', { allIn: true }), player('bob')], [{ playerId: 'bob', amount: 900 }])
-    expect(tracker.companion).toMatchObject({ ownerId: 'bob', reason: 'big_win', mood: 'arrive' })
-    expect(tracker.companion!.id).not.toBe(firstId)
+  it('switches to another 2+ streak when her owner breaks', () => {
+    let tracker = win(createLadyLuckTracker(), 1, 'bob', dealt('bob'))
+    tracker = win(tracker, 2, 'ann', dealt('ann', 'cat'))
+    tracker = win(tracker, 3, 'ann', dealt('ann', 'cat')) // ann owns her; bob sat out on streak 1
+    tracker = win(tracker, 4, 'bob', dealt('ann', 'bob')) // ann breaks, bob reaches 2
+    expect(tracker.companion).toMatchObject({ ownerId: 'bob', streak: 2, mood: 'arrive' })
   })
 
-  it('is stolen by a hotter player while her owner sits out, but not by a cooler one', () => {
-    let tracker = smallShowdown(createLadyLuckTracker(), 1, 'ann')
-    tracker = smallShowdown(tracker, 2, 'ann') // ann heat 2
-    const annFolds = (n: number, winner: string, amount: number, t: LadyLuckTracker) => hand(
-      t,
-      n,
-      [player('ann', { folded: true, totalInPot: 0 }), player('bob'), player('cat')],
-      [{ playerId: winner, amount }]
-    )
-
-    // Cat's first small win (heat 1) does not qualify.
-    tracker = annFolds(3, 'cat', 60, tracker)
+  it('is stolen only by a strictly longer active streak while her owner sits out', () => {
+    let tracker = win(createLadyLuckTracker(), 1, 'ann', dealt('ann', 'cat'))
+    tracker = win(tracker, 2, 'ann', dealt('ann', 'cat')) // ann: 2
+    const sitOut = dealt('bob', 'cat')
+    tracker = win(tracker, 3, 'bob', sitOut)
+    tracker = win(tracker, 4, 'bob', sitOut) // bob: 2 ties ann -> she stays
     expect(tracker.companion?.ownerId).toBe('ann')
-    // Cat's second win in a row (heat 2) ties Ann's heat: she stays loyal.
-    tracker = annFolds(4, 'cat', 60, tracker)
-    expect(tracker.companion?.ownerId).toBe('ann')
-    // Cat's third straight win (heat 3) beats Ann: she switches.
-    tracker = annFolds(5, 'cat', 60, tracker)
-    expect(tracker.companion).toMatchObject({ ownerId: 'cat', reason: 'streak', streak: 3, mood: 'arrive' })
+    tracker = win(tracker, 5, 'bob', sitOut) // bob: 3 > 2 -> switch
+    expect(tracker.companion).toMatchObject({ ownerId: 'bob', streak: 3, mood: 'arrive', muted: false })
   })
+})
 
-  it('picks the hottest qualifier when several qualify at once', () => {
-    let tracker = hand(createLadyLuckTracker(), 1, [player('ann'), player('bob')], [{ playerId: 'ann', amount: 80 }])
-    tracker = hand(
-      tracker,
-      2,
-      [player('ann'), player('bob'), player('cat')],
-      [
-        { playerId: 'ann', amount: 120 },
-        { playerId: 'cat', amount: 120 },
-      ]
-    )
-    // Ann: streak 2 (heat 2) beats Cat: streak 1, no big win.
-    expect(tracker.companion?.ownerId).toBe('ann')
+describe('Lady Luck mute', () => {
+  it('only her current owner can mute her, and a new appearance resets it', () => {
+    let tracker = win(createLadyLuckTracker(), 1, 'ann')
+    tracker = win(tracker, 2, 'ann')
+    expect(muteLadyLuck(tracker, 'bob')).toBe(tracker)
+    tracker = muteLadyLuck(tracker, 'ann')
+    expect(tracker.companion?.muted).toBe(true)
+    expect(muteLadyLuck(tracker, 'ann')).toBe(tracker)
+
+    // Still muted while she stays with ann.
+    tracker = win(tracker, 3, 'ann')
+    expect(tracker.companion).toMatchObject({ mood: 'cheer', muted: true })
+
+    // She leaves, then comes back for bob unmuted.
+    tracker = win(tracker, 4, 'bob')
+    expect(tracker.companion?.mood).toBe('sulk_leave')
+    expect(muteLadyLuck(tracker, 'ann')).toBe(tracker)
+    tracker = win(tracker, 5, 'bob')
+    expect(tracker.companion).toMatchObject({ ownerId: 'bob', muted: false })
   })
 })

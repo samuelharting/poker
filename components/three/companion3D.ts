@@ -1,6 +1,6 @@
 import * as THREE from 'three'
-import type { ThreeTableViewModel } from './tableViewModel'
-import { TABLE_FELT_SEMI_AXIS_X, TABLE_FELT_SEMI_AXIS_Z } from './tableWagerLayout'
+import type { ThreeActionCue, ThreeTableViewModel } from './tableViewModel'
+import { FELT_TOP_Y, getFeltEdgeToward } from './tableArt'
 import {
   getLadyLuckMoodContext,
   hashLadyLuckSeed,
@@ -9,11 +9,15 @@ import {
 } from '@/lib/ladyLuckLines'
 
 /**
- * "Lady Luck" — a procedurally built, toon-shaded glam casino hype-girl who
- * attaches herself to the hottest player at the table. Bone-free rig of
- * nested Groups (hips / torso / head / shoulder / elbow / hand) animated with
- * springs, analytic two-bone arm IK and a small gesture library. Everything
- * (geometry, textures, particles) is generated in code: no downloads.
+ * "Lady Luck" — a procedurally built, toon-shaded casino pool-party cocktail
+ * server and hype-girl who attaches herself to whoever is on a winning streak.
+ * Blonde blowout, sunglasses up, hibiscus, sporty red-and-gold swim top with
+ * "LUCKY" lettering, high-waisted denim shorts, an open tropical shirt knotted
+ * at the waist, platform sandals and a silver tray with a tropical cocktail.
+ *
+ * Bone-free rig of nested Groups (hips / torso / head / shoulder / elbow /
+ * hand) animated with springs, analytic two-bone arm IK and a gesture library.
+ * Everything (geometry, textures, particles) is generated in code.
  *
  * Model space: feet on y = 0, facing +Z, ~2.6 units tall at scale 1.
  */
@@ -24,6 +28,18 @@ import {
 
 export type CompanionState = ThreeTableViewModel['companion']
 
+/** Optional table context so she can react to the game (all fields optional). */
+export interface CompanionTableContext {
+  /** Changes whenever her owner acts (e.g. ThreePlayerView.actionKey). */
+  ownerActionKey?: string
+  /** What the owner just did (e.g. ThreePlayerView.actionCue). */
+  ownerActionCue?: ThreeActionCue
+  /** Other seated players' nicknames, for sassy remarks. */
+  otherPlayerNames?: readonly string[]
+  /** view.allInAnnouncement — she reacts to all-ins. */
+  allIn?: { actionKey: string; playerId: string; nickname: string } | null
+}
+
 export interface CompanionUpdateInput {
   /** Seconds (monotonic clock). */
   time: number
@@ -33,15 +49,18 @@ export interface CompanionUpdateInput {
   state: CompanionState
   /** World transform of the owner's seat root (seat faces -Z toward table center); null if owner not found. */
   ownerSeat: THREE.Object3D | null
-  /** True when the owner is the local player: she stands at the lower right of the camera view instead. */
+  /** True when the owner is the local player: she stands in the lower-left foreground of the camera view instead. */
   ownerIsHero: boolean
   camera: THREE.Camera
   /** Optional: true while the owner has folded the current hand (she rolls her eyes once). */
   ownerFolded?: boolean
+  /** Optional game context for her reactions and chatter. */
+  table?: CompanionTableContext
 }
 
 export type CompanionGesture =
   | 'wink'
+  | 'fingerGuns'
   | 'blowKiss'
   | 'hairFlip'
   | 'lean'
@@ -50,6 +69,8 @@ export type CompanionGesture =
   | 'cheekKiss'
   | 'cheer'
   | 'eyeRoll'
+  | 'serve'
+  | 'shoulderRub'
 
 export interface CompanionRuntime {
   group: THREE.Group
@@ -67,19 +88,25 @@ export interface CompanionRuntime {
 
 /** Where she stands in seat-root space: beside the chair back. x sign is chosen per seat. */
 export const COMPANION_SEAT_OFFSET = { x: 0.92, y: 0, z: 0.36 } as const
-/** Seated player's head / shoulder in seat-root space (used for facing and the hand-on-shoulder lean). */
-export const COMPANION_PLAYER_HEAD = { x: 0, y: 1.58, z: -0.16 } as const
-export const COMPANION_PLAYER_SHOULDER = { x: 0.2, y: 1.32, z: -0.12 } as const
+/** Where she stands for the shoulder rub: right behind the chair back. */
+export const COMPANION_BEHIND_OFFSET = { x: 0, y: 0, z: 0.5 } as const
+/** Seated player's head / shoulders in seat-root space (matches the avatar default anchors). */
+export const COMPANION_PLAYER_HEAD = { x: 0, y: 1.52, z: -0.26 } as const
+export const COMPANION_PLAYER_SHOULDER = { x: 0.24, y: 1.2, z: -0.1 } as const
 /**
- * Hero placement in normalised device coordinates: horizontal position and the
- * screen height of the top of her head. Left side keeps her clear of the
- * desktop action panel (bottom right). Works for any camera height / fov.
+ * Hero placement, locked to the live camera: horizontal NDC, the NDC heights of
+ * her feet and the top of her head, and her distance in front of the lens.
+ * Lower-left foreground, full body, ~44% of the screen tall, clear of the left
+ * nameplates (above), the board (right) and the action tray (bottom right).
  */
-export const HERO_COMPANION_NDC = { x: -0.82, headY: 0.55 } as const
-/** Keep-out ellipse around the felt so the hero companion never stands on the table. */
-const HERO_TABLE_KEEP_OUT = { x: TABLE_FELT_SEMI_AXIS_X + 1.1, z: TABLE_FELT_SEMI_AXIS_Z + 1.1 } as const
+export const HERO_COMPANION_SCREEN = { x: -0.64, feetY: -0.8, headY: 0.04, depth: 2.1 } as const
 /** Model height in local units at scale 1. */
 export const COMPANION_HEIGHT = 2.6
+/** Top of her hair above her soles, used for screen sizing. */
+const COMPANION_VISIBLE_HEIGHT = 2.52
+/** Her left arm carries the tray; her right arm does the gestures. */
+const TRAY_ARM = 0
+const GESTURE_ARM = 1
 
 /** Shortest signed angle from a to b. */
 export function angleDelta(a: number, b: number): number {
@@ -141,10 +168,17 @@ export interface CompanionPlacement {
   position: THREE.Vector3
   yaw: number
   scale: number
-  /** Player's shoulder in world space (for the hand-on-shoulder lean), when she is beside a seat. */
+  /** Player's nearer shoulder in world space (hand-on-shoulder lean), when beside a seat. */
   shoulder: THREE.Vector3 | null
+  /** Both of the player's shoulders (shoulder rub), when beside a seat. */
+  shoulders: [THREE.Vector3, THREE.Vector3] | null
+  /** Spot right behind the chair (shoulder rub) and the yaw she uses there. */
+  behind: THREE.Vector3 | null
+  behindYaw: number
   /** Player's head in world space, when known. */
   head: THREE.Vector3 | null
+  /** Re-derived from the live camera every frame (no smoothing). */
+  screenLocked: boolean
 }
 
 export function computeSeatCompanionPlacement(
@@ -153,15 +187,13 @@ export function computeSeatCompanionPlacement(
   side: 1 | -1
 ): CompanionPlacement {
   seat.updateWorldMatrix(true, false)
-  const position = seat.localToWorld(
-    new THREE.Vector3(COMPANION_SEAT_OFFSET.x * side, COMPANION_SEAT_OFFSET.y, COMPANION_SEAT_OFFSET.z)
-  )
-  const head = seat.localToWorld(
-    new THREE.Vector3(COMPANION_PLAYER_HEAD.x, COMPANION_PLAYER_HEAD.y, COMPANION_PLAYER_HEAD.z)
-  )
-  const shoulder = seat.localToWorld(
-    new THREE.Vector3(COMPANION_PLAYER_SHOULDER.x * side, COMPANION_PLAYER_SHOULDER.y, COMPANION_PLAYER_SHOULDER.z)
-  )
+  const local = (x: number, y: number, z: number) => seat.localToWorld(new THREE.Vector3(x, y, z))
+  const position = local(COMPANION_SEAT_OFFSET.x * side, COMPANION_SEAT_OFFSET.y, COMPANION_SEAT_OFFSET.z)
+  const head = local(COMPANION_PLAYER_HEAD.x, COMPANION_PLAYER_HEAD.y, COMPANION_PLAYER_HEAD.z)
+  const { x: sx, y: sy, z: sz } = COMPANION_PLAYER_SHOULDER
+  const shoulder = local(sx * side, sy, sz)
+  const shoulders: [THREE.Vector3, THREE.Vector3] = [local(sx, sy, sz), local(-sx, sy, sz)]
+  const behind = local(COMPANION_BEHIND_OFFSET.x, COMPANION_BEHIND_OFFSET.y, COMPANION_BEHIND_OFFSET.z)
   const cameraPosition = camera.getWorldPosition(new THREE.Vector3())
   const scale = seat.getWorldScale(new THREE.Vector3()).x
   return {
@@ -169,69 +201,63 @@ export function computeSeatCompanionPlacement(
     yaw: computeCompanionYaw(position, head, cameraPosition),
     scale,
     shoulder,
+    shoulders,
+    behind,
+    behindYaw: yawToward(behind, head),
     head,
+    screenLocked: false,
   }
 }
 
 /**
- * Hero placement: the local player's seat is not rendered, so she stands at the
- * lower right of the frame on the floor plane, turned toward the viewer.
+ * Hero placement: the local player's seat is not rendered, so she stands in
+ * the lower-left foreground of the live camera, full body, facing the viewer
+ * and turned a little toward the table. Sized in screen space so it works for
+ * any camera height, fov, aspect or drift.
  */
 export function computeHeroCompanionPlacement(
   camera: THREE.Camera,
-  floorY = -0.08,
-  ndc: { x: number; headY: number } = HERO_COMPANION_NDC
+  screen: { x: number; feetY: number; headY: number; depth: number } = HERO_COMPANION_SCREEN
 ): CompanionPlacement {
   camera.updateMatrixWorld()
+  const perspective = camera as THREE.PerspectiveCamera
+  const tanHalf = perspective.isPerspectiveCamera ? Math.tan(THREE.MathUtils.degToRad(perspective.fov) / 2) : 0.5
+  const aspect = perspective.isPerspectiveCamera ? perspective.aspect : 1.6
+  const depth = screen.depth
+  const feet = new THREE.Vector3(screen.x * depth * tanHalf * aspect, screen.feetY * depth * tanHalf, -depth)
+    .applyMatrix4(camera.matrixWorld)
+  const height = (screen.headY - screen.feetY) * depth * tanHalf
   const origin = camera.getWorldPosition(new THREE.Vector3())
-  const direction = new THREE.Vector3(ndc.x, 0, 0.5).unproject(camera).sub(origin)
-  direction.y = 0
-  if (direction.lengthSq() < 1e-8) direction.set(0, 0, -1)
-  direction.normalize()
-
-  // Pick the distance along that bearing where the top of her head lands on
-  // the requested screen height (works for any camera height / fov).
-  const probe = new THREE.Vector3()
-  const headNdc = (distance: number) => probe
-    .copy(origin)
-    .addScaledVector(direction, distance)
-    .setY(floorY + COMPANION_HEIGHT * 0.96)
-    .project(camera).y
-  let bestDistance = 6
-  let bestError = Infinity
-  for (let distance = 1.6; distance <= 14; distance += 0.1) {
-    const error = Math.abs(headNdc(distance) - ndc.headY)
-    if (error < bestError) {
-      bestError = error
-      bestDistance = distance
-    }
-  }
-  // Never stand on the table: step back toward the camera until clear of the rail.
-  const inTable = (distance: number) => {
-    const x = origin.x + direction.x * distance
-    const z = origin.z + direction.z * distance
-    return (x / HERO_TABLE_KEEP_OUT.x) ** 2 + (z / HERO_TABLE_KEEP_OUT.z) ** 2 < 1
-  }
-  while (bestDistance > 1.6 && inTable(bestDistance)) bestDistance -= 0.1
-
-  const position = origin.clone().addScaledVector(direction, bestDistance)
-  position.y = floorY
-  // Face the viewer, turned a little toward screen centre where "you" sit.
-  const towardCamera = yawToward(position, origin)
-  const centre = new THREE.Vector3(0, 0, 0.5).unproject(camera)
-  const towardCentre = yawToward(position, new THREE.Vector3(centre.x, floorY, centre.z))
-  const yaw = towardCamera + angleDelta(towardCamera, towardCentre) * 0.3
-  const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw))
-  const inward = ndc.x > 0 ? -1 : 1
+  const forward = camera.getWorldDirection(new THREE.Vector3())
+  const towardCamera = yawToward(feet, origin)
+  const towardTable = yawToward(feet, origin.clone().addScaledVector(forward, 6))
+  const yaw = towardCamera + angleDelta(towardCamera, towardTable) * 0.28
   // "You" are toward screen centre: a point to her side at head height.
-  const head = position.clone().addScaledVector(right, inward * 1.2).setY(floorY + 1.6)
+  const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw))
+  const inward = screen.x > 0 ? -1 : 1
+  const scale = height / COMPANION_VISIBLE_HEIGHT
+  const head = feet.clone().addScaledVector(right, inward * scale).setY(feet.y + scale * 1.6)
   return {
-    position,
+    position: feet,
     yaw,
-    scale: 1,
+    scale,
     shoulder: null,
+    shoulders: null,
+    behind: null,
+    behindYaw: yaw,
     head,
+    screenLocked: true,
   }
+}
+
+/** Where she sets the served cocktail: on the felt just inside the rail by the owner's seat, on her side. */
+export function computeServeSpot(seatWorld: THREE.Vector3, companionWorld: THREE.Vector3): THREE.Vector3 {
+  const { edge, normal } = getFeltEdgeToward(seatWorld.x, seatWorld.z)
+  const tangent = new THREE.Vector2(-normal.y, normal.x)
+  const toward = new THREE.Vector2(companionWorld.x - seatWorld.x, companionWorld.z - seatWorld.z)
+  const lateral = toward.dot(tangent) >= 0 ? 1 : -1
+  const spot = edge.clone().addScaledVector(normal, -0.42).addScaledVector(tangent, lateral * 0.42)
+  return new THREE.Vector3(spot.x, FELT_TOP_Y, spot.y)
 }
 
 /** Deterministic PRNG. */
@@ -246,32 +272,42 @@ export function createCompanionRandom(seed: number) {
   }
 }
 
-const FLIRT_GESTURES: readonly CompanionGesture[] = ['wink', 'blowKiss', 'hairFlip', 'lean', 'fan', 'cheekKiss', 'wink', 'blowKiss']
-const CHEER_GESTURES: readonly CompanionGesture[] = ['chaChing', 'blowKiss', 'hairFlip', 'cheer']
+const FLIRT_GESTURES: readonly CompanionGesture[] = [
+  'wink', 'serve', 'hairFlip', 'shoulderRub', 'blowKiss', 'fingerGuns', 'lean', 'serve', 'cheekKiss', 'shoulderRub', 'fan',
+]
+const CHEER_GESTURES: readonly CompanionGesture[] = ['fingerGuns', 'chaChing', 'cheer', 'serve', 'hairFlip', 'shoulderRub']
 const REDUCED_GESTURES: readonly CompanionGesture[] = ['wink']
+/** Gestures that need a real seat next to her (not for the hero's foreground placement). */
+export const SEAT_ONLY_GESTURES: readonly CompanionGesture[] = ['shoulderRub', 'lean']
 
 /** Picks the next idle gesture for a mood, never repeating the previous one. */
 export function pickCompanionGesture(
   mood: NonNullable<CompanionState>['mood'],
   random: () => number,
   previous: CompanionGesture | null,
-  reducedMotion = false
+  reducedMotion = false,
+  exclude: readonly CompanionGesture[] = []
 ): CompanionGesture {
-  const pool = reducedMotion ? REDUCED_GESTURES : mood === 'cheer' ? CHEER_GESTURES : FLIRT_GESTURES
-  const choices = pool.length > 1 ? pool.filter(gesture => gesture !== previous) : pool
+  const base = reducedMotion ? REDUCED_GESTURES : mood === 'cheer' ? CHEER_GESTURES : FLIRT_GESTURES
+  const pool = base.filter(gesture => !exclude.includes(gesture))
+  const usable = pool.length > 0 ? pool : REDUCED_GESTURES
+  const choices = usable.length > 1 ? usable.filter(gesture => gesture !== previous) : usable
   return choices[Math.floor(random() * choices.length) % choices.length]!
 }
 
 export const GESTURE_DURATIONS: Record<CompanionGesture, number> = {
   wink: 1.3,
+  fingerGuns: 1.9,
   blowKiss: 2.1,
-  hairFlip: 1.6,
+  hairFlip: 1.8,
   lean: 3.6,
   fan: 2.6,
   chaChing: 2.0,
   cheekKiss: 3.0,
   cheer: 2.8,
   eyeRoll: 1.9,
+  serve: 3.4,
+  shoulderRub: 4.4,
 }
 
 /** Smooth keyframe interpolation: keys are [u, value] pairs sorted by u. */
@@ -352,9 +388,13 @@ export function solveTwoBoneElbow(
 }
 
 /** Current speech-bubble line for a context, deterministic per companion id + counter. */
-export function companionLineFor(context: LadyLuckLineContext, companionId: string, counter: number): string {
-  return pickLadyLuckLine(context, hashLadyLuckSeed(`${companionId}:${context}`) + counter)
+export function companionLineFor(context: LadyLuckLineContext, companionId: string, counter: number, name?: string): string {
+  return pickLadyLuckLine(context, hashLadyLuckSeed(`${companionId}:${context}`) + counter, name)
 }
+
+/** Seconds between her unprompted quips (min + random spread). */
+const CHAT_GAP_MIN = 5
+const CHAT_GAP_SPREAD = 5
 
 // ---------------------------------------------------------------------------
 // Procedural textures (pure data, no canvas — works in tests and workers)
@@ -472,6 +512,89 @@ function sequinTextureData(size = 128): Uint8Array {
   })
 }
 
+/** 5x7 bitmap glyphs for the "LUCKY" lettering on her swim top. */
+const LUCKY_GLYPHS: Record<string, readonly string[]> = {
+  L: ['10000', '10000', '10000', '10000', '10000', '10000', '11111'],
+  U: ['10001', '10001', '10001', '10001', '10001', '10001', '01110'],
+  C: ['01111', '10000', '10000', '10000', '10000', '10000', '01111'],
+  K: ['10001', '10010', '10100', '11000', '10100', '10010', '10001'],
+  Y: ['10001', '10001', '01010', '00100', '00100', '00100', '00100'],
+}
+
+/** True when (u, v) hits a lit pixel of `text` laid out in the box (u: -w/2..w/2, v: v0..v1). */
+export function hitsLuckyText(text: string, u: number, v: number, width: number, v0: number, v1: number): boolean {
+  const columns = text.length * 6 - 1
+  const column = Math.floor(((u + width / 2) / width) * columns)
+  const row = Math.floor(((v1 - v) / (v1 - v0)) * 7)
+  if (column < 0 || column >= columns || row < 0 || row >= 7) return false
+  const letter = text[Math.floor(column / 6)] ?? ''
+  const glyph = LUCKY_GLYPHS[letter]
+  const within = column % 6
+  return Boolean(glyph && within < 5 && glyph[row]![within] === '1')
+}
+
+/**
+ * Sporty swim-top band texture: hot red with gold trim, a cream stripe and
+ * "LUCKY" lettering centred on the front (lathe u = 0 is +Z).
+ */
+export function swimTopTextureData(width = 512, height = 64): Uint8Array {
+  const data = new Uint8Array(width * height * 4)
+  const red = [226, 22, 44]
+  const gold = [255, 201, 60]
+  const cream = [255, 244, 222]
+  for (let y = 0; y < height; y += 1) {
+    const v = (y + 0.5) / height
+    for (let x = 0; x < width; x += 1) {
+      const rawU = (x + 0.5) / width
+      const u = ((rawU + 0.5) % 1) - 0.5
+      let color = red
+      if (v < 0.13 || v > 0.87) color = gold
+      else if (Math.abs(u) < 0.17 && v > 0.26 && v < 0.74) {
+        color = hitsLuckyText('LUCKY', u, v, 0.26, 0.32, 0.68) ? red : cream
+      }
+      const index = (y * width + x) * 4
+      data[index] = color[0]!
+      data[index + 1] = color[1]!
+      data[index + 2] = color[2]!
+      data[index + 3] = 255
+    }
+  }
+  return data
+}
+
+/** Tileable tropical shirt print: white with red hibiscus, gold centres and green leaves. */
+function shirtPrintTextureData(size = 128): Uint8Array {
+  const random = createCompanionRandom(808)
+  const flowers = Array.from({ length: 5 }, () => ({
+    x: random(), y: random(), r: 0.09 + random() * 0.04, spin: random() * Math.PI,
+  }))
+  const leaves = Array.from({ length: 7 }, () => ({
+    x: random(), y: random(), a: random() * Math.PI, l: 0.08 + random() * 0.05,
+  }))
+  const wrap = (d: number) => d - Math.round(d)
+  return makeDataTexture(size, (_u, _v, px, py) => {
+    const x = (px + 0.5) / size
+    const y = (py + 0.5) / size
+    let color: [number, number, number] = [255, 250, 240]
+    for (const leaf of leaves) {
+      const dx = wrap(x - leaf.x)
+      const dy = wrap(y - leaf.y)
+      const along = dx * Math.cos(leaf.a) + dy * Math.sin(leaf.a)
+      const across = -dx * Math.sin(leaf.a) + dy * Math.cos(leaf.a)
+      if ((along / leaf.l) ** 2 + (across / (leaf.l * 0.38)) ** 2 < 1) color = [46, 170, 92]
+    }
+    for (const flower of flowers) {
+      const dx = wrap(x - flower.x)
+      const dy = wrap(y - flower.y)
+      const d = Math.hypot(dx, dy)
+      const angle = Math.atan2(dy, dx) + flower.spin
+      const petal = flower.r * (0.72 + 0.28 * Math.cos(angle * 5))
+      if (d < petal) color = d < flower.r * 0.22 ? [255, 206, 64] : [232, 34, 58]
+    }
+    return [color[0], color[1], color[2], 255]
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Materials
 // ---------------------------------------------------------------------------
@@ -492,17 +615,26 @@ const PALETTE = {
   skin: '#ffc9a4',
   skinShade: '#f2a98a',
   blush: '#ff7aa2',
-  hair: '#d42a2f',
-  hairLight: '#e8383a',
-  dress: '#8a2be2',
-  dressDeep: '#5b1a9e',
-  sequin: '#ffd9ff',
+  hair: '#f3b63a',
+  hairLight: '#fff1b8',
+  swimRed: '#e2162c',
   gold: '#ffc93c',
+  denim: '#3d6fbf',
+  denimLight: '#7fa6de',
+  shirt: '#ffffff',
+  silver: '#d8dee9',
   lips: '#e8175d',
-  iris: '#18b37a',
+  iris: '#1f8fe8',
   pupil: '#141018',
   lash: '#1b0f14',
-  boa: '#ff7ec4',
+  brow: '#a0681f',
+  lens: '#2a1330',
+  petal: '#ff3d6e',
+  sole: '#fff1dc',
+  glass: '#e6f6ff',
+  drinkTop: '#ffa531',
+  drinkBottom: '#ff2f6d',
+  umbrella: '#19c6b3',
   white: '#fffaf6',
   ink: '#1a0d12',
 } as const
@@ -512,8 +644,13 @@ interface MaterialSet {
   skinShade: THREE.MeshToonMaterial
   hair: THREE.MeshToonMaterial
   hairLight: THREE.MeshToonMaterial
-  dress: THREE.MeshToonMaterial
+  swimTop: THREE.MeshToonMaterial
+  red: THREE.MeshToonMaterial
   gold: THREE.MeshToonMaterial
+  denim: THREE.MeshToonMaterial
+  denimLight: THREE.MeshToonMaterial
+  shirt: THREE.MeshToonMaterial
+  silver: THREE.MeshToonMaterial
   lips: THREE.MeshToonMaterial
   eyeWhite: THREE.MeshBasicMaterial
   iris: THREE.MeshToonMaterial
@@ -521,11 +658,19 @@ interface MaterialSet {
   glint: THREE.MeshBasicMaterial
   lash: THREE.MeshBasicMaterial
   brow: THREE.MeshBasicMaterial
-  boa: THREE.MeshToonMaterial
+  lens: THREE.MeshToonMaterial
+  petal: THREE.MeshToonMaterial
+  sole: THREE.MeshToonMaterial
+  glass: THREE.MeshToonMaterial
+  drinkTop: THREE.MeshToonMaterial
+  drinkBottom: THREE.MeshToonMaterial
+  umbrella: THREE.MeshToonMaterial
+  leaf: THREE.MeshToonMaterial
   blush: THREE.MeshBasicMaterial
   outline: THREE.MeshBasicMaterial
   outlineThin: THREE.MeshBasicMaterial
   sequinTexture: THREE.DataTexture
+  textures: THREE.Texture[]
   all: THREE.Material[]
 }
 
@@ -558,26 +703,50 @@ function createOutlineMaterial(width: number) {
 
 function createMaterials(): MaterialSet {
   const sequinTexture = toTexture(sequinTextureData(128), 128, true)
-  sequinTexture.repeat.set(3, 3)
+  sequinTexture.repeat.set(8, 1)
+  const swimTexture = new THREE.DataTexture(swimTopTextureData(512, 64), 512, 64, THREE.RGBAFormat)
+  swimTexture.colorSpace = THREE.SRGBColorSpace
+  swimTexture.wrapS = THREE.RepeatWrapping
+  swimTexture.magFilter = THREE.LinearFilter
+  swimTexture.minFilter = THREE.LinearMipmapLinearFilter
+  swimTexture.generateMipmaps = true
+  swimTexture.anisotropy = 4
+  swimTexture.needsUpdate = true
+  const printTexture = toTexture(shirtPrintTextureData(128), 128, true)
+  printTexture.repeat.set(3, 2)
   const set = {
     skin: toon(PALETTE.skin, 0.34),
     skinShade: toon(PALETTE.skinShade, 0.3),
-    hair: toon(PALETTE.hair, 0.16),
-    hairLight: toon(PALETTE.hairLight, 0.24),
-    dress: toon(PALETTE.dress, 0, {
-      emissive: new THREE.Color(PALETTE.sequin),
+    hair: toon(PALETTE.hair, 0.22),
+    hairLight: toon(PALETTE.hairLight, 0.4),
+    // Hot red + gold trim with a little sequin sparkle (emissive glints bloom).
+    swimTop: toon('#ffffff', 0, {
+      map: swimTexture,
+      emissive: new THREE.Color('#ffe7a8'),
       emissiveMap: sequinTexture,
-      emissiveIntensity: 0.9,
+      emissiveIntensity: 0.7,
     }),
-    gold: toon(PALETTE.gold, 0.35),
+    red: toon(PALETTE.swimRed, 0.25),
+    gold: toon(PALETTE.gold, 0.38),
+    denim: toon(PALETTE.denim, 0.22),
+    denimLight: toon(PALETTE.denimLight, 0.26),
+    shirt: toon(PALETTE.shirt, 0.18, { map: printTexture, side: THREE.DoubleSide }),
+    silver: toon(PALETTE.silver, 0.36),
     lips: toon(PALETTE.lips, 0.3),
     eyeWhite: new THREE.MeshBasicMaterial({ color: PALETTE.white }),
     iris: toon(PALETTE.iris, 0.35),
     pupil: new THREE.MeshBasicMaterial({ color: PALETTE.pupil }),
     glint: new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 2.2, 2.2), toneMapped: false }),
     lash: new THREE.MeshBasicMaterial({ color: PALETTE.lash }),
-    brow: new THREE.MeshBasicMaterial({ color: '#6e1620' }),
-    boa: toon(PALETTE.boa, 0.28),
+    brow: new THREE.MeshBasicMaterial({ color: PALETTE.brow }),
+    lens: toon(PALETTE.lens, 0.15),
+    petal: toon(PALETTE.petal, 0.3),
+    sole: toon(PALETTE.sole, 0.3),
+    glass: toon(PALETTE.glass, 0.4, { transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide }),
+    drinkTop: toon(PALETTE.drinkTop, 0.4),
+    drinkBottom: toon(PALETTE.drinkBottom, 0.35),
+    umbrella: toon(PALETTE.umbrella, 0.3, { side: THREE.DoubleSide }),
+    leaf: toon('#34b35a', 0.25),
     blush: new THREE.MeshBasicMaterial({ color: PALETTE.blush, transparent: true, opacity: 0.4, depthWrite: false }),
     outline: createOutlineMaterial(0.013),
     outlineThin: createOutlineMaterial(0.007),
@@ -585,10 +754,8 @@ function createMaterials(): MaterialSet {
   }
   return {
     ...set,
-    all: [
-      set.skin, set.skinShade, set.hair, set.hairLight, set.dress, set.gold, set.lips, set.eyeWhite,
-      set.iris, set.pupil, set.glint, set.lash, set.brow, set.boa, set.blush, set.outline, set.outlineThin,
-    ],
+    textures: [sequinTexture, swimTexture, printTexture],
+    all: (Object.values(set) as unknown[]).filter((value): value is THREE.Material => value instanceof THREE.Material),
   }
 }
 
@@ -726,7 +893,11 @@ interface CompanionRig {
   lowerLip: THREE.Mesh
   earrings: THREE.Group[]
   arms: [ArmRig, ArmRig]
-  boa: THREE.Group
+  shirt: THREE.Group
+  /** Round silver tray (model space, placed each frame). */
+  tray: THREE.Group
+  /** The tropical cocktail normally riding on the tray (model space, placed each frame). */
+  cocktail: THREE.Group
   materials: MaterialSet
 }
 
@@ -741,10 +912,25 @@ const PIVOT = {
 const HEAD_CENTER_Y = 0.27 // above the neck pivot
 const HEAD_RADIUS = 0.2
 
+/** Torso skin profile (radius, y); the swim top and shirt are offset from it. */
+const TORSO_PROFILE: Array<[number, number]> = [
+  [0.0, 1.36],
+  [0.136, 1.36],
+  [0.14, 1.46],
+  [0.152, 1.56],
+  [0.16, 1.64],
+  [0.16, 1.71],
+  [0.155, 1.77],
+  [0.13, 1.815],
+  [0.07, 1.83],
+  [0.0, 1.832],
+]
+const TORSO_DEPTH = 0.72
+
 function buildLegs(model: THREE.Group, materials: MaterialSet) {
   for (const side of [1, -1] as const) {
     const leg = new THREE.Group()
-    leg.position.set(side * 0.078, 0, 0)
+    leg.position.set(side * 0.08, 0, 0)
     // Model pose: one knee angled in front of the other.
     leg.rotation.z = side === 1 ? -0.05 : 0.025
     leg.rotation.x = side === 1 ? -0.07 : 0
@@ -757,90 +943,98 @@ function buildLegs(model: THREE.Group, materials: MaterialSet) {
         [0.053, 0.34],
         [0.043, 0.5],
         [0.057, 0.7],
-        [0.068, 0.95],
-        [0.0, 1.0],
+        [0.07, 0.95],
+        [0.0, 1.02],
       ],
       16
     )
     limb.scale(1, 1, 0.92)
     addMesh(leg, limb, materials.skin, materials.outlineThin)
 
-    // Glam heel: pointed pump + stiletto.
-    const shoe = mergeParts([
-      part(sphere(0.05, 16, 10), [0, 0.07, 0.035], [0.42, 0, 0], [0.8, 0.62, 1.75]),
-      part(new THREE.CylinderGeometry(0.009, 0.006, 0.1, 8), [0, 0.05, -0.04], [0.08, 0, 0]),
-      part(new THREE.CylinderGeometry(0.036, 0.034, 0.012, 14), [0, 0.108, 0.0], [0, 0, 0], [1, 1, 1]),
+    // Foot on a chunky platform sandal with red straps.
+    const foot = sphere(0.04, 14, 10)
+    foot.scale(0.85, 0.6, 2.1)
+    addMesh(leg, foot, materials.skin, materials.outlineThin, [0, 0.085, 0.045])
+    const sole = mergeParts([
+      part(new THREE.CapsuleGeometry(0.042, 0.1, 4, 12), [0, 0.034, 0.04], [Math.PI / 2, 0, 0], [1, 1, 0.85]),
+      part(new THREE.BoxGeometry(0.07, 0.03, 0.07), [0, 0.06, -0.015]),
     ])
-    addMesh(leg, shoe, materials.gold, materials.outlineThin)
+    addMesh(leg, sole, materials.sole, materials.outlineThin)
+    const straps = mergeParts([
+      part(new THREE.TorusGeometry(0.038, 0.011, 6, 18, Math.PI), [0, 0.078, 0.09], [0, Math.PI / 2, 0], [1, 0.9, 1.1]),
+      part(new THREE.TorusGeometry(0.034, 0.009, 6, 18), [0, 0.125, 0.0], [Math.PI / 2, 0, 0], [1, 1, 0.95]),
+    ])
+    addMesh(leg, straps, materials.red, null)
   }
-}
-
-function wavyHem(geometry: THREE.BufferGeometry, hemY: number, depth: number, lobes: number, amount: number) {
-  const position = geometry.getAttribute('position') as THREE.BufferAttribute
-  const v = new THREE.Vector3()
-  for (let index = 0; index < position.count; index += 1) {
-    v.fromBufferAttribute(position, index)
-    const t = THREE.MathUtils.clamp(1 - (v.y - hemY) / depth, 0, 1)
-    if (t <= 0) continue
-    const angle = Math.atan2(v.z, v.x)
-    const k = 1 + Math.sin(angle * lobes) * amount * t
-    position.setXYZ(index, v.x * k, v.y + Math.cos(angle * lobes) * amount * 0.25 * t, v.z * k)
-  }
-  position.needsUpdate = true
-  geometry.computeVertexNormals()
 }
 
 function buildHips(hips: THREE.Group, materials: MaterialSet) {
-  // Flared cocktail skirt ending just below the knee, with a ruffled hem.
-  const skirt = lathe(
+  const oy = -PIVOT.hips.y
+  // High-waisted denim shorts with rolled cuffs and a gold button.
+  const seat = lathe(
     [
-      [0.0, 1.42],
-      [0.13, 1.42],
-      [0.155, 1.35],
-      [0.198, 1.25],
-      [0.222, 1.12],
-      [0.238, 0.96],
-      [0.262, 0.8],
-      [0.3, 0.64],
-      [0.296, 0.6],
-      [0.24, 0.61],
+      [0.0, 1.04],
+      [0.165, 1.05],
+      [0.192, 1.12],
+      [0.194, 1.22],
+      [0.178, 1.32],
+      [0.152, 1.42],
+      [0.146, 1.475],
+      [0.0, 1.476],
     ],
-    40
+    32
   )
-  skirt.scale(1, 1, 0.82)
-  wavyHem(skirt, 0.6, 0.14, 9, 0.07)
-  skirt.translate(0, -PIVOT.hips.y, 0)
-  addMesh(hips, skirt, materials.dress, materials.outline)
+  seat.scale(1, 1, 0.8)
+  seat.translate(0, oy, 0)
+  const legs = ([1, -1] as const).map(side => part(
+    new THREE.CylinderGeometry(0.09, 0.096, 0.12, 20),
+    [side * 0.08, 1.01 + oy, 0],
+    [0, 0, side * 0.04],
+    [1, 1, 0.88]
+  ))
+  addMesh(hips, mergeParts([{ geometry: seat, matrix: new THREE.Matrix4() }, ...legs]), materials.denim, materials.outline)
+  const trim = mergeParts([
+    part(new THREE.TorusGeometry(0.093, 0.016, 8, 24), [0.08, 0.955 + oy, 0], [Math.PI / 2, 0, 0], [1.02, 0.88, 1]),
+    part(new THREE.TorusGeometry(0.093, 0.016, 8, 24), [-0.08, 0.955 + oy, 0], [Math.PI / 2, 0, 0], [1.02, 0.88, 1]),
+    part(new THREE.TorusGeometry(0.148, 0.013, 8, 36), [0, 1.462 + oy, 0], [Math.PI / 2, 0, 0], [1, 0.8, 1]),
+  ])
+  addMesh(hips, trim, materials.denimLight, materials.outlineThin)
+  addMesh(hips, sphere(0.014, 10, 8), materials.gold, null, [0, 1.44 + oy, 0.12])
 }
 
 function buildTorso(torso: THREE.Group, materials: MaterialSet) {
   const oy = -PIVOT.torso.y
-  // Bodice: modest boat neckline, gentle hourglass.
-  const bodice = lathe(
-    [
-      [0.0, 1.36],
-      [0.136, 1.36],
-      [0.14, 1.46],
-      [0.158, 1.56],
-      [0.168, 1.64],
-      [0.168, 1.71],
-      [0.16, 1.77],
-      [0.13, 1.815],
-      [0.07, 1.83],
-      [0.0, 1.832],
-    ],
-    32
-  )
-  bodice.scale(1, 1, 0.72)
-  bodice.translate(0, oy, 0)
-  addMesh(torso, bodice, materials.dress, materials.outline)
+  const body = lathe(TORSO_PROFILE, 32)
+  body.scale(1, 1, TORSO_DEPTH)
+  body.translate(0, oy, 0)
+  addMesh(torso, body, materials.skin, materials.outline)
 
-  // Gold waist belt with a little jewel.
-  const belt = mergeParts([
-    part(new THREE.TorusGeometry(0.139, 0.014, 8, 36), [0, 1.395 + oy, 0], [Math.PI / 2, 0, 0], [1, 0.72, 1]),
-    part(new THREE.OctahedronGeometry(0.03, 0), [0, 1.395 + oy, 0.107], [0, 0, Math.PI / 4], [1, 1, 0.5]),
-  ])
-  addMesh(torso, belt, materials.gold, null)
+  // Sporty swim top: a modest band (bandeau) with gold trim and "LUCKY" on the front.
+  const band = new THREE.LatheGeometry(
+    [
+      new THREE.Vector2(0.158, 1.575),
+      new THREE.Vector2(0.166, 1.62),
+      new THREE.Vector2(0.168, 1.67),
+      new THREE.Vector2(0.167, 1.72),
+      new THREE.Vector2(0.161, 1.765),
+    ],
+    40
+  )
+  band.scale(1.04, 1, TORSO_DEPTH * 1.08)
+  band.translate(0, oy, 0)
+  addMesh(torso, band, materials.swimTop, materials.outlineThin)
+
+  // Halter straps up to the neck.
+  const straps = ([1, -1] as const).map(side => {
+    const curve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(side * 0.075, 1.76 + oy, 0.105),
+      new THREE.Vector3(side * 0.06, 1.83 + oy, 0.075),
+      new THREE.Vector3(side * 0.045, 1.9 + oy, 0.02),
+      new THREE.Vector3(side * 0.02, 1.925 + oy, -0.04),
+    ])
+    return { geometry: new THREE.TubeGeometry(curve, 12, 0.011, 6), matrix: new THREE.Matrix4() }
+  })
+  addMesh(torso, mergeParts(straps), materials.red, null)
 
   // Rounded shoulders and a slim neck (skin).
   const shoulders = mergeParts([
@@ -848,55 +1042,57 @@ function buildTorso(torso: THREE.Group, materials: MaterialSet) {
     part(lathe([[0.0, 1.78], [0.058, 1.78], [0.046, 1.86], [0.044, 1.95], [0.0, 1.96]], 16), [0, oy, 0.0]),
   ])
   addMesh(torso, shoulders, materials.skin, materials.outlineThin)
-
-  // Pearl choker.
-  const choker = new THREE.TorusGeometry(0.047, 0.009, 6, 24)
-  choker.rotateX(Math.PI / 2)
-  choker.translate(0, 1.905 + oy, 0)
-  addMesh(torso, choker, materials.eyeWhite, null)
 }
 
-function buildBoa(torso: THREE.Group, materials: MaterialSet) {
-  // Fluffy feather stole: round the back of the neck, over the shoulders,
-  // ends hanging down the front.
-  const curve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0.14, 1.3, 0.15),
-    new THREE.Vector3(0.16, 1.5, 0.15),
-    new THREE.Vector3(0.19, 1.72, 0.1),
-    new THREE.Vector3(0.17, 1.84, -0.02),
-    new THREE.Vector3(0.08, 1.88, -0.1),
-    new THREE.Vector3(-0.08, 1.88, -0.1),
-    new THREE.Vector3(-0.17, 1.84, -0.02),
-    new THREE.Vector3(-0.19, 1.72, 0.1),
-    new THREE.Vector3(-0.17, 1.5, 0.15),
-    new THREE.Vector3(-0.15, 1.34, 0.15),
-  ])
-  const random = createCompanionRandom(99)
-  const parts: Part[] = []
-  const count = 120
-  for (let index = 0; index < count; index += 1) {
-    const t = index / (count - 1)
-    const point = curve.getPoint(t)
-    const taper = 0.7 + Math.sin(t * Math.PI) * 0.3
-    const radius = (0.022 + random() * 0.016) * taper
-    parts.push(
-      part(
-        new THREE.IcosahedronGeometry(radius, 1),
-        [
-          point.x + (random() - 0.5) * 0.06,
-          point.y - PIVOT.torso.y + (random() - 0.5) * 0.05,
-          point.z + (random() - 0.5) * 0.05,
-        ],
-        [random() * 3, random() * 3, random() * 3],
-        [1, 1 + random() * 0.5, 1]
-      )
-    )
+/** Open short-sleeve tropical shirt knotted at the waist. */
+function buildShirt(torso: THREE.Group, materials: MaterialSet) {
+  const oy = -PIVOT.torso.y
+  const group = new THREE.Group()
+  group.name = 'shirt'
+  torso.add(group)
+  const opening = 0.62
+  const shell = new THREE.LatheGeometry(
+    [
+      new THREE.Vector2(0.168, 1.44),
+      new THREE.Vector2(0.178, 1.52),
+      new THREE.Vector2(0.19, 1.6),
+      new THREE.Vector2(0.196, 1.68),
+      new THREE.Vector2(0.192, 1.75),
+      new THREE.Vector2(0.172, 1.805),
+      new THREE.Vector2(0.12, 1.845),
+    ],
+    36,
+    opening,
+    Math.PI * 2 - opening * 2
+  )
+  // Pull the front panels in toward the knot at the waist.
+  const position = shell.getAttribute('position') as THREE.BufferAttribute
+  const v = new THREE.Vector3()
+  for (let index = 0; index < position.count; index += 1) {
+    v.fromBufferAttribute(position, index)
+    const phi = Math.atan2(v.x, v.z)
+    const front = Math.max(0, 1 - Math.abs(phi) / 1.5)
+    const low = THREE.MathUtils.clamp((1.6 - v.y) / 0.16, 0, 1)
+    const pinch = 1 - front * low * 0.75
+    position.setX(index, v.x * pinch)
   }
-  const boa = new THREE.Group()
-  boa.name = 'boa'
-  torso.add(boa)
-  addMesh(boa, mergeParts(parts), materials.boa, materials.outlineThin)
-  return boa
+  position.needsUpdate = true
+  shell.computeVertexNormals()
+  shell.scale(1, 1, TORSO_DEPTH * 1.12)
+  shell.translate(0, oy, 0)
+  addMesh(group, shell, materials.shirt, materials.outlineThin)
+
+  const extras = mergeParts([
+    // Collar points.
+    part(sphere(0.05, 12, 8), [0.085, 1.815 + oy, 0.085], [0.3, 0.5, -0.9], [1.3, 0.22, 0.75]),
+    part(sphere(0.05, 12, 8), [-0.085, 1.815 + oy, 0.085], [0.3, -0.5, 0.9], [1.3, 0.22, 0.75]),
+    // Knot and its two tails.
+    part(sphere(0.036, 12, 10), [0, 1.455 + oy, 0.125], [0, 0, 0.3], [1.3, 1, 0.9]),
+    part(new THREE.CapsuleGeometry(0.022, 0.07, 4, 8), [0.03, 1.4 + oy, 0.13], [0.1, 0, 0.45], [1, 1, 0.6]),
+    part(new THREE.CapsuleGeometry(0.022, 0.06, 4, 8), [-0.035, 1.405 + oy, 0.128], [0.1, 0, -0.5], [1, 1, 0.6]),
+  ])
+  addMesh(group, extras, materials.shirt, materials.outlineThin)
+  return group
 }
 
 function buildArm(torso: THREE.Group, materials: MaterialSet, side: 1 | -1): ArmRig {
@@ -918,6 +1114,18 @@ function buildArm(torso: THREE.Group, materials: MaterialSet, side: 1 | -1): Arm
     14
   )
   addMesh(shoulder, upper, materials.skin, materials.outlineThin)
+  // Short puffed shirt sleeve.
+  const sleeve = new THREE.LatheGeometry(
+    [
+      new THREE.Vector2(0.063, -0.14),
+      new THREE.Vector2(0.066, -0.1),
+      new THREE.Vector2(0.066, -0.02),
+      new THREE.Vector2(0.056, 0.04),
+      new THREE.Vector2(0.02, 0.07),
+    ],
+    16
+  )
+  addMesh(shoulder, sleeve, materials.shirt, materials.outlineThin)
 
   const elbow = new THREE.Group()
   elbow.position.set(0, -upperLength, 0)
@@ -943,7 +1151,7 @@ function buildArm(torso: THREE.Group, materials: MaterialSet, side: 1 | -1): Arm
   const hand = new THREE.Group()
   hand.position.set(0, -lowerLength, 0)
   elbow.add(hand)
-  // Cartoon hand: palm, fused fingers and a thumb, with painted nails.
+  // Cartoon hand: palm, fused fingers and a thumb.
   const palm = mergeParts([
     part(sphere(0.036, 14, 10), [0, -0.035, 0], [0, 0, 0], [0.8, 1.05, 0.48]),
     part(new THREE.CapsuleGeometry(0.013, 0.05, 4, 8), [side * -0.012, -0.085, 0.002], [0, 0, side * 0.05]),
@@ -1060,21 +1268,26 @@ function buildBrows(head: THREE.Group, materials: MaterialSet): [THREE.Group, TH
 
 function buildHair(head: THREE.Group, materials: MaterialSet) {
   const y = HEAD_CENTER_Y
-  // Skull cap sits above the brow line so the face stays open.
+  // Big golden blowout; the cap sits above the brow line so the face stays open.
   const crown = mergeParts([
-    part(sphere(0.218, 24, 18), [0, y + 0.075, -0.045]),
-    // Big glam blowout on top.
-    part(sphere(0.17, 22, 16), [-0.03, y + 0.2, -0.02], [0, 0, 0.2], [1.32, 0.78, 1.12]),
-    // Temple volume.
-    part(sphere(0.12, 18, 14), [0.185, y + 0.04, -0.01], [0, 0, 0], [0.78, 1.25, 1.0]),
-    part(sphere(0.12, 18, 14), [-0.185, y + 0.04, -0.01], [0, 0, 0], [0.78, 1.25, 1.0]),
-    // Back mass down to the shoulder blades.
-    part(sphere(0.18, 20, 16), [0, y - 0.1, -0.12], [0, 0, 0], [1.18, 1.2, 0.75]),
-    part(sphere(0.15, 20, 14), [0, y - 0.3, -0.14], [0, 0, 0], [1.3, 1.0, 0.65]),
+    part(sphere(0.222, 24, 18), [0, y + 0.075, -0.045]),
+    part(sphere(0.175, 22, 16), [-0.03, y + 0.21, -0.02], [0, 0, 0.2], [1.34, 0.8, 1.14]),
+    part(sphere(0.125, 18, 14), [0.19, y + 0.04, -0.01], [0, 0, 0], [0.8, 1.28, 1.0]),
+    part(sphere(0.125, 18, 14), [-0.19, y + 0.04, -0.01], [0, 0, 0], [0.8, 1.28, 1.0]),
+    part(sphere(0.19, 20, 16), [0, y - 0.1, -0.12], [0, 0, 0], [1.2, 1.22, 0.76]),
+    part(sphere(0.16, 20, 14), [0, y - 0.31, -0.14], [0, 0, 0], [1.32, 1.0, 0.66]),
   ])
   addMesh(head, crown, materials.hair, materials.outline)
 
-  // Side-parted swoop across the forehead (lighter so the shape reads).
+  // Glossy toon highlight streaks on the crown.
+  const shine = mergeParts([
+    part(sphere(0.08, 14, 10), [0.1, y + 0.3, 0.1], [0.5, 0.2, -0.5], [1.6, 0.3, 0.5]),
+    part(sphere(0.06, 12, 10), [-0.13, y + 0.28, 0.1], [0.5, -0.2, 0.6], [1.5, 0.28, 0.5]),
+    part(sphere(0.05, 12, 10), [0.22, y + 0.08, 0.08], [0, 0.6, -1.2], [1.5, 0.3, 0.5]),
+  ])
+  addMesh(head, shine, materials.hairLight, null)
+
+  // Side-parted swoop across the forehead.
   const bangs = new THREE.Group()
   bangs.position.set(0, y + 0.15, 0.08)
   head.add(bangs)
@@ -1085,39 +1298,30 @@ function buildHair(head: THREE.Group, materials: MaterialSet) {
   ])
   addMesh(bangs, bangGeometry, materials.hair, materials.outlineThin)
 
-  // Shoulder-length waves on each side, flipping outward at the ends.
+  // Beachy waves on each side, flipping outward at the ends.
   const sides = ([1, -1] as const).map(side => {
     const group = new THREE.Group()
     group.position.set(side * 0.19, y - 0.04, -0.05)
     head.add(group)
     const waves = mergeParts([
-      part(sphere(0.115, 18, 14), [side * 0.01, -0.07, 0.0], [0, 0, side * 0.2], [0.9, 1.2, 1.0]),
-      part(sphere(0.11, 18, 14), [side * 0.045, -0.23, -0.02], [0, 0, side * -0.25], [0.95, 1.15, 0.95]),
-      part(sphere(0.085, 16, 12), [side * 0.11, -0.35, -0.02], [0, 0, side * 0.9], [1.45, 0.75, 0.9]),
+      part(sphere(0.12, 18, 14), [side * 0.01, -0.07, 0.0], [0, 0, side * 0.2], [0.9, 1.2, 1.0]),
+      part(sphere(0.115, 18, 14), [side * 0.045, -0.23, -0.02], [0, 0, side * -0.25], [0.95, 1.15, 0.95]),
+      part(sphere(0.09, 16, 12), [side * 0.115, -0.36, -0.02], [0, 0, side * 0.9], [1.45, 0.75, 0.9]),
     ])
     addMesh(group, waves, materials.hair, materials.outlineThin)
     return group
   })
 
-  // Long back hair that sways separately.
   const hairBack = new THREE.Group()
   hairBack.position.set(0, y - 0.38, -0.15)
   head.add(hairBack)
   const back = mergeParts([
-    part(sphere(0.12, 18, 14), [-0.08, -0.06, 0.0], [0, 0, 0.3], [1.0, 1.2, 0.7]),
-    part(sphere(0.12, 18, 14), [0.08, -0.06, 0.0], [0, 0, -0.3], [1.0, 1.2, 0.7]),
+    part(sphere(0.125, 18, 14), [-0.08, -0.06, 0.0], [0, 0, 0.3], [1.0, 1.2, 0.7]),
+    part(sphere(0.125, 18, 14), [0.08, -0.06, 0.0], [0, 0, -0.3], [1.0, 1.2, 0.7]),
     part(sphere(0.09, 16, 12), [-0.15, -0.24, 0.02], [0, 0, -0.8], [1.4, 0.8, 0.8]),
     part(sphere(0.09, 16, 12), [0.15, -0.24, 0.02], [0, 0, 0.8], [1.4, 0.8, 0.8]),
   ])
   addMesh(hairBack, back, materials.hair, materials.outlineThin)
-
-  // Hair clip: gold star with a ruby.
-  const clip = mergeParts([
-    part(new THREE.OctahedronGeometry(0.045, 0), [-0.165, y + 0.2, 0.1], [0, 0, 0.785], [1, 1, 0.35]),
-    part(new THREE.OctahedronGeometry(0.045, 0), [-0.165, y + 0.2, 0.1], [0, 0, 0], [1, 1, 0.35]),
-  ])
-  addMesh(head, clip, materials.gold, materials.outlineThin)
-  addMesh(head, sphere(0.018, 10, 8), materials.lips, null, [-0.165, y + 0.2, 0.118])
 
   return { hairLeft: sides[0]!, hairRight: sides[1]!, hairBack, bangs }
 }
@@ -1127,12 +1331,104 @@ function buildEarrings(head: THREE.Group, materials: MaterialSet) {
     const group = new THREE.Group()
     group.position.set(side * 0.172, HEAD_CENTER_Y - 0.05, 0.03)
     head.add(group)
-    const hoop = new THREE.TorusGeometry(0.042, 0.007, 6, 22)
+    const hoop = new THREE.TorusGeometry(0.05, 0.008, 6, 24)
     hoop.rotateY(side * 0.55)
-    hoop.translate(0, -0.045, 0)
+    hoop.translate(0, -0.052, 0)
     addMesh(group, hoop, materials.gold, null)
     return group
   })
+}
+
+/** Glossy heart-ish sunglasses pushed up on the hair + a hibiscus behind the ear. */
+function buildHeadAccessories(head: THREE.Group, materials: MaterialSet) {
+  const y = HEAD_CENTER_Y
+  const glasses = new THREE.Group()
+  glasses.position.set(0, y + 0.255, 0.19)
+  glasses.rotation.x = -0.32
+  head.add(glasses)
+  const lenses = mergeParts(([1, -1] as const).map(side => part(
+    sphere(0.05, 16, 12), [side * 0.062, 0, 0], [0, 0, side * -0.25], [1.2, 0.82, 0.32]
+  )))
+  addMesh(glasses, lenses, materials.lens, materials.outlineThin)
+  const frame = mergeParts([
+    ...([1, -1] as const).map(side => part(
+      new THREE.TorusGeometry(0.052, 0.009, 6, 24), [side * 0.062, 0, 0.004], [0, 0, side * -0.25], [1.2, 0.82, 1]
+    )),
+    part(new THREE.CylinderGeometry(0.007, 0.007, 0.03, 6), [0, 0.012, 0.004], [0, 0, Math.PI / 2]),
+  ])
+  addMesh(glasses, frame, materials.gold, null)
+  for (const side of [1, -1] as const) {
+    addMesh(glasses, sphere(0.011, 8, 6), materials.glint, null, [side * 0.062 - 0.018, 0.016, 0.018])
+  }
+
+  // Hibiscus behind her right ear.
+  const flower = new THREE.Group()
+  flower.position.set(-0.235, y + 0.07, 0.09)
+  flower.rotation.set(0.1, -0.8, 0.25)
+  head.add(flower)
+  const petals: Part[] = []
+  for (let index = 0; index < 5; index += 1) {
+    const angle = (index / 5) * Math.PI * 2
+    petals.push(part(sphere(0.044, 12, 8), [Math.cos(angle) * 0.045, Math.sin(angle) * 0.045, 0], [0, 0, angle], [1.2, 0.8, 0.28]))
+  }
+  addMesh(flower, mergeParts(petals), materials.petal, materials.outlineThin)
+  addMesh(flower, sphere(0.016, 10, 8), materials.gold, null, [0, 0, 0.012])
+}
+
+/** A tropical cocktail (hurricane glass, layered sunrise, umbrella, cherry). Base at y = 0. */
+function buildCocktail(materials: MaterialSet) {
+  const group = new THREE.Group()
+  group.name = 'cocktail'
+  const glass = lathe(
+    [
+      [0.0, 0.0],
+      [0.045, 0.0],
+      [0.042, 0.012],
+      [0.013, 0.02],
+      [0.013, 0.045],
+      [0.045, 0.08],
+      [0.056, 0.135],
+      [0.046, 0.19],
+      [0.054, 0.25],
+    ],
+    20
+  )
+  const glassMesh = addMesh(group, glass, materials.glass, null)
+  glassMesh.renderOrder = 3
+  glassMesh.castShadow = false
+  const bottom = lathe([[0.0, 0.05], [0.036, 0.075], [0.05, 0.12], [0.0, 0.121]], 18)
+  addMesh(group, bottom, materials.drinkBottom, null)
+  const top = lathe([[0.0, 0.12], [0.05, 0.12], [0.049, 0.16], [0.043, 0.19], [0.048, 0.225], [0.0, 0.226]], 18)
+  addMesh(group, top, materials.drinkTop, null)
+  // Orange wheel on the rim, cherry, straw and a little umbrella.
+  addMesh(group, mergeParts([part(new THREE.CylinderGeometry(0.034, 0.034, 0.01, 16), [0.05, 0.245, 0], [0, 0, 1.2])]), materials.drinkTop, materials.outlineThin)
+  addMesh(group, sphere(0.018, 10, 8), materials.red, materials.outlineThin, [-0.02, 0.238, 0.02])
+  addMesh(group, mergeParts([part(new THREE.CylinderGeometry(0.006, 0.006, 0.2, 6), [-0.015, 0.29, -0.012], [0.12, 0, 0.18])]), materials.petal, null)
+  const umbrella = new THREE.Group()
+  umbrella.position.set(0.018, 0.25, -0.01)
+  umbrella.rotation.set(-0.35, 0, -0.4)
+  group.add(umbrella)
+  addMesh(umbrella, new THREE.CylinderGeometry(0.004, 0.004, 0.16, 5).translate(0, 0.08, 0), materials.sole, null)
+  const canopy = new THREE.ConeGeometry(0.08, 0.035, 10, 1, true)
+  canopy.translate(0, 0.16, 0)
+  addMesh(umbrella, canopy, materials.umbrella, materials.outlineThin)
+  return group
+}
+
+function buildTray(materials: MaterialSet) {
+  const tray = new THREE.Group()
+  tray.name = 'tray'
+  const disc = mergeParts([
+    part(new THREE.CylinderGeometry(0.2, 0.18, 0.014, 36), [0, -0.007, 0]),
+    part(new THREE.TorusGeometry(0.198, 0.011, 8, 40), [0, 0.0, 0], [Math.PI / 2, 0, 0]),
+  ])
+  addMesh(tray, disc, materials.silver, materials.outlineThin)
+  // A bright glint strip that catches the bloom.
+  const glint = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.004, 4, 20, Math.PI * 0.35), materials.glint)
+  glint.rotation.set(Math.PI / 2, 0, 0.6)
+  glint.position.y = 0.006
+  tray.add(glint)
+  return tray
 }
 
 function buildRig(): CompanionRig {
@@ -1151,7 +1447,7 @@ function buildRig(): CompanionRig {
   torso.position.set(0, PIVOT.torso.y - PIVOT.hips.y, 0)
   hips.add(torso)
   buildTorso(torso, materials)
-  const boa = buildBoa(torso, materials)
+  const shirt = buildShirt(torso, materials)
 
   const head = new THREE.Group()
   head.position.set(0, PIVOT.neck.y - PIVOT.torso.y, PIVOT.neck.z)
@@ -1162,8 +1458,14 @@ function buildRig(): CompanionRig {
   const { mouth, upperLip, lowerLip } = buildMouth(head, materials)
   const hair = buildHair(head, materials)
   const earrings = buildEarrings(head, materials)
+  buildHeadAccessories(head, materials)
 
   const arms: [ArmRig, ArmRig] = [buildArm(torso, materials, 1), buildArm(torso, materials, -1)]
+
+  const tray = buildTray(materials)
+  model.add(tray)
+  const cocktail = buildCocktail(materials)
+  model.add(cocktail)
 
   return {
     model,
@@ -1181,7 +1483,9 @@ function buildRig(): CompanionRig {
     lowerLip,
     earrings,
     arms,
-    boa,
+    shirt,
+    tray,
+    cocktail,
     materials,
   }
 }
@@ -1263,6 +1567,21 @@ interface CompanionAnimState {
   fxPuffed: boolean
   /** x sign (in her own frame) of the side the player is on. */
   playerSide: 1 | -1
+  queuedGesture: CompanionGesture | null
+  trayOnHead: number
+  trayOnHeadTarget: number
+  standBehind: number
+  standBehindTarget: number
+  cocktailInHand: boolean
+  cocktailServedUntil: number
+  serveSpot: THREE.Vector3 | null
+  muted: boolean
+  lineIsMute: boolean
+  recentLines: string[]
+  nextChatAt: number
+  lastOwnerActionKey: string | null
+  lastAllInKey: string | null
+  otherNames: readonly string[]
 }
 
 const REST_ARM_TARGET = (side: 1 | -1): ArmTarget => ({
@@ -1314,6 +1633,7 @@ interface Particle {
 interface CompanionFx {
   group: THREE.Group
   sprites: Particle[]
+  served: ServedDrink[]
   confetti: Particle[]
   textures: THREE.Texture[]
   heartTexture: THREE.Texture
@@ -1375,6 +1695,7 @@ function createFx(scene: THREE.Scene): CompanionFx {
     smokeTexture,
     lipsTexture,
     confettiGeometry,
+    served: [],
   }
 }
 
@@ -1561,6 +1882,21 @@ export function createCompanion(scene: THREE.Scene): CompanionRuntime {
     enteredBurst: false,
     fxPuffed: false,
     playerSide: -1,
+    queuedGesture: null,
+    trayOnHead: 0,
+    trayOnHeadTarget: 0,
+    standBehind: 0,
+    standBehindTarget: 0,
+    cocktailInHand: false,
+    cocktailServedUntil: 0,
+    serveSpot: null,
+    muted: false,
+    lineIsMute: false,
+    recentLines: [],
+    nextChatAt: 0,
+    lastOwnerActionKey: null,
+    lastAllInKey: null,
+    otherNames: [],
   }
 
   return { group, rig, anim, fx }
@@ -1584,13 +1920,14 @@ export function disposeCompanion(runtime: CompanionRuntime): void {
   runtime.fx.group.removeFromParent()
   geometries.forEach(geometry => geometry.dispose())
   materials.forEach(material => material.dispose())
-  runtime.rig.materials.sequinTexture.dispose()
+  runtime.rig.materials.textures.forEach(texture => texture.dispose())
   runtime.fx.textures.forEach(texture => texture.dispose())
 }
 
 export function getCompanionLine(runtime: CompanionRuntime): string | null {
   const { anim } = runtime
   if (!anim.line || anim.time > anim.lineUntil) return null
+  if (anim.muted && !anim.lineIsMute) return null
   return anim.line
 }
 
@@ -1609,11 +1946,21 @@ export function triggerCompanionGesture(runtime: CompanionRuntime, name: Compani
   startGesture(anim, name, anim.time)
 }
 
-function say(anim: CompanionAnimState, context: LadyLuckLineContext, duration: number) {
+function say(anim: CompanionAnimState, context: LadyLuckLineContext, duration: number, name?: string) {
+  // Once told to shut up she only gets her one pouty "Fine." in.
+  if (anim.muted && context !== 'muted') return
   const id = anim.current?.id ?? 'lady-luck'
-  anim.lineCounter += 1
-  anim.line = companionLineFor(context, id, anim.lineCounter)
+  let line = ''
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    anim.lineCounter += 1
+    line = companionLineFor(context, id, anim.lineCounter, name)
+    if (!anim.recentLines.includes(line)) break
+  }
+  anim.recentLines = [line, ...anim.recentLines].slice(0, 4)
+  anim.line = line
+  anim.lineIsMute = context === 'muted'
   anim.lineUntil = anim.time + duration
+  anim.nextChatAt = Math.max(anim.nextChatAt, anim.time + duration + CHAT_GAP_MIN + anim.random() * CHAT_GAP_SPREAD)
 }
 
 function startGesture(anim: CompanionAnimState, name: CompanionGesture, time: number) {
@@ -1639,6 +1986,16 @@ function beginEntrance(runtime: CompanionRuntime, state: NonNullable<CompanionSt
   anim.lineCounter = 0
   anim.ownerFolded = false
   anim.exitFast = false
+  anim.queuedGesture = null
+  anim.muted = Boolean(state.muted)
+  anim.lineIsMute = false
+  anim.nextChatAt = time + 5 + anim.random() * 3
+  anim.lastOwnerActionKey = null
+  anim.lastAllInKey = null
+  anim.standBehindTarget = 0
+  anim.trayOnHeadTarget = 0
+  anim.cocktailInHand = false
+  anim.cocktailServedUntil = 0
   if (anim.sideForOwner !== state.ownerId) anim.sideForOwner = null
   setPhase(anim, 'entering', time)
   anim.line = null
@@ -1685,30 +2042,69 @@ function handleState(runtime: CompanionRuntime, input: CompanionUpdateInput) {
   // Same companion: react to mood edges.
   const moodChanged = state.mood !== anim.lastMood || state.since !== anim.lastSince
   anim.current = state
+  const present = anim.phase === 'present'
   if (moodChanged) {
     anim.lastMood = state.mood
     anim.lastSince = state.since
-    if (state.mood === 'cheer' && anim.phase === 'present') {
-      startGesture(anim, input.reducedMotion ? 'wink' : 'cheer', time)
-      say(anim, 'cheer', 3.2)
-      anim.nextGestureAt = time + GESTURE_DURATIONS.cheer + 2.5
+    if (state.mood === 'cheer' && present) {
+      // Owner won again: wink + finger-guns, then a victory cheer.
+      startGesture(anim, input.reducedMotion ? 'wink' : 'fingerGuns', time)
+      anim.queuedGesture = input.reducedMotion ? null : 'cheer'
+      say(anim, 'cheer', 3)
+      anim.nextGestureAt = time + GESTURE_DURATIONS.fingerGuns + 0.3
     }
   }
 
-  const folded = Boolean(input.ownerFolded)
-  if (folded && !anim.ownerFolded && anim.phase === 'present') {
+  // Told to shut up: one pout, then silence (gestures carry on).
+  const muted = Boolean(state.muted)
+  if (muted && !anim.muted) {
+    anim.muted = true
+    say(anim, 'muted', 2.2)
+    if (present) {
+      startGesture(anim, 'eyeRoll', time)
+      anim.nextGestureAt = time + GESTURE_DURATIONS.eyeRoll + 2.5
+    }
+  } else if (!muted && anim.muted) {
+    anim.muted = false
+  }
+
+  // React to the owner's own actions and to all-ins.
+  const table = input.table
+  const folded = Boolean(input.ownerFolded) || table?.ownerActionCue === 'fold'
+  const actionKey = table?.ownerActionKey ?? null
+  if (present && actionKey && actionKey !== anim.lastOwnerActionKey && anim.lastOwnerActionKey !== null) {
+    const cue = table?.ownerActionCue
+    if (cue === 'all_in') {
+      say(anim, 'owner_all_in', 2.8)
+      if (!anim.gesture) startGesture(anim, 'fan', time)
+    } else if (cue === 'bet' || cue === 'raise' || cue === 'call') {
+      say(anim, 'owner_bet', 2.6)
+    } else if (cue === 'check') {
+      say(anim, 'owner_check', 2.4)
+    }
+  }
+  anim.lastOwnerActionKey = actionKey ?? anim.lastOwnerActionKey ?? ''
+
+  if (folded && !anim.ownerFolded && present) {
     startGesture(anim, 'eyeRoll', time)
-    say(anim, 'owner_folded', 2.8)
+    say(anim, 'owner_folded', 2.6)
     anim.nextGestureAt = time + GESTURE_DURATIONS.eyeRoll + 3
   }
   anim.ownerFolded = folded
+
+  const allIn = table?.allIn ?? null
+  if (present && allIn && allIn.actionKey !== anim.lastAllInKey && anim.lastAllInKey !== null && allIn.playerId !== state.ownerId) {
+    say(anim, 'other_all_in', 2.6, allIn.nickname)
+  }
+  anim.lastAllInKey = allIn?.actionKey ?? anim.lastAllInKey ?? ''
+  anim.otherNames = table?.otherPlayerNames ?? anim.otherNames
 }
 
 function resolvePlacement(runtime: CompanionRuntime, input: CompanionUpdateInput): CompanionPlacement | null {
   const { anim } = runtime
   const ownerId = anim.current?.ownerId ?? null
   if (input.ownerIsHero) {
-    return computeHeroCompanionPlacement(input.camera, input.ownerSeat ? input.ownerSeat.getWorldPosition(new THREE.Vector3()).y : -0.08)
+    return computeHeroCompanionPlacement(input.camera)
   }
   if (!input.ownerSeat) return null
   if (anim.sideForOwner !== ownerId) {
@@ -1730,7 +2126,7 @@ function worldToTorso(rig: CompanionRig, world: THREE.Vector3, out: THREE.Vector
 }
 
 function buildTargets(runtime: CompanionRuntime, input: CompanionUpdateInput): PoseTargets {
-  const { anim, rig } = runtime
+  const { anim } = runtime
   const t = anim.time
   const reduced = input.reducedMotion
   const motion = reduced ? 0.25 : 1
@@ -1738,31 +2134,30 @@ function buildTargets(runtime: CompanionRuntime, input: CompanionUpdateInput): P
   const arms: [ArmTarget, ArmTarget] = [REST_ARM_TARGET(1), REST_ARM_TARGET(-1)]
   const blink: [number, number] = [0, 0]
   const side = anim.side
-  const playerArm: 0 | 1 = anim.playerSide === 1 ? 0 : 1
-  const freeArm: 0 | 1 = playerArm === 0 ? 1 : 0
+  anim.trayOnHeadTarget = 0
+  anim.standBehindTarget = 0
+  anim.cocktailInHand = false
 
-  // --- Idle: contrapposto hip pop, sway, breathing, head bob, sly smile.
+  // --- Idle: sassy contrapposto hip pop, sway, breathing, head bob, sly smile.
   const sway = Math.sin(t * 1.25)
-  body.hipX = (0.028 * sway + 0.018) * motion
-  body.hipRz = (0.075 * sway + 0.05) * motion
+  body.hipX = (0.03 * sway + 0.028) * motion
+  body.hipRz = (0.07 * sway + 0.085) * motion
   body.hipRy = 0.09 * Math.sin(t * 0.62) * motion
-  body.torRz = -body.hipRz * 0.75
+  body.torRz = -body.hipRz * 0.8
   body.torRx = 0.02 + 0.012 * Math.sin(t * 2.1) * motion
   body.torRy = -body.hipRy * 0.5
-  body.headRz = -0.1 + 0.05 * Math.sin(t * 1.25 + 0.6) * motion
-  body.headRx = 0.05 + 0.02 * Math.sin(t * 0.9) * motion
+  body.headRz = -0.12 + 0.05 * Math.sin(t * 1.25 + 0.6) * motion
+  body.headRx = 0.04 + 0.02 * Math.sin(t * 0.9) * motion
   body.headRy = 0.06 * Math.sin(t * 0.47) * motion
   body.bob = Math.abs(sway) * 0.012 * motion
-  body.smile = 0.7
-  body.browUp = 0.15
+  body.smile = 0.8
+  body.browUp = 0.2
   body.gazeX = 0.25 * Math.sin(t * 0.37)
   body.gazeY = -0.05
 
-  // Free hand on the hip, player-side hand relaxed and a little forward.
-  const freeSide = freeArm === 0 ? 1 : -1
-  setArm(arms[freeArm], freeSide * 0.185, -0.03, -0.03, freeSide * 1, 0.1, -0.35, 0.2, 1.1)
-  const playerSide = -freeSide
-  setArm(arms[playerArm], playerSide * 0.27, -0.12, 0.1, playerSide * 0.4, 0, -1, -0.1, 0.1)
+  // Left hand carries the tray waiter-style; right hand sits sassily on the hip.
+  setArm(arms[TRAY_ARM], 0.25, 0.1, 0.25, 1, -0.8, -0.3, 0, 0)
+  setArm(arms[GESTURE_ARM], -0.185, -0.03, -0.03, -1, 0.1, -0.35, 0.2, 1.1)
 
   // --- Blink (natural, every 2.5-5 s).
   if (t >= anim.nextBlinkAt) {
@@ -1776,39 +2171,35 @@ function buildTargets(runtime: CompanionRuntime, input: CompanionUpdateInput): P
     blink[1] = closed
   }
 
-  // --- Entrance: arms flung out in a "ta-da!" then settle.
+  // --- Entrance: tray up high, free arm flung out: "ta-da!"
   if (anim.phase === 'entering') {
     const u = (t - anim.phaseStart) / ENTRANCE_DURATION
     const ta = keyframe(u, [[0, 0], [0.45, 0], [0.62, 1], [0.9, 1], [1, 0]])
-    const armOut = new THREE.Vector3()
-    for (const index of [0, 1] as const) {
-      const s = index === 0 ? 1 : -1
-      const into = createArmTarget()
-      armOut.set(s * 0.68, 0.62, 0.12)
-      setArm(into, armOut.x, armOut.y, armOut.z, s * 0.4, -1, -0.3, -0.3, -0.5)
-      blendArm(arms[index], into, ta)
-    }
+    const into = createArmTarget()
+    setArm(into, 0.4, 0.72, 0.12, 1, -0.4, -0.4, 0, 0)
+    blendArm(arms[TRAY_ARM], into, ta)
+    setArm(into, -0.68, 0.62, 0.12, -0.4, -1, -0.3, -0.3, -0.5)
+    blendArm(arms[GESTURE_ARM], into, ta)
     blendBody(body, 'smile', 1, ta)
     blendBody(body, 'browUp', 0.8, ta)
-    blendBody(body, 'headRz', 0.12, ta)
+    blendBody(body, 'headRz', 0.14, ta)
     blendBody(body, 'headRx', -0.12, ta)
+    blendBody(body, 'hipRz', 0.16, ta)
   }
 
-  // --- Sulky exit: arms crossed, chin up, head turned away, pout.
+  // --- Sulky exit: hand on hip, chin up, head turned away, pout, stomp.
   if (anim.phase === 'leaving' && !anim.exitFast) {
     const u = (t - anim.phaseStart) / EXIT_DURATION
     const w = keyframe(u, [[0, 0], [0.12, 1], [1, 1]])
-    const crossL = createArmTarget()
-    const crossR = createArmTarget()
-    setArm(crossL, -0.1, 0.18, 0.2, 1, -0.6, 0.2, 0, 0.8)
-    setArm(crossR, 0.1, 0.13, 0.22, -1, -0.6, 0.2, 0, 0.8)
-    blendArm(arms[0], crossL, w)
-    blendArm(arms[1], crossR, w)
     const toss = keyframe(u, [[0, 0], [0.15, 1], [0.32, 0.6], [0.45, 1]])
+    const into = createArmTarget()
+    setArm(into, -0.14, 0.02, 0.02, -1, 0.3, -0.2, 0.3, 1.2)
+    blendArm(arms[GESTURE_ARM], into, w)
     blendBody(body, 'headRy', -0.75 * side, w)
     blendBody(body, 'headRx', -0.2 * toss, w)
     blendBody(body, 'headRz', 0.2 * side, w)
     blendBody(body, 'torRy', -0.3 * side, w)
+    blendBody(body, 'hipRz', -0.14, w)
     blendBody(body, 'smile', 0, w)
     blendBody(body, 'pout', 1, w)
     blendBody(body, 'browAngry', 1, w)
@@ -1825,7 +2216,7 @@ function buildTargets(runtime: CompanionRuntime, input: CompanionUpdateInput): P
     if (u >= 1) {
       anim.gesture = null
     } else {
-      applyGesture(runtime, input, gesture, u, body, arms, blink, playerArm, freeArm)
+      applyGesture(runtime, input, gesture, u, body, arms, blink)
     }
   }
 
@@ -1845,59 +2236,69 @@ function applyGesture(
   u: number,
   body: BodyPose,
   arms: [ArmTarget, ArmTarget],
-  blink: [number, number],
-  playerArm: 0 | 1,
-  freeArm: 0 | 1
+  blink: [number, number]
 ) {
   const { anim, rig, fx } = runtime
-  const side = anim.side
   const reduced = input.reducedMotion
   const scale = runtime.group.scale.x
   const w = gestureEnvelope(u)
   const into = createArmTarget()
-  const ps = playerArm === 0 ? 1 : -1 // x sign of the player-side arm in her frame
-  const fs = -ps
+  const elapsed = anim.time - gesture.start
+  // Her right hand (the free one) is on -X; `ps` is the side the player is on.
+  const ps = anim.playerSide
+  const winkEye: 0 | 1 = ps === 1 ? 0 : 1
 
   const mouthWorld = () => rig.mouth.localToWorld(tmpVector.set(0, 0, 0.04)).clone()
   const handWorld = (index: 0 | 1) => rig.arms[index].hand.localToWorld(tmpVector.set(0, -0.06, 0.02)).clone()
+  const sparkleAt = (origin: THREE.Vector3, count: number, speed = 1) => {
+    if (reduced) return
+    for (let index = 0; index < count; index += 1) {
+      const velocity = new THREE.Vector3((Math.random() - 0.5) * 1.2, Math.random() * 0.9, (Math.random() - 0.5) * 1.2)
+        .multiplyScalar(scale * speed)
+      spawnSprite(fx, 'sparkle', origin, velocity, 0.7 + Math.random() * 0.4, (0.08 + Math.random() * 0.08) * scale, SPARKLE_COLORS[index % 3]!)
+    }
+  }
 
   switch (gesture.name) {
-    case 'wink': {
-      const closed = keyframe(u, [[0, 0], [0.25, 0], [0.38, 1], [0.62, 1], [0.75, 0]])
-      blink[playerArm === 0 ? 0 : 1] = Math.max(blink[playerArm === 0 ? 0 : 1], closed)
+    case 'wink':
+    case 'fingerGuns': {
+      // Finger-guns + wink: "pew pew, you lucky thing".
+      const guns = gesture.name === 'fingerGuns'
+      const closed = keyframe(u, [[0, 0], [0.25, 0], [0.36, 1], [0.6, 1], [0.72, 0]])
+      blink[winkEye] = Math.max(blink[winkEye], closed)
       blendBody(body, 'headRz', -0.22 * ps, w)
-      blendBody(body, 'headRx', 0.1, w)
+      blendBody(body, 'headRx', 0.08, w)
       blendBody(body, 'smile', 1, w)
       blendBody(body, 'browUp', 0.9, w)
-      blendBody(body, 'hipRz', body.hipRz + 0.06, w)
-      // Little finger-gun toward the player.
-      setArm(into, ps * 0.32, 0.26, 0.3, ps * 0.6, -1, 0, -0.6, 0.3)
-      blendArm(arms[playerArm], into, w * keyframe(u, [[0, 0], [0.3, 1], [0.8, 1], [1, 0]]))
-      if (!reduced && fireOnce(gesture, 'spark', u > 0.4)) {
-        const origin = rig.eyes[playerArm === 0 ? 0 : 1].group.localToWorld(tmpVector.set(0.02 * ps, 0.03, 0.05)).clone()
-        spawnSprite(fx, 'sparkle', origin, new THREE.Vector3(0, 0.25, 0).multiplyScalar(scale), 0.7, 0.2 * scale, SPARKLE_COLORS[2]!)
+      blendBody(body, 'hipRz', body.hipRz + 0.08, w)
+      const aim = keyframe(u, [[0, 0], [0.22, 1], [0.8, 1], [1, 0]])
+      const recoil = guns ? keyframe(u, [[0.3, 0], [0.36, 1], [0.44, 0], [0.52, 1], [0.6, 0]]) : 0
+      setArm(into, -0.24, 0.3 + recoil * 0.08, 0.42, -1, -1, 0, -0.6 - recoil * 0.6, 0.3)
+      blendArm(arms[GESTURE_ARM], into, aim)
+      if (fireOnce(gesture, 'spark', u > 0.36)) {
+        sparkleAt(rig.eyes[winkEye].group.localToWorld(tmpVector.set(0.02, 0.03, 0.05)).clone(), guns ? 2 : 1, 0.3)
+        if (guns) sparkleAt(handWorld(GESTURE_ARM), 5, 0.8)
       }
+      if (guns && fireOnce(gesture, 'spark2', u > 0.52)) sparkleAt(handWorld(GESTURE_ARM), 4, 0.8)
       break
     }
     case 'blowKiss': {
-      // Hand to lips, pucker, then fling the kiss outward with a heart.
       const toLips = keyframe(u, [[0, 0], [0.22, 1], [0.44, 1], [0.58, 0]])
       const fling = keyframe(u, [[0.44, 0], [0.6, 1], [0.85, 1], [1, 0]])
-      setArm(into, ps * 0.03, 0.62, 0.24, ps * 1, -1.2, 0.2, -1.2, -0.2)
-      blendArm(arms[playerArm], into, toLips)
-      const out = createArmTarget()
-      setArm(out, ps * 0.46, 0.5, 0.36, ps * 0.6, -1, -0.2, -0.5, -0.9)
-      blendArm(arms[playerArm], out, fling)
+      setArm(into, -0.03, 0.62, 0.24, -1, -1.2, 0.2, -1.2, -0.2)
+      blendArm(arms[GESTURE_ARM], into, toLips)
+      setArm(into, -0.46, 0.5, 0.36, -0.6, -1, -0.2, -0.5, -0.9)
+      blendArm(arms[GESTURE_ARM], into, fling)
       blendBody(body, 'kiss', 1, toLips)
       blendBody(body, 'smile', 1, fling)
       blendBody(body, 'headRz', -0.18 * ps, w)
       blendBody(body, 'headRx', 0.08 * toLips - 0.1 * fling, 1)
-      blendBody(body, 'torRy', 0.2 * ps * fling, 1)
+      blendBody(body, 'torRy', -0.2 * fling, 1)
       blink[0] = Math.max(blink[0], 0.9 * toLips)
       blink[1] = Math.max(blink[1], 0.9 * toLips)
       if (fireOnce(gesture, 'heart', u > 0.56)) {
-        const origin = handWorld(playerArm)
-        const direction = tmpVector2.set(Math.sin(runtime.group.rotation.y + ps * 0.5), 0.8, Math.cos(runtime.group.rotation.y + ps * 0.5))
+        const origin = handWorld(GESTURE_ARM)
+        const direction = tmpVector2.set(Math.sin(runtime.group.rotation.y - 0.4), 0.8, Math.cos(runtime.group.rotation.y - 0.4))
           .normalize()
           .multiplyScalar(0.9 * scale)
         spawnSprite(fx, 'heart', origin, direction, 2.2, 0.36 * scale, HEART_COLORS[0]!)
@@ -1911,24 +2312,23 @@ function applyGesture(
       break
     }
     case 'hairFlip': {
-      const lift = keyframe(u, [[0, 0], [0.2, 1], [0.6, 1], [0.8, 0]])
-      setArm(into, fs * 0.2, 0.78, -0.04, fs * 1, 0.6, -0.2, -0.6, 1.2)
-      blendArm(arms[freeArm], into, lift)
-      const flip = keyframe(u, [[0, 0], [0.3, 0.2], [0.45, 1], [0.7, 0.3], [1, 0]])
+      // Big confident hair toss: hand sweeps through the hair, head whips round.
+      const lift = keyframe(u, [[0, 0], [0.18, 1], [0.55, 1], [0.78, 0]])
+      setArm(into, -0.22, 0.8, -0.02, -1, 0.6, -0.2, -0.6, 1.2)
+      blendArm(arms[GESTURE_ARM], into, lift)
+      const flip = keyframe(u, [[0, 0], [0.28, -0.3], [0.44, 1.35], [0.66, 0.4], [1, 0]])
       blendBody(body, 'hairFlip', flip, 1)
-      blendBody(body, 'headRz', 0.28 * fs * flip - 0.1 * fs, w)
-      blendBody(body, 'headRx', -0.18 * flip, w)
-      blendBody(body, 'headRy', 0.25 * fs * flip, w)
+      blendBody(body, 'headRz', 0.34 * flip + 0.08, w)
+      blendBody(body, 'headRx', -0.26 * Math.max(0, flip), w)
+      blendBody(body, 'headRy', -0.35 * flip, w)
+      blendBody(body, 'torRy', -0.12 * flip, w)
+      blendBody(body, 'hipRz', body.hipRz + 0.1, w)
       blendBody(body, 'smile', 1, w)
-      blendBody(body, 'squint', 0.4, w)
-      blink[0] = Math.max(blink[0], 0.5 * flip)
-      blink[1] = Math.max(blink[1], 0.5 * flip)
-      if (!reduced && fireOnce(gesture, 'sparkles', u > 0.45)) {
-        const origin = rig.head.localToWorld(tmpVector.set(fs * 0.2, HEAD_CENTER_Y + 0.1, -0.05)).clone()
-        for (let index = 0; index < 5; index += 1) {
-          const velocity = new THREE.Vector3((Math.random() - 0.5) * 1.2, Math.random() * 0.8, (Math.random() - 0.5) * 1.2).multiplyScalar(scale)
-          spawnSprite(fx, 'sparkle', origin, velocity, 0.8 + Math.random() * 0.4, (0.1 + Math.random() * 0.08) * scale, SPARKLE_COLORS[index % 3]!)
-        }
+      blendBody(body, 'squint', 0.45, w)
+      blink[0] = Math.max(blink[0], 0.6 * Math.max(0, flip))
+      blink[1] = Math.max(blink[1], 0.6 * Math.max(0, flip))
+      if (fireOnce(gesture, 'sparkles', u > 0.44)) {
+        sparkleAt(rig.head.localToWorld(tmpVector.set(-0.22, HEAD_CENTER_Y + 0.1, -0.05)).clone(), 7)
       }
       break
     }
@@ -1948,30 +2348,28 @@ function applyGesture(
       const shoulder = anim.placement?.shoulder
       if (shoulder) {
         const local = worldToTorso(rig, shoulder, new THREE.Vector3())
-        setArm(into, local.x, local.y, local.z, ps * 0.8, -0.4, -0.5, 0.4, 0.4)
+        setArm(into, local.x, local.y, local.z, -0.8, -0.4, -0.5, 0.4, 0.4)
       } else {
-        setArm(into, ps * 0.5, 0.05, 0.35, ps * 0.8, -0.4, -0.5, 0.4, 0.4)
+        setArm(into, -0.5, 0.05, 0.35, -0.8, -0.4, -0.5, 0.4, 0.4)
       }
-      blendArm(arms[playerArm], into, lean)
+      blendArm(arms[GESTURE_ARM], into, lean)
       if (!reduced && fireOnce(gesture, 'heart', u > 0.35)) {
-        const origin = rig.head.localToWorld(tmpVector.set(ps * 0.15, HEAD_CENTER_Y + 0.25, 0.1)).clone()
+        const origin = rig.head.localToWorld(tmpVector.set(0, HEAD_CENTER_Y + 0.25, 0.1)).clone()
         spawnSprite(fx, 'heart', origin, new THREE.Vector3(0, 0.5, 0).multiplyScalar(scale), 2, 0.22 * scale, HEART_COLORS[1]!)
       }
       break
     }
     case 'fan': {
-      // Flustered: fans herself with a hand, eyes fluttering.
+      // Flustered by the winner: fans herself, lashes fluttering.
       const up = keyframe(u, [[0, 0], [0.15, 1], [0.85, 1], [1, 0]])
-      const flutter = Math.sin((anim.time - gesture.start) * 18)
-      setArm(into, fs * 0.2, 0.62 + flutter * 0.02, 0.24, fs * 1, -1, 0, -1.1, 0.8 + flutter * 0.55)
-      blendArm(arms[freeArm], into, up)
-      setArm(into, ps * 0.14, 0.3, 0.2, ps * 1, -1, 0.3, 0.3, 1.2)
-      blendArm(arms[playerArm], into, up * 0.8)
+      const flutter = Math.sin(elapsed * 18)
+      setArm(into, -0.2, 0.62 + flutter * 0.02, 0.24, -1, -1, 0, -1.1, 0.8 + flutter * 0.55)
+      blendArm(arms[GESTURE_ARM], into, up)
       blendBody(body, 'headRx', -0.18, up)
-      blendBody(body, 'headRz', 0.12 * fs, up)
+      blendBody(body, 'headRz', -0.12, up)
       blendBody(body, 'smile', 1, up)
       blendBody(body, 'browUp', 1, up)
-      const flutterBlink = Math.max(0, Math.sin((anim.time - gesture.start) * 14)) * 0.8 * up
+      const flutterBlink = Math.max(0, Math.sin(elapsed * 14)) * 0.8 * up
       blink[0] = Math.max(blink[0], flutterBlink)
       blink[1] = Math.max(blink[1], flutterBlink)
       if (!reduced && fireOnce(gesture, 'hearts', u > 0.3)) {
@@ -1983,20 +2381,20 @@ function applyGesture(
       break
     }
     case 'chaChing': {
-      // Both hands up rubbing fingers: money money money.
+      // Tray balanced on her head, both hands rubbing fingers: money money money.
       const up = keyframe(u, [[0, 0], [0.15, 1], [0.85, 1], [1, 0]])
-      const rub = Math.sin((anim.time - gesture.start) * 22) * 0.03
+      anim.trayOnHeadTarget = up > 0.02 ? 1 : 0
+      const rub = Math.sin(elapsed * 22) * 0.03
       setArm(into, 0.13 + rub, 0.3, 0.3, 1, -1, -0.2, -0.9, -0.4)
-      blendArm(arms[0], into, up)
-      const other = createArmTarget()
-      setArm(other, -0.13 - rub, 0.3, 0.3, -1, -1, -0.2, -0.9, -0.4)
-      blendArm(arms[1], other, up)
-      blendBody(body, 'bob', body.bob + Math.abs(Math.sin((anim.time - gesture.start) * 7)) * 0.03, up)
+      blendArm(arms[TRAY_ARM], into, up)
+      setArm(into, -0.13 - rub, 0.3, 0.3, -1, -1, -0.2, -0.9, -0.4)
+      blendArm(arms[GESTURE_ARM], into, up)
+      blendBody(body, 'bob', body.bob + Math.abs(Math.sin(elapsed * 7)) * 0.03, up)
       blendBody(body, 'smile', 1, up)
       blendBody(body, 'browUp', 1, up)
-      blendBody(body, 'headRz', 0.1 * Math.sin((anim.time - gesture.start) * 7), up)
+      blendBody(body, 'headRz', 0.06 * Math.sin(elapsed * 7), up)
       if (!reduced) {
-        const beat = Math.floor((anim.time - gesture.start) / 0.22)
+        const beat = Math.floor(elapsed / 0.22)
         if (u > 0.12 && u < 0.8 && fireOnce(gesture, `coin${beat}`, true)) {
           const origin = handWorld(beat % 2 === 0 ? 0 : 1)
           const velocity = new THREE.Vector3((Math.random() - 0.5) * 0.8, 1.4 + Math.random() * 0.6, (Math.random() - 0.5) * 0.8).multiplyScalar(scale)
@@ -2006,7 +2404,6 @@ function applyGesture(
       break
     }
     case 'cheekKiss': {
-      // Leans in for a cheeky peck on the player's cheek: leaves a lipstick mark.
       const lean = keyframe(u, [[0, 0], [0.28, 1], [0.6, 1], [0.8, 0]])
       blendBody(body, 'hipRz', 0.18 * ps, lean)
       blendBody(body, 'torRz', 0.22 * ps, lean)
@@ -2018,13 +2415,11 @@ function applyGesture(
       blendBody(body, 'smile', 1, keyframe(u, [[0.6, 0], [0.75, 1], [1, 1]]))
       blink[0] = Math.max(blink[0], lean * 0.95)
       blink[1] = Math.max(blink[1], lean * 0.95)
-      setArm(into, fs * 0.1, 0.3, 0.26, fs * 1, -0.8, 0.2, -0.4, 0.8)
-      blendArm(arms[freeArm], into, lean)
       const shoulder = anim.placement?.shoulder
       if (shoulder) {
         const local = worldToTorso(rig, shoulder, new THREE.Vector3())
-        setArm(into, local.x, local.y, local.z, ps * 0.8, -0.4, -0.5, 0.4, 0.4)
-        blendArm(arms[playerArm], into, lean)
+        setArm(into, local.x, local.y, local.z, -0.8, -0.4, -0.5, 0.4, 0.4)
+        blendArm(arms[GESTURE_ARM], into, lean)
       }
       if (fireOnce(gesture, 'mark', u > 0.45)) {
         let origin: THREE.Vector3
@@ -2037,7 +2432,6 @@ function applyGesture(
         } else {
           const head = anim.placement?.head
           origin = head ? head.clone().lerp(mouthWorld(), 0.3) : mouthWorld()
-          // Nudge the mark toward the camera so it sits in front of the cheek.
           const cameraPosition = input.camera.getWorldPosition(new THREE.Vector3())
           origin.add(cameraPosition.sub(origin).normalize().multiplyScalar(0.25 * scale))
         }
@@ -2049,15 +2443,13 @@ function applyGesture(
       break
     }
     case 'cheer': {
-      // Arms up, little hops, confetti + hearts.
+      // Tray hoisted high, free fist pumping, little hops, confetti.
       const up = keyframe(u, [[0, 0], [0.12, 1], [0.85, 1], [1, 0]])
-      const elapsed = anim.time - gesture.start
       const hop = Math.max(0, Math.sin(elapsed * 9)) * (u < 0.7 ? 1 : 0)
-      setArm(into, 0.34, 0.92 + hop * 0.04, 0.12, 1, 0, -0.6, -0.2, -0.3 + Math.sin(elapsed * 12) * 0.4)
-      blendArm(arms[0], into, up)
-      const other = createArmTarget()
-      setArm(other, -0.34, 0.92 + hop * 0.04, 0.12, -1, 0, -0.6, -0.2, -0.3 - Math.sin(elapsed * 12) * 0.4)
-      blendArm(arms[1], other, up)
+      setArm(into, 0.3, 0.95 + hop * 0.04, 0.1, 1, 0, -0.6, 0, 0)
+      blendArm(arms[TRAY_ARM], into, up)
+      setArm(into, -0.34, 0.92 + hop * 0.04, 0.12, -1, 0, -0.6, -0.2, -0.3 - Math.sin(elapsed * 12) * 0.4)
+      blendArm(arms[GESTURE_ARM], into, up)
       blendBody(body, 'bob', hop * 0.09 * (reduced ? 0 : 1), 1)
       blendBody(body, 'smile', 1, up)
       blendBody(body, 'browUp', 1, up)
@@ -2071,30 +2463,95 @@ function applyGesture(
           spawnSprite(fx, 'heart', origin, velocity, 1.8 + Math.random() * 0.6, (0.15 + Math.random() * 0.1) * scale, HEART_COLORS[index % 3]!)
         }
       }
-      if (!reduced && fireOnce(gesture, 'burst2', u > 0.45)) {
-        const origin = rig.head.localToWorld(tmpVector.set(0, HEAD_CENTER_Y + 0.35, 0)).clone()
-        spawnConfetti(fx, origin, 12, scale)
-      }
       break
     }
     case 'eyeRoll': {
       const roll = keyframe(u, [[0, 0], [0.2, 1], [0.7, 1], [0.9, 0]])
-      const elapsed = u
-      blendBody(body, 'gazeY', 0.9 * Math.sin(elapsed * Math.PI), roll)
-      blendBody(body, 'gazeX', Math.cos(elapsed * Math.PI * 1.6) * 0.8 * fs, roll)
+      blendBody(body, 'gazeY', 0.9 * Math.sin(u * Math.PI), roll)
+      blendBody(body, 'gazeX', Math.cos(u * Math.PI * 1.6) * 0.8, roll)
       blendBody(body, 'headRx', -0.14, roll)
-      blendBody(body, 'headRy', 0.35 * fs, roll)
+      blendBody(body, 'headRy', -0.35, roll)
       blendBody(body, 'pout', 1, roll)
       blendBody(body, 'smile', 0, roll)
       blendBody(body, 'browAngry', 0.7, roll)
-      setArm(into, fs * 0.185, -0.03, -0.03, fs, 0.1, -0.35, 0.2, 1.1)
-      blendArm(arms[freeArm], into, roll)
-      setArm(into, ps * 0.185, -0.03, -0.03, ps, 0.1, -0.35, 0.2, 1.1)
-      blendArm(arms[playerArm], into, roll)
+      break
+    }
+    case 'serve': {
+      // Takes the cocktail off her tray and sets it down by the owner's seat.
+      const spot = anim.serveSpot
+      const reach = keyframe(u, [[0, 0], [0.18, 1], [0.3, 1], [0.55, 1], [0.72, 0]])
+      const grab = keyframe(u, [[0, 0], [0.16, 1], [0.26, 0]])
+      // 1) right hand to the glass on the tray.
+      const trayGlass = worldToTorso(rig, rig.cocktail.getWorldPosition(new THREE.Vector3()), new THREE.Vector3())
+      setArm(into, trayGlass.x, trayGlass.y + 0.08, trayGlass.z + 0.02, -1, -1, -0.2, -0.4, 0)
+      blendArm(arms[GESTURE_ARM], into, grab)
+      // 2) reach out and set it down toward the spot.
+      const outU = keyframe(u, [[0.24, 0], [0.4, 1], [0.58, 1], [0.72, 0]])
+      if (spot) {
+        const local = worldToTorso(rig, spot, new THREE.Vector3())
+        local.y = Math.max(local.y + 0.2, -0.1)
+        setArm(into, local.x, local.y, local.z, -1, -0.6, -0.4, 0.3, 0)
+      } else {
+        setArm(into, -0.3, 0.1, 0.5, -1, -0.6, -0.4, 0.3, 0)
+      }
+      blendArm(arms[GESTURE_ARM], into, outU)
+      blendBody(body, 'torRx', 0.3, outU)
+      blendBody(body, 'hipRx', 0.1, outU)
+      blendBody(body, 'torRy', -0.25, outU)
+      blendBody(body, 'headRx', 0.18, outU)
+      blendBody(body, 'smile', 1, reach)
+      blendBody(body, 'browUp', 0.8, reach)
+      anim.cocktailInHand = u > 0.2 && u < 0.46
+      if (fireOnce(gesture, 'release', u > 0.46)) {
+        const from = rig.arms[GESTURE_ARM].hand.localToWorld(new THREE.Vector3(0, -0.05, 0))
+        serveCocktail(runtime, from, spot, scale)
+        anim.cocktailServedUntil = anim.time + gesture.duration * 0.5
+      }
+      // A wink as she lets go.
+      const closed = keyframe(u, [[0.5, 0], [0.56, 1], [0.7, 1], [0.76, 0]])
+      blink[winkEye] = Math.max(blink[winkEye], closed)
+      if (fireOnce(gesture, 'refill', u > 0.94)) {
+        sparkleAt(rig.cocktail.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.15 * scale, 0)), 4, 0.5)
+      }
+      break
+    }
+    case 'shoulderRub': {
+      // Steps behind the chair, tray balanced on her head, a friendly
+      // two-handed shoulder squeeze with a little bob, and a wink.
+      const on = keyframe(u, [[0, 0], [0.18, 1], [0.82, 1], [1, 0]])
+      anim.standBehindTarget = on
+      anim.trayOnHeadTarget = on > 0.02 ? 1 : 0
+      const shoulders = anim.placement?.shoulders
+      const squeeze = Math.abs(Math.sin(elapsed * 8)) * (u > 0.25 && u < 0.78 ? 1 : 0)
+      if (shoulders) {
+        const a = worldToTorso(rig, shoulders[0], new THREE.Vector3())
+        const b = worldToTorso(rig, shoulders[1], new THREE.Vector3())
+        const [left, right] = a.x >= b.x ? [a, b] : [b, a]
+        setArm(into, left.x, left.y + 0.04 - squeeze * 0.025, left.z, 0.9, 0.2, 0.3, 0.8, 0)
+        blendArm(arms[TRAY_ARM], into, on)
+        setArm(into, right.x, right.y + 0.04 - squeeze * 0.025, right.z, -0.9, 0.2, 0.3, 0.8, 0)
+        blendArm(arms[GESTURE_ARM], into, on)
+      }
+      blendBody(body, 'hipRx', 0.12, on)
+      blendBody(body, 'torRx', 0.34, on)
+      blendBody(body, 'hipRz', 0, on)
+      blendBody(body, 'torRz', 0, on)
+      blendBody(body, 'headRx', -0.32, on)
+      blendBody(body, 'headRz', 0.18 * ps + Math.sin(elapsed * 4) * 0.05, on)
+      blendBody(body, 'bob', body.bob - squeeze * 0.02, on)
+      blendBody(body, 'smile', 1, on)
+      blendBody(body, 'browUp', 0.8, on)
+      const closed = keyframe(u, [[0.45, 0], [0.5, 1], [0.62, 1], [0.67, 0]])
+      blink[winkEye] = Math.max(blink[winkEye], closed)
+      if (!reduced && fireOnce(gesture, 'hearts', u > 0.5)) {
+        const origin = rig.head.localToWorld(tmpVector.set(0, HEAD_CENTER_Y + 0.2, 0.2)).clone()
+        for (let index = 0; index < 2; index += 1) {
+          spawnSprite(fx, 'heart', origin, new THREE.Vector3((index - 0.5) * 0.3, 0.55, 0).multiplyScalar(scale), 1.7, 0.16 * scale, HEART_COLORS[index]!)
+        }
+      }
       break
     }
   }
-  void side
 }
 
 const ENTRANCE_DURATION = 1.9
@@ -2153,7 +2610,7 @@ function applyPose(runtime: CompanionRuntime, targets: PoseTargets, dt: number) 
     earring.rotation.z = Math.sin(time * 3.1 + index) * 0.25 - headVelocity * 0.3
     earring.rotation.x = Math.sin(time * 2.3 + index * 2) * 0.15
   })
-  rig.boa.rotation.x = 0.02 * Math.sin(time * 2.2)
+  rig.shirt.rotation.x = 0.015 * Math.sin(time * 2.2)
 
   // Face.
   targets.blink.forEach((closed, index) => {
@@ -2210,13 +2667,23 @@ function updateRootTransform(runtime: CompanionRuntime, input: CompanionUpdateIn
   const t = anim.time
   const scaleBase = placement.scale
 
-  if (!anim.positionReady) {
+  if (!anim.positionReady || placement.screenLocked) {
     anim.position.copy(placement.position)
     anim.yaw = placement.yaw
     anim.positionReady = true
   } else {
     anim.position.lerp(placement.position, Math.min(1, dt * 6))
     anim.yaw += angleDelta(anim.yaw, placement.yaw) * Math.min(1, dt * 5)
+  }
+
+  // Step behind the chair for the shoulder rub.
+  const behindTarget = placement.behind ? anim.standBehindTarget : 0
+  anim.standBehind += (behindTarget - anim.standBehind) * Math.min(1, dt * 4.5)
+  const base = tmpVector2.copy(anim.position)
+  let yaw = anim.yaw
+  if (placement.behind && anim.standBehind > 1e-3) {
+    base.lerp(placement.behind, anim.standBehind)
+    yaw += angleDelta(yaw, placement.behindYaw) * anim.standBehind
   }
 
   let spin = 0
@@ -2235,9 +2702,6 @@ function updateRootTransform(runtime: CompanionRuntime, input: CompanionUpdateIn
       spin = keyframe(u, [[0, -Math.PI * 4], [0.52, 0]])
       scale = keyframe(u, [[0, 0.05], [0.2, 0.9], [0.48, 1.08], [0.62, 0.97], [0.75, 1]])
       rig.hips.rotation.z += Math.sin(u * Math.PI * 6) * 0.18 * (1 - u)
-      if (!runtime.anim.gesture && u < 0.05) {
-        // no-op: gestures are suppressed during the entrance
-      }
     }
   } else if (anim.phase === 'leaving') {
     const duration = anim.exitFast ? FAST_EXIT_DURATION : EXIT_DURATION
@@ -2257,13 +2721,95 @@ function updateRootTransform(runtime: CompanionRuntime, input: CompanionUpdateIn
     }
   }
 
-  const direction = anim.side
-  const sideVector = tmpVector.set(Math.cos(anim.yaw), 0, -Math.sin(anim.yaw)).multiplyScalar(-direction * offsetSide * scaleBase)
-  group.position.copy(anim.position).add(sideVector)
+  const sideVector = tmpVector.set(Math.cos(yaw), 0, -Math.sin(yaw)).multiplyScalar(-anim.side * offsetSide * scaleBase)
+  group.position.copy(base).add(sideVector)
   group.position.y += sink * scaleBase
-  group.rotation.set(0, anim.yaw + spin, 0)
+  group.rotation.set(0, yaw + spin, 0)
   group.scale.setScalar(Math.max(1e-3, scale * scaleBase))
   fx.group.visible = true
+}
+
+/** Places the tray (hand or balanced on her head) and the cocktail, in model space. */
+function placeTrayAndCocktail(runtime: CompanionRuntime, dt: number) {
+  const { anim, rig } = runtime
+  anim.trayOnHead += (anim.trayOnHeadTarget - anim.trayOnHead) * Math.min(1, dt * 7)
+  const w = THREE.MathUtils.smoothstep(anim.trayOnHead, 0, 1)
+  rig.model.updateMatrixWorld(true)
+  const toModel = (object: THREE.Object3D, x: number, y: number, z: number) =>
+    rig.model.worldToLocal(object.localToWorld(new THREE.Vector3(x, y, z)))
+  const hand = toModel(rig.arms[TRAY_ARM].hand, 0, -0.045, 0).add(new THREE.Vector3(0.05, 0.035, 0.06))
+  const head = toModel(rig.head, 0, HEAD_CENTER_Y + 0.36, -0.03)
+  rig.tray.position.copy(hand).lerp(head, w)
+  rig.tray.position.y += Math.sin(w * Math.PI) * 0.18
+  const wobble = w * Math.sin(anim.time * 3.4) * 0.07
+  rig.tray.rotation.set(wobble * 0.6, 0, wobble)
+
+  const cocktail = rig.cocktail
+  if (anim.cocktailInHand) {
+    cocktail.visible = true
+    cocktail.position.copy(toModel(rig.arms[GESTURE_ARM].hand, 0, -0.07, 0.02)).add(new THREE.Vector3(0, -0.06, 0))
+    cocktail.rotation.set(0, 0, 0)
+    cocktail.scale.setScalar(1)
+  } else if (anim.time < anim.cocktailServedUntil) {
+    cocktail.visible = false
+  } else {
+    // On the tray (pops back in after a serve).
+    const refill = THREE.MathUtils.clamp((anim.time - anim.cocktailServedUntil) / 0.3, 0, 1)
+    cocktail.visible = true
+    cocktail.position.copy(rig.tray.position).add(new THREE.Vector3(0.05, 0.004, -0.02))
+    cocktail.rotation.copy(rig.tray.rotation)
+    cocktail.scale.setScalar(anim.cocktailServedUntil > 0 ? keyframe(refill, [[0, 0.2], [0.7, 1.15], [1, 1]]) : 1)
+  }
+}
+
+interface ServedDrink {
+  object: THREE.Group
+  from: THREE.Vector3
+  to: THREE.Vector3
+  age: number
+  scale: number
+}
+
+const SERVED_FLIGHT = 0.45
+const SERVED_LIFE = 7
+
+/** Launches a copy of her cocktail from her hand to the serve spot on the felt. */
+function serveCocktail(runtime: CompanionRuntime, from: THREE.Vector3, to: THREE.Vector3 | null, scale: number) {
+  const { fx, rig } = runtime
+  const object = rig.cocktail.clone(true)
+  object.visible = true
+  object.rotation.set(0, 0, 0)
+  fx.group.add(object)
+  const target = to ? to.clone() : from.clone().add(new THREE.Vector3(0, -0.5 * scale, 0))
+  fx.served.push({ object, from: from.clone(), to: target, age: 0, scale })
+  while (fx.served.length > 3) {
+    fx.served.shift()!.object.removeFromParent()
+  }
+}
+
+function updateServedDrinks(fx: CompanionFx, dt: number, reducedMotion: boolean) {
+  for (let index = fx.served.length - 1; index >= 0; index -= 1) {
+    const drink = fx.served[index]!
+    drink.age += dt
+    const object = drink.object
+    if (drink.age >= SERVED_LIFE) {
+      object.removeFromParent()
+      fx.served.splice(index, 1)
+      continue
+    }
+    const flight = THREE.MathUtils.clamp(drink.age / SERVED_FLIGHT, 0, 1)
+    object.position.copy(drink.from).lerp(drink.to, flight)
+    object.position.y += Math.sin(flight * Math.PI) * 0.35 * drink.scale
+    const land = flight >= 1 ? keyframe(drink.age - SERVED_FLIGHT, [[0, 1.2], [0.15, 0.92], [0.3, 1]]) : 1
+    const fade = 1 - THREE.MathUtils.smoothstep(drink.age, SERVED_LIFE - 0.6, SERVED_LIFE)
+    object.scale.setScalar(Math.max(1e-3, drink.scale * land * fade))
+    if (!reducedMotion && flight >= 1 && drink.age - dt < SERVED_FLIGHT) {
+      spawnSprite(fx, 'sparkle', drink.to.clone().add(new THREE.Vector3(0, 0.2 * drink.scale, 0)), new THREE.Vector3(0, 0.4 * drink.scale, 0), 0.8, 0.16 * drink.scale, SPARKLE_COLORS[0]!)
+    }
+    if (!reducedMotion && drink.age >= SERVED_LIFE - 0.6 && drink.age - dt < SERVED_LIFE - 0.6) {
+      spawnSprite(fx, 'sparkle', object.position.clone().add(new THREE.Vector3(0, 0.15 * drink.scale, 0)), new THREE.Vector3(0, 0.3 * drink.scale, 0), 0.6, 0.14 * drink.scale, SPARKLE_COLORS[2]!)
+    }
+  }
 }
 
 function spawnEntranceBurst(runtime: CompanionRuntime, input: CompanionUpdateInput) {
@@ -2333,6 +2879,7 @@ export function updateCompanion(runtime: CompanionRuntime, input: CompanionUpdat
   if (anim.phase === 'hidden') {
     group.visible = false
     updateParticles(fx, dt, anim.time)
+    updateServedDrinks(fx, dt, input.reducedMotion)
     return
   }
 
@@ -2341,6 +2888,7 @@ export function updateCompanion(runtime: CompanionRuntime, input: CompanionUpdat
     // Owner seat not found: hide quietly (keep state so she can come back).
     group.visible = false
     updateParticles(fx, dt, anim.time)
+    updateServedDrinks(fx, dt, input.reducedMotion)
     return
   }
   anim.placement = placement
@@ -2351,6 +2899,16 @@ export function updateCompanion(runtime: CompanionRuntime, input: CompanionUpdat
     const localX = dx * Math.cos(placement.yaw) - dz * Math.sin(placement.yaw)
     anim.playerSide = localX >= 0 ? 1 : -1
   }
+  if (input.ownerSeat && !input.ownerIsHero) {
+    anim.serveSpot = computeServeSpot(input.ownerSeat.getWorldPosition(new THREE.Vector3()), placement.position)
+  } else if (input.ownerIsHero) {
+    // "Your" drink lands on the felt just in front of the lens.
+    input.camera.updateMatrixWorld()
+    const spot = input.camera.localToWorld(new THREE.Vector3(-0.35, -0.6, -2.4))
+    anim.serveSpot = spot
+  } else {
+    anim.serveSpot = null
+  }
 
   if (anim.phase === 'entering' && !anim.enteredBurst) {
     anim.enteredBurst = true
@@ -2358,18 +2916,33 @@ export function updateCompanion(runtime: CompanionRuntime, input: CompanionUpdat
   }
   if (anim.phase === 'entering' && anim.time - anim.phaseStart > 0.9 && !anim.line) {
     const context = anim.current ? getLadyLuckMoodContext({ mood: 'arrive', reason: anim.current.reason }) : 'arrive_streak'
-    say(anim, context, 4)
+    say(anim, context, 3.2)
   }
   if (anim.phase !== 'entering') anim.enteredBurst = false
 
-  // Idle gesture scheduler.
+  // Gesture scheduler.
   if (anim.phase === 'present' && !anim.gesture && anim.time >= anim.nextGestureAt && anim.current) {
-    const name = pickCompanionGesture(anim.current.mood, anim.random, anim.lastGesture, input.reducedMotion)
+    const name = anim.queuedGesture ?? pickCompanionGesture(
+      anim.current.mood,
+      anim.random,
+      anim.lastGesture,
+      input.reducedMotion,
+      input.ownerIsHero || !placement.behind ? SEAT_ONLY_GESTURES : []
+    )
+    anim.queuedGesture = null
     startGesture(anim, name, anim.time)
-    if (anim.random() < 0.55 && anim.time > anim.lineUntil + 1.5) {
-      say(anim, anim.current.mood === 'cheer' ? 'cheer' : 'flirt', 3.2)
+    if (name === 'serve') say(anim, 'serve', 2.4)
+    anim.nextGestureAt = anim.time + GESTURE_DURATIONS[name] + 1.6 + anim.random() * 2.6
+  }
+
+  // Chatter: a short quip every ~6-12 s (flirty to her owner, sassy about others).
+  if (anim.phase === 'present' && !anim.muted && anim.time >= anim.nextChatAt && anim.time > anim.lineUntil) {
+    const names = anim.otherNames.filter(Boolean)
+    if (names.length > 0 && anim.random() < 0.35) {
+      say(anim, 'sass_other', 2.8, names[Math.floor(anim.random() * names.length) % names.length])
+    } else {
+      say(anim, anim.current?.mood === 'cheer' ? 'cheer' : 'flirt', 2.8)
     }
-    anim.nextGestureAt = anim.time + GESTURE_DURATIONS[name] + 2.8 + anim.random() * 3.4
   }
 
   group.visible = true
@@ -2378,12 +2951,14 @@ export function updateCompanion(runtime: CompanionRuntime, input: CompanionUpdat
   applyPose(runtime, targets, dt)
   updateRootTransform(runtime, input, dt)
   group.updateMatrixWorld(true)
+  placeTrayAndCocktail(runtime, dt)
 
-  // Sequin shimmer: drift the sparkle map and pulse its glow.
+  // A little sequin sparkle on the swim top.
   const sequins = rig.materials.sequinTexture
-  sequins.offset.set((anim.time * 0.013) % 1, Math.floor(anim.time * 5) * 0.137 % 1)
-  rig.materials.dress.emissiveIntensity = input.reducedMotion ? 0.8 : 0.75 + 0.35 * Math.sin(anim.time * 3.3)
+  sequins.offset.set((anim.time * 0.02) % 1, Math.floor(anim.time * 5) * 0.137 % 1)
+  rig.materials.swimTop.emissiveIntensity = input.reducedMotion ? 0.55 : 0.5 + 0.3 * Math.sin(anim.time * 3.3)
 
   updateParticles(fx, dt, anim.time)
+  updateServedDrinks(fx, dt, input.reducedMotion)
 }
 

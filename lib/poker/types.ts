@@ -192,6 +192,8 @@ export interface LadyLuckCompanionState {
   mood: LadyLuckMood
   /** Server ms timestamp of the last mood change. */
   since: number
+  /** Her owner told her to shut up: no speech until she leaves. */
+  muted: boolean
 }
 
 // Internal game state used by the engine (includes full hole cards for all players)

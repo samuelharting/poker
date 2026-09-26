@@ -34,6 +34,8 @@ interface HarnessApi {
   seat: (seat: number) => void
   hero: (isHero: boolean) => void
   fold: (folded: boolean) => void
+  mute: () => void
+  act: (cue: 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'all_in') => void
   line: () => string | null
 }
 
@@ -43,7 +45,7 @@ declare global {
   }
 }
 
-const GESTURES: CompanionGesture[] = ['wink', 'blowKiss', 'hairFlip', 'lean', 'fan', 'chaChing', 'cheekKiss', 'cheer', 'eyeRoll']
+const GESTURES: CompanionGesture[] = ['wink', 'fingerGuns', 'blowKiss', 'hairFlip', 'serve', 'shoulderRub', 'lean', 'fan', 'chaChing', 'cheekKiss', 'cheer', 'eyeRoll']
 
 function toonMaterial(color: string) {
   const ramp = new THREE.DataTexture(new Uint8Array([80, 150, 210, 255]), 4, 1, THREE.RedFormat)
@@ -112,7 +114,7 @@ export default function CompanionHarness() {
       new THREE.MeshStandardMaterial({ color: '#0f6b45', roughness: 0.9 })
     )
     table.scale.set(TABLE_FELT_SEMI_AXIS_X, 1, TABLE_FELT_SEMI_AXIS_Z)
-    table.position.y = 0.92
+    table.position.y = 0.25
     table.receiveShadow = true
     scene.add(table)
     const rail = new THREE.Mesh(
@@ -121,7 +123,7 @@ export default function CompanionHarness() {
     )
     rail.rotation.x = Math.PI / 2
     rail.scale.set(TABLE_FELT_SEMI_AXIS_X, TABLE_FELT_SEMI_AXIS_Z, 1)
-    rail.position.y = 1.07
+    rail.position.y = 0.5
     scene.add(rail)
 
     const seatColors = ['#2b4a7a', '#7a2b3c', '#2f6b4f', '#6b4f2f', '#4b2f6b', '#2f5f6b', '#6b2f2f', '#34406b']
@@ -146,6 +148,8 @@ export default function CompanionHarness() {
     let time = 0
     let serverNow = 1_000
     let counter = 0
+    let actionCounter = 0
+    let ownerAction: { key: string; cue: 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'all_in' } = { key: 'a0', cue: 'check' }
 
     const resize = () => {
       const width = mount.clientWidth
@@ -195,6 +199,12 @@ export default function CompanionHarness() {
         ownerIsHero,
         camera,
         ownerFolded,
+        table: {
+          ownerActionKey: ownerAction.key,
+          ownerActionCue: ownerAction.cue,
+          otherPlayerNames: ['Bot Bluff', 'Nova', 'Dealer Dan'],
+          allIn: null,
+        },
       })
       placeCamera(0)
       postFx.composer.render()
@@ -233,7 +243,7 @@ export default function CompanionHarness() {
         }
         if (!state) {
           counter += 1
-          state = { id: `dev-${counter}`, ownerId: `seat-${ownerSeat}`, reason, streak: 2, mood, since: serverNow }
+          state = { id: `dev-${counter}`, ownerId: `seat-${ownerSeat}`, reason, streak: 2, mood, since: serverNow, muted: false }
           return
         }
         state = { ...state, mood, reason, since: serverNow, streak: mood === 'cheer' ? state.streak + 1 : state.streak }
@@ -241,7 +251,7 @@ export default function CompanionHarness() {
       newCompanion(reason = 'streak') {
         counter += 1
         serverNow += 1000
-        state = { id: `dev-${counter}`, ownerId: `seat-${ownerSeat}`, reason, streak: 2, mood: 'arrive', since: serverNow }
+        state = { id: `dev-${counter}`, ownerId: `seat-${ownerSeat}`, reason, streak: 2, mood: 'arrive', since: serverNow, muted: false }
       },
       gesture(name) {
         triggerCompanionGesture(companion, name)
@@ -266,6 +276,13 @@ export default function CompanionHarness() {
       },
       fold(next) {
         ownerFolded = next
+      },
+      mute() {
+        if (state) state = { ...state, muted: true }
+      },
+      act(cue) {
+        actionCounter += 1
+        ownerAction = { key: `a${actionCounter}`, cue }
       },
       line() {
         return getCompanionLine(companion)
@@ -341,6 +358,8 @@ export default function CompanionHarness() {
           api.seat(Math.floor(Math.random() * 7) + 1)
           api.newCompanion('big_win')
         })}
+        {button('🤫 Shut up', () => apiRef.current?.mute())}
+        {button('Owner bets', () => apiRef.current?.act('bet'))}
         {button('Fold', () => apiRef.current?.fold(true))}
         {button('Unfold', () => apiRef.current?.fold(false))}
         {GESTURES.map(name => button(name, () => apiRef.current?.gesture(name)))}

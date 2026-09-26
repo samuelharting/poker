@@ -26,7 +26,11 @@ export default function BadgePreview() {
           streak: mood === 'cheer' ? (previous?.streak ?? 2) + 1 : previous?.streak ?? 2,
           mood,
           since: Date.now(),
+          muted: mood === 'arrive' && fresh ? false : previous?.muted ?? false,
         }))
+      },
+      mute() {
+        setCompanion(previous => (previous ? { ...previous, muted: true } : previous))
       },
       clear() {
         setCompanion(null)
@@ -60,7 +64,7 @@ export default function BadgePreview() {
       </div>
       <div className="mobile-hero-lane" style={{ position: 'absolute', left: 0, right: 0, bottom: 20, height: 120 }}>
         <div style={{ padding: 12, font: '700 14px system-ui' }}>Hero lane</div>
-        <CompanionBadge companion={companion} playerId="hero" placement="hero" />
+        <CompanionBadge companion={companion} playerId="hero" placement="hero" canMute />
       </div>
       <div style={{ position: 'absolute', bottom: 4, left: 8, fontSize: 11, opacity: 0.6 }}>updates: {counter}</div>
     </div>

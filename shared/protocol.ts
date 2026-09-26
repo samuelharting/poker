@@ -76,6 +76,7 @@ export type C2SMessage =
   | { type: 'table_chat'; message: string; targetId?: string }
   | { type: 'table_emote'; emote: string; targetId?: string }
   | { type: 'order_drink'; kind: DrinkKind }
+  | { type: 'companion_mute' }
 
 // Server -> Client messages
 export type S2CMessage =
@@ -308,6 +309,9 @@ export function parseC2S(raw: string): C2SMessage | null {
         const kind = parsed.kind
         return kind === 'beer' || kind === 'water' ? { type, kind } : null
       }
+
+      case 'companion_mute':
+        return { type }
 
       default:
         return null

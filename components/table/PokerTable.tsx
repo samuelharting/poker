@@ -17,7 +17,7 @@ import { PotDisplay } from './PotDisplay'
 import { ShowdownCinematic, useShowdownPresentation } from './ShowdownCinematic'
 import { DrinkControls } from './DrinkControls'
 import { SeatDrinkBadge } from './SeatDrinkBadge'
-import { CompanionBadge, CompanionToast } from './CompanionBadge'
+import { CompanionBadge, CompanionMuteButton, CompanionToast } from './CompanionBadge'
 import { ChipStack } from '@/components/ui/ChipStack'
 import { PlayingCard } from '@/components/ui/PlayingCard'
 import { SearchableEmojiPicker } from '@/components/ui/SearchableEmojiPicker'
@@ -1842,6 +1842,7 @@ export function PokerTable({
         />
       ) : null}
       {!isMobileViewport && showdownCinematic}
+      <CompanionMuteButton companion={state.companion} yourId={yourId} hidden={isMobileViewport} />
       <CompanionToast
         companion={state.companion}
         yourId={yourId}
@@ -2039,7 +2040,7 @@ export function PokerTable({
                   status={mobileHeroStatus}
                 />
                 <DrinkControls variant="mobile" />
-                <CompanionBadge companion={state.companion} playerId={visibleOwnPlayer.id} placement="hero" />
+                <CompanionBadge companion={state.companion} playerId={visibleOwnPlayer.id} placement="hero" canMute />
 
                 <OwnHand
                   cards={ownHandCards}

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Connection, Room } from 'partykit/server'
 import PokerRoom from '@/partykit/room'
-import type { C2SMessage, S2CMessage } from '@/shared/protocol'
+import { parseC2S, type C2SMessage, type S2CMessage } from '@/shared/protocol'
 
 class MockConnection {
   readyState = 1
@@ -59,7 +59,6 @@ type Internals = {
     gameState: {
       phase: string
       handNumber: number
-      bigBlind: number
       players: Array<{ id: string; holeCards: unknown[]; status: string; totalInPot: number }>
       winners?: Array<{ playerId: string; amount: number }>
     }
@@ -114,26 +113,49 @@ describe('PokerRoom Lady Luck companion', () => {
     expect(bobs!.id).not.toBe(arrived!.id)
   })
 
-  it('arrives straight away for a pot of at least 20 big blinds', () => {
+  it('lets only her owner tell her to shut up, and resets that when she reappears', () => {
     const { server, join } = createRoom()
     const ann = join('ann', 'Ann', 0)
-    join('bob', 'Bob', 1)
+    const bob = join('bob', 'Bob', 1)
     const internals = server as unknown as Internals
-    const gameState = internals.data.gameState
-    gameState.phase = 'between_hands'
-    gameState.handNumber = 1
-    for (const player of gameState.players) {
-      player.holeCards = [{ rank: 'Q', suit: 'spades' }, { rank: 'Q', suit: 'hearts' }]
-      player.status = 'active'
-      player.totalInPot = 300
+    const playHand = (handNumber: number, winnerId: string) => {
+      internals.data.gameState.phase = 'between_hands'
+      internals.data.gameState.handNumber = handNumber
+      for (const player of internals.data.gameState.players) {
+        player.holeCards = [{ rank: 'Q', suit: 'spades' }, { rank: 'Q', suit: 'hearts' }]
+        player.status = 'active'
+      }
+      internals.data.gameState.winners = [{ playerId: winnerId, amount: 60 }]
+      internals.recordHandsPlayedForCurrentHand()
+      internals.recordCompletedHandStats()
     }
-    gameState.winners = [{ playerId: ann.playerId, amount: gameState.bigBlind * 20 }]
-    internals.recordHandsPlayedForCurrentHand()
-    internals.recordCompletedHandStats()
+    const mute = (connection: Connection) => server.onMessage(JSON.stringify({ type: 'companion_mute' }), connection)
+    const companion = () => internals.buildSnapshotFor(bob.connection.id).state.companion
 
-    expect(internals.buildSnapshotFor(ann.connection.id).state.companion).toMatchObject({
-      ownerId: ann.playerId,
-      reason: 'big_win',
-    })
+    playHand(1, ann.playerId)
+    playHand(2, ann.playerId)
+    expect(companion()).toMatchObject({ ownerId: ann.playerId, muted: false })
+
+    mute(bob.connection)
+    expect(companion()?.muted).toBe(false)
+    mute(ann.connection)
+    expect(companion()?.muted).toBe(true)
+    // The mute is broadcast to the whole table.
+    const lastSnapshot = [...(bob.connection as unknown as MockConnection).messages]
+      .reverse()
+      .find(message => message.type === 'room_snapshot')
+    expect(lastSnapshot?.type === 'room_snapshot' && lastSnapshot.state.companion?.muted).toBe(true)
+
+    playHand(3, bob.playerId)
+    playHand(4, bob.playerId)
+    expect(companion()).toMatchObject({ ownerId: bob.playerId, muted: false })
+  })
+})
+
+describe('companion_mute protocol', () => {
+  it('parses the owner mute request and rejects junk', () => {
+    expect(parseC2S(JSON.stringify({ type: 'companion_mute' }))).toEqual({ type: 'companion_mute' })
+    expect(parseC2S(JSON.stringify({ type: 'companion_mute', extra: 'ignored' }))).toEqual({ type: 'companion_mute' })
+    expect(parseC2S('{"type":"companion_muted"}')).toBeNull()
   })
 })

@@ -34,6 +34,7 @@ import {
   applyLadyLuckHandOutcome,
   createLadyLuckTracker,
   getVisibleLadyLuck,
+  muteLadyLuck,
   type LadyLuckTracker,
 } from '../lib/poker/ladyLuck'
 import {
@@ -285,6 +286,9 @@ export default class PokerRoom implements PartyServer {
           break
         case 'order_drink':
           this.handleOrderDrink(sender, msg.kind)
+          break
+        case 'companion_mute':
+          this.handleCompanionMute(sender)
           break
         default:
           this.sendError(sender, 'Unknown message type')
@@ -1971,6 +1975,20 @@ export default class PokerRoom implements PartyServer {
     )
   }
 
+  /** Only Lady Luck's current owner may tell her to shut up; anyone else is ignored. */
+  private handleCompanionMute(conn: Connection) {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    if (!playerId) {
+      return
+    }
+    const next = muteLadyLuck(this.data.ladyLuck, playerId)
+    if (next === this.data.ladyLuck) {
+      return
+    }
+    this.data.ladyLuck = next
+    this.broadcastState()
+  }
+
   /** Cosmetic only: feeds the finished hand to the Lady Luck companion rules. */
   private recordLadyLuckOutcome() {
     const state = this.data.gameState
@@ -1980,19 +1998,11 @@ export default class PokerRoom implements PartyServer {
 
     this.data.ladyLuck = applyLadyLuckHandOutcome(this.data.ladyLuck, {
       handNumber: state.handNumber,
-      bigBlind: state.bigBlind,
       now: Date.now(),
       winners: state.winners,
       players: state.players.map(player => ({
         id: player.id,
         dealtIn: player.holeCards.length === 2,
-        folded: player.status === 'folded',
-        allIn: player.status === 'all_in',
-        totalInPot: player.totalInPot,
-        forcedBlind: Math.min(
-          player.totalInPot,
-          player.isBB ? state.bigBlind : player.isSB ? state.smallBlind : 0
-        ),
       })),
     })
   }

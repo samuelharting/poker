@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TableState } from '@/lib/poker/types'
+import { LADY_LUCK_MUTE_EVENT } from '@/lib/ladyLuckLines'
 import type { PlayerProfile } from '@/lib/profile'
 import {
   MAX_CHAT_LENGTH,
@@ -159,6 +160,13 @@ export function useRoom(
 
   const orderDrink = useCallback((kind: DrinkKind) => {
     sendMessage({ type: 'order_drink', kind })
+  }, [sendMessage])
+
+  // Lady Luck's "shut up" button dispatches a window event (see lib/ladyLuckLines).
+  useEffect(() => {
+    const onMute = () => sendMessage({ type: 'companion_mute' })
+    window.addEventListener(LADY_LUCK_MUTE_EVENT, onMute)
+    return () => window.removeEventListener(LADY_LUCK_MUTE_EVENT, onMute)
   }, [sendMessage])
 
   useEffect(() => {
