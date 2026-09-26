@@ -1,4 +1,4 @@
-import type { Card, SeatPlayer, TableState } from '@/lib/poker/types'
+import type { Card, LadyLuckCompanionState, SeatPlayer, TableState } from '@/lib/poker/types'
 import type {
   PlayerAvatarCelebration,
   PlayerAvatarGlassesStyle,
@@ -145,7 +145,16 @@ export interface ThreeTableViewModel {
   actionKey: string
   lastAction: string
   allInAnnouncement: ThreeAllInAnnouncement | null
+  /** "Lady Luck" win-streak companion (server-authoritative), or null. */
+  companion: ThreeCompanionView | null
 }
+
+/**
+ * id: changes each time she (re)appears. ownerId: player she is with.
+ * mood: renderer hint; `cheer` when the owner just won again.
+ * since: server ms timestamp of the last mood change.
+ */
+export type ThreeCompanionView = LadyLuckCompanionState
 
 export interface ThreeEmoteReaction {
   id: string
@@ -347,6 +356,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
     actionKey,
     lastAction,
     allInAnnouncement,
+    companion: state.companion ? { ...state.companion } : null,
   }
 }
 

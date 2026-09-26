@@ -29,6 +29,13 @@ import {
   isTrueShowdown,
   RUN_IT_TWICE_PRESENTATION_DURATION_MS,
 } from '../lib/poker/showdown'
+import {
+  advanceLadyLuckForNewHand,
+  applyLadyLuckHandOutcome,
+  createLadyLuckTracker,
+  getVisibleLadyLuck,
+  type LadyLuckTracker,
+} from '../lib/poker/ladyLuck'
 import { MAX_CHAT_LENGTH, parseC2S } from '../shared/protocol'
 
 interface TableSettings {
@@ -80,6 +87,7 @@ interface RoomData {
   tableSettings: TableSettings
   pendingTableSettings: Partial<TableSettings> | null
   autoStartEnabled: boolean
+  ladyLuck: LadyLuckTracker
 }
 
 function generateId(length = 8): string {
@@ -172,6 +180,7 @@ export default class PokerRoom implements PartyServer {
       tableSettings: { ...DEFAULT_SETTINGS },
       pendingTableSettings: null,
       autoStartEnabled: true,
+      ladyLuck: createLadyLuckTracker(),
     }
   }
 
@@ -1580,6 +1589,7 @@ export default class PokerRoom implements PartyServer {
         autoStartDelay: this.data.tableSettings.autoStartDelay,
         pendingTableSettings,
         lobbyPlayers: this.buildLobbyPlayers(),
+        companion: getVisibleLadyLuck(this.data.ladyLuck, this.getSeatedPlayerIds()),
       },
     }
   }
@@ -1702,6 +1712,13 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
+    this.data.ladyLuck = advanceLadyLuckForNewHand(
+      this.data.ladyLuck,
+      handNumber,
+      this.getSeatedPlayerIds(),
+      Date.now()
+    )
+
     for (const player of this.data.gameState.players) {
       if (player.holeCards.length !== 2) {
         continue
@@ -1750,6 +1767,7 @@ export default class PokerRoom implements PartyServer {
     }
 
     this.data.countedWinHands[handNumber] = true
+    this.recordLadyLuckOutcome()
     const winnerAmounts = new Map<string, number>()
     for (const winner of this.data.gameState.winners) {
       winnerAmounts.set(winner.playerId, (winnerAmounts.get(winner.playerId) ?? 0) + winner.amount)
@@ -1782,6 +1800,40 @@ export default class PokerRoom implements PartyServer {
         ...winner,
         venmoUsername: profile.venmoUsername,
       }
+    })
+  }
+
+  private getSeatedPlayerIds(): Set<string> {
+    return new Set(
+      this.data.gameState.players
+        .filter(player => !this.data.spectatorIds[player.id] && !this.data.pendingRemovals[player.id])
+        .map(player => player.id)
+    )
+  }
+
+  /** Cosmetic only: feeds the finished hand to the Lady Luck companion rules. */
+  private recordLadyLuckOutcome() {
+    const state = this.data.gameState
+    if (!state.winners?.length) {
+      return
+    }
+
+    this.data.ladyLuck = applyLadyLuckHandOutcome(this.data.ladyLuck, {
+      handNumber: state.handNumber,
+      bigBlind: state.bigBlind,
+      now: Date.now(),
+      winners: state.winners,
+      players: state.players.map(player => ({
+        id: player.id,
+        dealtIn: player.holeCards.length === 2,
+        folded: player.status === 'folded',
+        allIn: player.status === 'all_in',
+        totalInPot: player.totalInPot,
+        forcedBlind: Math.min(
+          player.totalInPot,
+          player.isBB ? state.bigBlind : player.isSB ? state.smallBlind : 0
+        ),
+      })),
     })
   }
 

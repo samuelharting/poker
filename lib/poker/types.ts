@@ -173,6 +173,22 @@ export interface TableState {
   lobbyPlayers: LobbyPlayer[]
   winners?: HandWinner[]
   bounty?: BountyMetadata
+  /** "Lady Luck" win-streak companion; null/absent when nobody is hot. */
+  companion?: LadyLuckCompanionState | null
+}
+
+export type LadyLuckReason = 'big_win' | 'streak'
+export type LadyLuckMood = 'arrive' | 'flirt' | 'cheer' | 'sulk_leave'
+
+export interface LadyLuckCompanionState {
+  /** Changes each time she (re)appears so renderers can replay an entrance. */
+  id: string
+  ownerId: string
+  reason: LadyLuckReason
+  streak: number
+  mood: LadyLuckMood
+  /** Server ms timestamp of the last mood change. */
+  since: number
 }
 
 // Internal game state used by the engine (includes full hole cards for all players)
