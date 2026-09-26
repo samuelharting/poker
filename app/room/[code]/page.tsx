@@ -28,6 +28,11 @@ import {
   type PokerSoundPreferences,
 } from '@/lib/poker/soundscape'
 import { usePokerSoundscape } from '@/hooks/usePokerSoundscape'
+import { useDrunkHallucination } from '@/hooks/useDrunkHallucination'
+import { DrinkProvider } from '@/components/table/DrinkContext'
+import { DrinkControls } from '@/components/table/DrinkControls'
+import { DrinkToasts } from '@/components/table/DrinkToasts'
+import { DrunkVisionLayer } from '@/components/table/DrunkVisionLayer'
 
 const ignoreFeedback = () => {}
 
@@ -141,10 +146,12 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
   })
   const [soundPreferencesReady, setSoundPreferencesReady] = useState(false)
 
-  const { tableState, socialState, yourId, isHost, sendAction, seatMe, sendMessage, isConnected, connectionIssue } = useRoom(
+  const { tableState, socialState, yourId, isHost, sendAction, seatMe, sendMessage, isConnected, connectionIssue, drinkEvents, orderDrink } = useRoom(
     roomCode,
     currentProfile
   )
+  // Drunk players occasionally misread a freshly dealt card on their own screen only.
+  const displayTableState = useDrunkHallucination(tableState, yourId)
   const { playCue: playSoundCue } = usePokerSoundscape(tableState ?? undefined, yourId, {
     enabled: soundPreferencesReady,
     connected: isConnected,
@@ -287,6 +294,13 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
   }, [sendMessage])
 
   return (
+    <DrinkProvider
+      yourId={yourId}
+      players={tableState?.players ?? []}
+      events={drinkEvents}
+      isConnected={isConnected}
+      onOrder={orderDrink}
+    >
     <div className="room-shell">
       <RoomHud
         roomCode={roomCode}
@@ -304,7 +318,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
 
       {tableState ? (
         <PokerTable
-          state={tableState}
+          state={displayTableState ?? tableState}
           socialState={socialState}
           yourId={yourId}
           isHost={isHost}
@@ -393,6 +407,14 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
         </div>
       )}
 
+      {tableState && (
+        <>
+          <DrunkVisionLayer />
+          <DrinkControls variant="desktop" />
+          <DrinkToasts />
+        </>
+      )}
     </div>
+    </DrinkProvider>
   )
 }

@@ -1,0 +1,948 @@
+/* ==========================================================================
+   Drinks: beer / water controls, table toasts, seat badges and the
+   drinker's own "drunk vision" (see components/table/Drunk*.tsx).
+
+   Drunk vision is driven by attributes that DrunkVisionLayer puts on <html>:
+     data-drunk-tier   buzzed | tipsy | drunk | wasted | out
+     data-drunk-wobble action buttons wobble (level 6+)
+     data-drunk-hiccup a hiccup is happening right now
+     data-drunk-misread a card is being misread right now
+   and CSS variables --drunk-blur, --drunk-ghost, --drunk-sway-deg,
+   --drunk-sway-px, --drunk-pulse and --drunk-tint.
+   ========================================================================== */
+
+@property --drunk-phase {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Controls
+   -------------------------------------------------------------------------- */
+
+.drink-controls {
+  --drink-amber: var(--c-brass-400);
+  --drink-sky: var(--c-sky-400);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-family: var(--font-ui);
+  color: var(--c-text-1);
+  pointer-events: auto;
+}
+
+.drink-controls.is-desktop {
+  position: fixed;
+  left: 174px;
+  bottom: 20px;
+  z-index: 223;
+  min-height: 46px;
+  padding: 5px 14px 5px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface-glass);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(14px);
+}
+
+@media (max-width: 1023px) {
+  .drink-controls.is-desktop {
+    display: none;
+  }
+}
+
+.drink-buttons {
+  position: relative;
+  display: flex;
+  gap: 6px;
+}
+
+.drink-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 13px 0 5px;
+  border: 1px solid rgba(242, 199, 102, 0.28);
+  border-radius: var(--r-pill);
+  background: linear-gradient(180deg, rgba(242, 199, 102, 0.14), rgba(242, 199, 102, 0.04));
+  color: var(--c-text-1);
+  font: 700 var(--fs-12) / 1 var(--font-ui);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out),
+    opacity var(--dur-base) var(--ease-out);
+}
+
+.drink-button.is-water {
+  border-color: rgba(127, 208, 255, 0.28);
+  background: linear-gradient(180deg, rgba(127, 208, 255, 0.13), rgba(127, 208, 255, 0.03));
+}
+
+.drink-button-glyph {
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(242, 199, 102, 0.18);
+  font-size: 15px;
+  line-height: 1;
+  transition: transform var(--dur-base) var(--ease-pop);
+}
+
+.drink-button.is-water .drink-button-glyph {
+  background: rgba(127, 208, 255, 0.18);
+}
+
+.drink-button:hover:not(:disabled),
+.drink-button:focus-visible {
+  transform: translateY(-1px);
+  border-color: var(--line-brass);
+  box-shadow: var(--glow-brass);
+  outline: none;
+}
+
+.drink-button.is-water:hover:not(:disabled),
+.drink-button.is-water:focus-visible {
+  border-color: rgba(127, 208, 255, 0.6);
+  box-shadow: var(--glow-sky);
+}
+
+.drink-button:hover:not(:disabled) .drink-button-glyph {
+  transform: rotate(-14deg) scale(1.08);
+}
+
+.drink-button:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.drink-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.drink-controls.is-cooling .drink-button:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.drink-button-count {
+  position: absolute;
+  top: -6px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--drink-amber);
+  color: var(--c-text-on-brass);
+  font: 800 10px / 18px var(--font-ui);
+  font-style: normal;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  animation: drink-count-pop 420ms var(--ease-pop);
+}
+
+.drink-button-count.is-pending {
+  background: var(--drink-sky);
+  color: var(--c-ink-900);
+  animation: drink-pending-pulse 1.6s ease-in-out infinite;
+}
+
+.drink-cooldown {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -6px;
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, var(--drink-amber), var(--drink-sky));
+  transform-origin: left center;
+  animation: drink-cooldown var(--drink-cooldown, 3s) linear forwards;
+  pointer-events: none;
+}
+
+.drink-meter {
+  display: grid;
+  gap: 5px;
+  min-width: 78px;
+}
+
+.drink-meter-label {
+  font: 800 10px / 1 var(--font-ui);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--c-text-3);
+  white-space: nowrap;
+}
+
+.drink-controls[data-tier='buzzed'] .drink-meter-label { color: var(--c-brass-200); }
+.drink-controls[data-tier='tipsy'] .drink-meter-label { color: var(--c-brass-400); }
+.drink-controls[data-tier='drunk'] .drink-meter-label { color: var(--c-ember-300); }
+.drink-controls[data-tier='wasted'] .drink-meter-label { color: var(--c-ruby-500); }
+.drink-controls[data-tier='out'] .drink-meter-label { color: var(--c-violet-400); }
+
+.drink-meter-pips {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 2px;
+}
+
+.drink-meter-pips i {
+  height: 6px;
+  border-radius: 2px;
+  background: rgba(244, 239, 228, 0.1);
+  transition: background var(--dur-slow) var(--ease-out), transform var(--dur-slow) var(--ease-pop);
+}
+
+.drink-meter-pips i.is-full {
+  background: var(--c-brass-400);
+}
+
+.drink-meter-pips i.is-full:nth-child(n + 5) {
+  background: var(--c-ember-500);
+}
+
+.drink-meter-pips i.is-full:nth-child(n + 8) {
+  background: var(--c-ruby-500);
+}
+
+.drink-controls[data-tier='out'] .drink-meter-pips i {
+  background: rgba(169, 139, 255, 0.55);
+}
+
+/* Mobile: two round buttons beside your cards */
+.drink-controls.is-mobile {
+  grid-area: side;
+  align-self: end;
+  justify-self: end;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  margin-bottom: 4px;
+}
+
+.drink-controls.is-mobile .drink-button {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface-glass);
+  box-shadow: var(--shadow-1);
+}
+
+.drink-controls.is-mobile .drink-button.is-beer {
+  border-color: rgba(242, 199, 102, 0.4);
+}
+
+.drink-controls.is-mobile .drink-button.is-water {
+  border-color: rgba(127, 208, 255, 0.4);
+}
+
+.drink-controls.is-mobile .drink-button-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.drink-controls.is-mobile .drink-button-glyph {
+  width: auto;
+  height: auto;
+  background: none;
+  font-size: 20px;
+}
+
+.drink-controls.is-mobile .drink-meter {
+  min-width: 0;
+  width: 94px;
+  gap: 3px;
+}
+
+.drink-controls.is-mobile .drink-meter-label {
+  font-size: 9px;
+  text-align: right;
+}
+
+.drink-controls.is-mobile .drink-meter-pips i {
+  height: 4px;
+}
+
+@media (max-width: 1023px) and (orientation: landscape) {
+  .drink-controls.is-mobile {
+    position: absolute;
+    top: 0;
+    right: 10px;
+    grid-area: auto;
+    margin: 0;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Toasts
+   -------------------------------------------------------------------------- */
+
+.drink-toasts {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 78px);
+  left: 20px;
+  z-index: 238;
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.drink-toast {
+  --toast-accent: rgba(242, 199, 102, 0.5);
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 6px 15px 6px 6px;
+  border: 1px solid var(--toast-accent);
+  border-radius: var(--r-pill);
+  background: var(--surface-glass-strong);
+  box-shadow: var(--shadow-2);
+  color: var(--c-text-1);
+  font: 700 var(--fs-12) / 1.25 var(--font-ui);
+  backdrop-filter: blur(12px);
+  animation:
+    drink-toast-in 380ms var(--ease-pop) both,
+    drink-toast-out 320ms var(--ease-in) calc(var(--toast-life, 3800ms) - 340ms) forwards;
+}
+
+.drink-toast-icon {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(242, 199, 102, 0.16);
+  font-size: 15px;
+}
+
+.drink-toast.is-beer .drink-toast-icon {
+  animation: drink-toast-clink 700ms var(--ease-pop) 120ms both;
+}
+
+.drink-toast.is-water,
+.drink-toast.is-water-kicked-in {
+  --toast-accent: rgba(127, 208, 255, 0.5);
+}
+
+.drink-toast.is-water .drink-toast-icon,
+.drink-toast.is-water-kicked-in .drink-toast-icon {
+  background: rgba(127, 208, 255, 0.16);
+}
+
+.drink-toast.is-passed-out {
+  --toast-accent: rgba(169, 139, 255, 0.6);
+  background: linear-gradient(90deg, rgba(90, 68, 166, 0.5), var(--surface-glass-strong) 55%);
+}
+
+.drink-toast.is-passed-out .drink-toast-icon {
+  background: rgba(169, 139, 255, 0.2);
+}
+
+.drink-toast.is-woke-up {
+  --toast-accent: var(--line-brass);
+}
+
+.drink-toast.is-self {
+  font-weight: 800;
+}
+
+@media (max-width: 1023px) {
+  .drink-toasts {
+    top: calc(env(safe-area-inset-top) + var(--hud-h, 56px) + 6px);
+    left: 50%;
+    translate: -50% 0;
+    justify-items: center;
+    width: max-content;
+    max-width: calc(100vw - 24px);
+  }
+
+  .drink-toast {
+    font-size: var(--fs-11);
+    padding: 4px 12px 4px 4px;
+  }
+
+  .drink-toast-icon {
+    width: 24px;
+    height: 24px;
+    font-size: 13px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   2D seat badges (other players)
+   -------------------------------------------------------------------------- */
+
+.seat-drink-badge {
+  position: absolute;
+  left: calc(var(--avatar, 44px) * -0.5 - 10px);
+  top: calc(var(--avatar, 44px) * -0.5 - 8px);
+  z-index: 6;
+  pointer-events: none;
+}
+
+.seat-position .seat-drink-badge {
+  left: -4px;
+  top: -10px;
+}
+
+.seat-drink-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  height: 18px;
+  padding: 0 6px 0 4px;
+  border: 1px solid rgba(242, 199, 102, 0.55);
+  border-radius: var(--r-pill);
+  background: rgba(20, 12, 9, 0.9);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
+  color: var(--c-brass-200);
+  font: 800 10px / 1 var(--font-ui);
+  font-size: 10px;
+  white-space: nowrap;
+  animation: drink-count-pop 420ms var(--ease-pop);
+}
+
+.seat-drink-chip b {
+  font-weight: 800;
+}
+
+.seat-drink-badge[data-tier='drunk'] .seat-drink-chip {
+  border-color: rgba(255, 122, 61, 0.7);
+  color: var(--c-ember-300);
+}
+
+.seat-drink-badge[data-tier='wasted'] .seat-drink-chip {
+  border-color: rgba(226, 80, 92, 0.85);
+  color: #ffc2c7;
+  box-shadow: 0 0 12px rgba(226, 80, 92, 0.45), 0 3px 8px rgba(0, 0, 0, 0.45);
+}
+
+.seat-drink-badge[data-passed-out] .seat-drink-chip {
+  border-color: rgba(169, 139, 255, 0.7);
+  background: rgba(40, 28, 80, 0.92);
+  padding: 0 5px;
+}
+
+.seat-drink-zzz {
+  display: inline-block;
+  animation: seat-drink-zzz 2.4s ease-in-out infinite;
+}
+
+/* Quick "drinking" animation over the seat */
+.seat-drink-sip {
+  position: absolute;
+  left: calc(var(--avatar, 44px) * 0.5 + 10px);
+  top: 4px;
+  font-size: 26px;
+  line-height: 1;
+  transform-origin: 30% 90%;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.5));
+  animation: seat-drink-sip 1.4s var(--ease-out) forwards;
+}
+
+/* The seat itself wobbles when the player is 5+ deep, slumps when passed out */
+.mobile-edge-seat-position:has(.seat-drink-badge[data-wobble]) .mobile-seat-puck,
+.seat-position:has(.seat-drink-badge[data-wobble]) > :first-child {
+  transform-origin: 50% 85%;
+  animation: seat-drunk-wobble 2.8s ease-in-out infinite;
+}
+
+.mobile-edge-seat-position:has(.seat-drink-badge[data-passed-out]) .mobile-seat-puck {
+  rotate: -16deg;
+  translate: 0 3px;
+  filter: grayscale(0.45) brightness(0.78);
+  transition: rotate var(--dur-slow) var(--ease-pop), filter var(--dur-slow) var(--ease-out);
+}
+
+/* --------------------------------------------------------------------------
+   Drunk vision (only on the drinker's own screen)
+   -------------------------------------------------------------------------- */
+
+:root[data-drunk-tier] {
+  animation: drunk-phase var(--drunk-pulse, 7s) ease-in-out infinite;
+}
+
+/* Pulsing blur + double vision on the table itself (never on the action tray). */
+:root[data-drunk-tier] :is(.desktop-3d-stage, .mobile-table-zone, .table-wrapper) {
+  filter: blur(calc(var(--drunk-blur, 0px) * var(--drunk-phase)));
+}
+
+/* Wasted: colours start to swim too */
+:root[data-drunk-tier='wasted'] :is(.desktop-3d-stage, .mobile-table-zone, .table-wrapper) {
+  filter:
+    blur(calc(var(--drunk-blur, 0px) * var(--drunk-phase)))
+    saturate(calc(1 + var(--drunk-phase) * 0.35))
+    hue-rotate(calc(var(--drunk-phase) * -12deg));
+}
+
+:root[data-drunk-tier] .table-scene {
+  text-shadow:
+    calc(var(--drunk-ghost, 0px) * var(--drunk-phase)) calc(var(--drunk-ghost, 0px) * var(--drunk-phase) * 0.35) 0
+    color-mix(in srgb, currentColor 42%, transparent);
+}
+
+:root[data-drunk-tier] .table-scene :is(.community-cards, .own-card-row, .mobile-edge-seat-cards) .card-container {
+  filter: drop-shadow(
+    calc(var(--drunk-ghost, 0px) * var(--drunk-phase) * 1.4)
+    calc(var(--drunk-ghost, 0px) * var(--drunk-phase) * 0.4)
+    0
+    rgba(255, 248, 234, 0.34)
+  );
+}
+
+/* Gentle sway from tipsy upward */
+:root:is([data-drunk-tier='tipsy'], [data-drunk-tier='drunk'], [data-drunk-tier='wasted'])
+  :is(.desktop-3d-stage, .mobile-table-zone, .mobile-hero-lane, .own-hand-area) {
+  animation: drunk-sway calc(var(--drunk-pulse, 7s) * 1.35) ease-in-out infinite;
+}
+
+:root:is([data-drunk-tier='tipsy'], [data-drunk-tier='drunk'], [data-drunk-tier='wasted']) .mobile-hero-lane,
+:root:is([data-drunk-tier='tipsy'], [data-drunk-tier='drunk'], [data-drunk-tier='wasted']) .own-hand-area {
+  animation-delay: -1.2s;
+}
+
+/* Hide the edges of the 3D room while it sways */
+:root:is([data-drunk-tier='tipsy'], [data-drunk-tier='drunk'], [data-drunk-tier='wasted']) .desktop-3d-stage {
+  scale: 1.045;
+}
+
+/* While a card is being misread the viewer's eyes are visibly unfocused */
+:root[data-drunk-misread='hole'] .own-card-row,
+:root[data-drunk-misread='board'] .community-cards {
+  animation: drunk-misread-swim 520ms ease-in-out infinite alternate;
+}
+
+.drunk-vision {
+  position: fixed;
+  inset: 0;
+  z-index: 229;
+  pointer-events: none;
+}
+
+.drunk-vignette {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 75% 70% at 50% 46%, transparent 48%, rgba(42, 20, 4, calc(0.18 + var(--drunk-tint, 0) * 0.5)) 100%),
+    linear-gradient(rgba(255, 168, 64, calc(var(--drunk-tint, 0) * 0.07)), rgba(255, 168, 64, calc(var(--drunk-tint, 0) * 0.07)));
+  opacity: calc(0.45 + var(--drunk-phase) * 0.55);
+  mix-blend-mode: multiply;
+}
+
+.drunk-vision[data-tier='buzzed'] .drunk-vignette {
+  opacity: calc(0.35 + var(--drunk-phase) * 0.25);
+}
+
+/* Hiccups (level 6+) */
+:root[data-drunk-hiccup] .room-shell {
+  animation: drunk-hiccup 540ms var(--ease-out);
+}
+
+.drunk-hiccup {
+  position: absolute;
+  left: 50%;
+  top: 32%;
+  translate: -50% 0;
+  padding: 8px 18px 10px;
+  border: 1px solid var(--line-brass);
+  border-radius: var(--r-pill);
+  background: rgba(20, 12, 9, 0.82);
+  box-shadow: var(--shadow-2), 0 0 26px rgba(242, 199, 102, 0.28);
+  font: 800 var(--fs-32) / 1 var(--font-display);
+  letter-spacing: 0.04em;
+  color: var(--c-cream-50);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55);
+  animation: drunk-hic-pop 1s var(--ease-out) forwards;
+}
+
+/* Wobbly action buttons (level 6+). Still clickable, just unsteady. */
+:root[data-drunk-wobble] :is(.mobile-main-action, .bet-action-row .btn-action) {
+  animation: drunk-button-wobble 3.3s ease-in-out infinite;
+}
+
+:root[data-drunk-wobble] :is(.mobile-main-action, .bet-action-row .btn-action):nth-child(2) {
+  animation-delay: -1.1s;
+  animation-duration: 2.9s;
+}
+
+:root[data-drunk-wobble] :is(.mobile-main-action, .bet-action-row .btn-action):nth-child(3) {
+  animation-delay: -2.1s;
+  animation-duration: 3.7s;
+}
+
+:root[data-drunk-wobble] :is(.mobile-main-action, .bet-action-row .btn-action):nth-child(4) {
+  animation-delay: -0.6s;
+}
+
+/* Your own sip */
+.drunk-sip {
+  position: absolute;
+  left: 50%;
+  bottom: 22%;
+  translate: -50% 0;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.drunk-sip::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at 50% 78%, rgba(242, 199, 102, 0.3), transparent 58%);
+  animation: drunk-wash 1.35s var(--ease-out) forwards;
+}
+
+.drunk-sip.is-water::before {
+  background: radial-gradient(circle at 50% 78%, rgba(127, 208, 255, 0.26), transparent 58%);
+}
+
+.drunk-sip-glass {
+  position: relative;
+  font-size: 84px;
+  line-height: 1;
+  transform-origin: 40% 85%;
+  filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.5));
+  animation: drunk-sip-glass 1.35s var(--ease-out) forwards;
+}
+
+.drunk-sip-copy {
+  position: relative;
+  font: 800 var(--fs-14) / 1 var(--font-display);
+  letter-spacing: 0.06em;
+  color: var(--c-brass-200);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+  animation: drunk-wash 1.35s var(--ease-out) forwards;
+}
+
+.drunk-sip.is-water .drunk-sip-copy {
+  color: #d3efff;
+}
+
+/* Passed out: eyelids close to a slit, then the room fades away */
+.drunk-passout,
+.drunk-wake {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.drunk-passout {
+  background: radial-gradient(ellipse at 50% 50%, rgba(5, 9, 10, 0.35), rgba(5, 9, 10, 0.82));
+  backdrop-filter: grayscale(0.7) blur(3px);
+  animation: drunk-fade-in 1.6s var(--ease-in) both;
+}
+
+.drunk-eyelid {
+  position: absolute;
+  left: -5vw;
+  right: -5vw;
+  height: 52vh;
+  background: linear-gradient(180deg, #020404, #07100f);
+  box-shadow: 0 0 60px 30px rgba(2, 4, 4, 0.9);
+}
+
+.drunk-eyelid.is-top {
+  top: 0;
+  transform-origin: 50% 0;
+  border-radius: 0 0 50% 50% / 0 0 26% 26%;
+}
+
+.drunk-eyelid.is-bottom {
+  bottom: 0;
+  transform-origin: 50% 100%;
+  border-radius: 50% 50% 0 0 / 26% 26% 0 0;
+}
+
+.drunk-passout .drunk-eyelid {
+  animation: drunk-eyelid-close 2.2s var(--ease-in) forwards;
+}
+
+.drunk-wake .drunk-eyelid {
+  animation: drunk-eyelid-open 2.1s var(--ease-out) forwards;
+}
+
+.drunk-passout-card {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  max-width: min(420px, calc(100vw - 48px));
+  padding: 18px 26px;
+  text-align: center;
+  animation: drunk-fade-in 900ms var(--ease-out) 1.1s both;
+}
+
+.drunk-passout-card strong {
+  font: 800 var(--fs-24) / 1.1 var(--font-display);
+  color: var(--c-cream-50);
+  letter-spacing: 0.02em;
+}
+
+.drunk-passout-card p {
+  margin: 0;
+  font: 600 var(--fs-14) / 1.4 var(--font-ui);
+  color: var(--c-text-2);
+}
+
+.drunk-passout-z {
+  display: flex;
+  gap: 4px;
+  height: 52px;
+  align-items: flex-end;
+  font: 800 var(--fs-24) / 1 var(--font-display);
+  color: var(--c-violet-400);
+}
+
+.drunk-passout-z i {
+  font-style: normal;
+  animation: drunk-z-float 2.4s ease-in-out infinite;
+}
+
+.drunk-passout-z i:nth-child(2) { font-size: 1.25em; animation-delay: 0.4s; }
+.drunk-passout-z i:nth-child(3) { font-size: 1.6em; animation-delay: 0.8s; }
+
+/* --------------------------------------------------------------------------
+   Keyframes
+   -------------------------------------------------------------------------- */
+
+@keyframes drunk-phase {
+  0%, 100% { --drunk-phase: 0.1; }
+  22% { --drunk-phase: 0.2; }
+  52% { --drunk-phase: 1; }
+  68% { --drunk-phase: 0.75; }
+  84% { --drunk-phase: 0.35; }
+}
+
+@keyframes drunk-sway {
+  0%, 100% { translate: 0 0; rotate: 0deg; }
+  25% {
+    translate: calc(var(--drunk-sway-px, 0px) * -1) calc(var(--drunk-sway-px, 0px) * 0.3);
+    rotate: calc(var(--drunk-sway-deg, 0deg) * -1);
+  }
+  50% { translate: 0 calc(var(--drunk-sway-px, 0px) * -0.2); rotate: 0deg; }
+  75% {
+    translate: var(--drunk-sway-px, 0px) calc(var(--drunk-sway-px, 0px) * 0.35);
+    rotate: var(--drunk-sway-deg, 0deg);
+  }
+}
+
+@keyframes drunk-misread-swim {
+  from { filter: blur(0.4px); scale: 1; }
+  to { filter: blur(1.6px); scale: 1.015; }
+}
+
+@keyframes drunk-hiccup {
+  0% { translate: 0 0; scale: 1; }
+  14% { translate: 0 -10px; scale: 1.012; }
+  30% { translate: 4px 5px; scale: 0.996; }
+  46% { translate: -4px -3px; }
+  64% { translate: 2px 1px; }
+  100% { translate: 0 0; scale: 1; }
+}
+
+@keyframes drunk-hic-pop {
+  0% { opacity: 0; scale: 0.5; translate: -50% 12px; rotate: -10deg; }
+  12% { opacity: 1; scale: 1.2; translate: -50% -6px; rotate: 5deg; }
+  26% { scale: 0.95; rotate: -3deg; }
+  70% { opacity: 1; scale: 1; translate: -50% -16px; rotate: -1deg; }
+  100% { opacity: 0; scale: 0.96; translate: -50% -34px; rotate: 0deg; }
+}
+
+@keyframes drunk-button-wobble {
+  0%, 100% { rotate: 0deg; translate: 0 0; }
+  30% { rotate: -1.6deg; translate: -2px 1px; }
+  62% { rotate: 1.3deg; translate: 2px -1px; }
+}
+
+@keyframes drunk-sip-glass {
+  0% { opacity: 0; translate: 0 70px; rotate: 8deg; }
+  16% { opacity: 1; translate: 0 0; rotate: 0deg; }
+  40% { rotate: -42deg; translate: -8px -26px; }
+  58% { rotate: -52deg; translate: -10px -30px; }
+  78% { rotate: -8deg; translate: 0 -6px; opacity: 1; }
+  100% { rotate: 0deg; translate: 0 50px; opacity: 0; }
+}
+
+@keyframes drunk-wash {
+  0% { opacity: 0; }
+  20% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes drunk-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes drunk-eyelid-close {
+  0% { scale: 1 0; }
+  30% { scale: 1 0.55; }
+  42% { scale: 1 0.2; }
+  70% { scale: 1 0.78; }
+  80% { scale: 1 0.6; }
+  100% { scale: 1 0.86; }
+}
+
+@keyframes drunk-eyelid-open {
+  0% { scale: 1 0.9; }
+  30% { scale: 1 0.35; }
+  42% { scale: 1 0.75; }
+  70% { scale: 1 0.1; }
+  100% { scale: 1 0; }
+}
+
+@keyframes drunk-z-float {
+  0%, 100% { translate: 0 0; opacity: 0.55; }
+  50% { translate: 3px -8px; opacity: 1; }
+}
+
+@keyframes drink-cooldown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+@keyframes drink-count-pop {
+  0% { scale: 0.4; }
+  60% { scale: 1.2; }
+  100% { scale: 1; }
+}
+
+@keyframes drink-pending-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(127, 208, 255, 0.55); }
+  50% { box-shadow: 0 0 0 5px rgba(127, 208, 255, 0); }
+}
+
+@keyframes drink-toast-in {
+  from { opacity: 0; translate: -14px 0; scale: 0.92; }
+  to { opacity: 1; translate: 0 0; scale: 1; }
+}
+
+@keyframes drink-toast-out {
+  to { opacity: 0; translate: 0 -8px; }
+}
+
+@keyframes drink-toast-clink {
+  0% { rotate: 0deg; }
+  30% { rotate: -22deg; scale: 1.15; }
+  60% { rotate: 10deg; }
+  100% { rotate: 0deg; scale: 1; }
+}
+
+@keyframes seat-drink-sip {
+  0% { opacity: 0; translate: 0 10px; rotate: 0deg; scale: 0.6; }
+  18% { opacity: 1; translate: 0 -8px; rotate: 0deg; scale: 1; }
+  45% { rotate: -48deg; translate: -6px -14px; }
+  70% { rotate: -40deg; translate: -6px -14px; opacity: 1; }
+  100% { rotate: 0deg; translate: 0 -30px; opacity: 0; }
+}
+
+@keyframes seat-drink-zzz {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 1px -2px; }
+}
+
+@keyframes seat-drunk-wobble {
+  0%, 100% { rotate: 0deg; }
+  25% { rotate: -5deg; }
+  50% { rotate: 1deg; }
+  75% { rotate: 4deg; }
+}
+
+/* --------------------------------------------------------------------------
+   Reduced motion: no sway, shake, wobble or flying glasses. Drunkenness
+   becomes a gentle static blur and warm tint instead.
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-drunk-tier] {
+    animation: none;
+    --drunk-phase: 0.55;
+  }
+
+  :root[data-drunk-tier] :is(.desktop-3d-stage, .mobile-table-zone, .mobile-hero-lane, .own-hand-area),
+  :root[data-drunk-hiccup] .room-shell,
+  :root[data-drunk-wobble] :is(.mobile-main-action, .bet-action-row .btn-action),
+  :root[data-drunk-misread] :is(.own-card-row, .community-cards),
+  .mobile-edge-seat-position:has(.seat-drink-badge[data-wobble]) .mobile-seat-puck,
+  .seat-position:has(.seat-drink-badge[data-wobble]) > :first-child {
+    animation: none;
+  }
+
+  :root[data-drunk-tier] .table-scene {
+    text-shadow: none;
+  }
+
+  :root[data-drunk-misread='hole'] .own-card-row,
+  :root[data-drunk-misread='board'] .community-cards {
+    filter: blur(1px);
+  }
+
+  .drunk-hiccup,
+  .drunk-sip-glass,
+  .seat-drink-sip,
+  .drink-toast,
+  .drink-toast-icon,
+  .drink-button-count,
+  .seat-drink-chip,
+  .seat-drink-zzz,
+  .drunk-passout-z i {
+    animation: drunk-wash 1.2s ease-out both;
+  }
+
+  .drink-toast {
+    animation: drink-toast-fade var(--toast-life, 3800ms) linear both;
+  }
+
+  .drink-button-count,
+  .seat-drink-chip,
+  .seat-drink-zzz,
+  .drunk-passout-z i,
+  .drink-toast-icon {
+    animation: none;
+  }
+
+  .drunk-passout .drunk-eyelid {
+    animation: none;
+    scale: 1 0.86;
+  }
+
+  .drunk-wake .drunk-eyelid {
+    animation: drunk-fade-out 1.2s ease-out forwards;
+    scale: 1 0.5;
+  }
+
+  .drink-button,
+  .drink-button-glyph {
+    transition: none;
+  }
+}
+
+@keyframes drink-toast-fade {
+  0% { opacity: 0; }
+  8%, 90% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes drunk-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}

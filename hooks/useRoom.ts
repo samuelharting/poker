@@ -9,6 +9,8 @@ import {
   sanitizeEmote,
   sanitizeText,
   type C2SMessage,
+  type DrinkEvent,
+  type DrinkKind,
   type PlayerSocialState,
   type SocialSnapshot,
   type S2CMessage,
@@ -21,6 +23,7 @@ const PARTYKIT_HOST = process.env.NEXT_PUBLIC_PARTYKIT_HOST ?? 'localhost:1999'
 const PARTY_NAME = process.env.NEXT_PUBLIC_PARTY_NAME ?? 'main'
 const LOCAL_PARTYKIT_HOST_PATTERN = /^(localhost|127\.0\.0\.1)(:\d+)?$/i
 const BACKGROUND_RECONNECT_THRESHOLD_MS = 10_000
+const MAX_DRINK_EVENTS = 12
 
 function buildConnectionIssue(): string {
   if (LOCAL_PARTYKIT_HOST_PATTERN.test(PARTYKIT_HOST)) {
@@ -113,6 +116,9 @@ export interface RoomState {
   ) => void
   seatMe: () => void
   sendMessage: (msg: C2SMessage) => void
+  /** Most recent drink events (beers, waters, pass-outs), oldest first. */
+  drinkEvents: DrinkEvent[]
+  orderDrink: (kind: DrinkKind) => void
 }
 
 export function useRoom(
@@ -133,6 +139,7 @@ export function useRoom(
   const [isHost, setIsHost] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
   const [connectionIssue, setConnectionIssue] = useState<string | null>(null)
+  const [drinkEvents, setDrinkEvents] = useState<DrinkEvent[]>([])
   const sendMessage = useCallback((msg: C2SMessage) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(msg))
@@ -150,6 +157,10 @@ export function useRoom(
     sendMessage({ type: 'seat_me' })
   }, [sendMessage])
 
+  const orderDrink = useCallback((kind: DrinkKind) => {
+    sendMessage({ type: 'order_drink', kind })
+  }, [sendMessage])
+
   useEffect(() => {
     if (!roomCode || !profile.nickname) {
       return
@@ -159,6 +170,7 @@ export function useRoom(
     hasEverConnectedRef.current = false
     setTableState(null)
     setSocialState({ active: [], chatLog: [] })
+    setDrinkEvents([])
     setYourId('')
     setIsHost(false)
     setIsConnected(false)
@@ -293,6 +305,15 @@ export function useRoom(
               break
             }
 
+            case 'drink_event': {
+              const event = msg.event
+              setDrinkEvents(previous => [
+                ...previous.filter(entry => entry.id !== event.id),
+                event,
+              ].slice(-MAX_DRINK_EVENTS))
+              break
+            }
+
             case 'action_result':
             case 'action_failed':
             case 'error':
@@ -370,6 +391,8 @@ export function useRoom(
     sendAction,
     seatMe,
     sendMessage,
+    drinkEvents,
+    orderDrink,
   }
 }
 

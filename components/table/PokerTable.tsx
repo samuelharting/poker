@@ -15,6 +15,8 @@ import { RunItTwiceBoards, RunItTwicePrompt } from './RunItTwice'
 import { OwnHand } from './OwnHand'
 import { PotDisplay } from './PotDisplay'
 import { ShowdownCinematic, useShowdownPresentation } from './ShowdownCinematic'
+import { DrinkControls } from './DrinkControls'
+import { SeatDrinkBadge } from './SeatDrinkBadge'
 import { CompanionBadge, CompanionToast } from './CompanionBadge'
 import { ChipStack } from '@/components/ui/ChipStack'
 import { PlayingCard } from '@/components/ui/PlayingCard'
@@ -1975,6 +1977,7 @@ export function PokerTable({
                         ) : null}
                         onNameClick={handleSelectEmoteTarget}
                       />
+                      <SeatDrinkBadge drinks={player.drinks} nickname={player.nickname} />
                       <CompanionBadge companion={state.companion} playerId={player.id} />
                       {(seatSocial.message || seatSocial.emote) && (
                         <div className="mobile-edge-social" aria-live="polite">
@@ -2035,6 +2038,7 @@ export function PokerTable({
                   isWinner={betweenHands && showWinnerHighlights && myWinnerAmount > 0}
                   status={mobileHeroStatus}
                 />
+                <DrinkControls variant="mobile" />
                 <CompanionBadge companion={state.companion} playerId={visibleOwnPlayer.id} placement="hero" />
 
                 <OwnHand
@@ -2116,6 +2120,7 @@ export function PokerTable({
                     ) : null}
                     onNameClick={handleSelectEmoteTarget}
                   />
+                  <SeatDrinkBadge drinks={player.drinks} nickname={player.nickname} />
                 </div>
               )
             })}
