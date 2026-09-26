@@ -58,8 +58,10 @@ describe('desktop room rendering stability', () => {
     expect(sceneSource).toContain('wager.chipMeshes.forEach')
     expect(sceneSource).toContain('animatePot(runtime, time, reducedMotion)')
     expect(sceneSource).toContain('seat.winnerHalo.visible = seat.winner')
-    expect(sceneSource).toContain('seat.winnerLight.visible = seat.winner')
-    expect(sceneSource).toContain('seat.winnerLight.intensity')
+    // One always-on accent light follows the winner; toggling per-seat lights
+    // changed the light count and recompiled every shader at showdown.
+    expect(sceneSource).not.toContain('winnerLight')
+    expect(sceneSource).toContain('const accentGoal = winnerSeat ?')
     expect(sceneSource).toContain('function applySeatFoldVisualState(seat: SeatRuntime)')
     expect(sceneSource.match(/applySeatFoldVisualState\(seat\)/g)).toHaveLength(2)
     expect(sceneSource).toContain('seat.avatar.modelKey === profile.modelKey')

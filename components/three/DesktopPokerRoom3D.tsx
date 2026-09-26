@@ -186,7 +186,6 @@ interface SeatRuntime {
   ring: THREE.Mesh<THREE.TorusGeometry, THREE.MeshStandardMaterial>
   winnerHalo: THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>
   winnerSparkles: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial>
-  winnerLight: THREE.PointLight
   materials: THREE.MeshStandardMaterial[]
   foldMaterials: THREE.MeshStandardMaterial[]
   visualSeat: number
@@ -1017,11 +1016,6 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
   winnerSparkles.visible = false
   root.add(winnerSparkles)
 
-  const winnerLight = new THREE.PointLight('#ffd978', 0, 4.2, 1.75)
-  winnerLight.position.set(0, 1.45, -0.2)
-  winnerLight.visible = false
-  root.add(winnerLight)
-
   const seatRuntime: SeatRuntime = {
     playerId: player.id,
     root,
@@ -1061,7 +1055,6 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     ring,
     winnerHalo,
     winnerSparkles,
-    winnerLight,
     materials,
     foldMaterials,
     visualSeat: player.visualSeat,
@@ -1253,6 +1246,7 @@ async function requestRiggedAvatar(
     seat.fallbackAvatar.visible = false
     applySeatFoldVisualState(seat)
     startAvatarIdle(seat)
+    precompileScene(runtime.renderer, runtime.scene, runtime.camera)
     updateAvatarDiagnostics(runtime)
   } catch (error) {
     if (runtime.disposed || seat.avatarGeneration !== generation) return
@@ -2225,7 +2219,6 @@ function animateSeat(
 
   seat.winnerHalo.visible = seat.winner
   seat.winnerSparkles.visible = seat.winner
-  seat.winnerLight.visible = seat.winner
   if (seat.winner) {
     const celebrationPulse = reducedMotion ? 1 : 0.88 + Math.sin(time * 3.8 + seat.phase) * 0.12
     seat.winnerHalo.position.y = 2.28 + pose.bodyPosition[1] + (reducedMotion ? 0 : Math.sin(time * 2.4) * 0.035)
@@ -2239,13 +2232,9 @@ function animateSeat(
     seat.winnerSparkles.material.opacity = reducedMotion
       ? 0.64
       : 0.6 + Math.sin(time * 4.6 + seat.phase) * 0.25
-    seat.winnerLight.intensity = reducedMotion
-      ? 5
-      : 5 + Math.sin(time * 3.8 + seat.phase) * 1.4
   } else {
     seat.winnerHalo.material.opacity = 0
     seat.winnerSparkles.material.opacity = 0
-    seat.winnerLight.intensity = 0
   }
 
   if (seat.hadCards) {
@@ -2491,6 +2480,29 @@ function animateEffects(runtime: SceneRuntime, time: number, delta: number, redu
   animateLightCone(effects.cone, time, reducedMotion, winners.length > 0 ? 1 : 0)
   animateConfetti(effects.confetti, delta)
   animateShockwave(effects.shockwave, time)
+}
+
+/**
+ * Compiles every shader in the scene up front — including hidden things like
+ * confetti, the all-in shockwave, winner halos and Lady Luck — so the first
+ * showdown doesn't stall for seconds compiling programs mid-animation.
+ */
+function precompileScene(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
+  const hidden: THREE.Object3D[] = []
+  scene.traverse(object => {
+    // Lights keep their real state: toggling one changes every lit shader's variant.
+    if (!object.visible && !(object as THREE.Light).isLight) {
+      hidden.push(object)
+      object.visible = true
+    }
+  })
+  // Synchronous on purpose: compileAsync's readiness poll throws if an avatar
+  // swap disposes a material mid-compile. This only runs at load time anyway.
+  try {
+    renderer.compile(scene, camera)
+  } finally {
+    hidden.forEach(object => { object.visible = false })
+  }
 }
 
 const companionBubbleWorld = new THREE.Vector3()
@@ -2854,6 +2866,7 @@ function createSceneRuntime(
   syncWagers(runtime, viewRef.current)
   syncPot(runtime, viewRef.current)
   syncBoardRuntime(runtime.board, viewRef.current.communityCards, highlightRef.current, 0)
+  precompileScene(renderer, scene, camera)
   renderer.render(scene, camera)
   if (!runtime.suspended) animate()
   return runtime

@@ -3334,3 +3334,81 @@
   8%, 88% { opacity: 1; }
   100% { opacity: 0; }
 }
+
+/* 7-2 bounty celebration toast (all layouts) */
+.bounty-toast {
+  position: fixed;
+  top: max(72px, calc(env(safe-area-inset-top) + 64px));
+  left: 50%;
+  z-index: 240;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 10px 16px 10px 12px;
+  border: 1px solid rgba(255, 122, 61, 0.7);
+  border-radius: var(--r-lg);
+  background:
+    radial-gradient(120% 160% at 0% 0%, rgba(255, 122, 61, 0.28), transparent 60%),
+    var(--surface-glass-strong);
+  box-shadow: var(--shadow-3), var(--glow-ember);
+  color: var(--c-text-1);
+  transform: translateX(-50%);
+  animation: bounty-slam 520ms var(--ease-pop) both;
+  pointer-events: none;
+}
+
+.bounty-toast-cards {
+  display: flex;
+  flex: none;
+}
+
+.bounty-toast-cards b {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 36px;
+  border-radius: 5px;
+  background: var(--c-cream-50);
+  color: var(--card-black);
+  font-family: var(--font-display);
+  font-size: 15px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+  transform: rotate(-8deg);
+}
+
+.bounty-toast-cards b + b {
+  margin-left: -8px;
+  color: var(--card-red);
+  transform: rotate(7deg);
+}
+
+.bounty-toast-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bounty-toast-copy strong {
+  font-family: var(--font-display);
+  font-size: var(--fs-14);
+  font-weight: 700;
+  color: var(--c-ember-300);
+}
+
+.bounty-toast-copy small {
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  font-weight: 600;
+}
+
+@keyframes bounty-slam {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-18px) scale(1.25);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(-50%);
+  }
+}
