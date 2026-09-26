@@ -20,6 +20,7 @@ const anchors = {
   betSpot: [0, 0.5, -2.4] as [number, number, number],
   tap: [0.15, 0.5, -1.3] as [number, number, number],
   board: [0, 0.5, -4] as [number, number, number],
+  drinkRest: [-0.5, 0.5, -1.5] as [number, number, number],
 }
 
 function input(overrides: Partial<AvatarAnimatorInput> = {}): AvatarAnimatorInput {

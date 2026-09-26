@@ -760,6 +760,7 @@ function createDefaultAnchors(): AvatarAnchors {
     betSpot: [0, 0.5, -2.4],
     tap: [0.15, 0.5, -1.3],
     board: [0, 0.5, -4],
+    drinkRest: [-0.5, 0.5, -1.5],
   }
 }
 
@@ -813,6 +814,7 @@ function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
   const betLocal = toSeatLocal(seat, betWorld[0], betWorld[1] + 0.05, betWorld[2])
   seat.anchors.betSpot = betLocal
   seat.anchors.board = toSeatLocal(seat, 0, FELT_TOP_Y + 0.1, BOARD_Z)
+  seat.anchors.drinkRest = [-0.66 / scale, stackSpot[1] + 0.02, stackSpot[2] + 0.08]
   // Dealer puck lies on the felt to the left of the dealer's hole cards.
   seat.dealerButton.position.set(-0.62, cardSpot[1] + 0.03 / scale, cardSpot[2] + 0.12)
   // Selection ring sits on the carpet under the chair.
@@ -1854,9 +1856,20 @@ const drinkForward = new THREE.Vector3()
 function placeDrinkProp(seat: SeatRuntime, pose: AvatarPose, time: number) {
   const prop = seat.drinkProp
   if (!prop) return
-  const active = time - seat.drinkStartedAt < DRINK_DURATION && !seat.passedOut && seat.root.visible
-  prop.group.visible = active
-  if (!active) return
+  // The glass lives on the felt beside the drinker; it's only in hand mid-sip.
+  prop.group.visible = seat.root.visible
+  if (!seat.root.visible) return
+  const elapsed = time - seat.drinkStartedAt
+  const inHand = elapsed > 0.32 && elapsed < DRINK_DURATION - 0.3 && !seat.passedOut
+  if (!inHand) {
+    drinkWristWorld.set(...seat.anchors.drinkRest)
+    seat.root.localToWorld(drinkWristWorld)
+    prop.group.position.copy(drinkWristWorld)
+    prop.group.position.y = FELT_TOP_Y
+    prop.group.rotation.set(0, seat.root.rotation.y, 0)
+    prop.group.scale.setScalar(seat.root.scale.x * 1.35)
+    return
+  }
   const wrist = seat.avatar?.bones.get('WristR')
   const knuckle = seat.avatar?.bones.get('Middle1R')
   if (!wrist) {
@@ -1889,7 +1902,7 @@ function flushCheeks(seat: SeatRuntime) {
 
 const DRUNK_FLUSH = new THREE.Color('#ff6b6b')
 
-const FINGER_BONES_R = ['Index1R', 'Middle1R', 'Ring1R', 'Pinky1R', 'Index2R', 'Middle2R', 'Ring2R', 'Pinky2R'] as const
+const FINGER_BONES_R = ['Index1R', 'Middle1R', 'Ring1R', 'Pinky1R', 'Index2R', 'Middle2R', 'Ring2R', 'Pinky2R', 'Index3R', 'Middle3R', 'Ring3R', 'Pinky3R'] as const
 const FINGER_BONES_L = ['Index1L', 'Middle1L', 'Ring1L', 'Pinky1L', 'Index2L', 'Middle2L', 'Ring2L', 'Pinky2L'] as const
 
 function animateSeat(
@@ -2030,13 +2043,17 @@ function animateSeat(
     }
     for (const name of FINGER_BONES_R) {
       // During a flick-off the middle finger straightens while the rest curl.
-      const middle = name.startsWith('Middle') ? 1 - pose.middleFinger : 1
-      applyAvatarBoneOffset(seat, bones.get(name), pose.fingerCurlR * 0.55 * middle + (middle < 1 ? -0.1 * pose.middleFinger : 0), 0, 0)
+      // During a flick-off the middle finger straightens while the rest close into a fist.
+      const isMiddle = name.startsWith('Middle')
+      const curl = isMiddle
+        ? pose.fingerCurlR * 0.55 * (1 - pose.middleFinger) - 0.12 * pose.middleFinger
+        : pose.fingerCurlR * (0.55 + 0.95 * pose.middleFinger)
+      applyAvatarBoneOffset(seat, bones.get(name), curl, 0, 0)
     }
     for (const name of FINGER_BONES_L) {
       applyAvatarBoneOffset(seat, bones.get(name), pose.fingerCurlL * 0.55, 0, 0)
     }
-    applyAvatarBoneOffset(seat, bones.get('Thumb1R'), pose.fingerCurlR * 0.2, -pose.fingerCurlR * 0.16, 0)
+    applyAvatarBoneOffset(seat, bones.get('Thumb1R'), pose.fingerCurlR * (0.2 + 0.5 * pose.middleFinger), -pose.fingerCurlR * (0.16 + 0.4 * pose.middleFinger), 0)
     applyAvatarBoneOffset(seat, bones.get('Thumb1L'), pose.fingerCurlL * 0.2, pose.fingerCurlL * 0.16, 0)
 
     if (process.env.NODE_ENV !== 'production') {

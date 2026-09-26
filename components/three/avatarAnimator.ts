@@ -48,6 +48,8 @@ export interface AvatarAnchors {
   tap: Vec3
   /** Centre of the community cards. */
   board: Vec3
+  /** Where the player's drink sits on the felt between sips. */
+  drinkRest: Vec3
 }
 
 export interface AvatarPose {
@@ -612,22 +614,36 @@ export function computeAvatarTargetPose(
     pose.fingerCurlL *= 1 - 0.6 * startle
   }
 
-  // 10. Lost the showdown: head shake, then either a facepalm or a slump.
+  // 10. Lost the showdown: each loser reacts in their own time and way —
+  // a facepalm, a slump into the chair, or a head-shaking shrug.
   if (input.loser) {
-    const elapsed = time - state.loserSince
+    const elapsed = time - state.loserSince - seed * 0.7
     const shake = envelope(elapsed, 1.3, 0.1, 0.5) * Math.sin(elapsed * 16) * motion
     const settle = smoothStep((elapsed - 0.5) / 0.7)
-    add(bones.Head, 0.08, 0.24 * shake, 0)
-    if (state.loserStyle === 1) {
-      add(bones.Head, 0.28 * settle, 0, 0)
-      add(bones.Chest, 0.18 * settle, 0, 0)
+    const style = Math.floor(seed * 3) % 3
+    if (style === 0) {
+      add(bones.Head, 0.08 + 0.22 * settle, 0.1 * shake, 0)
+      add(bones.Chest, 0.16 * settle, 0, 0)
       blendTo(pose.handR, offset(anchors.chin, 0.02, 0.2, -0.1), settle)
       pose.fingerCurlR = pose.fingerCurlR * (1 - settle) + 0.15 * settle
-    } else {
-      add(bones.Chest, -0.1 * settle, 0, 0)
-      add(bones.Head, -0.18 * settle, 0, 0)
+    } else if (style === 1) {
+      add(bones.Head, 0.08, 0.24 * shake, 0)
+      add(bones.Chest, -0.12 * settle, 0, 0)
+      add(bones.Head, -0.16 * settle, 0, 0)
       add(pose.handR, 0.04, -0.14, 0.24, settle)
       add(pose.handL, -0.04, -0.14, 0.24, settle)
+      pose.bodyPosition[2] += 0.08 * settle
+    } else {
+      const shrug = envelope(elapsed, 2.2, 0.3, 0.6)
+      add(bones.Head, 0, 0.3 * shake, 0.12 * shrug)
+      add(bones.ShoulderR, 0, 0, 0.18 * shrug)
+      add(bones.ShoulderL, 0, 0, -0.18 * shrug)
+      blendTo(pose.handR, offset(anchors.shoulderR, 0.28, -0.12, -0.3), shrug)
+      blendTo(pose.handL, offset(anchors.shoulderL, -0.28, -0.12, -0.3), shrug)
+      add(bones.WristR, 0, 0, -0.7 * shrug)
+      add(bones.WristL, 0, 0, 0.7 * shrug)
+      pose.fingerCurlR *= 1 - shrug
+      pose.fingerCurlL *= 1 - shrug
     }
     pose.bodyPosition[1] -= 0.04 * settle
   }
@@ -695,11 +711,12 @@ export function computeAvatarTargetPose(
   // 13. Drinking: grab the glass, lift it to the mouth, tip the head back, set it down.
   if (input.drinkElapsed !== null && input.drinkElapsed !== undefined && !input.passedOut) {
     const elapsed = input.drinkElapsed
+    // Reach for the glass on the felt, raise it to the mouth, tip back, set it down.
     const holding = envelope(elapsed, DRINK_SECONDS, 0.35, 0.35)
     const lift = smoothStep((elapsed - 0.35) / 0.45) * smoothStep((DRINK_SECONDS - 0.4 - elapsed) / 0.45)
-    blendTo(pose.handR, offset(anchors.railR, -0.08, 0.08, 0.05), holding)
-    blendTo(pose.handR, offset(anchors.chin, 0.03, -0.06, -0.1), lift)
-    add(bones.Head, -0.38 * lift, 0, 0)
+    blendTo(pose.handR, offset(anchors.drinkRest, 0.02, 0.1, 0.04), holding)
+    blendTo(pose.handR, offset(anchors.chin, 0.02, -0.12, -0.12), lift)
+    add(bones.Head, -0.42 * lift, 0, 0)
     add(bones.Chest, -0.1 * lift, 0, 0)
     pose.fingerCurlR = pose.fingerCurlR * (1 - holding) + 1 * holding
     pose.drinkLift = lift
