@@ -57,9 +57,7 @@ export function DrinkControls({ variant }: { variant: 'desktop' | 'mobile' }) {
     : `Crack a beer (${myDrinks.beers} so far)`
   const waterTitle = myDrinks.passedOut
     ? 'You are passed out'
-    : myDrinks.sobering > 0
-      ? `Order a water (${myDrinks.sobering} still kicking in)`
-      : 'Order a water. It sobers you up a little after about 30 seconds.'
+    : 'Drink a water. Sobers you up one level.'
 
   return (
     <div
@@ -86,7 +84,7 @@ export function DrinkControls({ variant }: { variant: 'desktop' | 'mobile' }) {
         </button>
         <button
           type="button"
-          className={`drink-button is-water ${myDrinks.sobering > 0 ? 'is-sobering' : ''}`}
+          className="drink-button is-water"
           onClick={() => order('water')}
           disabled={disabled}
           aria-label={waterTitle}
@@ -94,9 +92,6 @@ export function DrinkControls({ variant }: { variant: 'desktop' | 'mobile' }) {
         >
           <span className="drink-button-glyph" aria-hidden="true">💧</span>
           <span className="drink-button-label">Water</span>
-          {myDrinks.sobering > 0 && (
-            <em className="drink-button-count is-pending" aria-hidden="true">{myDrinks.sobering}</em>
-          )}
         </button>
         {isCooling && lastOrderAt !== null && (
           <span key={lastOrderAt} className="drink-cooldown" aria-hidden="true" />

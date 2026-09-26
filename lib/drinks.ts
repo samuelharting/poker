@@ -5,7 +5,7 @@
  *
  * Timing rules (server authoritative):
  * - Beer: +1 drunk level immediately.
- * - Water: -1 drunk level WATER_KICK_IN_MS (30s) after ordering ("after a while").
+ * - Water: -1 drunk level WATER_KICK_IN_MS (3s) after ordering, once the sip finishes.
  * - Wear-off: every WEAR_OFF_EVERY_HANDS (3) completed hands, -1 level on its own.
  * - Pass-out: reaching PASS_OUT_LEVEL (10). The player's hand is folded through
  *   the normal fold path when action reaches them; they wake up at the start of
@@ -20,7 +20,7 @@ export const DRUNK_LEVEL_MAX = 10
 export const PASS_OUT_LEVEL = 10
 export const WAKE_UP_LEVEL = 6
 export const DRINK_COOLDOWN_MS = 3_000
-export const WATER_KICK_IN_MS = 30_000
+export const WATER_KICK_IN_MS = 3_000
 export const WEAR_OFF_EVERY_HANDS = 3
 /** How long a passed-out player "slumps" before their hand is folded. */
 export const PASS_OUT_FOLD_DELAY_MS = 900

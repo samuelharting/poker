@@ -38,7 +38,8 @@ export function SeatDrinkBadge({
     return () => window.clearTimeout(timer)
   }, [lastDrinkId, lastDrinkKind])
 
-  const hasHistory = drinks.beers > 0 || drinks.waters > 0 || drinks.passedOut
+  // Only beers are worth bragging about; water isn't counted.
+  const hasHistory = drinks.beers > 0 || drinks.passedOut
   if (!hasHistory && !sip) {
     return null
   }
@@ -62,15 +63,10 @@ export function SeatDrinkBadge({
         <span className="seat-drink-chip">
           {drinks.passedOut ? (
             <span className="seat-drink-zzz" aria-hidden="true">💤</span>
-          ) : drinks.beers > 0 ? (
+          ) : (
             <>
               <span aria-hidden="true">🍺</span>
               <b>×{drinks.beers}</b>
-            </>
-          ) : (
-            <>
-              <span aria-hidden="true">💧</span>
-              <b>×{drinks.waters}</b>
             </>
           )}
         </span>
