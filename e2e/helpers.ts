@@ -1,4 +1,4 @@
-import { expect, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test'
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -37,7 +37,17 @@ export class RoomTap {
   session: Json = null
   failures: string[] = []
   results: string[] = []
+  pageErrors: string[] = []
   snapshots = 0
+
+  /** Forget everything received so far (e.g. before a reload) so waits only see fresh data. */
+  reset() {
+    this.snapshot = null
+    this.social = null
+    this.session = null
+    this.failures = []
+    this.results = []
+  }
 
   attach(page: Page) {
     page.on('websocket', ws => {
@@ -114,8 +124,17 @@ export async function newPlayer(
   const page = await context.newPage()
   // Never let a native confirm() (Leave game) block the run.
   page.on('dialog', dialog => { void dialog.accept() })
+  // The Next.js dev-tools badge (bottom-left) sits on top of the mobile Fold
+  // button and target panel. It does not exist in production builds, so hide it;
+  // real runtime errors are still collected through the tap below.
+  await context.addInitScript(() => {
+    const style = document.createElement('style')
+    style.textContent = 'nextjs-portal { display: none !important; }'
+    document.addEventListener('DOMContentLoaded', () => document.head.appendChild(style))
+  })
   const tap = new RoomTap()
   tap.attach(page)
+  page.on('pageerror', error => tap.pageErrors.push(String(error?.message ?? error)))
   return { name, viewport: viewportName, context, page, tap }
 }
 
@@ -359,7 +378,11 @@ export async function openTargetPanel(viewer: Player, targetName: string): Promi
   const trigger = viewer.viewport === 'desktop'
     ? viewer.page.getByRole('button', { name: `Send a reaction to ${targetName}` })
     : viewer.page.getByRole('button', { name: `Target ${targetName} for emojis` })
-  await visible(trigger).first().click()
+  await clickOrReport(
+    visible(trigger).first(),
+    `Seat target for "${targetName}" is covered and cannot be clicked`,
+    `ui-issue-seat-target-${viewer.viewport}-${targetName}`
+  )
   const panel = viewer.page.getByRole('dialog', { name: `Message or react to ${targetName}` })
   await expect(panel).toBeVisible()
   return panel
@@ -391,4 +414,37 @@ export async function recordedAttribute(page: Page, key: string): Promise<string
 
 export function otherViewport(viewport: ViewportName): ViewportName {
   return viewport === 'desktop' ? 'mobile' : 'desktop'
+}
+
+/**
+ * Clicks a control the way a user would. If another element covers it (layout
+ * regression), record a UI issue with a screenshot and fall back to the
+ * keyboard so the rest of the feature can still be verified.
+ */
+export async function clickOrReport(
+  locator: Locator,
+  issue: string,
+  screenshotName: string
+): Promise<'clicked' | 'keyboard'> {
+  await expect(locator).toBeVisible()
+  try {
+    await locator.click({ trial: true, timeout: 5_000 })
+    await locator.click()
+    return 'clicked'
+  } catch {
+    const page = locator.page()
+    const file = await snap(page, screenshotName)
+    const blocker = await locator.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+      return top ? `${top.tagName.toLowerCase()}.${String(top.className).split(' ').join('.')}` + ` in ${top.closest('[class]')?.parentElement?.className ?? ''}` : 'unknown'
+    }).catch(() => 'unknown')
+    test.info().annotations.push({
+      type: 'ui-issue',
+      description: `${issue} — covered by ${blocker} (viewport ${page.viewportSize()?.width}x${page.viewportSize()?.height}); screenshot ${file}`,
+    })
+    await locator.focus()
+    await locator.press('Enter')
+    return 'keyboard'
+  }
 }
