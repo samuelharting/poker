@@ -224,25 +224,33 @@ describe('room UI layering', () => {
       'max-height: min(42svh, 360px);',
       'background:',
     ], polishCss)
-    // 2D table: the result card takes the pot's place above the board, narrow
-    // enough to sit between the side seats.
+    // 2D layout: the result card takes the pot's line above the board, with a
+    // simple brass outline.
     expectRule('.mobile-edge-winners', [
-      'max-width: min(58cqw, 340px);',
-      'animation: winnerCardIn',
+      'width: min(100%, 360px);',
+      'border: 1px solid var(--c-brass-400);',
     ], table2dCss)
-    expectRule('.mobile-board-header', [
-      'position: absolute;',
-      'bottom: calc(100% + clamp(6px, 2cqh, 14px));',
+    expectRule('.mobile-board-footer', [
+      'display: flex;',
+      'justify-content: center;',
     ], table2dCss)
+    expect(table2dCss).toMatch(/\.mobile-board-header,\s*\.mobile-board-footer \{/)
     expect(pokerTableSource).toContain('className="table-hand-result-summary"')
     expect(pokerTableSource).toContain("winnerDisplays.length > 1 ? 'Split pot' : 'Hand winner'")
     expect(pokerTableSource).not.toContain('className="table-center-winner-announcement"')
   })
 
-  it('makes the winner chip payout large, bright, and visible on mobile', () => {
-    expect(pokerTableSource).toContain(
-      'className="table-center-winner-chip-trails mobile-winner-chip-trails"'
-    )
+  it('keeps the large winner chip payout on desktop and a simple highlight on 2D', () => {
+    // The 2D layout marks the winner in their seat chip ("+$180") instead of
+    // flying chips across the screen.
+    expect(pokerTableSource).not.toContain('mobile-winner-chip-trails')
+    expect(table2dCss).not.toContain('mobile-winner-chip-trails')
+    expectRule('.mobile-seat-status.is-win .mobile-seat-action', [
+      'color: var(--c-brass-200);',
+    ], table2dCss)
+    expectRule('.mobile-edge-seat.is-winner', [
+      'border-color: var(--c-brass-400);',
+    ], table2dCss)
     expect(polishCss).toContain('@keyframes winnerChipTravelEmphasis')
     expectRule('.table-center-winner-chip-trail', [
       'animation: winnerChipTravelEmphasis 1200ms',
@@ -252,14 +260,6 @@ describe('room UI layering', () => {
       'transform: scale(1.62);',
       'drop-shadow(0 0 13px rgba(255, 220, 115, 0.72))',
     ], polishCss)
-    expectRule("[data-layout='2d'] .mobile-winner-chip-trails", [
-      'position: absolute;',
-      'inset: 0;',
-      'border-radius: 0;',
-    ], table2dCss)
-    expectRule("[data-layout='2d'] .mobile-winner-chip-trails .table-center-winner-chip-trail", [
-      'animation: mobileChipPayout 1100ms',
-    ], table2dCss)
   })
 
   it('enlarges showdown cards at their existing seats instead of opening a new screen', () => {
@@ -277,13 +277,13 @@ describe('room UI layering', () => {
       'width: 128px;',
       'z-index: 30;',
     ], polishCss)
-    // 2D table: shown hands cover the avatar puck at a readable size.
-    expectRule('.mobile-edge-seat-cards.is-revealed', [
-      'z-index: 3;',
-      'transform: translate(-50%, -50%);',
+    // 2D layout: shown hands get a compact row inside the seat chip.
+    expectRule('.mobile-edge-seat > .mobile-edge-seat-cards.is-revealed', [
+      'grid-area: cards;',
     ], table2dCss)
     expectRule('.mobile-edge-seat-cards.is-revealed .card.card-xs', [
-      'width: calc(var(--avatar) * 0.78);',
+      'width: 24px;',
+      'height: 34px;',
     ], table2dCss)
     expectRule(".desktop-3d-stage[data-phase='between_hands'] .cinematic-hole-cards.has-revealed-cards", [
       'top: -72px;',
@@ -401,7 +401,7 @@ describe('room UI layering', () => {
     ])
   })
 
-  it('draws one responsive 2D felt table for every width under 1024px', () => {
+  it('uses one simple, table-free 2D layout for every width under 1024px', () => {
     // The old tableless edge layout and the 769-1023px tablet table are gone.
     expect(css).not.toContain('Mobile edge arena restructure')
     expect(polishCss).not.toContain('Mobile tableless edge layout')
@@ -415,18 +415,19 @@ describe('room UI layering', () => {
       'padding: calc(var(--hud-h, 56px) + env(safe-area-inset-top)) 0 0;',
       'flex-direction: column;',
     ], table2dCss)
-    expectRule('.mobile-table-zone', [
-      'container: zone / size;',
-    ], table2dCss)
-    expectRule('.mobile-table', [
-      'border-radius: 9999px;',
-    ], table2dCss)
-    expectRule('.mobile-table::before', [
-      'border: 1.5px solid rgba(242, 199, 102, 0.55);',
+    // No drawn felt table on 2D: seats are a tidy grid of small chips.
+    expect(table2dCss).not.toMatch(/\.mobile-table(-felt|-zone)?\s*\{/)
+    expect(pokerTableSource).not.toContain('mobile-table-felt')
+    expectRule('.mobile-seat-grid', [
+      'display: flex;',
+      'flex-wrap: wrap;',
     ], table2dCss)
     expectRule('.mobile-edge-seat-position', [
-      'position: absolute;',
-      'left: clamp(var(--edge), calc(var(--sx) * 1%), calc(100% - var(--edge)));',
+      'flex: 0 0 calc((100% - (var(--cols) - 1) * var(--seat-gap)) / var(--cols));',
+    ], table2dCss)
+    expectRule('.mobile-board-zone', [
+      'flex: 1 1 auto;',
+      'justify-content: center;',
     ], table2dCss)
     expectRule('.mobile-seat-ring', [
       'conic-gradient(var(--ring) calc(var(--turn-pct) * 1%)',
@@ -448,5 +449,17 @@ describe('room UI layering', () => {
       'width: 44px;',
       'height: 44px;',
     ], table2dCss)
+  })
+
+  it('keeps drinks off the 2D layout and Lady Luck small', () => {
+    expect(table2dCss).toMatch(
+      /@media \(max-width: 1023px\) \{\s*\.drink-controls,\s*\.seat-drink-badge,\s*\.drink-toasts,\s*\.drunk-vision \{\s*display: none !important;/
+    )
+    expectRule(".table-scene[data-layout='2d'] .lady-luck-badge", [
+      '--ll-size: 22px;',
+    ], table2dCss)
+    expect(table2dCss).toMatch(
+      /\.table-scene\[data-layout='2d'\] \.lady-luck-bubble,[\s\S]*?\{\s*display: none;/
+    )
   })
 })

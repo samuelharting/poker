@@ -1160,7 +1160,7 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).toContain('player-emote-badge-targeted')
   })
 
-  it('draws the 2D felt table with avatar pucks instead of the desktop table surface under 1024px', () => {
+  it('shows the simple 2D layout with seat chips instead of the desktop table surface under 1024px', () => {
     const socialState: SocialSnapshot = {
       active: [],
       chatLog: [],
@@ -1229,7 +1229,8 @@ describe('PokerTable desktop 3D gate', () => {
 
     expect(markup).toContain('data-layout="2d"')
     expect(markup).toContain('mobile-poker-field')
-    expect(markup).toContain('mobile-table-felt')
+    expect(markup).not.toContain('mobile-table-felt')
+    expect(markup).toContain('mobile-seat-grid')
     expect(markup).toContain('mobile-board-zone')
     expect(markup).toContain('mobile-edge-seat')
     expect(markup).toContain('mobile-seat-avatar')
@@ -1422,10 +1423,11 @@ describe('PokerTable desktop 3D gate', () => {
       />
     )
 
-    expect(markup).toContain('mobile-seat-position-4')
-    expect(markup).not.toContain('mobile-seat-position-0')
-    expect(markup).not.toContain('mobile-seat-position-1')
-    expect(markup).not.toContain('mobile-seat-position-7')
+    // Heads-up: one opponent chip in the seat grid; the hero lives in the hand lane.
+    expect(markup.match(/class="mobile-edge-seat-position /g)).toHaveLength(1)
+    expect(markup).toContain('data-seat-count="1"')
+    expect(markup).toContain('mobile-hero-lane')
+    expect(markup).not.toContain('>Hero Player<')
   })
 })
 
@@ -1543,7 +1545,7 @@ describe('PokerTable table-management controls', () => {
     expect(mobileMarkup).toContain('Rabbit hunt')
   })
 
-  it('sends the mobile payout chips to the winner compact rendered seat', () => {
+  it('marks the 2D winner in their seat chip instead of flying payout chips', () => {
     const state = makeFoldEndedState()
     state.players[0] = { ...state.players[0]!, status: 'folded' }
     state.players[1] = { ...state.players[1]!, status: 'waiting' }
@@ -1554,12 +1556,12 @@ describe('PokerTable table-management controls', () => {
       '(min-width: 1024px)': false,
     })
 
-    expect(mobileMarkup).toContain('mobile-seat-position-4')
-    expect(mobileMarkup).toContain('table-center-winner-chip-trails mobile-winner-chip-trails')
-    expect(mobileMarkup).toContain('--winner-chip-x:50%;--winner-chip-y:6%')
+    expect(mobileMarkup).toContain('mobile-edge-seat mobile-seat-1 is-winner')
+    expect(mobileMarkup).toContain('+$30')
+    expect(mobileMarkup).not.toContain('table-center-winner-chip-trails')
   })
 
-  it('sends hero payout chips to the hero lane regardless of their physical seat', () => {
+  it('sends desktop hero payout chips to the hero seat regardless of their physical seat', () => {
     const state = makeFoldEndedState()
     state.players[0] = { ...state.players[0]!, seatIndex: 6 }
     state.players[1] = { ...state.players[1]!, seatIndex: 7 }
@@ -1573,7 +1575,7 @@ describe('PokerTable table-management controls', () => {
       '(min-width: 1024px)': false,
     })
 
-    expect(mobileMarkup).toContain('--winner-chip-x:50%;--winner-chip-y:104%')
+    expect(mobileMarkup).not.toContain('--winner-chip-x')
     expect(desktopMarkup).toContain('--winner-chip-x:50.5%;--winner-chip-y:88.2%')
   })
 

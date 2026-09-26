@@ -18,8 +18,8 @@ const pokerTableSource = readFileSync(
   'utf8'
 )
 
-describe('2D table card layout', () => {
-  it('exposes the number of dealt board cards for the 2D table', () => {
+describe('2D layout cards and seats', () => {
+  it('exposes the number of dealt board cards for the 2D layout', () => {
     expect(renderToStaticMarkup(<CommunityCards cards={[]} />)).toContain(
       'data-visible-count="0"'
     )
@@ -39,12 +39,12 @@ describe('2D table card layout', () => {
     )
   })
 
-  it('keeps the board a stable width with printed guides for streets still to come', () => {
+  it('keeps the board a stable width and hides empty guides before the flop', () => {
     expect(table2dCss).toMatch(
       /\.mobile-board-zone \.community-cards\[data-visible-count='0'\] \.community-card-slot\s*\{[^}]*visibility:\s*hidden;/s
     )
     expect(table2dCss).toMatch(
-      /\.mobile-board-zone \.community-card-slot:not\(\.is-live\)\s*\{[^}]*border:\s*1\.5px dashed/s
+      /\.mobile-board-zone \.community-card-slot:not\(\.is-live\)\s*\{[^}]*border:\s*1px dashed/s
     )
     expect(table2dCss).toMatch(
       /\.mobile-board-zone \.community-card-slot\s*\{[^}]*width:\s*var\(--board-card-w\);/s
@@ -52,53 +52,49 @@ describe('2D table card layout', () => {
     expect(table2dCss).toContain('@keyframes boardCardDeal')
   })
 
-  it('fans the hero hand in the thumb zone and simplifies small card faces', () => {
+  it('shows the hero hand large with a gentle fan and simple card faces', () => {
     expect(table2dCss).toMatch(
-      /\.mobile-hero-lane \.own-card-slot-left\s*\{[^}]*transform:\s*rotate\(-7deg\)/s
+      /\.mobile-hero-lane \.own-card-slot-left,[^{]*\{[^}]*transform:\s*rotate\(-5deg\)/s
     )
     expect(table2dCss).toMatch(
-      /\.mobile-hero-lane \.own-card-slot-right\s*\{[^}]*transform:\s*rotate\(7deg\)/s
+      /\.mobile-hero-lane \.own-card-slot-right,[^{]*\{[^}]*transform:\s*rotate\(5deg\)/s
     )
     expect(table2dCss).toMatch(
       /\.mobile-hero-lane \.card-corner-bottom,\s*\[data-layout='2d'\] \.mobile-board-zone \.card-corner-bottom\s*\{[^}]*display:\s*none;/s
     )
-    expect(table2dCss).toMatch(/\.mobile-hero-lane\s*\{[^}]*margin-top:\s*calc\(var\(--hero-card-h\) \* -0\.5\);/s)
+    expect(table2dCss).toMatch(/--hero-card-w: clamp\(60px, 18vw, 96px\);/)
   })
 
-  it('shows revealed opponent hands over the avatar puck, fanned apart', () => {
+  it('shows revealed opponent hands as a compact row inside the seat chip', () => {
     expect(pokerTableSource).toContain("hasVisibleHoleCards ? 'has-visible-cards' : ''")
     expect(table2dCss).toMatch(
-      /\.mobile-edge-seat-cards\.is-revealed \.card-container:first-child\s*\{[^}]*transform:\s*rotate\(-5deg\);/s
-    )
-    expect(table2dCss).toMatch(
-      /\.mobile-edge-seat-cards\.is-revealed \.card-container:last-child\s*\{[^}]*transform:\s*rotate\(5deg\);/s
+      /\.mobile-edge-seat > \.mobile-edge-seat-cards\.is-revealed\s*\{[^}]*grid-area:\s*cards;/s
     )
   })
 
-  it('animates wagers out from each seat and collects them into the pot', () => {
+  it('shows each current bet as a small badge inside the seat chip', () => {
     expect(pokerTableSource).toContain('function MobileBetIndicator')
-    expect(pokerTableSource).toContain('function MobileBetCollect')
+    expect(pokerTableSource).not.toContain('function MobileBetCollect')
     expect(pokerTableSource).toContain('key={`${player.id}-${player.bet}`}')
-    expect(pokerTableSource).toContain('key={`${visibleOwnPlayer.id}-${visibleOwnPlayer.bet}`}')
     expect(pokerTableSource).toContain('className="mobile-edge-bet-anchor"')
     expect(pokerTableSource).toContain('className="mobile-hero-bet-anchor"')
     expect(table2dCss).toContain('@keyframes mobileBetCommit')
-    expect(table2dCss).toMatch(/\.mobile-bet-indicator\s*\{[^}]*animation:\s*mobileBetCommit 420ms/s)
-    expect(table2dCss).toContain('@keyframes chipsToPot')
-    expect(table2dCss).toContain('calc((50 - var(--sx, 50)) * 1cqw - var(--bx, 0px))')
+    expect(table2dCss).toMatch(/\.mobile-bet-indicator\s*\{[^}]*animation:\s*mobileBetCommit 280ms/s)
+    expect(table2dCss).not.toContain('@keyframes chipsToPot')
   })
 
-  it('places every seat on the rail and keeps edge seats on screen', () => {
-    for (let seat = 0; seat <= 7; seat += 1) {
-      expect(table2dCss).toMatch(new RegExp(`\\.mobile-seat-position-${seat} \\{ --sx: \\d+; --sy: \\d+; \\}`))
-    }
+  it('lays seats out as a balanced grid instead of positions around a table', () => {
+    expect(table2dCss).toContain(".mobile-seat-grid[data-seat-count='7'] { --n: 7; --cols: 4; }")
+    expect(table2dCss).toContain(".mobile-seat-grid[data-seat-count='5'] { --n: 5; --cols: 3; }")
+    expect(table2dCss).not.toMatch(/--sx:/)
     expect(pokerTableSource).not.toContain('MOBILE_SEAT_NUMBERS_BY_VISUAL_SEAT')
+    expect(pokerTableSource).not.toContain('MOBILE_EDGE_SAFE_SEATS_BY_COUNT')
     expect(pokerTableSource).not.toContain('mobile-seat-number')
   })
 
-  it('keeps card reveal controls above the seat and at least a comfortable tap size', () => {
+  it('keeps card reveal controls inside the chip and at least a comfortable tap size', () => {
     expect(table2dCss).toMatch(
-      /\.mobile-card-reveal-control\s*\{[^}]*top:\s*calc\(var\(--avatar\) \* -0\.6\);/s
+      /\.mobile-card-reveal-control\s*\{[^}]*position:\s*absolute;[^}]*right:\s*4px;/s
     )
     expect(table2dCss).toMatch(
       /\.mobile-card-reveal-control \.card-reveal-seat-button\s*\{[^}]*min-width:\s*44px;/s

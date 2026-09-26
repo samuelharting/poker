@@ -126,10 +126,6 @@ interface OpponentSeat extends SeatPlayer {
   visualSeat: number
 }
 
-interface MobileEdgeOpponent extends OpponentSeat {
-  mobileVisualSeat: number
-}
-
 const SEAT_LAYOUTS: SeatLayout[] = [
   { cssClass: 'seat-0', depthClass: 'seat-depth-near', opacity: 1.0 },
   { cssClass: 'seat-1', depthClass: 'seat-depth-near', opacity: 0.97 },
@@ -140,16 +136,6 @@ const SEAT_LAYOUTS: SeatLayout[] = [
   { cssClass: 'seat-6', depthClass: 'seat-depth-mid', opacity: 0.94 },
   { cssClass: 'seat-7', depthClass: 'seat-depth-near', opacity: 0.97 },
 ]
-
-const MOBILE_EDGE_SAFE_SEATS_BY_COUNT: Record<number, number[]> = {
-  1: [4],
-  2: [3, 5],
-  3: [3, 4, 5],
-  4: [2, 3, 5, 6],
-  5: [2, 3, 4, 5, 6],
-  6: [2, 3, 4, 5, 6, 1],
-  7: [2, 3, 4, 5, 6, 1, 7],
-}
 
 const SEAT_TONES = ['burgundy', 'midnight', 'emerald', 'ivory', 'gold', 'violet'] as const
 
@@ -284,6 +270,7 @@ interface DesktopPokerRoom3DProps {
   onSelectPlayer: (playerId: string) => void
   cardRevealActions: CardRevealSeatAction[]
   onRequestCardReveal: (playerId: string) => void
+  highlightedCards?: ReadonlyArray<Pick<Card, 'rank' | 'suit'>>
 }
 
 const DesktopPokerRoom3D = dynamic<DesktopPokerRoom3DProps>(
@@ -302,18 +289,6 @@ const WINNER_SEAT_TARGETS: Record<number, { x: string; y: string }> = {
   5: { x: '81.2%', y: '23.5%' },
   6: { x: '89%', y: '53%' },
   7: { x: '80.5%', y: '78.5%' },
-}
-
-// Seat anchors on the 2D table zone; keep in step with --sx/--sy in app/styles/table-2d.css.
-const MOBILE_WINNER_SEAT_TARGETS: Record<number, { x: string; y: string }> = {
-  0: { x: '50%', y: '104%' },
-  1: { x: '13%', y: '78%' },
-  2: { x: '10%', y: '44%' },
-  3: { x: '18%', y: '13%' },
-  4: { x: '50%', y: '6%' },
-  5: { x: '82%', y: '13%' },
-  6: { x: '90%', y: '44%' },
-  7: { x: '87%', y: '78%' },
 }
 
 const SHOW_CARD_OPTIONS: Array<{
@@ -445,15 +420,6 @@ function MobileBetIndicator({
   )
 }
 
-/** A chip that flies from a seat's wager spot into the pot when a street closes. */
-function MobileBetCollect({ className }: { className: string }) {
-  return (
-    <div className={`${className} is-collecting`} aria-hidden="true">
-      <span className="mobile-bet-token" />
-    </div>
-  )
-}
-
 type SeatTimerStyle = CSSProperties & { '--turn-pct'?: number }
 
 function AllInAnnouncement({ announcement }: { announcement: AllInAnnouncementView }) {
@@ -484,6 +450,18 @@ function AllInAnnouncement({ announcement }: { announcement: AllInAnnouncementVi
   )
 }
 
+const SEAT_ACTION_WORDS: Record<SeatActionTone, string> = {
+  fold: 'Folded',
+  check: 'Check',
+  call: 'Call',
+  raise: 'Raise',
+  'all-in': 'All-in',
+}
+
+/**
+ * 2D seat chip: a small avatar, name, stack and one status line with the
+ * player's current bet. Shown hands get a compact row inside the chip.
+ */
 function MobileEdgeSeat({
   player,
   visualSeat,
@@ -492,9 +470,7 @@ function MobileEdgeSeat({
   timerPercent,
   isWinner = false,
   winnerAmount,
-  winnerHandDescription,
   winningCards = [],
-  collectingBet = false,
   cardRevealControl,
   onNameClick,
 }: {
@@ -505,9 +481,7 @@ function MobileEdgeSeat({
   timerPercent?: number
   isWinner?: boolean
   winnerAmount?: number
-  winnerHandDescription?: string
   winningCards?: Card[]
-  collectingBet?: boolean
   cardRevealControl?: React.ReactNode
   onNameClick?: (playerId: string) => void
 }) {
@@ -523,11 +497,12 @@ function MobileEdgeSeat({
     holeCards
   )
   const hasVisibleHoleCards = Boolean(visibleLeftCard || visibleRightCard)
-  const actionChip = isWinner && typeof winnerAmount === 'number' && winnerAmount > 0
-    ? { label: `Won ${formatAmount(winnerAmount)}`, tone: 'win' }
+  const actionChip = getSeatActionChip(player)
+  const statusTone = isWinner && typeof winnerAmount === 'number' && winnerAmount > 0
+    ? 'win'
     : isDisconnected && !isFolded
-      ? { label: 'Away', tone: 'away' }
-      : getSeatActionChip(player)
+      ? 'away'
+      : actionChip?.tone ?? (blindRole ? 'blind' : 'idle')
   const classes = [
     'mobile-edge-seat',
     `mobile-seat-${visualSeat}`,
@@ -564,12 +539,6 @@ function MobileEdgeSeat({
     >
       <div className="mobile-seat-puck">
         {isActing && <span className="mobile-seat-ring" aria-hidden="true" />}
-        {player.hasCards && !isFolded && !hasVisibleHoleCards && (
-          <div className="mobile-edge-seat-cards">
-            <span className="mobile-edge-card-back" aria-label="Hidden card" />
-            <span className="mobile-edge-card-back" aria-label="Hidden card" />
-          </div>
-        )}
         {onNameClick ? (
           <button
             type="button"
@@ -586,35 +555,26 @@ function MobileEdgeSeat({
             {getSeatInitials(player.nickname)}
           </div>
         )}
-        {player.hasCards && hasVisibleHoleCards && (
-          <div className="mobile-edge-seat-cards is-revealed">
-            {visibleLeftCard ? renderSeatCard(visibleLeftCard) : (
-              <span className="mobile-edge-card-back" aria-label="Hidden card" />
-            )}
-            {visibleRightCard ? renderSeatCard(visibleRightCard) : (
-              <span className="mobile-edge-card-back" aria-label="Hidden card" />
-            )}
-          </div>
+        {player.hasCards && !isFolded && !hasVisibleHoleCards && (
+          <span className="mobile-edge-seat-cards" aria-label="Holding cards">
+            <span className="mobile-edge-card-back" />
+            <span className="mobile-edge-card-back" />
+          </span>
         )}
         {player.isDealer && (
           <span className="mobile-seat-dealer" title="Dealer" aria-label="Dealer">D</span>
         )}
-        {blindRole && (
-          <span className={`mobile-blind-role is-${blindRole}`}>
-            <strong aria-hidden="true">{blindRole === 'big' ? 'BB' : 'SB'}</strong>
-            <span className="sr-only">{blindRole === 'big' ? 'Big Blind' : 'Small Blind'}</span>
-          </span>
-        )}
-        {isActing && typeof secondsLeft === 'number' && (
-          <div
-            className={`mobile-edge-seat-timer ${secondsLeft <= 5 ? 'is-low' : ''}`}
-            role="timer"
-            aria-label={`${secondsLeft} seconds left`}
-          >
-            {secondsLeft}s
-          </div>
-        )}
       </div>
+
+      {isActing && typeof secondsLeft === 'number' && (
+        <div
+          className={`mobile-edge-seat-timer ${secondsLeft <= 5 ? 'is-low' : ''}`}
+          role="timer"
+          aria-label={`${secondsLeft} seconds left`}
+        >
+          {secondsLeft}s
+        </div>
+      )}
 
       <div className="mobile-edge-seat-main">
         {onNameClick ? (
@@ -631,45 +591,50 @@ function MobileEdgeSeat({
           <div className="mobile-edge-seat-name">{mobileSeatName}</div>
         )}
         <div className="mobile-edge-seat-stack">{formatAmount(player.stack)}</div>
-        {actionChip && (
-          <div
+      </div>
+
+      {player.hasCards && hasVisibleHoleCards && (
+        <div className="mobile-edge-seat-cards is-revealed">
+          {visibleLeftCard ? renderSeatCard(visibleLeftCard) : (
+            <span className="mobile-edge-card-back" aria-label="Hidden card" />
+          )}
+          {visibleRightCard ? renderSeatCard(visibleRightCard) : (
+            <span className="mobile-edge-card-back" aria-label="Hidden card" />
+          )}
+        </div>
+      )}
+
+      <div className={`mobile-seat-status is-${statusTone}`}>
+        {statusTone === 'win' ? (
+          <span className="mobile-seat-action">+{formatAmount(winnerAmount ?? 0)}</span>
+        ) : statusTone === 'away' ? (
+          <span className="mobile-seat-action">Away</span>
+        ) : actionChip ? (
+          <span
             key={`${actionChip.tone}-${player.lastActionId ?? actionChip.label}`}
-            className={`mobile-seat-action is-${actionChip.tone}`}
+            className="mobile-seat-action"
           >
-            {actionChip.label}
-          </div>
+            {SEAT_ACTION_WORDS[actionChip.tone]}
+          </span>
+        ) : blindRole ? (
+          <span className={`mobile-blind-role is-${blindRole}`}>
+            <strong aria-hidden="true">{blindRole === 'big' ? 'BB' : 'SB'}</strong>
+            <span className="sr-only">{blindRole === 'big' ? 'Big Blind' : 'Small Blind'}</span>
+          </span>
+        ) : null}
+        {player.bet > 0 && statusTone !== 'win' && (
+          <MobileBetIndicator
+            key={`${player.id}-${player.bet}`}
+            amount={player.bet}
+            ownerLabel={mobileSeatName}
+            className="mobile-edge-bet-anchor"
+          />
         )}
       </div>
 
-      {isWinner && winnerHandDescription && (
-        <div className="mobile-edge-winner-hand">{winnerHandDescription}</div>
-      )}
-      {player.bet > 0 && (
-        <MobileBetIndicator
-          key={`${player.id}-${player.bet}`}
-          amount={player.bet}
-          ownerLabel={mobileSeatName}
-          className="mobile-edge-bet-anchor"
-        />
-      )}
-      {collectingBet && <MobileBetCollect className="mobile-edge-bet-anchor" />}
       {cardRevealControl && (
         <div className="mobile-card-reveal-control">{cardRevealControl}</div>
       )}
-    </div>
-  )
-}
-
-function MobileOpenSeat({ visualSeat, isInHand }: { visualSeat: number; isInHand: boolean }) {
-  return (
-    <div
-      className={`mobile-edge-seat-position mobile-seat-position-${visualSeat} is-open-seat`}
-      aria-hidden="true"
-    >
-      <div className="mobile-open-seat">
-        <span className="mobile-open-seat-ring" />
-        <span className="mobile-open-seat-label">{isInHand ? 'Wait' : 'Open'}</span>
-      </div>
     </div>
   )
 }
@@ -709,6 +674,14 @@ function MobileHeroSeat({
         <div className="mobile-hero-seat-stack">{formatAmount(player.stack)}</div>
         <div className="mobile-hero-seat-status">{status}</div>
       </div>
+      {player.bet > 0 && (
+        <MobileBetIndicator
+          key={`${player.id}-${player.bet}`}
+          amount={player.bet}
+          ownerLabel="Your"
+          className="mobile-hero-bet-anchor"
+        />
+      )}
     </div>
   )
 }
@@ -1327,23 +1300,11 @@ export function PokerTable({
       .filter(layout => !occupiedVisualSeats.has(layout.visualSeat))
   }, [occupiedVisualSeats])
 
-  const mobileEdgeOpponents = useMemo<MobileEdgeOpponent[]>(() => {
-    const visiblePlayers = orderedOpponents.filter(player => !(shouldShowOwnHand && !isSpectator && player.id === yourId))
-
-    if (!shouldShowOwnHand || isSpectator) {
-      return visiblePlayers.map(player => ({
-        ...player,
-        mobileVisualSeat: player.visualSeat,
-      }))
-    }
-
-    const safeSeats = MOBILE_EDGE_SAFE_SEATS_BY_COUNT[Math.min(visiblePlayers.length, 7)] ?? MOBILE_EDGE_SAFE_SEATS_BY_COUNT[7]
-
-    return visiblePlayers.map((player, index) => ({
-      ...player,
-      mobileVisualSeat: safeSeats[index] ?? player.visualSeat,
-    }))
-  }, [isSpectator, orderedOpponents, shouldShowOwnHand, yourId])
+  // 2D seat grid: everyone but the hero (once the hero has cards), in table order.
+  const mobileEdgeOpponents = useMemo<OpponentSeat[]>(
+    () => orderedOpponents.filter(player => !(shouldShowOwnHand && !isSpectator && player.id === yourId)),
+    [isSpectator, orderedOpponents, shouldShowOwnHand, yourId]
+  )
 
   const toCall = me ? Math.min(state.currentBet - me.bet, me.stack) : 0
   const canCheck = me ? me.bet >= state.currentBet : false
@@ -1489,34 +1450,6 @@ export function PokerTable({
     state.serverNow
   )
 
-  // 2D table: when a street closes, fly each wager from its seat into the pot.
-  const streetKey = `${state.handNumber}:${state.round ?? 'none'}:${state.phase}`
-  const betSnapshotRef = useRef<{ key: string; bets: Map<string, number> }>({ key: '', bets: new Map() })
-  const [collectingBetIds, setCollectingBetIds] = useState<Set<string> | null>(null)
-
-  useEffect(() => {
-    const previous = betSnapshotRef.current
-    const currentBets = new Map(
-      state.players.filter(player => player.bet > 0).map(player => [player.id, player.bet] as const)
-    )
-    betSnapshotRef.current = { key: streetKey, bets: currentBets }
-
-    if (!isMobileViewport || !previous.key || previous.key === streetKey || previous.bets.size === 0) {
-      return
-    }
-
-    setCollectingBetIds(new Set(previous.bets.keys()))
-  }, [isMobileViewport, state.players, streetKey])
-
-  useEffect(() => {
-    if (!collectingBetIds) {
-      return
-    }
-
-    const timeout = window.setTimeout(() => setCollectingBetIds(null), 720)
-    return () => window.clearTimeout(timeout)
-  }, [collectingBetIds])
-
   useEffect(() => {
     const activeExpiries = socialState.active.flatMap(entry =>
       [entry.messageExpiresAt, entry.emoteExpiresAt].filter(
@@ -1568,22 +1501,11 @@ export function PokerTable({
     [showWinnerHighlights, state.winners]
   )
   const myWinnerAmount = winnerAmounts.get(yourId) ?? 0
-  const winnerSeatMap = useMemo(() => {
-    if (isMobileViewport) {
-      return new Map(
-        [
-          [yourId, 0],
-          ...mobileEdgeOpponents.map(player => [player.id, player.mobileVisualSeat] as const),
-        ]
-      )
-    }
-
-    return new Map([
-      [yourId, 0],
-      ...orderedOpponents.map(player => [player.id, player.visualSeat] as const),
-    ])
-  }, [isMobileViewport, mobileEdgeOpponents, orderedOpponents, yourId])
-  const winnerSeatTargets = isMobileViewport ? MOBILE_WINNER_SEAT_TARGETS : WINNER_SEAT_TARGETS
+  const winnerSeatMap = useMemo(() => new Map([
+    [yourId, 0],
+    ...orderedOpponents.map(player => [player.id, player.visualSeat] as const),
+  ]), [orderedOpponents, yourId])
+  const winnerSeatTargets = WINNER_SEAT_TARGETS
   const winnerDisplays = useMemo<WinnerDisplay[]>(() => {
     if (!betweenHands || !state.winners?.length) {
       return []
@@ -1819,9 +1741,6 @@ export function PokerTable({
     winnerDisplays.length > 0 &&
     !hasVisibleRabbitRunout &&
     !acceptedRunItTwice
-  const mobileOpenSeats = isSpectator || !shouldShowOwnHand
-    ? emptyVisualSeats.map(layout => layout.visualSeat)
-    : []
 
   return (
     <div
@@ -1848,6 +1767,7 @@ export function PokerTable({
           onSelectPlayer={handleSelectEmoteTarget}
           cardRevealActions={cardRevealActions}
           onRequestCardReveal={onRequestCardReveal}
+          highlightedCards={highlightedWinningCards}
         />
       ) : null}
       {!isMobileViewport && showdownCinematic}
@@ -1899,131 +1819,87 @@ export function PokerTable({
             data-seat-count={mobileEdgeOpponents.length}
             data-hero-lane={shouldShowOwnHand && visibleOwnPlayer ? 'true' : 'false'}
           >
-            <div className="mobile-table-zone">
-              <div className="mobile-table" aria-hidden="true">
-                <div className="mobile-table-felt">
-                  <span className="mobile-table-line" />
-                  <span className="mobile-table-crest">
-                    <span className="mobile-table-crest-suits">♠ ♥ ♣ ♦</span>
-                    <span className="mobile-table-crest-word">Poker Night</span>
-                    <span className="mobile-table-crest-stakes">
-                      No limit · {formatAmount(state.smallBlind)}/{formatAmount(state.bigBlind)}
-                    </span>
-                  </span>
-                </div>
-              </div>
+            <div
+              className="mobile-seat-grid mobile-edge-seats"
+              aria-label="Players"
+              data-seat-count={mobileEdgeOpponents.length}
+            >
+              {mobileEdgeOpponents.map(player => {
+                const seatSocial = activeSocialByPlayer.get(player.id) ?? {}
+                const isActingSeat = state.actingPlayerId === player.id
 
-              <div
-                className="mobile-board-zone"
-                data-board-count={acceptedRunItTwice ? 'twice' : Math.min(state.communityCards.length, 5)}
-              >
-                <div className="mobile-board-header">
-                  {showMobileWinnerSummary ? (
-                    <div className="mobile-edge-winners" role="status" aria-live="assertive" aria-atomic="true">
-                      <div className="mobile-edge-winners-heading">
-                        {winnerDisplays.length > 1 ? 'Split pot' : 'Hand winner'}
+                return (
+                  <div
+                    key={player.id}
+                    className={`mobile-edge-seat-position mobile-seat-position-${player.visualSeat}`}
+                  >
+                    <MobileEdgeSeat
+                      player={player}
+                      visualSeat={player.visualSeat}
+                      isActing={isActingSeat}
+                      secondsLeft={isActingSeat ? turnTimer.secondsLeft : undefined}
+                      timerPercent={isActingSeat ? turnTimer.percent : undefined}
+                      isWinner={betweenHands && showWinnerHighlights && winnerAmounts.has(player.id)}
+                      winnerAmount={winnerAmounts.get(player.id)}
+                      winningCards={winnerCardsByPlayer.get(player.id)}
+                      cardRevealControl={cardRevealActionByPlayerId.has(player.id) ? (
+                        <CardRevealSeatButton
+                          action={cardRevealActionByPlayerId.get(player.id)!}
+                          onRequest={onRequestCardReveal}
+                        />
+                      ) : null}
+                      onNameClick={handleSelectEmoteTarget}
+                    />
+                    <SeatDrinkBadge drinks={player.drinks} nickname={player.nickname} />
+                    <CompanionBadge companion={state.companion} playerId={player.id} />
+                    {(seatSocial.message || seatSocial.emote) && (
+                      <div className="mobile-edge-social" aria-live="polite">
+                        {seatSocial.emote && <EmojiGlyph emoji={seatSocial.emote} />}
+                        {seatSocial.message && <span>{seatSocial.message}</span>}
                       </div>
-                      {winnerDisplays.map(winner => (
-                        <div key={winner.playerId} className="mobile-edge-winner-line">
-                          <span>
-                            <b>{formatWinnerPaymentLabel(winner.nickname, winner.venmoUsername)}</b>
-                            {winner.handDescription && <small>{winner.handDescription}</small>}
-                          </span>
-                          <strong>+{formatAmount(winner.amount)}</strong>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="mobile-pot-wrap" key={`pot-${state.totalPot}`}>
-                      <PotDisplay
-                        totalPot={state.totalPot}
-                        pots={state.pots}
-                        currentBet={state.currentBet}
-                        toCall={isMyTurn ? Math.max(0, toCall) : 0}
-                      />
-                    </div>
-                  )}
-                </div>
-                {acceptedRunItTwice ? (
-                  <RunItTwiceBoards runItTwice={acceptedRunItTwice} players={state.players} />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div
+              className="mobile-board-zone"
+              data-board-count={acceptedRunItTwice ? 'twice' : Math.min(state.communityCards.length, 5)}
+            >
+              <div className="mobile-board-header">
+                {showMobileWinnerSummary ? (
+                  <div className="mobile-edge-winners" role="status" aria-live="assertive" aria-atomic="true">
+                    {winnerDisplays.map(winner => (
+                      <div key={winner.playerId} className="mobile-edge-winner-line">
+                        <span>
+                          <b>{formatWinnerPaymentLabel(winner.nickname, winner.venmoUsername)}</b>
+                          {winner.handDescription && <small>{winner.handDescription}</small>}
+                        </span>
+                        <strong>+{formatAmount(winner.amount)}</strong>
+                      </div>
+                    ))}
+                  </div>
                 ) : (
-                  <CommunityCards
-                    cards={state.communityCards}
-                    highlightedCards={highlightedWinningCards}
-                  />
+                  <div className="mobile-pot-wrap" key={`pot-${state.totalPot}`}>
+                    <PotDisplay
+                      totalPot={state.totalPot}
+                      pots={state.pots}
+                      currentBet={state.currentBet}
+                      toCall={isMyTurn ? Math.max(0, toCall) : 0}
+                    />
+                  </div>
                 )}
-                <div className="mobile-board-footer">{showdownCinematic}</div>
               </div>
-
-              <div className="mobile-edge-seats" aria-label="Players">
-                {mobileOpenSeats.map(visualSeat => (
-                  <MobileOpenSeat key={`open-${visualSeat}`} visualSeat={visualSeat} isInHand={isInHand} />
-                ))}
-                {mobileEdgeOpponents.map(player => {
-                  const seatSocial = activeSocialByPlayer.get(player.id) ?? {}
-                  const isActingSeat = state.actingPlayerId === player.id
-
-                  return (
-                    <div
-                      key={player.id}
-                      className={`mobile-edge-seat-position mobile-seat-position-${player.mobileVisualSeat}`}
-                    >
-                      <MobileEdgeSeat
-                        player={player}
-                        visualSeat={player.mobileVisualSeat}
-                        isActing={isActingSeat}
-                        secondsLeft={isActingSeat ? turnTimer.secondsLeft : undefined}
-                        timerPercent={isActingSeat ? turnTimer.percent : undefined}
-                        isWinner={betweenHands && showWinnerHighlights && winnerAmounts.has(player.id)}
-                        winnerAmount={winnerAmounts.get(player.id)}
-                        winnerHandDescription={winnerDescriptions.get(player.id)}
-                        winningCards={winnerCardsByPlayer.get(player.id)}
-                        collectingBet={Boolean(collectingBetIds?.has(player.id))}
-                        cardRevealControl={cardRevealActionByPlayerId.has(player.id) ? (
-                          <CardRevealSeatButton
-                            action={cardRevealActionByPlayerId.get(player.id)!}
-                            onRequest={onRequestCardReveal}
-                          />
-                        ) : null}
-                        onNameClick={handleSelectEmoteTarget}
-                      />
-                      <SeatDrinkBadge drinks={player.drinks} nickname={player.nickname} />
-                      <CompanionBadge companion={state.companion} playerId={player.id} />
-                      {(seatSocial.message || seatSocial.emote) && (
-                        <div className="mobile-edge-social" aria-live="polite">
-                          {seatSocial.emote && <EmojiGlyph emoji={seatSocial.emote} />}
-                          {seatSocial.message && <span>{seatSocial.message}</span>}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-
-              {betweenHands && showWinnerPayout && winnerDisplays.length > 0 && (
-                <div
-                  className="table-center-winner-chip-trails mobile-winner-chip-trails"
-                  aria-hidden="true"
-                >
-                  {winnerDisplays.map(winner => {
-                    const trailStyle: WinnerChipTrailStyle = {
-                      ['--winner-chip-x']: winner.targetX,
-                      ['--winner-chip-y']: winner.targetY,
-                      ['--winner-chip-delay']: `${winner.delayMs}ms`,
-                    }
-
-                    return (
-                      <div
-                        key={`${winner.playerId}-mobile-trail`}
-                        className="table-center-winner-chip-trail"
-                        style={trailStyle}
-                      >
-                        <ChipStack amount={winner.amount} compact showAmount={false} />
-                      </div>
-                    )
-                  })}
-                </div>
+              {acceptedRunItTwice ? (
+                <RunItTwiceBoards runItTwice={acceptedRunItTwice} players={state.players} />
+              ) : (
+                <CommunityCards
+                  cards={state.communityCards}
+                  highlightedCards={highlightedWinningCards}
+                />
               )}
+              <div className="mobile-board-footer">{showdownCinematic}</div>
             </div>
 
             {shouldShowOwnHand && visibleOwnPlayer && (
@@ -2031,17 +1907,6 @@ export function PokerTable({
                 className={`mobile-hero-lane ${isMyTurn ? 'is-acting' : ''}`}
                 data-show-cards={canAdjustShownCards && !settingsOpen ? 'true' : 'false'}
               >
-                {visibleOwnPlayer.bet > 0 && (
-                  <MobileBetIndicator
-                    key={`${visibleOwnPlayer.id}-${visibleOwnPlayer.bet}`}
-                    amount={visibleOwnPlayer.bet}
-                    ownerLabel="Your"
-                    className="mobile-hero-bet-anchor"
-                  />
-                )}
-                {collectingBetIds?.has(visibleOwnPlayer.id) && (
-                  <MobileBetCollect className="mobile-hero-bet-anchor" />
-                )}
                 <MobileHeroSeat
                   player={visibleOwnPlayer}
                   isActing={isMyTurn}
@@ -3927,8 +3792,8 @@ function RabbitHuntDock({
   return (
     <div className="rabbit-hunt-dock" role="region" aria-label="Rabbit hunt controls">
       <div className="rabbit-hunt-copy">
-        <span className="rabbit-hunt-kicker">Folded hand</span>
-        <span className="rabbit-hunt-title">See the board runout</span>
+        <span className="rabbit-hunt-kicker">Hand ended early</span>
+        <span className="rabbit-hunt-title">Peek at the cards that would have come</span>
       </div>
       <button
         type="button"
