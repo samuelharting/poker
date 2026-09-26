@@ -7,6 +7,9 @@ import {
   validatePlayerProfile,
   type PlayerAvatarCustomization,
 } from '../lib/profile'
+import { DRINK_EVENT_KINDS, type DrinkEvent, type DrinkKind } from '../lib/drinks'
+
+export type { DrinkEvent, DrinkKind } from '../lib/drinks'
 
 export interface TableChatEntry {
   id: string
@@ -72,6 +75,7 @@ export type C2SMessage =
   | { type: 'respond_card_reveal'; requesterId: string; allow: boolean }
   | { type: 'table_chat'; message: string; targetId?: string }
   | { type: 'table_emote'; emote: string; targetId?: string }
+  | { type: 'order_drink'; kind: DrinkKind }
 
 // Server -> Client messages
 export type S2CMessage =
@@ -81,6 +85,7 @@ export type S2CMessage =
   | { type: 'action_result'; success: true; message?: string }
   | { type: 'action_failed'; message: string }
   | { type: 'error'; message: string }
+  | { type: 'drink_event'; event: DrinkEvent }
 
 export const MAX_CHAT_LENGTH = 140
 const ALLOWED_CHAT_MESSAGE_RE = /\s+/g
@@ -299,6 +304,11 @@ export function parseC2S(raw: string): C2SMessage | null {
         return emote ? { type, emote, targetId } : null
       }
 
+      case 'order_drink': {
+        const kind = parsed.kind
+        return kind === 'beer' || kind === 'water' ? { type, kind } : null
+      }
+
       default:
         return null
     }
@@ -350,12 +360,34 @@ export function parseS2C(raw: string): S2CMessage | null {
         return message ? { type, message } : null
       }
 
+      case 'drink_event':
+        return isValidDrinkEvent(parsed.event)
+          ? { type, event: { ...parsed.event, nickname: sanitizeText(parsed.event.nickname, 40) } }
+          : null
+
       default:
         return null
     }
   } catch {
     return null
   }
+}
+
+export function isValidDrinkEvent(raw: unknown): raw is DrinkEvent {
+  if (!isObject(raw)) {
+    return false
+  }
+
+  const event = raw as Partial<DrinkEvent>
+  return (
+    typeof event.id === 'string' && event.id.length > 0 &&
+    typeof event.playerId === 'string' && event.playerId.trim().length > 0 &&
+    typeof event.nickname === 'string' &&
+    typeof event.kind === 'string' && (DRINK_EVENT_KINDS as readonly string[]).includes(event.kind) &&
+    typeof event.level === 'number' && Number.isInteger(event.level) && event.level >= 0 && event.level <= 10 &&
+    typeof event.beers === 'number' && Number.isInteger(event.beers) && event.beers >= 0 &&
+    typeof event.at === 'number' && Number.isFinite(event.at)
+  )
 }
 
 function isValidSocialSnapshot(raw: unknown): raw is SocialSnapshot {

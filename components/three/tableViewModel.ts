@@ -8,6 +8,7 @@ import type {
   PlayerAvatarJacketStyle,
 } from '@/lib/profile'
 import type { SocialSnapshot } from '@/shared/protocol'
+import { normalizeDrinkState } from '@/lib/drinks'
 import { REALISTIC_AVATAR_MODEL_KEYS, type RealisticAvatarModelKey } from './avatarModelCatalog'
 
 export type ThreeActionCue = 'ready' | 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'all_in'
@@ -79,6 +80,39 @@ export interface ThreePlayerView {
   wagerIntensity: number
   lastAction?: string
   lastActionId?: string
+  drinks: ThreePlayerDrinks
+}
+
+/** Per-player drink state for avatar animations (drinking, swaying, passed out). */
+export interface ThreePlayerDrinks {
+  /** Current drunk level 0..10. */
+  level: number
+  /** Total beers this session (for display). */
+  beers: number
+  /** `id` changes on every new drink so the renderer can trigger the animation once. */
+  lastDrink: { kind: 'beer' | 'water'; id: string; at: number } | null
+  passedOut: boolean
+}
+
+export const DEFAULT_THREE_PLAYER_DRINKS: Readonly<ThreePlayerDrinks> = Object.freeze({
+  level: 0,
+  beers: 0,
+  lastDrink: null,
+  passedOut: false,
+})
+
+export function toThreePlayerDrinks(raw: SeatPlayer['drinks'] | undefined): ThreePlayerDrinks {
+  if (!raw) {
+    return { ...DEFAULT_THREE_PLAYER_DRINKS }
+  }
+
+  const drinks = normalizeDrinkState(raw)
+  return {
+    level: drinks.level,
+    beers: drinks.beers,
+    lastDrink: drinks.lastDrink,
+    passedOut: drinks.passedOut,
+  }
 }
 
 export interface ThreeVisibleCardSlots {
@@ -325,6 +359,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
         wagerIntensity: getWagerIntensity(actionCue, actionAmount, state.bigBlind),
         lastAction: player.lastAction,
         lastActionId: player.lastActionId,
+        drinks: toThreePlayerDrinks(player.drinks),
       }
     })
     .sort((a, b) => a.visualSeat - b.visualSeat)

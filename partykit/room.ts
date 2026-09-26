@@ -36,6 +36,19 @@ import {
   getVisibleLadyLuck,
   type LadyLuckTracker,
 } from '../lib/poker/ladyLuck'
+import {
+  applyHandCompleted as applyDrinkHandCompleted,
+  applyWaterKickIn,
+  createDrinkLedgerEntry,
+  orderDrink,
+  PASS_OUT_FOLD_DELAY_MS,
+  toPublicDrinkState,
+  wakeIfRested,
+  type DrinkEvent,
+  type DrinkEventKind,
+  type DrinkKind,
+  type DrinkLedgerEntry,
+} from '../lib/drinks'
 import { MAX_CHAT_LENGTH, parseC2S } from '../shared/protocol'
 
 interface TableSettings {
@@ -147,6 +160,11 @@ export default class PokerRoom implements PartyServer {
   private runItTwiceDeadline: number | null = null
   private hostTransferTimeout: ReturnType<typeof setTimeout> | null = null
   private disconnectedHostId: string | null = null
+  /** Drink state lives beside, not inside, the game engine. */
+  private drinkLedger: Record<string, DrinkLedgerEntry> = {}
+  private drinkWaterTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private drinkWearOffHand = 0
+  private passedOutFoldPending = false
 
   constructor(readonly room: Room) {
     const roomCode = room.id.toUpperCase()
@@ -264,6 +282,9 @@ export default class PokerRoom implements PartyServer {
           break
         case 'table_emote':
           this.handleTableEmote(sender, msg.emote, msg.targetId)
+          break
+        case 'order_drink':
+          this.handleOrderDrink(sender, msg.kind)
           break
         default:
           this.sendError(sender, 'Unknown message type')
@@ -563,6 +584,7 @@ export default class PokerRoom implements PartyServer {
       this.data.cardRevealRequests = {}
       this.data.gameState = startHand(this.data.gameState)
       this.recordHandsPlayedForCurrentHand()
+      this.wakeRestedDrinkers()
       this.syncActionTimer(true)
       this.sendActionResult(conn, this.data.gameState.handNumber > 1 ? 'Dealing next hand.' : 'Dealing the first hand.')
       this.broadcastState()
@@ -1256,6 +1278,141 @@ export default class PokerRoom implements PartyServer {
     this.broadcastState()
   }
 
+  private handleOrderDrink(conn: Connection, kind: DrinkKind) {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    if (!playerId) {
+      this.sendActionFailed(conn, 'Join the room before ordering a drink')
+      return
+    }
+
+    const player = this.getPlayer(playerId)
+    if (!player) {
+      this.sendActionFailed(conn, 'Take a seat before ordering a drink')
+      return
+    }
+
+    const entry = this.drinkLedger[playerId] ??= createDrinkLedgerEntry()
+    const state = this.data.gameState
+    const now = Date.now()
+    const result = orderDrink(entry, {
+      kind,
+      now,
+      drinkId: generateId(10),
+      handNumber: state.handNumber,
+      isDealtIntoLiveHand: state.phase === 'in_hand' && player.holeCards.length === 2,
+    })
+
+    if (!result.ok) {
+      this.sendActionFailed(conn, result.reason)
+      return
+    }
+
+    this.broadcastDrinkEvent(playerId, kind)
+
+    if (result.water) {
+      this.scheduleWaterKickIn(playerId, result.water.id, result.water.dueAt - now)
+    }
+
+    if (result.passedOut) {
+      this.clearWaterTimers(playerId)
+      this.broadcastDrinkEvent(playerId, 'passed_out')
+      if (state.phase === 'in_hand' && state.actingPlayerId === playerId) {
+        this.syncActionTimer(true)
+      }
+    }
+
+    this.sendActionResult(conn)
+    this.broadcastState()
+  }
+
+  private scheduleWaterKickIn(playerId: string, waterId: string, delayMs: number) {
+    const timerKey = `${playerId}:${waterId}`
+    const timer = setTimeout(() => {
+      this.drinkWaterTimers.delete(timerKey)
+      const entry = this.drinkLedger[playerId]
+      if (!entry || !applyWaterKickIn(entry, waterId)) {
+        return
+      }
+
+      this.broadcastDrinkEvent(playerId, 'water_kicked_in')
+      this.broadcastState()
+    }, Math.max(0, delayMs))
+    this.drinkWaterTimers.set(timerKey, timer)
+  }
+
+  private clearWaterTimers(playerId: string) {
+    for (const [timerKey, timer] of Array.from(this.drinkWaterTimers.entries())) {
+      if (timerKey.startsWith(`${playerId}:`)) {
+        clearTimeout(timer)
+        this.drinkWaterTimers.delete(timerKey)
+      }
+    }
+  }
+
+  private forgetDrinks(playerId: string) {
+    this.clearWaterTimers(playerId)
+    delete this.drinkLedger[playerId]
+  }
+
+  /** Wakes passed-out drinkers when the first hand after the one they slept through starts. */
+  private wakeRestedDrinkers() {
+    const handNumber = this.data.gameState.handNumber
+    for (const [playerId, entry] of Object.entries(this.drinkLedger)) {
+      if (wakeIfRested(entry, handNumber)) {
+        this.broadcastDrinkEvent(playerId, 'woke_up')
+      }
+    }
+  }
+
+  /** Drunkenness wears off by itself: one level every few completed hands. */
+  private recordDrinkWearOff(handNumber: number) {
+    if (handNumber <= this.drinkWearOffHand) {
+      return
+    }
+
+    this.drinkWearOffHand = handNumber
+    for (const entry of Object.values(this.drinkLedger)) {
+      applyDrinkHandCompleted(entry)
+    }
+  }
+
+  /**
+   * A passed-out player cannot act, so when action reaches them their hand is
+   * folded through the same timed auto-fold path as an expired action timer.
+   */
+  private schedulePassedOutFold(playerId: string) {
+    if (this.passedOutFoldPending && this.autoFoldPlayerId === playerId && this.autoFoldTimeout) {
+      return
+    }
+
+    this.clearBotAction()
+    this.clearAutoFold(false)
+    this.autoFoldPlayerId = playerId
+    this.passedOutFoldPending = true
+    this.data.gameState.actionTimerStart = Date.now()
+    this.autoFoldDeadline = this.data.gameState.actionTimerStart + PASS_OUT_FOLD_DELAY_MS
+    this.autoFoldTimeout = setTimeout(() => {
+      this.runAutoFold(playerId, true)
+    }, PASS_OUT_FOLD_DELAY_MS)
+  }
+
+  private broadcastDrinkEvent(playerId: string, kind: DrinkEventKind) {
+    const entry = this.drinkLedger[playerId]
+    const event: DrinkEvent = {
+      id: generateId(12),
+      kind,
+      playerId,
+      nickname: this.getPlayer(playerId)?.nickname ?? this.data.playerNicknames[playerId] ?? 'Player',
+      level: entry?.level ?? 0,
+      beers: entry?.beers ?? 0,
+      at: Date.now(),
+    }
+
+    for (const conn of Array.from(this.room.getConnections())) {
+      this.sendMessage(conn, { type: 'drink_event', event })
+    }
+  }
+
   private appendChatEntry(
     playerId: string,
     nickname: string,
@@ -1386,6 +1543,7 @@ export default class PokerRoom implements PartyServer {
     delete this.data.spectatorStacks[playerId]
     delete this.data.pendingSpectators[playerId]
     this.clearPlayerSocialState(playerId)
+    this.forgetDrinks(playerId)
 
     if (this.data.hostId === playerId) {
       this.data.hostId = this.selectNextHost()
@@ -1661,6 +1819,7 @@ export default class PokerRoom implements PartyServer {
       avatar: this.data.playerProfiles[player.id]?.avatar,
       venmoUsername: this.data.playerProfiles[player.id]?.venmoUsername,
       stats: this.getPublicStats(player.id),
+      drinks: toPublicDrinkState(this.drinkLedger[player.id]),
     }
   }
 
@@ -1768,6 +1927,7 @@ export default class PokerRoom implements PartyServer {
 
     this.data.countedWinHands[handNumber] = true
     this.recordLadyLuckOutcome()
+    this.recordDrinkWearOff(handNumber)
     const winnerAmounts = new Map<string, number>()
     for (const winner of this.data.gameState.winners) {
       winnerAmounts.set(winner.playerId, (winnerAmounts.get(winner.playerId) ?? 0) + winner.amount)
@@ -1892,6 +2052,11 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
+    if (this.drinkLedger[actingPlayerId]?.passedOut) {
+      this.schedulePassedOutFold(actingPlayerId)
+      return
+    }
+
     if (
       !resetCurrentTimer &&
       this.autoFoldPlayerId === actingPlayerId &&
@@ -1918,7 +2083,7 @@ export default class PokerRoom implements PartyServer {
     }, this.data.gameState.actionTimerDuration)
   }
 
-  private runAutoFold(playerId: string) {
+  private runAutoFold(playerId: string, forceFold = false) {
     this.clearAutoFold()
 
     const gameState = this.data.gameState
@@ -1928,7 +2093,7 @@ export default class PokerRoom implements PartyServer {
 
     try {
       const actingPlayer = this.getPlayer(playerId)
-      const shouldCheck = actingPlayer ? actingPlayer.bet >= gameState.currentBet : false
+      const shouldCheck = !forceFold && (actingPlayer ? actingPlayer.bet >= gameState.currentBet : false)
       const action = shouldCheck ? 'check' : 'fold'
       this.data.gameState = processAction(gameState, playerId, action)
       if (action === 'fold') {
@@ -1948,6 +2113,7 @@ export default class PokerRoom implements PartyServer {
       clearTimeout(this.autoFoldTimeout)
     }
 
+    this.passedOutFoldPending = false
     this.autoFoldTimeout = null
     this.autoFoldPlayerId = null
     this.autoFoldDeadline = null
@@ -2179,6 +2345,7 @@ export default class PokerRoom implements PartyServer {
         this.data.cardRevealRequests = {}
         this.data.gameState = startHand(this.data.gameState)
         this.recordHandsPlayedForCurrentHand()
+        this.wakeRestedDrinkers()
         this.clearAutoFold()
         this.syncActionTimer(true)
         this.broadcastState()
