@@ -22,7 +22,7 @@ describe('OwnHand strength badge', () => {
     expect(markup).not.toContain('You have')
   })
 
-  it('keeps folded hero cards in place face-down and flips selected cards up', () => {
+  it('keeps folded hero cards face-up to their owner and marks which ones the table sees', () => {
     const markup = renderToStaticMarkup(
       <OwnHand
         cards={[
@@ -31,6 +31,7 @@ describe('OwnHand strength badge', () => {
         ]}
         isActing={false}
         isFolded
+        revealChoiceActive
         showCardsMode="right"
         showCardsControl={<button type="button">R</button>}
       />
@@ -38,43 +39,48 @@ describe('OwnHand strength badge', () => {
 
     expect(markup).toContain('own-hand-area')
     expect(markup).toContain('is-folded')
-    expect(markup).toContain('is-face-down')
-    expect(markup).toContain('is-shown')
-    expect(markup).toContain('Face-down card')
+    expect(markup).not.toContain('Face-down card')
+    expect(markup).toContain('9 of spades')
     expect(markup).toContain('K of diamonds')
+    expect(markup).toContain('own-card-slot-left is-private')
+    expect(markup).toContain('own-card-slot-right is-shown')
+    expect(markup).not.toContain('Hidden from table')
     expect(markup).toContain('own-hand-show-cards')
-    expect(markup).toContain('R')
   })
 
-  it('starts an optional post-hand reveal face-down and flips only the selected card', () => {
+  it('never flips your own cards over after a mucked hand; it marks them hidden from the table', () => {
     const cards = [
       { rank: 'A' as const, suit: 'spades' as const },
       { rank: 'K' as const, suit: 'diamonds' as const },
     ]
 
-    const hiddenMarkup = renderToStaticMarkup(
-      <OwnHand
-        cards={cards}
-        isActing={false}
-        revealChoiceActive
-        showCardsMode="none"
-      />
+    const mucked = renderToStaticMarkup(
+      <OwnHand cards={cards} isActing={false} isWinner revealChoiceActive showCardsMode="none" />
     )
-    const leftMarkup = renderToStaticMarkup(
+    const live = renderToStaticMarkup(
+      <OwnHand cards={cards} isActing={false} showCardsMode="none" />
+    )
+
+    expect(mucked).not.toContain('Face-down card')
+    expect(mucked).toContain('A of spades')
+    expect(mucked).toContain('K of diamonds')
+    expect(mucked).toContain('Hidden from table')
+    expect(live).not.toContain('Hidden from table')
+    expect(live).not.toContain('is-private')
+  })
+
+  it('labels a targeted emote with its sender', () => {
+    const markup = renderToStaticMarkup(
       <OwnHand
-        cards={cards}
+        cards={[{ rank: 'A', suit: 'spades' }, { rank: 'K', suit: 'hearts' }]}
         isActing={false}
-        revealChoiceActive
-        showCardsMode="left"
+        socialEmote={String.fromCodePoint(0x1f595)}
+        socialEmoteExpiresAt={Date.now() + 5000}
+        socialEmoteTargeted
+        socialEmoteFrom="Maverick"
       />
     )
 
-    expect(hiddenMarkup.match(/Face-down card/g)).toHaveLength(2)
-    expect(hiddenMarkup).not.toContain('A of spades')
-    expect(hiddenMarkup).not.toContain('K of diamonds')
-    expect(leftMarkup).toContain('A of spades')
-    expect(leftMarkup).not.toContain('K of diamonds')
-    expect(leftMarkup).toContain('own-card-slot-left is-shown')
-    expect(leftMarkup).toContain('own-card-slot-right is-face-down')
+    expect(markup).toContain('Maverick →')
   })
 })

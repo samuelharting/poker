@@ -21,6 +21,8 @@ interface OwnHandProps {
   socialEmote?: string
   socialEmoteExpiresAt?: number
   socialEmoteTargeted?: boolean
+  /** Sender of a targeted emote, shown as "Name →". */
+  socialEmoteFrom?: string
   showCardsControl?: React.ReactNode
 }
 
@@ -38,31 +40,21 @@ export function OwnHand({
   socialEmote,
   socialEmoteExpiresAt,
   socialEmoteTargeted = false,
+  socialEmoteFrom,
   showCardsControl = null,
 }: OwnHandProps) {
   if (cards.length === 0) {
     return null
   }
 
-  const isCardFaceUp = (index: number) => {
-    if (!isFolded && !revealChoiceActive) {
-      return true
-    }
-
-    if (showCardsMode === 'both') {
-      return true
-    }
-
-    if (showCardsMode === 'left') {
-      return index === 0
-    }
-
-    if (showCardsMode === 'right') {
-      return index === 1
-    }
-
-    return false
-  }
+  // Your own cards are always face up to you. After a hand, the ones the table
+  // cannot see are marked instead of flipped over.
+  const isShownToTable = (index: number) => (
+    showCardsMode === 'both' ||
+    (showCardsMode === 'left' && index === 0) ||
+    (showCardsMode === 'right' && index === 1)
+  )
+  const isHiddenFromTable = revealChoiceActive && showCardsMode === 'none'
 
   const socialBubbleTtl = Math.max(0, socialMessageExpiresAt ? socialMessageExpiresAt - Date.now() : 0)
   const socialEmoteTtl = Math.max(0, socialEmoteExpiresAt ? socialEmoteExpiresAt - Date.now() : 0)
@@ -98,6 +90,7 @@ export function OwnHand({
               )}
               style={{ ['--chat-ttl' as any]: `${socialEmoteTtl}ms` }}
             >
+              {socialEmoteFrom && <span className="player-emote-from">{socialEmoteFrom} →</span>}
               <EmojiGlyph emoji={socialEmote} />
             </div>
           )}
@@ -116,8 +109,7 @@ export function OwnHand({
             className={clsx(
               'own-card-slot',
               index === 0 ? 'own-card-slot-left' : 'own-card-slot-right',
-              !isCardFaceUp(index) && 'is-face-down',
-              (isFolded || revealChoiceActive) && isCardFaceUp(index) && 'is-shown'
+              revealChoiceActive && (isShownToTable(index) ? 'is-shown' : 'is-private')
             )}
           >
             <PlayingCard
@@ -129,10 +121,12 @@ export function OwnHand({
                   winningCard => winningCard.rank === card.rank && winningCard.suit === card.suit
                 )
               )}
-              faceDown={!isCardFaceUp(index)}
             />
           </div>
         ))}
+        {isHiddenFromTable && (
+          <span className="own-hand-private-mark">Hidden from table</span>
+        )}
       </div>
       {showCardsControl && <div className="own-hand-show-cards">{showCardsControl}</div>}
     </div>
