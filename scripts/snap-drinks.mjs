@@ -55,10 +55,13 @@ await host.evaluate(() => {
   if (!seat) return
   const p = seat.root.position
   const toward = Math.hypot(p.x, p.z) || 1
+  // Side-on view so the reach, sip and set-down all read clearly.
+  const tx = -p.z / toward
+  const tz = p.x / toward
   runtime.debugCamera = {
-    position: [p.x - (p.x / toward) * 2.6, 2.3, p.z - (p.z / toward) * 2.6],
-    lookAt: [p.x, 1.2, p.z],
-    fov: 40,
+    position: [p.x + tx * 2.6 - (p.x / toward) * 1.2, 1.9, p.z + tz * 2.6 - (p.z / toward) * 1.2],
+    lookAt: [p.x - (p.x / toward) * 0.5, 1.0, p.z - (p.z / toward) * 0.5],
+    fov: 45,
   }
 })
 
