@@ -38,6 +38,7 @@ import {
 } from './avatarAnimator'
 import { getArmChain, solveArmIK } from './avatarIK'
 import { applyBlink, getBlinkAmount, stylizeAvatar, type StylizedAvatar } from './avatarStyle'
+import { createAvatarFace, disposeAvatarFace, updateAvatarFace, type AvatarFaceRig, type FaceMood } from './avatarFace'
 import { DESKTOP_CAMERA_FRAMING } from './cameraFraming'
 import {
   animateBoardRuntime,
@@ -139,6 +140,7 @@ interface SeatRuntime {
   anchors: AvatarAnchors
   anchorsFromRig: boolean
   avatarStyle: StylizedAvatar | null
+  face: AvatarFaceRig | null
   loser: boolean
   lastPose: AvatarPose | null
   dealerButton: THREE.Mesh
@@ -893,6 +895,7 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     anchors: createDefaultAnchors(),
     anchorsFromRig: false,
     avatarStyle: null,
+    face: null,
     loser: false,
     lastPose: null,
     dealerButton,
@@ -983,6 +986,8 @@ function detachRiggedAvatar(seat: SeatRuntime) {
     seat.avatarMixer?.stopAllAction()
   }
 
+  disposeAvatarFace(seat.face)
+  seat.face = null
   seat.avatar = null
   seat.avatarStyle = null
   seat.avatarMixer = null
@@ -1066,6 +1071,7 @@ async function requestRiggedAvatar(
     const style = stylizeAvatar(avatar.model, avatar.materials)
     seat.avatar = { ...avatar, materials: style.materials }
     seat.avatarStyle = style
+    seat.face = createAvatarFace(avatar.model, avatar.bones.get('Head'), style.materials, style.skinColor)
     seat.avatarMount.add(avatar.root)
     seat.avatarMount.position.set(0, AVATAR_SEAT_LIFT, 0)
     seat.anchorsFromRig = false
@@ -1699,8 +1705,29 @@ function animateSeat(
     seat.avatar.model.updateMatrixWorld(true)
     if (!seat.anchorsFromRig) measureRigAnchors(seat)
     solveSeatArms(seat, pose)
-    if (seat.avatarStyle) {
-      applyBlink(seat.avatarStyle, reducedMotion ? 0 : getBlinkAmount(time, seat.animator.seed))
+    const blink = reducedMotion ? 0 : getBlinkAmount(time, seat.animator.seed)
+    if (seat.face) {
+      const mood: FaceMood = seat.winner
+        ? 'happy'
+        : seat.loser
+          ? 'sad'
+          : tableHeat > 0.3 && !seat.acting
+            ? 'surprised'
+            : seat.acting
+              ? 'focused'
+              : seat.folded
+                ? 'bored'
+                : 'neutral'
+      updateAvatarFace(seat.face, {
+        delta,
+        blink,
+        mood,
+        lookX: -(poseBones.Head[1] + poseBones.Neck[1]) * 1.6,
+        lookY: (poseBones.Head[0] + poseBones.Neck[0]) * 1.4,
+        reducedMotion,
+      })
+    } else if (seat.avatarStyle) {
+      applyBlink(seat.avatarStyle, blink)
     }
     for (const name of FINGER_BONES_R) {
       applyAvatarBoneOffset(seat, bones.get(name), pose.fingerCurlR * 0.55, 0, 0)
