@@ -15,6 +15,7 @@ import { RunItTwiceBoards, RunItTwicePrompt } from './RunItTwice'
 import { OwnHand } from './OwnHand'
 import { PotDisplay } from './PotDisplay'
 import { ShowdownCinematic, useShowdownPresentation } from './ShowdownCinematic'
+import { CompanionBadge, CompanionToast } from './CompanionBadge'
 import { ChipStack } from '@/components/ui/ChipStack'
 import { PlayingCard } from '@/components/ui/PlayingCard'
 import { SearchableEmojiPicker } from '@/components/ui/SearchableEmojiPicker'
@@ -1837,6 +1838,13 @@ export function PokerTable({
         />
       ) : null}
       {!isMobileViewport && showdownCinematic}
+      <CompanionToast
+        companion={state.companion}
+        yourId={yourId}
+        nameOf={id => state.players.find(player => player.id === id)?.nickname
+          ?? state.lobbyPlayers?.find(player => player.id === id)?.nickname
+          ?? 'someone'}
+      />
       {pendingIncomingCardRequest && incomingCardRequester && !settingsOpen ? (
         <CardRevealConsentPrompt
           requesterName={incomingCardRequester.nickname}
@@ -1965,6 +1973,7 @@ export function PokerTable({
                         ) : null}
                         onNameClick={handleSelectEmoteTarget}
                       />
+                      <CompanionBadge companion={state.companion} playerId={player.id} />
                       {(seatSocial.message || seatSocial.emote) && (
                         <div className="mobile-edge-social" aria-live="polite">
                           {seatSocial.emote && <EmojiGlyph emoji={seatSocial.emote} />}
@@ -2024,6 +2033,7 @@ export function PokerTable({
                   isWinner={betweenHands && showWinnerHighlights && myWinnerAmount > 0}
                   status={mobileHeroStatus}
                 />
+                <CompanionBadge companion={state.companion} playerId={visibleOwnPlayer.id} placement="hero" />
 
                 <OwnHand
                   cards={ownHandCards}

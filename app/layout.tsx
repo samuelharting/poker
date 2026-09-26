@@ -5,6 +5,7 @@ import './globals.css'
 import './styles/base.css'
 import './poker-polish.css'
 import './styles/table-2d.css'
+import './styles/companion.css'
 
 const jakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],
