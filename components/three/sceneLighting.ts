@@ -132,7 +132,7 @@ export function createPostFx(
 ): PostFx {
   const composer = new EffectComposer(renderer)
   composer.addPass(new RenderPass(scene, camera))
-  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.42, 0.55, 0.86)
+  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.24, 0.32, 0.97)
   composer.addPass(bloom)
   composer.addPass(new ShaderPass(VignetteShader))
   composer.addPass(new OutputPass())

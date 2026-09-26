@@ -435,3 +435,8 @@
   white-space: nowrap;
   transform: translateX(-50%);
 }
+
+/* The action tray already states the amount to call. */
+.table-scene[data-desktop-three='true'] .table-surface .pot-display .pot-to-call {
+  display: none;
+}

@@ -508,7 +508,7 @@ function createWallSconce(scene: THREE.Scene, x: number, brassMaterial: THREE.Me
     new THREE.MeshStandardMaterial({
       color: '#ffcf8a',
       emissive: '#ffb45c',
-      emissiveIntensity: 2.4,
+      emissiveIntensity: 1.3,
       side: THREE.DoubleSide,
       roughness: 0.6,
     }),
@@ -615,7 +615,7 @@ function createRoom(scene: THREE.Scene) {
     map: createNeonSignTexture('POKER NIGHT'),
     emissive: '#ffffff',
     emissiveMap: createNeonSignTexture('POKER NIGHT'),
-    emissiveIntensity: 2.2,
+    emissiveIntensity: 1.25,
     transparent: true,
     depthWrite: false,
     toneMapped: false,
@@ -2025,7 +2025,7 @@ function createSceneRuntime(
     accent.intensity += (accentGoal - accent.intensity) * (1 - Math.exp(-delta * 5))
     const flicker = reducedMotion ? 1 : 1 + Math.sin(time * 23) * 0.015 + (Math.sin(time * 1.3) > 0.985 ? -0.35 : 0)
     runtime.neonMaterials.forEach(material => {
-      material.emissiveIntensity = 2.2 * flicker
+      material.emissiveIntensity = 1.25 * flicker
     })
 
     // A living camera: a slow breathing drift, a subtle lean toward whoever is
@@ -2080,7 +2080,7 @@ function createSceneRuntime(
     projectSeatOverlays(runtime, host, viewportWidth, viewportHeight)
 
     if (runtime.postFx) {
-      runtime.postFx.bloom.strength = 0.36 + (winnerSeat ? 0.22 : 0) + allInImpact.strength * 0.3
+      runtime.postFx.bloom.strength = 0.22 + (winnerSeat ? 0.2 : 0) + allInImpact.strength * 0.3
       runtime.postFx.composer.render(delta)
     } else {
       renderer.render(scene, camera)

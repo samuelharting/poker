@@ -57,6 +57,23 @@ console.log('overlay vars', await page.evaluate(() => ({
   postFx: document.querySelector('.desktop-3d-stage')?.dataset.postFx ?? 'on',
 })))
 
+if (process.argv.includes('--sequence')) {
+  // Frame sequence of the far side of the table to review motion over time.
+  await page.evaluate(() => {
+    const host = document.querySelector('.desktop-3d-stage')
+    if (host?.__pokerRuntime) {
+      host.__pokerRuntime.debugCamera = { position: [0, 3.6, 3.2], lookAt: [0, 1.0, -3.2], fov: 50 }
+    }
+  })
+  for (let frame = 0; frame < 16; frame += 1) {
+    await clickVisible(page, /^(Check|Call)/)
+    await clickVisible(page, /^Deal next hand$/)
+    await sleep(900)
+    await page.screenshot({ path: path.join(outDir, `seq-${String(frame).padStart(2, '0')}.png`) })
+  }
+  console.log('saved sequence')
+}
+
 if (closeups) {
   const shots = [
     { name: 'closeup-far', position: [0, 2.6, 0.6], lookAt: [0, 1.5, -4.1], fov: 40 },
