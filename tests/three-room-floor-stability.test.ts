@@ -41,16 +41,18 @@ describe('desktop room rendering stability', () => {
     expect(sceneSource).toContain('animateWagers(runtime, time, reducedMotion)')
     expect(sceneSource).toContain('const smoothing = reducedMotion ? 1')
     expect(sceneSource).toContain("const FOLD_MATERIAL_BASELINE = 'pokerFoldMaterialBaseline'")
-    expect(sceneSource).toContain('material.transparent = nextTransparent')
-    expect(sceneSource).toContain('material.depthWrite = nextDepthWrite')
-    expect(sceneSource).toContain('material.opacity = nextOpacity')
+    // Folded players stay opaque (no sorting glitches) and dim instead.
+    expect(sceneSource).toContain('function applyFoldTint(material: THREE.Material, folded: boolean)')
+    expect(sceneSource).toContain('tinted.color.copy(baseline.color)')
+    expect(sceneSource).toContain('if (folded) tinted.color.multiplyScalar(0.5)')
     expect(sceneSource).toContain('seat.foldMaterials.forEach')
     expect(sceneSource).toContain('restoreAvatarBoneOffsets(seat)')
     expect(sceneSource).toContain('returnAvatarToIdle(seat)')
   })
 
   it('adds deterministic table detail, staggered props, and a readable winner celebration', () => {
-    expect(sceneSource).toContain("texture.name = 'procedural-felt-grain'")
+    expect(sceneSource).toContain('createStylizedTable()')
+    expect(sceneSource).toContain('createCarpetTexture()')
     expect(sceneSource).toContain('createSeededRandom(0x3344524f)')
     expect(sceneSource).toContain('seat.cardMeshes.forEach')
     expect(sceneSource).toContain('wager.chipMeshes.forEach')

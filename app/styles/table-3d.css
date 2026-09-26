@@ -1,0 +1,437 @@
+/*
+ * Desktop 3D table overlay (>= 1024px): nameplates that ride on projected 3D
+ * anchors, world-anchored bet labels, and the visually hidden DOM board (the
+ * board is rendered as physical cards in the scene).
+ */
+
+.desktop-3d-stage .cinematic-seats {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* Nameplates ------------------------------------------------------------- */
+
+.desktop-3d-stage .cinematic-seats .cinematic-seat {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: auto;
+  bottom: auto;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  transform: translate3d(var(--seat-x, -999px), var(--seat-y, -999px), 0) translate(-50%, -100%);
+  transition: opacity var(--dur-slow) var(--ease-out), filter var(--dur-slow) var(--ease-out);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.desktop-3d-stage .cinematic-seats .cinematic-seat.is-local-player {
+  display: none;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-seat-target {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-text-1);
+  cursor: pointer;
+  pointer-events: auto;
+  font-family: var(--font-ui);
+  transform-origin: 50% 100%;
+  transform: scale(calc(0.78 + var(--seat-depth, 1) * 0.22));
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-avatar {
+  display: none;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-seat-panel {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 2px;
+  min-width: 132px;
+  max-width: 190px;
+  padding: 7px 12px 8px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 60%),
+    var(--surface-glass-strong);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(10px) saturate(1.2);
+  text-align: left;
+  transition:
+    box-shadow var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-pop);
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-seat-target:hover .cinematic-seat-panel,
+.desktop-3d-stage .cinematic-seat .cinematic-seat-target:focus-visible .cinematic-seat-panel {
+  border-color: var(--line-brass);
+  transform: translateY(-2px);
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-seat-topline {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-seat-topline strong {
+  overflow: hidden;
+  min-width: 0;
+  font-size: var(--fs-14);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-blind-role {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-blind-role span {
+  display: none;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-blind-role.is-big {
+  background: var(--c-ruby-500);
+  color: #fff;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-blind-role.is-small {
+  background: var(--c-brass-400);
+  color: var(--c-text-on-brass);
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-seat-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-seat-meta b {
+  font-family: var(--font-display);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-felt-300);
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-seat-meta small {
+  overflow: hidden;
+  max-width: 96px;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--c-text-2);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* States */
+
+.desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-panel {
+  border-color: rgba(127, 208, 255, 0.7);
+  box-shadow: var(--shadow-2), 0 0 0 3px rgba(127, 208, 255, 0.16), 0 0 26px rgba(127, 208, 255, 0.3);
+  animation: seat-acting-pulse 1.4s var(--ease-out) infinite;
+}
+
+.desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-meta small {
+  background: rgba(127, 208, 255, 0.16);
+  color: var(--c-sky-400);
+}
+
+.desktop-3d-stage .cinematic-seat.is-winner .cinematic-seat-panel {
+  border-color: rgba(242, 199, 102, 0.9);
+  background:
+    linear-gradient(180deg, rgba(242, 199, 102, 0.22), rgba(242, 199, 102, 0.04)),
+    var(--surface-glass-strong);
+  box-shadow: var(--shadow-2), var(--glow-brass);
+  animation: seat-winner-pop 620ms var(--ease-pop) both;
+}
+
+.desktop-3d-stage .cinematic-seat.is-winner .cinematic-seat-topline strong {
+  color: var(--c-brass-200);
+}
+
+.desktop-3d-stage .cinematic-seat.is-winner .cinematic-seat-meta .cinematic-winner-label {
+  max-width: 120px;
+  background: var(--c-brass-400);
+  color: var(--c-text-on-brass);
+}
+
+.desktop-3d-stage .cinematic-seat.is-folded {
+  opacity: 0.55;
+  filter: saturate(0.4);
+}
+
+.desktop-3d-stage .cinematic-seat.is-selected .cinematic-seat-panel {
+  border-color: var(--c-brass-400);
+  box-shadow: var(--shadow-2), var(--glow-brass);
+}
+
+@keyframes seat-acting-pulse {
+  0%,
+  100% {
+    box-shadow: var(--shadow-2), 0 0 0 3px rgba(127, 208, 255, 0.16), 0 0 22px rgba(127, 208, 255, 0.24);
+  }
+  50% {
+    box-shadow: var(--shadow-2), 0 0 0 5px rgba(127, 208, 255, 0.08), 0 0 34px rgba(127, 208, 255, 0.42);
+  }
+}
+
+@keyframes seat-winner-pop {
+  0% {
+    transform: scale(0.9);
+  }
+  60% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Revealed opponent cards sit above the plate; face-down backs are shown on
+   the felt in 3D, so the small DOM backs are hidden. */
+
+.desktop-3d-stage .cinematic-seat .cinematic-hole-cards {
+  position: static;
+  display: none;
+  gap: 4px;
+  transform: none;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-hole-cards.has-revealed-cards {
+  display: flex;
+  animation: seat-cards-reveal 460ms var(--ease-pop) both;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-hole-cards.has-revealed-cards i {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 53px;
+  margin: 0;
+  border-radius: 6px;
+  background: linear-gradient(160deg, #fffdf6, #f1e6cc);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
+  color: var(--card-black);
+  font-style: normal;
+  transform: none;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-hole-cards.has-revealed-cards i.is-left {
+  transform: rotate(-5deg);
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-hole-cards.has-revealed-cards i.is-right {
+  transform: rotate(5deg);
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-hole-cards i.is-hearts,
+.desktop-3d-stage .cinematic-seat .cinematic-hole-cards i.is-diamonds {
+  color: var(--card-red);
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-hole-cards i b {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-hole-cards i small {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-hole-cards i.is-back {
+  background: linear-gradient(160deg, #c9303f, #8e1a2b);
+}
+
+@keyframes seat-cards-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Bet label anchored to the chips on the felt ------------------------------ */
+
+.desktop-3d-stage .cinematic-seat .cinematic-seat-bet {
+  position: absolute;
+  left: calc(50% + var(--bet-x, 0px));
+  top: calc(100% + var(--bet-y, 40px));
+  right: auto;
+  bottom: auto;
+  padding: 3px 9px;
+  border: 1px solid rgba(242, 199, 102, 0.55);
+  border-radius: var(--r-pill);
+  background: rgba(10, 17, 18, 0.88);
+  color: var(--c-brass-200);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  animation: seat-bet-in 360ms var(--ease-pop) both;
+}
+
+@keyframes seat-bet-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -30%) scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* Chat / reaction bubble above the plate */
+
+.desktop-3d-stage .cinematic-seat .cinematic-seat-social {
+  position: absolute;
+  left: 50%;
+  right: auto;
+  top: auto;
+  bottom: calc(100% + 8px);
+  max-width: 180px;
+  transform: translateX(-50%);
+}
+
+.desktop-3d-stage .cinematic-seat .card-reveal-seat-button {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 6px);
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+/* The board is physical in the 3D scene; keep the DOM board for assistive tech. */
+
+.table-scene[data-desktop-three='true'] .community-cards {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+}
+
+.desktop-3d-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Pot readout rides on the felt above the pot chips ------------------------ */
+
+.table-scene[data-desktop-three='true'] .table-surface .pot-display {
+  position: fixed;
+  left: var(--pot-x, 50%);
+  top: var(--pot-y, 18%);
+  right: auto;
+  bottom: auto;
+  z-index: 4;
+  margin: 0;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+}
+
+.table-scene[data-desktop-three='true'] .pot-display-card {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 14px 7px;
+  border: 1px solid var(--line-brass);
+  border-radius: var(--r-pill);
+  background: var(--surface-glass-strong);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(8px);
+}
+
+.table-scene[data-desktop-three='true'] .pot-display-label {
+  color: var(--c-brass-400);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.table-scene[data-desktop-three='true'] .pot-display-value {
+  color: var(--c-cream-50);
+  font-family: var(--font-display);
+  font-size: var(--fs-20);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.table-scene[data-desktop-three='true'] .pot-to-call {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 6px);
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  background: rgba(127, 208, 255, 0.16);
+  color: var(--c-sky-400);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}

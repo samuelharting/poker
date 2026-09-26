@@ -42,7 +42,8 @@ describe('animated WebGL desktop player presentation', () => {
     expect(renderer).toContain('new THREE.WebGLRenderer')
     expect(renderer).toContain('className="desktop-3d-canvas"')
     expect(renderer).toContain('data-renderer="three-webgl"')
-    expect(renderer).toContain('createPokerTable(scene)')
+    expect(renderer).toContain('createStylizedTable()')
+    expect(renderer).toContain('createBoardRuntime(scene)')
     expect(renderer).toContain('createSeatRuntime(player, now)')
     expect(renderer).toContain('createAvatarAssetInstance')
     expect(renderer).toContain('new THREE.AnimationMixer')
@@ -75,12 +76,13 @@ describe('animated WebGL desktop player presentation', () => {
 
   it('animates player actions, cards, table light, and all-in camera impact', () => {
     expect(renderer).toContain('function animateSeat')
-    expect(renderer).toContain("playback.cue === 'all_in'")
-    expect(renderer).toContain('getSeatedAvatarActionPose')
+    // Poses come from the spring-driven animator; hands reach targets with IK.
+    expect(renderer).toContain('updateAvatarAnimator(seat.animator')
+    expect(renderer).toContain('solveSeatArms(seat, pose)')
     expect(renderer).toContain('getOpponentTableActionPose')
     expect(renderer).toContain('seat.cards.position.set')
     expect(renderer).toContain('seat.avatarMixer.update(reducedMotion ? 0 : delta)')
-    expect(renderer).toContain('runtime.feltMaterial.emissiveIntensity')
+    expect(renderer).toContain('runtime.lights.accent')
     expect(renderer).toContain('targetCamera.copy(baseCameraPosition)')
     expect(renderer).toContain('getAllInCameraImpact')
     expect(renderer).toContain('camera.position.lerp')

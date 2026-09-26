@@ -17,7 +17,8 @@ describe('desktop 3D camera framing', () => {
       cameraZ - lookAtZ
     ) * 180 / Math.PI
 
-    expect(cameraY).toBe(5.25)
+    // Raised and pulled back so all eight seats and their plates fit on screen.
+    expect(cameraY).toBe(5.9)
     expect(downwardPitchDegrees).toBeGreaterThan(20)
     expect(downwardPitchDegrees).toBeLessThan(25)
   })

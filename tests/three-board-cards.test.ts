@@ -63,12 +63,18 @@ describe('desktop 3D board cards', () => {
     expect(renderer).toContain('data-pot-amount')
   })
 
-  it('shares chip geometry and merges stripe details to control draw calls', () => {
-    expect(renderer).toContain("import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'")
-    expect(renderer).toContain('const chipBodyGeometry = new THREE.CylinderGeometry')
-    expect(renderer).toContain('const chipDetailGeometry = mergeGeometries(detailParts, false)')
-    expect(renderer).toContain('chipDetail.castShadow = false')
-    expect(renderer).toContain('chipBodyGeometry,')
-    expect(renderer).toContain('chipDetailGeometry,')
+  it('shares one textured chip geometry so every chip is a single draw', () => {
+    expect(renderer).toContain('sharedChipGeometry ??= new THREE.CylinderGeometry')
+    expect(renderer).toContain('const chipBodyGeometry = getChipGeometry()')
+    expect(renderer).toContain('[edgeMaterial, faceMaterial, faceMaterial]')
+    expect(renderer).toContain('getChipEdgeTexture(index)')
+    expect(renderer).toContain('getChipFaceTexture(index)')
+  })
+
+  it('deals physical 3D board cards that flip onto the felt and glow when they win', () => {
+    expect(renderer).toContain('createBoardRuntime(scene)')
+    expect(renderer).toContain('syncBoardRuntime(')
+    expect(renderer).toContain('animateBoardRuntime(runtime.board, time, reducedMotion)')
+    expect(renderer).toContain('highlightedCards')
   })
 })

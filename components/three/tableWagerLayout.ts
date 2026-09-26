@@ -37,7 +37,8 @@ export const TABLE_FELT_SEMI_AXIS_Z = 2.96
 export const TABLE_WAGER_SEMI_AXIS_X = 1.63 * 1.62
 export const TABLE_WAGER_SEMI_AXIS_Z = 1.63
 
-export const TABLE_WAGER_Y = 0.435
+/** Matches FELT_TOP_Y in tableArt.ts: chip stacks sit directly on the felt. */
+export const TABLE_WAGER_Y = 0.4
 export const MAX_WAGER_CHIPS = 12
 
 const SEAT_EDGE_INSET = 0.88

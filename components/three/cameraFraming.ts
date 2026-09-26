@@ -5,7 +5,7 @@ export type CameraPoint = readonly [number, number, number]
  * table, but still pitched down enough to keep bets and the board readable.
  */
 export const DESKTOP_CAMERA_FRAMING = {
-  fov: 39,
-  position: [0, 5.25, 11.4] as CameraPoint,
-  lookAt: [0, 0.25, -0.45] as CameraPoint,
+  fov: 40,
+  position: [0, 5.9, 12.2] as CameraPoint,
+  lookAt: [0, 0.4, -0.6] as CameraPoint,
 } as const

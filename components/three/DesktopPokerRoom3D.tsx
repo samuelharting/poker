@@ -28,8 +28,49 @@ import {
   getAvatarAppearanceKey,
   type AvatarAccessorySet,
 } from './avatarCustomization'
-import { getAvatarPersonalityPose } from './avatarPersonality'
+import {
+  ANIMATED_BONES,
+  createAvatarAnimatorState,
+  updateAvatarAnimator,
+  type AvatarAnchors,
+  type AvatarAnimatorState,
+  type AvatarPose,
+} from './avatarAnimator'
+import { getArmChain, solveArmIK } from './avatarIK'
+import { applyBlink, getBlinkAmount, stylizeAvatar, type StylizedAvatar } from './avatarStyle'
 import { DESKTOP_CAMERA_FRAMING } from './cameraFraming'
+import {
+  animateBoardRuntime,
+  createBoardRuntime,
+  createCardMesh,
+  disposeCardMesh,
+  setCardFace,
+  syncBoardRuntime,
+  type BoardRuntime,
+  type CardMesh,
+} from './cardMeshes'
+import {
+  applyEnvironmentLighting,
+  createPostFx,
+  createStageLights,
+  FrameBudget,
+  type PostFx,
+  type StageLights,
+} from './sceneLighting'
+import {
+  disposeSceneTextures,
+  getChipEdgeTexture,
+  getChipFaceTexture,
+  CHIP_DENOMINATIONS,
+} from './sceneTextures'
+import {
+  createStylizedChair,
+  createStylizedTable,
+  FELT_TOP_Y,
+  getFeltEdgeToward,
+  RAIL_PEAK_Y,
+  RAIL_WIDTH,
+} from './tableArt'
 import type {
   ThreeActionCue,
   ThreeCardView,
@@ -70,6 +111,8 @@ interface DesktopPokerRoom3DProps {
   onSelectPlayer: (playerId: string) => void
   cardRevealActions: CardRevealSeatAction[]
   onRequestCardReveal: (playerId: string) => void
+  /** Winning board cards to glow during the showdown highlight. */
+  highlightedCards?: ReadonlyArray<{ rank: string; suit: ThreeCardView['suit'] }>
 }
 
 interface SeatRuntime {
@@ -78,7 +121,6 @@ interface SeatRuntime {
   body: THREE.Group
   fallbackAvatar: THREE.Group
   avatarMount: THREE.Group
-  avatarOccluder: THREE.Mesh
   avatar: AvatarAssetInstance | null
   avatarMixer: THREE.AnimationMixer | null
   avatarIdleAction: THREE.AnimationAction | null
@@ -87,7 +129,18 @@ interface SeatRuntime {
   leftArm: THREE.Mesh
   rightArm: THREE.Mesh
   cards: THREE.Group
-  cardMeshes: THREE.Mesh[]
+  cardMeshes: THREE.Object3D[]
+  holeCards: CardMesh[]
+  cardLocalZ: number
+  animator: AvatarAnimatorState
+  chair: THREE.Group
+  /** How far the chair and body slide in toward the rail (seat-local Z). */
+  seatShiftZ: number
+  anchors: AvatarAnchors
+  anchorsFromRig: boolean
+  avatarStyle: StylizedAvatar | null
+  loser: boolean
+  lastPose: AvatarPose | null
   dealerButton: THREE.Mesh
   ring: THREE.Mesh<THREE.TorusGeometry, THREE.MeshStandardMaterial>
   winnerHalo: THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>
@@ -153,9 +206,14 @@ interface SceneRuntime {
   seats: Map<string, SeatRuntime>
   wagers: Map<string, WagerRuntime>
   pot: PotRuntime
-  particleField: THREE.Points
-  floorRing: THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>
-  ceilingRing: THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>
+  board: BoardRuntime
+  lights: StageLights
+  postFx: PostFx | null
+  frameBudget: FrameBudget
+  neonMaterials: THREE.MeshStandardMaterial[]
+  overlayElements: Map<string, HTMLElement>
+  /** Development-only camera override used by scripts/snap-3d.mjs close-ups. */
+  debugCamera: { position: Vec3; lookAt: Vec3; fov?: number } | null
   feltMaterial: THREE.MeshStandardMaterial
   startTime: number
   animationFrame: number
@@ -192,38 +250,6 @@ function createSeededRandom(seed: number) {
     state = (state * 1664525 + 1013904223) >>> 0
     return state / 0x100000000
   }
-}
-
-function createFeltGrainTexture() {
-  const size = 64
-  const data = new Uint8Array(size * size * 4)
-  const random = createSeededRandom(0x504f4b45)
-
-  for (let index = 0; index < size * size; index += 1) {
-    const offset = index * 4
-    const horizontalThread = index % size % 2 === 0 ? 18 : -10
-    const verticalThread = Math.floor(index / size) % 3 === 0 ? 12 : -4
-    const value = THREE.MathUtils.clamp(
-      Math.round(142 + horizontalThread + verticalThread + (random() - 0.5) * 34),
-      48,
-      220
-    )
-    data[offset] = value
-    data[offset + 1] = value
-    data[offset + 2] = value
-    data[offset + 3] = 255
-  }
-
-  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat)
-  texture.name = 'procedural-felt-grain'
-  texture.wrapS = THREE.RepeatWrapping
-  texture.wrapT = THREE.RepeatWrapping
-  texture.repeat.set(12, 7)
-  texture.magFilter = THREE.LinearFilter
-  texture.minFilter = THREE.LinearMipmapLinearFilter
-  texture.generateMipmaps = true
-  texture.needsUpdate = true
-  return texture
 }
 
 function getStatusLabel(player: ThreePlayerView): string {
@@ -280,28 +306,18 @@ function createStandardMaterial(
 
 const FOLD_MATERIAL_BASELINE = 'pokerFoldMaterialBaseline'
 
-function applyFoldOpacity(material: THREE.Material, folded: boolean) {
-  const stored = material.userData[FOLD_MATERIAL_BASELINE] as
-    | { opacity: number; transparent: boolean; depthWrite: boolean }
-    | undefined
-  const baseline = stored ?? {
-    opacity: material.opacity,
-    transparent: material.transparent,
-    depthWrite: material.depthWrite,
-  }
-
+/**
+ * Folded players stay solid (transparent skinned meshes sort badly against the
+ * table) and instead sink into shadow: their materials dim toward the room.
+ */
+function applyFoldTint(material: THREE.Material, folded: boolean) {
+  const tinted = material as THREE.MeshStandardMaterial
+  if (!tinted.color) return
+  const stored = material.userData[FOLD_MATERIAL_BASELINE] as { color: THREE.Color } | undefined
+  const baseline = stored ?? { color: tinted.color.clone() }
   if (!stored) material.userData[FOLD_MATERIAL_BASELINE] = baseline
-
-  const nextOpacity = folded ? baseline.opacity * 0.35 : baseline.opacity
-  const nextTransparent = folded || baseline.transparent
-  const nextDepthWrite = folded ? false : baseline.depthWrite
-  if (
-    material.transparent !== nextTransparent ||
-    material.depthWrite !== nextDepthWrite
-  ) material.needsUpdate = true
-  material.transparent = nextTransparent
-  material.depthWrite = nextDepthWrite
-  material.opacity = nextOpacity
+  tinted.color.copy(baseline.color)
+  if (folded) tinted.color.multiplyScalar(0.5)
 }
 
 function addMesh(
@@ -322,533 +338,315 @@ function addMesh(
   return mesh
 }
 
-function createHeartReliefGeometry() {
-  const shape = new THREE.Shape()
-  shape.moveTo(0, -0.68)
-  shape.bezierCurveTo(-0.16, -0.42, -0.8, -0.08, -0.8, 0.36)
-  shape.bezierCurveTo(-0.8, 0.9, -0.16, 1.02, 0, 0.5)
-  shape.bezierCurveTo(0.16, 1.02, 0.8, 0.9, 0.8, 0.36)
-  shape.bezierCurveTo(0.8, -0.08, 0.16, -0.42, 0, -0.68)
-
-  return new THREE.ExtrudeGeometry(shape, {
-    depth: 0.1,
-    steps: 1,
-    bevelEnabled: true,
-    bevelSegments: 2,
-    bevelSize: 0.035,
-    bevelThickness: 0.035,
-  })
+function createCanvasTexture(
+  width: number,
+  height: number,
+  draw: (context: CanvasRenderingContext2D) => void,
+  repeat?: [number, number]
+) {
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  if (context) draw(context)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.anisotropy = 8
+  if (repeat) {
+    texture.wrapS = THREE.RepeatWrapping
+    texture.wrapT = THREE.RepeatWrapping
+    texture.repeat.set(...repeat)
+  }
+  return texture
 }
 
-function createFramedSuitRelief(
-  scene: THREE.Scene,
-  x: number,
-  suit: 'heart' | 'spade',
-  brassMaterial: THREE.MeshStandardMaterial
-) {
-  const group = new THREE.Group()
-  group.name = `framed-${suit}-wall-relief`
-  group.position.set(x, 1.34, -9.18)
-  scene.add(group)
+function createCarpetTexture() {
+  return createCanvasTexture(512, 512, context => {
+    context.fillStyle = '#10262a'
+    context.fillRect(0, 0, 512, 512)
+    const random = createSeededRandom(0x3344524f)
+    context.globalAlpha = 0.18
+    for (let index = 0; index < 5000; index += 1) {
+      context.fillStyle = random() > 0.5 ? '#1f4448' : '#081416'
+      context.fillRect(random() * 512, random() * 512, 2, 2)
+    }
+    context.globalAlpha = 1
+    context.strokeStyle = 'rgba(217, 164, 65, 0.32)'
+    context.lineWidth = 4
+    for (const [x, y] of [[0, 0], [256, 256], [512, 0], [0, 512], [512, 512]] as const) {
+      context.beginPath()
+      context.moveTo(x, y - 110)
+      context.lineTo(x + 110, y)
+      context.lineTo(x, y + 110)
+      context.lineTo(x - 110, y)
+      context.closePath()
+      context.stroke()
+    }
+    context.fillStyle = 'rgba(226, 80, 92, 0.28)'
+    for (const [x, y] of [[256, 256], [0, 0], [512, 0], [0, 512], [512, 512]] as const) {
+      context.beginPath()
+      context.arc(x, y, 12, 0, Math.PI * 2)
+      context.fill()
+    }
+  }, [7, 7])
+}
 
-  const frameBacking = addMesh(
-    group,
-    new THREE.BoxGeometry(1.78, 2.18, 0.16),
-    brassMaterial
-  )
-  frameBacking.castShadow = false
+function createWallPanelTexture() {
+  return createCanvasTexture(512, 512, context => {
+    const gradient = context.createLinearGradient(0, 0, 0, 512)
+    gradient.addColorStop(0, '#0c2a2a')
+    gradient.addColorStop(1, '#123634')
+    context.fillStyle = gradient
+    context.fillRect(0, 0, 512, 512)
+    context.strokeStyle = 'rgba(242, 199, 102, 0.22)'
+    context.lineWidth = 3
+    for (let x = 32; x < 512; x += 64) {
+      context.beginPath()
+      context.moveTo(x, 0)
+      context.lineTo(x, 512)
+      context.stroke()
+    }
+    context.strokeStyle = 'rgba(0, 0, 0, 0.25)'
+    context.lineWidth = 10
+    for (let x = 0; x < 512; x += 64) {
+      context.beginPath()
+      context.moveTo(x, 0)
+      context.lineTo(x, 512)
+      context.stroke()
+    }
+  }, [10, 1])
+}
 
-  addMesh(
-    group,
-    new THREE.BoxGeometry(1.54, 1.92, 0.13),
-    createStandardMaterial('#0b241d', {
-      emissive: '#071712',
-      emissiveIntensity: 0.42,
-      roughness: 0.76,
-      metalness: 0.18,
-    }),
-    [0, 0, 0.12]
-  )
-
-  const innerLine = addMesh(
-    group,
-    new THREE.RingGeometry(0.52, 0.535, 64),
-    new THREE.MeshBasicMaterial({
-      color: '#d9bd72',
-      transparent: true,
-      opacity: 0.58,
-      depthWrite: false,
-    }),
-    [0, 0.05, 0.2]
-  )
-  innerLine.scale.y = 1.28
-
-  const suitMaterial = createStandardMaterial(suit === 'heart' ? '#8f2735' : '#d0b56e', {
-    emissive: suit === 'heart' ? '#4a0c16' : '#66501f',
-    emissiveIntensity: suit === 'heart' ? 0.72 : 0.5,
-    roughness: 0.34,
-    metalness: suit === 'heart' ? 0.3 : 0.68,
+function createNeonSignTexture(text: string) {
+  return createCanvasTexture(1024, 256, context => {
+    const font = getComputedStyle(document.documentElement).getPropertyValue('--font-unbounded').trim()
+    context.clearRect(0, 0, 1024, 256)
+    context.textAlign = 'center'
+    context.textBaseline = 'middle'
+    context.font = `800 104px ${font ? `${font}, ` : ''}'Arial Black', sans-serif`
+    context.shadowColor = '#ff9a5c'
+    context.shadowBlur = 36
+    context.strokeStyle = '#ffd0a8'
+    context.lineWidth = 10
+    context.strokeText(text, 512, 132)
+    context.shadowBlur = 12
+    context.fillStyle = '#fff4e6'
+    context.fillText(text, 512, 132)
   })
-  const pip = addMesh(group, createHeartReliefGeometry(), suitMaterial, [0, 0.08, 0.22])
-  pip.scale.setScalar(0.56)
-  if (suit === 'spade') {
-    pip.rotation.z = Math.PI
-    addMesh(
-      group,
-      new THREE.BoxGeometry(0.24, 0.46, 0.1),
-      suitMaterial,
-      [0, -0.53, 0.25]
-    )
-    const foot = addMesh(
-      group,
-      new THREE.BoxGeometry(0.48, 0.13, 0.1),
-      suitMaterial,
-      [0, -0.74, 0.25]
-    )
-    foot.rotation.z = -0.04
-  }
-
-  for (const y of [-0.82, 0.82]) {
-    addMesh(group, new THREE.BoxGeometry(0.54, 0.025, 0.025), brassMaterial, [0, y, 0.23])
-  }
 }
 
 function createBackBar(scene: THREE.Scene, brassMaterial: THREE.MeshStandardMaterial) {
   const bar = new THREE.Group()
   bar.name = 'emerald-back-bar'
-  bar.position.set(0, 1.3, -9.2)
+  bar.position.set(0, 1.5, -9.2)
   scene.add(bar)
 
-  const frame = addMesh(
-    bar,
-    new THREE.BoxGeometry(5.45, 2.34, 0.18),
-    brassMaterial
-  )
-  frame.castShadow = false
+  const woodMaterial = createStandardMaterial('#4a2a1a', { roughness: 0.46, metalness: 0.08 })
+  addMesh(bar, new THREE.BoxGeometry(6.2, 3.1, 0.3), woodMaterial).castShadow = false
 
-  addMesh(
-    bar,
-    new THREE.BoxGeometry(5.14, 2.04, 0.16),
-    createStandardMaterial('#061c18', {
-      emissive: '#082f26',
-      emissiveIntensity: 0.66,
-      roughness: 0.34,
-      metalness: 0.48,
-    }),
-    [0, 0, 0.13]
-  )
-
-  const mirrorMaterial = createStandardMaterial('#15372f', {
-    emissive: '#0b2c24',
-    emissiveIntensity: 0.48,
-    roughness: 0.2,
-    metalness: 0.72,
+  const backLight = new THREE.MeshStandardMaterial({
+    color: '#0f3d36',
+    emissive: '#1f8f78',
+    emissiveIntensity: 0.55,
+    roughness: 0.4,
   })
-  for (const x of [-1.68, 0, 1.68]) {
-    addMesh(bar, new THREE.BoxGeometry(1.52, 1.78, 0.035), mirrorMaterial, [x, 0, 0.24])
+  addMesh(bar, new THREE.BoxGeometry(5.6, 2.5, 0.05), backLight, [0, 0.05, 0.17])
+
+  for (const y of [-0.62, 0.22, 1.0]) {
+    addMesh(bar, new THREE.BoxGeometry(5.5, 0.07, 0.42), brassMaterial, [0, y, 0.38])
   }
 
-  const shelfMaterial = createStandardMaterial('#9d7133', {
-    emissive: '#5d3513',
-    emissiveIntensity: 0.5,
-    roughness: 0.34,
-    metalness: 0.56,
-  })
-  for (const y of [-0.48, 0.22]) {
-    addMesh(bar, new THREE.BoxGeometry(4.82, 0.085, 0.38), shelfMaterial, [0, y, 0.35])
-  }
-
-  const bottleColors = ['#7e2638', '#b66a22', '#0e6b58', '#d0aa54', '#4f2f68']
-  const bottleRows = [
-    { shelfY: -0.48, xs: [-2.08, -1.48, -0.82, 0.82, 1.48, 2.08] },
-    { shelfY: 0.22, xs: [-1.76, -1.08, -0.38, 0.38, 1.08, 1.76] },
-  ]
-  bottleRows.forEach((row, rowIndex) => {
-    row.xs.forEach((x, index) => {
-      const height = 0.34 + ((index + rowIndex) % 3) * 0.07
-      const bottleBaseY = row.shelfY + 0.0525
-      const color = bottleColors[(index + rowIndex * 2) % bottleColors.length]
-      const bottleMaterial = createStandardMaterial(color, {
+  const bottleColors = ['#b8364a', '#e0922f', '#1faa76', '#f2c766', '#8e6cf0', '#3f7fe0']
+  const random = createSeededRandom(0x0b0771e5)
+  for (const [rowIndex, shelfY] of [-0.62, 0.22].entries()) {
+    for (let index = 0; index < 11; index += 1) {
+      const x = -2.4 + index * 0.48 + (random() - 0.5) * 0.1
+      const height = 0.36 + random() * 0.22
+      const color = bottleColors[(index + rowIndex * 3) % bottleColors.length]!
+      const bottleMaterial = new THREE.MeshStandardMaterial({
+        color,
         emissive: color,
-        emissiveIntensity: 0.24,
+        emissiveIntensity: 0.42,
+        roughness: 0.12,
+        metalness: 0.1,
         transparent: true,
-        opacity: 0.9,
-        roughness: 0.28,
-        metalness: 0.18,
+        opacity: 0.92,
       })
-      addMesh(
+      const bottle = addMesh(
         bar,
-        new THREE.CylinderGeometry(0.09, 0.11, height, 16),
+        new THREE.LatheGeometry([
+          new THREE.Vector2(0, 0),
+          new THREE.Vector2(0.1, 0),
+          new THREE.Vector2(0.11, height * 0.62),
+          new THREE.Vector2(0.05, height * 0.82),
+          new THREE.Vector2(0.04, height),
+          new THREE.Vector2(0, height),
+        ], 14),
         bottleMaterial,
-        [x, bottleBaseY + height / 2, 0.53]
+        [x, shelfY + 0.035, 0.5]
       )
-      addMesh(
-        bar,
-        new THREE.CylinderGeometry(0.045, 0.055, 0.14, 12),
-        bottleMaterial,
-        [x, bottleBaseY + height + 0.08, 0.53]
-      )
-      addMesh(
-        bar,
-        new THREE.CylinderGeometry(0.052, 0.052, 0.035, 12),
-        brassMaterial,
-        [x, bottleBaseY + height + 0.16, 0.53]
-      )
-    })
-  })
+      bottle.castShadow = false
+    }
+  }
 
-  const crestRing = addMesh(
-    bar,
-    new THREE.RingGeometry(0.24, 0.275, 48),
-    new THREE.MeshBasicMaterial({
-      color: '#ead58f',
-      transparent: true,
-      opacity: 0.9,
-      depthWrite: false,
-    }),
-    [0, 0.77, 0.55]
-  )
-  crestRing.scale.y = 1.08
-  const crestDiamond = addMesh(
-    bar,
-    new THREE.BoxGeometry(0.23, 0.23, 0.055),
-    brassMaterial,
-    [0, 0.77, 0.57]
-  )
-  crestDiamond.rotation.z = Math.PI / 4
-
-  const shelfGlow = new THREE.PointLight('#55b89a', 4.8, 5.2, 2)
-  shelfGlow.position.set(0, 0.02, 1.1)
+  const shelfGlow = new THREE.PointLight('#5fe0c0', 5, 5, 2)
+  shelfGlow.position.set(0, 0.2, 1.2)
   bar.add(shelfGlow)
 }
 
-function createWallSconce(
-  scene: THREE.Scene,
-  x: number,
-  brassMaterial: THREE.MeshStandardMaterial
-) {
+function createWallSconce(scene: THREE.Scene, x: number, brassMaterial: THREE.MeshStandardMaterial) {
   const sconce = new THREE.Group()
   sconce.name = 'art-deco-wall-sconce'
-  sconce.position.set(x, 1.36, -9.03)
+  sconce.position.set(x, 2.1, -9.05)
   scene.add(sconce)
 
-  addMesh(
+  addMesh(sconce, new THREE.CylinderGeometry(0.2, 0.2, 0.05, 24), brassMaterial, [0, 0, 0]).rotation.x = Math.PI / 2
+  addMesh(sconce, new THREE.CylinderGeometry(0.03, 0.03, 0.34, 8), brassMaterial, [0, 0, 0.18]).rotation.x = Math.PI / 2
+  const shade = addMesh(
     sconce,
-    new THREE.BoxGeometry(0.26, 1.24, 0.16),
-    createStandardMaterial('#3a2617', {
-      emissive: '#2b1709',
-      emissiveIntensity: 0.46,
-      roughness: 0.46,
-      metalness: 0.48,
-    })
+    new THREE.CylinderGeometry(0.16, 0.3, 0.38, 24, 1, true),
+    new THREE.MeshStandardMaterial({
+      color: '#ffcf8a',
+      emissive: '#ffb45c',
+      emissiveIntensity: 2.4,
+      side: THREE.DoubleSide,
+      roughness: 0.6,
+    }),
+    [0, 0.14, 0.36]
   )
-  const halo = addMesh(
-    sconce,
-    new THREE.TorusGeometry(0.34, 0.035, 10, 48),
-    brassMaterial,
-    [0, 0.08, 0.16]
-  )
-  halo.scale.y = 1.24
-  addMesh(sconce, new THREE.BoxGeometry(0.52, 0.08, 0.2), brassMaterial, [0, -0.4, 0.19])
+  shade.castShadow = false
 
-  const bulbMaterial = createStandardMaterial('#fff0c2', {
-    emissive: '#ffbd66',
-    emissiveIntensity: 2.8,
-    roughness: 0.22,
-    metalness: 0.02,
-  })
-  const bulb = addMesh(sconce, new THREE.SphereGeometry(0.24, 24, 16), bulbMaterial, [0, 0.08, 0.32])
-  bulb.scale.y = 1.32
-
-  const light = new THREE.PointLight('#f2b867', 9.5, 6.5, 2)
-  light.position.set(0, 0.03, 0.82)
+  const light = new THREE.PointLight('#ffb865', 7, 6, 2)
+  light.position.set(0, 0.2, 0.7)
   sconce.add(light)
 }
 
-function createRoom(scene: THREE.Scene) {
-  const floorMaterial = createStandardMaterial('#07110f', {
-    roughness: 0.94,
-    metalness: 0.04,
-  })
-  const floor = addMesh(scene, new THREE.CircleGeometry(18, 96), floorMaterial, [0, -0.63, 0])
-  floor.rotation.x = -Math.PI / 2
+function createPendantLamp(scene: THREE.Scene, x: number, z: number, brassMaterial: THREE.MeshStandardMaterial) {
+  const lamp = new THREE.Group()
+  lamp.name = 'pendant-lamp'
+  lamp.position.set(x, 7.1, z)
+  scene.add(lamp)
 
-  const floorInset = addMesh(
-    scene,
-    new THREE.RingGeometry(5.6, 8.4, 96),
-    new THREE.MeshBasicMaterial({
-      color: '#1c5c49',
-      transparent: true,
-      opacity: 0.18,
+  addMesh(lamp, new THREE.CylinderGeometry(0.012, 0.012, 3, 6), brassMaterial, [0, 1.5, 0])
+  const shade = addMesh(
+    lamp,
+    new THREE.LatheGeometry([
+      new THREE.Vector2(0.08, 0.34),
+      new THREE.Vector2(0.18, 0.3),
+      new THREE.Vector2(0.52, 0.02),
+      new THREE.Vector2(0.62, -0.08),
+      new THREE.Vector2(0.6, -0.1),
+    ], 40),
+    new THREE.MeshStandardMaterial({
+      color: '#0f7a57',
+      roughness: 0.25,
+      metalness: 0.35,
       side: THREE.DoubleSide,
+    })
+  )
+  shade.castShadow = false
+  const bulb = addMesh(
+    lamp,
+    new THREE.SphereGeometry(0.14, 20, 12),
+    new THREE.MeshStandardMaterial({
+      color: '#fff3d6',
+      emissive: '#ffd9a0',
+      emissiveIntensity: 6,
+      toneMapped: false,
     }),
-    [0, -0.615, 0]
+    [0, 0.02, 0]
   )
-  floorInset.rotation.x = -Math.PI / 2
-  floorInset.scale.x = 1.42
+  bulb.castShadow = false
+  const rimGlow = addMesh(
+    lamp,
+    new THREE.TorusGeometry(0.61, 0.018, 8, 48),
+    brassMaterial,
+    [0, -0.09, 0]
+  )
+  rimGlow.rotation.x = Math.PI / 2
+}
 
-  const wallMaterial = createStandardMaterial('#0a1d18', {
-    emissive: '#04100d',
-    emissiveIntensity: 0.32,
-    roughness: 0.86,
-    metalness: 0.12,
+function createRoom(scene: THREE.Scene) {
+  const floorMaterial = new THREE.MeshStandardMaterial({
+    map: createCarpetTexture(),
+    roughness: 0.95,
+    metalness: 0,
+    envMapIntensity: 0.2,
   })
-  const backWall = addMesh(
-    scene,
-    new THREE.BoxGeometry(30, 13, 0.2),
-    wallMaterial,
-    [0, 5.2, -9.55]
-  )
+  const floor = addMesh(scene, new THREE.CircleGeometry(20, 96), floorMaterial, [0, -2, 0])
+  floor.rotation.x = -Math.PI / 2
+  floor.castShadow = false
+
+  const panelMaterial = new THREE.MeshStandardMaterial({
+    map: createWallPanelTexture(),
+    roughness: 0.82,
+    metalness: 0.05,
+    envMapIntensity: 0.3,
+  })
+  const backWall = addMesh(scene, new THREE.BoxGeometry(32, 14, 0.2), panelMaterial, [0, 5, -9.55])
   backWall.name = 'visible-back-wall'
   backWall.castShadow = false
 
-  for (const x of [-11.8, 11.8]) {
-    const sideWall = addMesh(
-      scene,
-      new THREE.BoxGeometry(0.24, 11.5, 19.5),
-      createStandardMaterial('#081612', {
-        emissive: '#030b09',
-        emissiveIntensity: 0.2,
-        roughness: 0.9,
-      }),
-      [x, 4.85, -0.1]
-    )
+  const sideMaterial = panelMaterial.clone()
+  for (const x of [-12.5, 12.5]) {
+    const sideWall = addMesh(scene, new THREE.BoxGeometry(0.24, 14, 22), sideMaterial, [x, 5, 0])
     sideWall.castShadow = false
   }
 
-  const lowerWallMaterial = createStandardMaterial('#102921', {
-    emissive: '#06150f',
-    emissiveIntensity: 0.34,
-    roughness: 0.72,
-    metalness: 0.18,
-  })
-  const lowerWall = addMesh(
-    scene,
-    new THREE.BoxGeometry(24, 1.62, 0.2),
-    lowerWallMaterial,
-    [0, 0.12, -9.37]
-  )
-  lowerWall.castShadow = false
+  const wainscotMaterial = createStandardMaterial('#3b2216', { roughness: 0.5, metalness: 0.06 })
+  addMesh(scene, new THREE.BoxGeometry(32, 1.9, 0.3), wainscotMaterial, [0, -1.05, -9.4]).castShadow = false
 
-  const columnMaterial = createStandardMaterial('#173127', {
-    emissive: '#08150f',
-    emissiveIntensity: 0.26,
-    roughness: 0.58,
-    metalness: 0.34,
+  const brassMaterial = new THREE.MeshStandardMaterial({
+    color: '#e0b25a',
+    roughness: 0.28,
+    metalness: 1,
+    envMapIntensity: 1.2,
   })
-  for (const x of [-9.2, -6.7, 6.7, 9.2]) {
-    addMesh(scene, new THREE.BoxGeometry(0.22, 8.8, 0.3), columnMaterial, [x, 3.2, -9.18])
-  }
-
-  const brassMaterial = createStandardMaterial('#b9984d', {
-    emissive: '#5e491f',
-    emissiveIntensity: 0.54,
-    roughness: 0.36,
-    metalness: 0.76,
-  })
-  addMesh(scene, new THREE.BoxGeometry(20, 0.075, 0.11), brassMaterial, [0, 2.5, -9.18])
-  addMesh(scene, new THREE.BoxGeometry(23.5, 0.13, 0.15), brassMaterial, [0, 0.91, -9.15])
-  addMesh(scene, new THREE.BoxGeometry(18.5, 0.035, 0.08), brassMaterial, [0, -0.55, -9.14])
+  addMesh(scene, new THREE.BoxGeometry(32, 0.08, 0.34), brassMaterial, [0, -0.08, -9.3])
+  addMesh(scene, new THREE.BoxGeometry(32, 0.06, 0.12), brassMaterial, [0, 4.6, -9.4])
 
   createBackBar(scene, brassMaterial)
-  createFramedSuitRelief(scene, -4.15, 'heart', brassMaterial)
-  createFramedSuitRelief(scene, 4.15, 'spade', brassMaterial)
-  createWallSconce(scene, -5.8, brassMaterial)
-  createWallSconce(scene, 5.8, brassMaterial)
+  for (const x of [-4.6, 4.6]) createWallSconce(scene, x, brassMaterial)
+  for (const x of [-9.4, 9.4]) createWallSconce(scene, x, brassMaterial)
+  createPendantLamp(scene, -2.6, -0.4, brassMaterial)
+  createPendantLamp(scene, 2.6, -0.4, brassMaterial)
 
-  const floorRing = addMesh(
-    scene,
-    new THREE.TorusGeometry(5.4, 0.025, 8, 128),
-    new THREE.MeshBasicMaterial({ color: '#c8aa5d', transparent: true, opacity: 0.28 }),
-    [0, -0.58, 0]
-  ) as THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>
-  floorRing.rotation.x = Math.PI / 2
-  floorRing.scale.x = 1.55
+  const neonMaterial = new THREE.MeshStandardMaterial({
+    map: createNeonSignTexture('POKER NIGHT'),
+    emissive: '#ffffff',
+    emissiveMap: createNeonSignTexture('POKER NIGHT'),
+    emissiveIntensity: 2.2,
+    transparent: true,
+    depthWrite: false,
+    toneMapped: false,
+  })
+  const neon = addMesh(scene, new THREE.PlaneGeometry(4.4, 1.1), neonMaterial, [0, 3.58, -9.3])
+  neon.name = 'neon-sign'
+  neon.castShadow = false
+  neon.receiveShadow = false
 
-  const ceilingRing = addMesh(
-    scene,
-    new THREE.TorusGeometry(4.8, 0.035, 8, 128),
-    new THREE.MeshBasicMaterial({ color: '#79c8aa', transparent: true, opacity: 0.22 }),
-    [0, 7.2, -1.6]
-  ) as THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>
-  ceilingRing.rotation.x = Math.PI / 2
-  ceilingRing.scale.x = 1.5
-
-  const random = createSeededRandom(0x3344524f)
-  const particlePositions = new Float32Array(180 * 3)
-  for (let index = 0; index < 180; index += 1) {
-    const offset = index * 3
-    particlePositions[offset] = (random() - 0.5) * 22
-    particlePositions[offset + 1] = random() * 8.5 - 0.25
-    particlePositions[offset + 2] = random() * 14 - 7
-  }
-  const particlesGeometry = new THREE.BufferGeometry()
-  particlesGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3))
-  const particleField = new THREE.Points(
-    particlesGeometry,
-    new THREE.PointsMaterial({
-      color: '#cce9dc',
-      size: 0.026,
-      transparent: true,
-      opacity: 0.28,
-      depthWrite: false,
-    })
-  )
-  scene.add(particleField)
-
-  return { floorRing, ceilingRing, particleField }
+  return { neonMaterials: [neonMaterial] }
 }
 
-function createPokerTable(scene: THREE.Scene) {
-  const pedestalMaterial = createStandardMaterial('#080d0c', {
-    roughness: 0.52,
-    metalness: 0.42,
-  })
-  const pedestal = addMesh(scene, new THREE.CylinderGeometry(1.55, 2.15, 1.8, 64), pedestalMaterial, [0, -1.08, 0])
-  pedestal.scale.x = 1.3
 
-  const foot = addMesh(scene, new THREE.CylinderGeometry(2.45, 2.75, 0.32, 64), pedestalMaterial, [0, -1.88, 0])
-  foot.scale.x = 1.45
+const AVATAR_SEAT_LIFT = 0.28
+const HAND_SPREAD = 0.24
 
-  const baseMaterial = createStandardMaterial('#0a0f0e', {
-    roughness: 0.48,
-    metalness: 0.46,
-  })
-  const base = addMesh(scene, new THREE.CylinderGeometry(3.46, 3.35, 0.58, 96), baseMaterial, [0, -0.18, 0])
-  base.scale.x = 1.56
-
-  const railMaterial = new THREE.MeshPhysicalMaterial({
-    color: '#b99a50',
-    emissive: '#4d3b18',
-    emissiveIntensity: 0.28,
-    roughness: 0.24,
-    metalness: 0.72,
-    clearcoat: 0.82,
-    clearcoatRoughness: 0.2,
-  })
-  const rail = addMesh(scene, new THREE.CylinderGeometry(3.3, 3.3, 0.52, 96), railMaterial, [0, 0.02, 0])
-  rail.scale.x = 1.56
-
-  const innerRailMaterial = createStandardMaterial('#151f1b', {
-    roughness: 0.52,
-    metalness: 0.32,
-  })
-  const innerRail = addMesh(scene, new THREE.CylinderGeometry(3.14, 3.14, 0.53, 96), innerRailMaterial, [0, 0.075, 0])
-  innerRail.scale.x = 1.56
-
-  const feltGrain = createFeltGrainTexture()
-  const feltMaterial = createStandardMaterial('#087052', {
-    emissive: '#063f31',
-    emissiveIntensity: 0.25,
-    roughness: 0.98,
-    metalness: 0.01,
-    roughnessMap: feltGrain,
-    bumpMap: feltGrain,
-    bumpScale: 0.012,
-  })
-  const felt = addMesh(scene, new THREE.CylinderGeometry(2.96, 2.96, 0.5, 96), feltMaterial, [0, 0.14, 0])
-  felt.scale.x = 1.56
-
-  const bettingLineMaterial = new THREE.MeshBasicMaterial({
-    color: '#d9c477',
-    transparent: true,
-    opacity: 0.2,
-    side: THREE.DoubleSide,
-  })
-  const bettingLine = addMesh(scene, new THREE.RingGeometry(1.62, 1.64, 96), bettingLineMaterial, [0, 0.405, 0])
-  bettingLine.rotation.x = -Math.PI / 2
-  bettingLine.scale.x = 1.62
-
-  const railGlow = addMesh(
-    scene,
-    new THREE.TorusGeometry(3.055, 0.018, 8, 128),
-    new THREE.MeshBasicMaterial({
-      color: '#e3ca7b',
-      transparent: true,
-      opacity: 0.28,
-      depthWrite: false,
-    }),
-    [0, 0.342, 0]
-  )
-  railGlow.rotation.x = Math.PI / 2
-  railGlow.scale.x = 1.56
-
-  const boardPlinth = addMesh(
-    scene,
-    new THREE.BoxGeometry(4.25, 0.06, 1.12),
-    createStandardMaterial('#03271d', {
-      transparent: true,
-      opacity: 0.82,
-      roughness: 0.88,
-    }),
-    [0, 0.43, -0.08]
-  )
-  boardPlinth.rotation.y = 0
-
-  const boardSlotMaterial = createStandardMaterial('#071a15', {
-    emissive: '#04100d',
-    emissiveIntensity: 0.24,
-    roughness: 0.9,
-    metalness: 0.04,
-  })
-  const boardSlotEdgeMaterial = createStandardMaterial('#8f7c48', {
-    emissive: '#30250f',
-    emissiveIntensity: 0.24,
-    roughness: 0.48,
-    metalness: 0.42,
-  })
-  for (const x of [-1.46, -0.73, 0, 0.73, 1.46]) {
-    addMesh(
-      scene,
-      new THREE.BoxGeometry(0.62, 0.032, 0.86),
-      [boardSlotEdgeMaterial, boardSlotEdgeMaterial, boardSlotMaterial, boardSlotEdgeMaterial, boardSlotEdgeMaterial, boardSlotEdgeMaterial],
-      [x, 0.47, -0.08]
-    )
+function createDefaultAnchors(): AvatarAnchors {
+  return {
+    railR: [0.3, 0.9, -0.9],
+    railL: [-0.3, 0.9, -0.9],
+    cards: [0, 0.5, -1.6],
+    chest: [0, 1.0, -0.2],
+    chin: [0, 1.4, -0.3],
+    shoulderR: [0.24, 1.2, -0.1],
+    shoulderL: [-0.24, 1.2, -0.1],
   }
-
-  const markMaterial = new THREE.MeshBasicMaterial({
-    color: '#d8c785',
-    transparent: true,
-    opacity: 0.1,
-    side: THREE.DoubleSide,
-  })
-  const mark = addMesh(scene, new THREE.RingGeometry(0.56, 0.59, 64), markMaterial, [0, 0.452, 0.08])
-  mark.rotation.x = -Math.PI / 2
-  mark.scale.x = 1.55
-
-  return feltMaterial
 }
 
-function createLighting(scene: THREE.Scene) {
-  scene.add(new THREE.HemisphereLight('#dff9ec', '#07100d', 1.65))
-
-  const key = new THREE.DirectionalLight('#ffe1a3', 3.2)
-  key.position.set(-5.5, 8.5, 6.5)
-  scene.add(key)
-
-  const tableSpot = new THREE.SpotLight('#fff0bd', 58, 28, 0.66, 0.78, 1.25)
-  tableSpot.position.set(0, 10.5, 3.2)
-  tableSpot.target.position.set(0, 0, -0.35)
-  tableSpot.castShadow = true
-  tableSpot.shadow.mapSize.set(1536, 1536)
-  tableSpot.shadow.bias = -0.00008
-  tableSpot.shadow.normalBias = 0.025
-  tableSpot.shadow.camera.near = 1
-  tableSpot.shadow.camera.far = 24
-  scene.add(tableSpot, tableSpot.target)
-
-  const greenRim = new THREE.SpotLight('#60d0a7', 26, 24, 0.72, 0.82, 1.4)
-  greenRim.position.set(4.8, 6.5, -5.8)
-  greenRim.target.position.set(0, 0.2, 0)
-  scene.add(greenRim, greenRim.target)
-
-  const warmRim = new THREE.PointLight('#d8a356', 18, 16, 1.7)
-  warmRim.position.set(-6, 3.2, 3.4)
-  scene.add(warmRim)
-
-  const coolRim = new THREE.PointLight('#4eb395', 15, 16, 1.8)
-  coolRim.position.set(6, 3.1, -3.8)
-  scene.add(coolRim)
+function toSeatLocal(seat: SeatRuntime, x: number, y: number, z: number): Vec3 {
+  const point = seat.root.worldToLocal(new THREE.Vector3(x, y, z))
+  return [point.x, point.y, point.z]
 }
 
 function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
@@ -862,6 +660,56 @@ function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
   // Player faces, cards, and hands point down local -Z. This yaw makes that
   // direction point toward table center at every seat.
   seat.root.rotation.y = Math.atan2(position[0], position[2])
+  seat.root.updateMatrixWorld(true)
+
+  const { edge, normal } = getFeltEdgeToward(position[0], position[2])
+  const at = (inset: number, y: number) => toSeatLocal(
+    seat,
+    edge.x + normal.x * inset,
+    y,
+    edge.y + normal.y * inset
+  )
+
+  // Slide chair and body in so the player's chest sits just behind the rail.
+  const railOuter = at(RAIL_WIDTH, RAIL_PEAK_Y)
+  seat.seatShiftZ = THREE.MathUtils.clamp(railOuter[2] + 0.18 - 0.12, -1.1, 0)
+  seat.chair.position.z = seat.seatShiftZ
+
+  // Forearms rest on the padded rail; hole cards sit on the felt just inside it.
+  const railRest = at(RAIL_WIDTH * 0.86, RAIL_PEAK_Y + 0.02)
+  seat.anchors.railR = [HAND_SPREAD / scale, railRest[1], railRest[2]]
+  seat.anchors.railL = [-HAND_SPREAD / scale, railRest[1], railRest[2]]
+  const cardSpot = at(-0.42, FELT_TOP_Y + 0.012)
+  seat.cardLocalZ = cardSpot[2]
+  seat.anchors.cards = [0, cardSpot[1] + 0.02, cardSpot[2]]
+  seat.cards.userData.restY = cardSpot[1]
+  seat.cards.position.set(0, cardSpot[1], cardSpot[2])
+  seat.anchorsFromRig = false
+}
+
+/**
+ * Reads chest, chin, and shoulder anchors from the loaded rig (in seat-local
+ * space) so gestures like chin rests and folded arms fit each model.
+ */
+function measureRigAnchors(seat: SeatRuntime) {
+  const bones = seat.avatar?.bones
+  if (!bones) return
+  seat.root.updateMatrixWorld(true)
+  const local = (name: string, forward = 0, up = 0): Vec3 | null => {
+    const bone = bones.get(name)
+    if (!bone) return null
+    const point = seat.root.worldToLocal(bone.getWorldPosition(new THREE.Vector3()))
+    return [point.x, point.y + up, point.z - forward]
+  }
+  const chest = local('Chest', 0.2, 0.05)
+  const chin = local('Head', 0.26, 0.02)
+  const shoulderR = local('UpperArmR')
+  const shoulderL = local('UpperArmL')
+  if (chest) seat.anchors.chest = chest
+  if (chin) seat.anchors.chin = chin
+  if (shoulderR) seat.anchors.shoulderR = shoulderR
+  if (shoulderL) seat.anchors.shoulderL = shoulderL
+  seat.anchorsFromRig = true
 }
 
 function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
@@ -880,27 +728,10 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
   const [chairMaterial, trimMaterial, shirtMaterial, sleeveMaterial, skinMaterial, hairMaterial] = materials
   const foldMaterials = [shirtMaterial, sleeveMaterial, skinMaterial, hairMaterial]
 
-  const chair = new THREE.Group()
-  root.add(chair)
-  const chairBack = addMesh(chair, new THREE.BoxGeometry(1.34, 1.6, 0.28), chairMaterial, [0, 0.72, 0.53])
-  chairBack.scale.set(1, 1, 1)
-  addMesh(chair, new THREE.BoxGeometry(1.42, 0.08, 0.32), trimMaterial, [0, 1.47, 0.51])
-  const chairCushion = addMesh(
-    chair,
-    new THREE.BoxGeometry(1.22, 0.18, 0.82, 3, 1, 3),
-    chairMaterial,
-    [0, -0.02, 0.22]
-  )
-  chairCushion.rotation.x = -0.05
-  for (const side of [-1, 1]) {
-    addMesh(
-      chair,
-      new THREE.BoxGeometry(0.11, 0.12, 0.72),
-      trimMaterial,
-      [side * 0.68, 0.38, 0.08]
-    )
-  }
-  addMesh(chair, new THREE.CylinderGeometry(0.12, 0.16, 0.9, 20), chairMaterial, [0, -0.24, 0.52])
+  const chair = createStylizedChair(chairMaterial.color, trimMaterial.color)
+  root.add(chair.group)
+  const chairGroup = chair.group
+  materials.push(...chair.materials)
 
   const body = new THREE.Group()
   body.position.set(0, 0.12, 0.03)
@@ -913,17 +744,6 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
   const avatarMount = new THREE.Group()
   avatarMount.name = `rigged-avatar-${player.id}`
   body.add(avatarMount)
-  const avatarOccluder = addMesh(
-    avatarMount,
-    new THREE.BoxGeometry(2.65, 1.05, 0.62),
-    new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: true, depthTest: true }),
-    [0, 0.36, -0.38]
-  )
-  avatarOccluder.name = `avatar-bust-occluder-${player.id}`
-  avatarOccluder.castShadow = false
-  avatarOccluder.receiveShadow = false
-  avatarOccluder.renderOrder = 1
-  avatarOccluder.visible = false
 
   const torso = addMesh(fallbackAvatar, new THREE.SphereGeometry(0.62, 28, 20), shirtMaterial, [0, 0.66, 0.08])
   torso.scale.set(profile.build === 'broad' ? 1.12 : profile.build === 'lean' ? 0.9 : 1, 1.08, 0.72)
@@ -960,43 +780,19 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
   const cards = new THREE.Group()
   cards.position.set(0, 0.55, -1.02)
   root.add(cards)
-  const cardBack = createStandardMaterial('#721d2b', {
-    emissive: '#26070d',
-    emissiveIntensity: 0.35,
-    roughness: 0.5,
-    metalness: 0.14,
-  })
-  const cardEdge = createStandardMaterial('#e6d9b5', { roughness: 0.7 })
-  materials.push(cardBack, cardEdge)
-  const cardMeshes: THREE.Mesh[] = []
-  for (const [index, x] of [-0.2, 0.2].entries()) {
-    const card = addMesh(
-      cards,
-      new THREE.BoxGeometry(0.47, 0.035, 0.68),
-      [cardEdge, cardEdge, cardBack, cardEdge, cardEdge, cardEdge],
-      [x, 0, 0]
-    )
-    card.rotation.y = index === 0 ? -0.12 : 0.12
-    card.rotation.z = index === 0 ? -0.04 : 0.04
-    card.userData.baseX = x
-    card.userData.baseYaw = card.rotation.y
-    card.userData.baseRoll = card.rotation.z
-    cardMeshes.push(card)
-
-    const backInlay = addMesh(
-      card,
-      new THREE.RingGeometry(0.105, 0.12, 28),
-      new THREE.MeshBasicMaterial({
-        color: '#d5b968',
-        transparent: true,
-        opacity: 0.82,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      }),
-      [0, 0.021, 0]
-    )
-    backInlay.rotation.x = -Math.PI / 2
-    backInlay.scale.y = 1.35
+  const cardMeshes: THREE.Object3D[] = []
+  const holeCards: CardMesh[] = []
+  for (const [index, x] of [-0.17, 0.17].entries()) {
+    const card = createCardMesh(0.46)
+    // Face down by default; showdown flips each card over its long edge.
+    card.group.rotation.set(0, index === 0 ? -0.16 : 0.12, Math.PI)
+    card.group.position.set(x, index * 0.014, 0)
+    card.group.userData.baseX = x
+    card.group.userData.baseYaw = card.group.rotation.y
+    card.group.userData.baseRoll = 0
+    cards.add(card.group)
+    cardMeshes.push(card.group)
+    holeCards.push(card)
   }
 
   const dealerMaterial = createStandardMaterial('#eee4c8', { roughness: 0.55, metalness: 0.12 })
@@ -1075,7 +871,6 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     body,
     fallbackAvatar,
     avatarMount,
-    avatarOccluder,
     avatar: null,
     avatarMixer: null,
     avatarIdleAction: null,
@@ -1085,6 +880,16 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     rightArm,
     cards,
     cardMeshes,
+    holeCards,
+    cardLocalZ: -1.02,
+    animator: createAvatarAnimatorState(player.id),
+    chair: chairGroup,
+    seatShiftZ: 0,
+    anchors: createDefaultAnchors(),
+    anchorsFromRig: false,
+    avatarStyle: null,
+    loser: false,
+    lastPose: null,
     dealerButton,
     ring,
     winnerHalo,
@@ -1174,11 +979,11 @@ function detachRiggedAvatar(seat: SeatRuntime) {
   }
 
   seat.avatar = null
+  seat.avatarStyle = null
   seat.avatarMixer = null
   seat.avatarIdleAction = null
   seat.avatarActiveAction = null
   seat.avatarFailureCount = 0
-  seat.avatarOccluder.visible = false
   seat.fallbackAvatar.visible = true
 }
 
@@ -1209,54 +1014,21 @@ function returnAvatarToIdle(seat: SeatRuntime, fadeSeconds = 0.18) {
   startAvatarIdle(seat, fadeSeconds)
 }
 
-function playAvatarOneShot(seat: SeatRuntime, cue: ThreeActionCue, winner = false) {
-  const avatar = seat.avatar
-  const mixer = seat.avatarMixer
-  if (!avatar || !mixer) return
-
-  const clip = winner
-    ? seat.avatarProfile.celebration === 'slow_clap'
-      ? avatar.clips.interact ?? avatar.clips.wave
-      : avatar.clips.wave ?? avatar.clips.interact
-    : cue === 'fold'
-      ? avatar.clips.hitReceive
-      : cue === 'ready'
-        ? undefined
-        : avatar.clips.interact
-  if (!clip) return
-
-  const action = mixer.clipAction(clip, avatar.model)
-  const previous = seat.avatarActiveAction
-  if (previous && previous !== action) previous.fadeOut(0.1)
-  action.stopFading()
-  action.stopWarping()
-  action.reset()
-  action.setLoop(THREE.LoopOnce, 1)
-  action.clampWhenFinished = true
-  const winnerDuration = seat.avatarProfile.celebration === 'slow_clap'
-    ? 2.15
-    : seat.avatarProfile.celebration === 'fist_pump'
-      ? 1.15
-      : 1.5
-  action.setDuration(winner ? winnerDuration : cue === 'all_in' ? 1.08 : cue === 'check' ? 0.72 : 0.92)
-  action.setEffectiveWeight(1)
-  seat.avatarIdleAction?.fadeOut(0.16)
-  action.fadeIn(0.16).play()
-  seat.avatarActiveAction = action
-}
+// Rigged avatars are performed procedurally (see avatarAnimator.ts). Only the
+// idle clip runs on the mixer so authored clips never fight the seated poses.
 
 function applySeatFoldVisualState(seat: SeatRuntime) {
   seat.foldMaterials.forEach(material => {
-    applyFoldOpacity(material, seat.folded)
+    applyFoldTint(material, seat.folded)
   })
   seat.avatar?.materials.forEach(material => {
-    applyFoldOpacity(material, seat.folded)
+    applyFoldTint(material, seat.folded)
   })
   seat.fallbackAccessories.materials.forEach(material => {
-    applyFoldOpacity(material, seat.folded)
+    applyFoldTint(material, seat.folded)
   })
   seat.riggedAccessories?.materials.forEach(material => {
-    applyFoldOpacity(material, seat.folded)
+    applyFoldTint(material, seat.folded)
   })
 }
 
@@ -1286,8 +1058,12 @@ async function requestRiggedAvatar(
     }
 
     detachRiggedAvatar(seat)
-    seat.avatar = avatar
+    const style = stylizeAvatar(avatar.model, avatar.materials)
+    seat.avatar = { ...avatar, materials: style.materials }
+    seat.avatarStyle = style
     seat.avatarMount.add(avatar.root)
+    seat.avatarMount.position.set(0, AVATAR_SEAT_LIFT, 0)
+    seat.anchorsFromRig = false
     seat.riggedAccessories = createRiggedAvatarAccessories(
       avatar.root,
       avatar.bones,
@@ -1302,10 +1078,8 @@ async function requestRiggedAvatar(
     seat.avatarRetryAt = 0
     seat.avatarFailureCount = 0
     seat.fallbackAvatar.visible = false
-    seat.avatarOccluder.visible = true
     applySeatFoldVisualState(seat)
     startAvatarIdle(seat)
-    if (seat.winner) playAvatarOneShot(seat, 'ready', true)
     updateAvatarDiagnostics(runtime)
   } catch (error) {
     if (runtime.disposed || seat.avatarGeneration !== generation) return
@@ -1316,7 +1090,6 @@ async function requestRiggedAvatar(
     // When a profile changes while an older model is already live, retain the
     // healthy instance until the requested replacement succeeds.
     seat.fallbackAvatar.visible = seat.avatar === null
-    seat.avatarOccluder.visible = seat.avatar !== null
     updateAvatarDiagnostics(runtime)
   }
 }
@@ -1352,9 +1125,6 @@ function syncSeatAppearance(
 
 function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number) {
   if (seat.visualSeat !== player.visualSeat) setSeatPosition(seat, player.visualSeat)
-  const actionChanged = seat.actionKey !== player.actionKey
-  const becameWinner = !seat.winner && player.isWinner
-
   // Desktop is framed from the local player's chair. Their physical avatar would
   // sit between the camera and their DOM-rendered hole cards, so keep that seat
   // out of the 3D scene while retaining its readable fixed hand and stack HUD.
@@ -1385,15 +1155,15 @@ function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number) {
 
   applySeatFoldVisualState(seat)
 
-  const ringColor = player.isWinner ? '#f4d77e' : player.isActing ? '#d8bd68' : '#69bfa0'
+  const slots = getThreeVisibleCardSlots(player.showCards, player.visibleCards)
+  ;[slots.left, slots.right].forEach((card, index) => {
+    const holeCard = seat.holeCards[index]
+    if (holeCard) setCardFace(holeCard, card ? { rank: card.rank, suit: card.suit } : null)
+  })
+
+  const ringColor = player.isWinner ? '#ffd46b' : player.isActing ? '#7fd0ff' : '#39c795'
   seat.ring.material.color.set(ringColor)
   seat.ring.material.emissive.set(ringColor)
-
-  if (becameWinner) {
-    playAvatarOneShot(seat, 'ready', true)
-  } else if (actionChanged && player.actionKey) {
-    playAvatarOneShot(seat, player.actionCue)
-  }
 }
 
 function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
@@ -1409,6 +1179,7 @@ function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
     runtime.seats.delete(playerId)
   }
 
+  const hasWinner = view.players.some(player => player.isWinner)
   for (const player of view.players) {
     let seat = runtime.seats.get(player.id)
     if (!seat) {
@@ -1417,6 +1188,8 @@ function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
       runtime.scene.add(seat.root)
     }
     syncSeat(seat, player, now)
+    // Anyone who reached the showdown and didn't win reacts to the loss.
+    seat.loser = hasWinner && !player.isWinner && !player.isOutOfHand && player.hasCards
 
     const avatarKeyChanged = seat.requestedAvatarKey !== player.avatarProfile.modelKey
     const retryReady = seat.avatarLoadStatus === 'failed' && performance.now() >= seat.avatarRetryAt
@@ -1431,64 +1204,62 @@ function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
   updateAvatarDiagnostics(runtime)
 }
 
-const CHIP_STYLES = [
-  { body: '#a82938', stripe: '#f6e8c7' },
-  { body: '#24528b', stripe: '#f5e5bd' },
-  { body: '#d0a63e', stripe: '#291d0c' },
-  { body: '#23775a', stripe: '#f0dfb0' },
-  { body: '#e4d8b4', stripe: '#6f2430' },
-] as const
+const CHIP_RADIUS = 0.13
+const CHIP_HEIGHT = 0.042
+const CHIPS_PER_COLUMN = 5
+let sharedChipGeometry: THREE.CylinderGeometry | null = null
+
+function getChipGeometry() {
+  // One shared cylinder: the side group takes the edge-spot band and both caps
+  // take the printed face, so each chip is a single draw with no detail mesh.
+  sharedChipGeometry ??= new THREE.CylinderGeometry(CHIP_RADIUS, CHIP_RADIUS, CHIP_HEIGHT, 36)
+  return sharedChipGeometry
+}
 
 function createChipSet(maxChips: number) {
   const group = new THREE.Group()
-  const materials = CHIP_STYLES.flatMap(style => [
-    createStandardMaterial(style.body, { roughness: 0.34, metalness: 0.24 }),
-    createStandardMaterial(style.stripe, { roughness: 0.3, metalness: 0.18 }),
+  const materials = CHIP_DENOMINATIONS.flatMap((_, index) => [
+    new THREE.MeshStandardMaterial({
+      map: getChipEdgeTexture(index),
+      roughness: 0.38,
+      metalness: 0.05,
+      envMapIntensity: 0.7,
+    }),
+    new THREE.MeshStandardMaterial({
+      map: getChipFaceTexture(index),
+      roughness: 0.34,
+      metalness: 0.05,
+      envMapIntensity: 0.7,
+    }),
   ])
   const chipMeshes: THREE.Mesh[] = []
   const chipBasePositions: THREE.Vector3[] = []
-  const stackCount = Math.ceil(maxChips / 4)
-  const chipBodyGeometry = new THREE.CylinderGeometry(0.14, 0.14, 0.05, 32)
-  const detailParts: THREE.BufferGeometry[] = []
-  const topRingGeometry = new THREE.TorusGeometry(0.087, 0.011, 6, 28)
-  topRingGeometry.rotateX(Math.PI / 2)
-  topRingGeometry.translate(0, 0.027, 0)
-  detailParts.push(topRingGeometry)
-  for (const rotation of [0, Math.PI / 2]) {
-    const inlayGeometry = new THREE.BoxGeometry(0.024, 0.006, 0.23)
-    inlayGeometry.rotateY(rotation)
-    inlayGeometry.translate(0, 0.028, 0)
-    detailParts.push(inlayGeometry)
-  }
-  const chipDetailGeometry = mergeGeometries(detailParts, false)
-  detailParts.forEach(geometry => geometry.dispose())
-  if (!chipDetailGeometry) {
-    chipBodyGeometry.dispose()
-    throw new Error('Unable to build shared chip detail geometry.')
-  }
+  const chipBodyGeometry = getChipGeometry()
+  const random = createSeededRandom(maxChips * 7919)
 
   for (let index = 0; index < maxChips; index += 1) {
-    const styleIndex = index % CHIP_STYLES.length
-    const bodyMaterial = materials[styleIndex * 2]!
-    const stripeMaterial = materials[styleIndex * 2 + 1]!
-    const stackIndex = Math.floor(index / 4)
-    const stackLevel = index % 4
+    const column = Math.floor(index / CHIPS_PER_COLUMN)
+    const level = index % CHIPS_PER_COLUMN
+    const styleIndex = column % CHIP_DENOMINATIONS.length
+    const edgeMaterial = materials[styleIndex * 2]!
+    const faceMaterial = materials[styleIndex * 2 + 1]!
+    // Columns sit in a tight cluster; each chip is nudged so stacks look hand-placed.
+    const angle = column * 2.4
+    const radius = column === 0 ? 0 : 0.24 + Math.floor((column - 1) / 6) * 0.2
     const chip = addMesh(
       group,
       chipBodyGeometry,
-      bodyMaterial,
-      [(stackIndex - (stackCount - 1) / 2) * 0.29, stackLevel * 0.052, (stackIndex % 2) * 0.08 - 0.04]
+      [edgeMaterial, faceMaterial, faceMaterial],
+      [
+        Math.cos(angle) * radius + (random() - 0.5) * 0.012,
+        CHIP_HEIGHT / 2 + level * (CHIP_HEIGHT + 0.002),
+        Math.sin(angle) * radius * 0.8 + (random() - 0.5) * 0.012,
+      ]
     )
+    chip.rotation.y = random() * Math.PI * 2
+    chip.userData.baseYaw = chip.rotation.y
     chip.name = `casino-chip-${index}`
     chip.visible = false
-
-    const chipDetail = addMesh(
-      chip,
-      chipDetailGeometry,
-      stripeMaterial
-    )
-    chipDetail.castShadow = false
-
     chipMeshes.push(chip)
     chipBasePositions.push(chip.position.clone())
   }
@@ -1610,7 +1381,7 @@ function resetChipTransforms(chips: THREE.Mesh[], basePositions: THREE.Vector3[]
   chips.forEach((chip, index) => {
     const base = basePositions[index]
     if (base) chip.position.copy(base)
-    chip.rotation.set(0, 0, 0)
+    chip.rotation.set(0, Number(chip.userData.baseYaw ?? 0), 0)
   })
 }
 
@@ -1702,8 +1473,8 @@ function animateWagers(runtime: SceneRuntime, time: number, reducedMotion: boole
 function createPotRuntime(scene: THREE.Scene): PotRuntime {
   const pot = createChipSet(18)
   pot.group.name = 'table-pot-chip-mound'
-  pot.group.position.set(0, 0.435, 0.96)
-  pot.group.scale.setScalar(1.2)
+  pot.group.position.set(0, FELT_TOP_Y, 0.95)
+  pot.group.scale.setScalar(1.15)
   scene.add(pot.group)
   return {
     ...pot,
@@ -1750,14 +1521,40 @@ function animatePot(runtime: SceneRuntime, time: number, reducedMotion: boolean)
   }
 }
 
+const ikTarget = new THREE.Vector3()
+const ikPole = new THREE.Vector3()
+
+/** Reaches each hand to its animator target with two-bone arm IK. */
+function solveSeatArms(seat: SeatRuntime, pose: AvatarPose) {
+  const bones = seat.avatar?.bones
+  if (!bones) return
+  const sides = [
+    { side: 'R', hand: pose.handR, shoulder: seat.anchors.shoulderR, out: 1 },
+    { side: 'L', hand: pose.handL, shoulder: seat.anchors.shoulderL, out: -1 },
+  ] as const
+  for (const { side, hand, shoulder, out } of sides) {
+    const chain = getArmChain(bones.get(`UpperArm${side}`), bones.get(`LowerArm${side}`), bones.get(`Wrist${side}`))
+    if (!chain) continue
+    ikTarget.set(hand[0], hand[1], hand[2])
+    seat.root.localToWorld(ikTarget)
+    // Elbows swing out to the side and down/back, like arms resting on a rail.
+    ikPole.set(shoulder[0] + out * 0.7, shoulder[1] - 0.7, shoulder[2] + 0.45)
+    seat.root.localToWorld(ikPole)
+    solveArmIK(chain, ikTarget, ikPole)
+  }
+}
+
+const FINGER_BONES_R = ['Index1R', 'Middle1R', 'Ring1R', 'Pinky1R', 'Index2R', 'Middle2R', 'Ring2R', 'Pinky2R'] as const
+const FINGER_BONES_L = ['Index1L', 'Middle1L', 'Ring1L', 'Pinky1L', 'Index2L', 'Middle2L', 'Ring2L', 'Pinky2L'] as const
+
 function animateSeat(
   seat: SeatRuntime,
   time: number,
   delta: number,
   actingVisualSeat: number | null,
-  reducedMotion: boolean
+  reducedMotion: boolean,
+  tableHeat = 0
 ) {
-  const idle = reducedMotion ? 0 : Math.sin(time * 1.15 + seat.phase)
   // Furniture and table props stay grounded. Only the player breathes, shifts,
   // and reacts to action playback.
   seat.root.position.y = seat.baseY
@@ -1771,11 +1568,6 @@ function animateSeat(
     playerId: seat.playerId,
     wagerIntensity: seat.wagerIntensity,
   }
-  const avatarPose = getSeatedAvatarActionPose(
-    playback.cue,
-    playback.elapsedMs,
-    actionPoseOptions
-  )
   const tablePose = getOpponentTableActionPose(
     seat.folded && seat.keepFoldedCardsVisible ? 'ready' : playback.cue,
     seat.folded && seat.keepFoldedCardsVisible
@@ -1783,56 +1575,49 @@ function animateSeat(
       : playback.elapsedMs,
     actionPoseOptions
   )
-  const personalityPose = getAvatarPersonalityPose({
-    idleTell: seat.avatarProfile.idleTell,
-    celebration: seat.avatarProfile.celebration,
-    winner: seat.winner,
-    actionActive: playback.isActive,
+  const headTurn = getAvatarHeadTurn(seat.visualSeat, actingVisualSeat)
+  const pose = updateAvatarAnimator(seat.animator, {
+    time,
+    delta,
+    reducedMotion,
     acting: seat.acting,
     folded: seat.folded,
-    time,
-    phase: seat.phase,
-    reducedMotion,
+    winner: seat.winner,
+    loser: seat.loser,
+    hasCards: seat.hadCards && seat.cards.visible,
+    cue: playback.cue,
+    cueElapsedMs: playback.elapsedMs,
+    cueActive: playback.isActive,
+    actionKey: seat.actionKey,
+    playerId: seat.playerId,
+    wagerIntensity: seat.wagerIntensity,
+    lookYaw: headTurn.yaw,
+    lookPitch: headTurn.pitch,
+    tableHeat,
+    idleTell: seat.avatarProfile.idleTell,
+    celebration: seat.avatarProfile.celebration,
+    anchors: seat.anchors,
   })
-  const alertLift = seat.acting && !reducedMotion
-    ? Math.sin(time * 3.2 + seat.phase) * 0.018
-    : 0
+  seat.lastPose = pose
 
   seat.body.position.set(
-    avatarPose.bodyPosition[0] + personalityPose.bodyPosition[0],
-    0.12 + idle * 0.012 + alertLift + avatarPose.bodyPosition[1] + personalityPose.bodyPosition[1],
-    0.03 + avatarPose.bodyPosition[2] + personalityPose.bodyPosition[2]
+    pose.bodyPosition[0],
+    0.12 + pose.bodyPosition[1],
+    0.03 + seat.seatShiftZ + pose.bodyPosition[2]
   )
-  seat.body.rotation.set(
-    -0.035 + idle * 0.006 + avatarPose.bodyRotation[0] + personalityPose.bodyRotation[0],
-    avatarPose.bodyRotation[1] + personalityPose.bodyRotation[1],
-    idle * 0.006 + avatarPose.bodyRotation[2] + personalityPose.bodyRotation[2]
-  )
+  seat.body.rotation.set(-0.035 + pose.bodyRotation[0], pose.bodyRotation[1], pose.bodyRotation[2])
 
-  const bothArms = playback.cue === 'all_in'
-  const armX = avatarPose.armRotation[0] * 2.35
-  const armY = avatarPose.armRotation[1] * 1.6
-  const armZ = avatarPose.armRotation[2] * 1.5
-  seat.leftArm.rotation.set(
-    1.08 - (bothArms ? armX : armX * 0.22) + personalityPose.leftUpperArm[0],
-    (bothArms ? -armY : 0) + personalityPose.leftUpperArm[1],
-    -0.22 - (bothArms ? armZ : 0) + personalityPose.leftUpperArm[2]
+  // The primitive fallback avatar mirrors the same performance at a coarser level.
+  const { bones: poseBones } = pose
+  seat.head.rotation.set(
+    poseBones.Head[0] + poseBones.Neck[0],
+    poseBones.Head[1] + poseBones.Neck[1],
+    poseBones.Head[2]
   )
-  seat.rightArm.rotation.set(
-    1.08 - armX + personalityPose.rightUpperArm[0],
-    armY + personalityPose.rightUpperArm[1],
-    0.22 + armZ + personalityPose.rightUpperArm[2]
-  )
-
-  const headTurn = getAvatarHeadTurn(seat.visualSeat, actingVisualSeat)
-  seat.head.rotation.y = headTurn.yaw + (
-    seat.acting && !reducedMotion
-      ? Math.sin(time * 1.8 + seat.phase) * 0.035
-      : idle * 0.018
-  )
-  seat.head.rotation.x = (seat.folded ? 0.18 : headTurn.pitch) + avatarPose.headRotation[0] + personalityPose.headRotation[0]
-  seat.head.rotation.y += personalityPose.headRotation[1]
-  seat.head.rotation.z = avatarPose.headRotation[2] + personalityPose.headRotation[2]
+  const leftLift = pose.handL[1] - seat.anchors.railL[1]
+  const rightLift = pose.handR[1] - seat.anchors.railR[1]
+  seat.leftArm.rotation.set(1.08 - leftLift * 1.6, 0, -0.22)
+  seat.rightArm.rotation.set(1.08 - rightLift * 1.6, 0, 0.22)
 
   if (seat.avatar && seat.avatarMixer) {
     // AnimationMixer only rewrites bones that have tracks in the active clip.
@@ -1850,122 +1635,38 @@ function animateSeat(
       returnAvatarToIdle(seat)
     }
 
-    // The bundled models provide polished motion and a full hand rig, while
-    // these post-mixer offsets make that generic motion read as poker actions.
     const bones = seat.avatar.bones
-    const headBone = bones.get('Head')
-    const chestBone = bones.get('Chest')
-    const upperArmRight = bones.get('UpperArmR')
-    const lowerArmRight = bones.get('LowerArmR')
-    const upperArmLeft = bones.get('UpperArmL')
-    const lowerArmLeft = bones.get('LowerArmL')
-
-    // The source idle clip is a standing neutral. A small symmetrical bend
-    // settles both forearms toward the rail so players read as seated poker
-    // participants even when no action clip is running.
-    applyAvatarBoneOffset(seat, upperArmRight, -0.14, 0, 0.08)
-    applyAvatarBoneOffset(seat, lowerArmRight, -0.3, 0, 0.04)
-    applyAvatarBoneOffset(seat, upperArmLeft, -0.14, 0, -0.08)
-    applyAvatarBoneOffset(seat, lowerArmLeft, -0.3, 0, -0.04)
-
-    applyAvatarBoneOffset(
-      seat,
-      headBone,
-      headTurn.pitch * 0.58 + avatarPose.headRotation[0] * 0.42,
-      headTurn.yaw * 0.72 + avatarPose.headRotation[1] * 0.42,
-      avatarPose.headRotation[2] * 0.36
-    )
-    applyAvatarBoneOffset(
-      seat,
-      chestBone,
-      avatarPose.bodyRotation[0] * 0.34,
-      avatarPose.bodyRotation[1] * 0.32,
-      avatarPose.bodyRotation[2] * 0.32
-    )
-    applyAvatarBoneOffset(
-      seat,
-      upperArmRight,
-      -avatarPose.armRotation[0] * 0.82,
-      avatarPose.armRotation[1] * 0.52,
-      avatarPose.armRotation[2] * 0.68
-    )
-    applyAvatarBoneOffset(
-      seat,
-      lowerArmRight,
-      -avatarPose.armRotation[0] * 0.5,
-      0,
-      avatarPose.armRotation[2] * 0.38
-    )
-
-    const wristRight = bones.get('WristR')
-    applyAvatarBoneOffset(
-      seat,
-      wristRight,
-      tablePose.hand.rotation[0] * 0.22,
-      tablePose.hand.rotation[1] * 0.3,
-      tablePose.hand.rotation[2] * 0.28
-    )
-    for (const name of ['Index1R', 'Middle1R', 'Ring1R', 'Pinky1R']) {
-      applyAvatarBoneOffset(seat, bones.get(name), tablePose.hand.fingerCurl * 0.34, 0, 0)
+    // Seat the standing rig: thighs forward onto the cushion, shins down.
+    for (const side of ['R', 'L'] as const) {
+      applyAvatarBoneOffset(seat, bones.get(`UpperLeg${side}`), -1.45, 0, side === 'R' ? 0.06 : -0.06)
+      applyAvatarBoneOffset(seat, bones.get(`LowerLeg${side}`), 1.5, 0, 0)
     }
-    applyAvatarBoneOffset(
-      seat,
-      bones.get('Thumb1R'),
-      tablePose.hand.fingerCurl * 0.16,
-      -tablePose.hand.fingerCurl * 0.12,
-      0
-    )
-
-    if (playback.cue === 'all_in') {
-      applyAvatarBoneOffset(
-        seat,
-        upperArmLeft,
-        -avatarPose.armRotation[0] * 0.82,
-        -avatarPose.armRotation[1] * 0.52,
-        -avatarPose.armRotation[2] * 0.68
-      )
-      applyAvatarBoneOffset(
-        seat,
-        lowerArmLeft,
-        -avatarPose.armRotation[0] * 0.5,
-        0,
-        -avatarPose.armRotation[2] * 0.38
-      )
-      for (const name of ['Index1L', 'Middle1L', 'Ring1L', 'Pinky1L']) {
-        applyAvatarBoneOffset(seat, bones.get(name), tablePose.hand.fingerCurl * 0.34, 0, 0)
-      }
+    for (const name of ANIMATED_BONES) {
+      const offset = poseBones[name]
+      applyAvatarBoneOffset(seat, bones.get(name), offset[0], offset[1], offset[2])
     }
+    seat.avatar.model.updateMatrixWorld(true)
+    if (!seat.anchorsFromRig) measureRigAnchors(seat)
+    solveSeatArms(seat, pose)
+    if (seat.avatarStyle) {
+      applyBlink(seat.avatarStyle, reducedMotion ? 0 : getBlinkAmount(time, seat.animator.seed))
+    }
+    for (const name of FINGER_BONES_R) {
+      applyAvatarBoneOffset(seat, bones.get(name), pose.fingerCurlR * 0.55, 0, 0)
+    }
+    for (const name of FINGER_BONES_L) {
+      applyAvatarBoneOffset(seat, bones.get(name), pose.fingerCurlL * 0.55, 0, 0)
+    }
+    applyAvatarBoneOffset(seat, bones.get('Thumb1R'), pose.fingerCurlR * 0.2, -pose.fingerCurlR * 0.16, 0)
+    applyAvatarBoneOffset(seat, bones.get('Thumb1L'), pose.fingerCurlL * 0.2, pose.fingerCurlL * 0.16, 0)
 
-    applyAvatarBoneOffset(
-      seat,
-      headBone,
-      personalityPose.headRotation[0],
-      personalityPose.headRotation[1],
-      personalityPose.headRotation[2]
-    )
-    applyAvatarBoneOffset(
-      seat,
-      chestBone,
-      personalityPose.bodyRotation[0],
-      personalityPose.bodyRotation[1],
-      personalityPose.bodyRotation[2]
-    )
-    applyAvatarBoneOffset(seat, upperArmRight, ...personalityPose.rightUpperArm)
-    applyAvatarBoneOffset(seat, lowerArmRight, ...personalityPose.rightLowerArm)
-    applyAvatarBoneOffset(seat, wristRight, ...personalityPose.rightWrist)
-    applyAvatarBoneOffset(seat, upperArmLeft, ...personalityPose.leftUpperArm)
-    applyAvatarBoneOffset(seat, lowerArmLeft, ...personalityPose.leftLowerArm)
-    applyAvatarBoneOffset(seat, bones.get('WristL'), ...personalityPose.leftWrist)
-    if (personalityPose.fingerCurl > 0) {
-      for (const side of ['R', 'L']) {
-        for (const finger of ['Index1', 'Middle1', 'Ring1', 'Pinky1']) {
-          applyAvatarBoneOffset(
-            seat,
-            bones.get(`${finger}${side}`),
-            personalityPose.fingerCurl * 0.34,
-            0,
-            0
-          )
+    if (process.env.NODE_ENV !== 'production') {
+      // Development-only live pose tuning: window.__avatarTweak = { Bone: [x, y, z] }.
+      const tweak = (globalThis as { __avatarTweak?: Record<string, Vec3> }).__avatarTweak
+      if (tweak) {
+        for (const [name, offset] of Object.entries(tweak)) {
+          if (name === 'mount') seat.avatarMount.position.set(...offset)
+          else applyAvatarBoneOffset(seat, bones.get(name), offset[0], offset[1], offset[2])
         }
       }
     }
@@ -1976,31 +1677,31 @@ function animateSeat(
     : 1 + Math.sin(time * (seat.winner ? 4.4 : 3.2) + seat.phase) * 0.07
   seat.ring.scale.setScalar(ringPulse)
   seat.ring.material.opacity = seat.winner
-    ? 0.72 + (reducedMotion ? 0 : Math.sin(time * 4.4) * 0.18)
+    ? 0.8 + (reducedMotion ? 0 : Math.sin(time * 4.4) * 0.15)
     : seat.acting
-      ? 0.52 + (reducedMotion ? 0 : Math.sin(time * 3.2) * 0.15)
+      ? 0.62 + (reducedMotion ? 0 : Math.sin(time * 3.2) * 0.18)
       : 0
-  seat.ring.material.emissiveIntensity = seat.winner ? 2.1 : 1.45
+  seat.ring.material.emissiveIntensity = seat.winner ? 2.6 : 1.8
 
   seat.winnerHalo.visible = seat.winner
   seat.winnerSparkles.visible = seat.winner
   seat.winnerLight.visible = seat.winner
   if (seat.winner) {
     const celebrationPulse = reducedMotion ? 1 : 0.88 + Math.sin(time * 3.8 + seat.phase) * 0.12
-    seat.winnerHalo.position.y = 2.08 + (reducedMotion ? 0 : Math.sin(time * 2.4) * 0.035)
+    seat.winnerHalo.position.y = 2.28 + pose.bodyPosition[1] + (reducedMotion ? 0 : Math.sin(time * 2.4) * 0.035)
     seat.winnerHalo.rotation.z = reducedMotion ? 0 : time * 0.42
     seat.winnerHalo.scale.setScalar(celebrationPulse)
     seat.winnerHalo.material.opacity = reducedMotion
       ? 0.78
       : 0.64 + Math.sin(time * 3.8 + seat.phase) * 0.16
     seat.winnerSparkles.rotation.y = reducedMotion ? 0 : time * 0.34
-    seat.winnerSparkles.position.y = reducedMotion ? 0 : Math.sin(time * 1.7 + seat.phase) * 0.06
+    seat.winnerSparkles.position.y = reducedMotion ? 0 : Math.sin(time * 1.7 + seat.phase) * 0.06 + (time % 3) * 0.05
     seat.winnerSparkles.material.opacity = reducedMotion
       ? 0.64
-      : 0.5 + Math.sin(time * 4.6 + seat.phase) * 0.18
+      : 0.6 + Math.sin(time * 4.6 + seat.phase) * 0.25
     seat.winnerLight.intensity = reducedMotion
-      ? 4.2
-      : 3.8 + Math.sin(time * 3.8 + seat.phase) * 1.15
+      ? 5
+      : 5 + Math.sin(time * 3.8 + seat.phase) * 1.4
   } else {
     seat.winnerHalo.material.opacity = 0
     seat.winnerSparkles.material.opacity = 0
@@ -2008,41 +1709,51 @@ function animateSeat(
   }
 
   if (seat.hadCards) {
-    const seatDelay = (seat.visualSeat % 4) * 0.045
+    const seatDelay = (seat.visualSeat % 4) * 0.07
     const dealProgress = reducedMotion
       ? 1
-      : THREE.MathUtils.clamp((time - seat.dealStartedAt - seatDelay) / 0.74, 0, 1)
+      : THREE.MathUtils.clamp((time - seat.dealStartedAt - seatDelay) / 0.7, 0, 1)
     const eased = 1 - Math.pow(1 - dealProgress, 3)
     const actionCardsVisible = playback.cue === 'fold' ? tablePose.cards.visible : true
     seat.cards.visible = seat.keepFoldedCardsVisible || (
       actionCardsVisible && (!seat.folded || playback.isActive)
     )
+    const restY = Number(seat.cards.userData.restY ?? 0)
+    const peekLift = pose.cardLift
+    // Cards fly in from the dealer (table centre) and slide into place.
     seat.cards.position.set(
       tablePose.cards.position[0],
-      0.55 + (1 - eased) * 2.4 + tablePose.cards.position[1],
-      -1.02 + tablePose.cards.position[2]
+      restY + (1 - eased) * 0.9 + tablePose.cards.position[1] + peekLift * 0.05,
+      seat.cardLocalZ * (0.35 + eased * 0.65) + tablePose.cards.position[2] * 0.6
     )
     seat.cards.rotation.set(
-      tablePose.cards.rotation[0],
+      tablePose.cards.rotation[0] - peekLift * 0.5,
       tablePose.cards.rotation[1],
       (1 - eased) * (seat.visualSeat % 2 === 0 ? 0.8 : -0.8) + tablePose.cards.rotation[2]
     )
-    seat.cards.scale.setScalar(0.72 + eased * 0.28)
+    seat.cards.scale.setScalar(1)
     seat.cardMeshes.forEach((card, index) => {
       const cardProgress = reducedMotion
         ? 1
         : THREE.MathUtils.clamp(
-            (time - seat.dealStartedAt - seatDelay - index * 0.095) / 0.62,
+            (time - seat.dealStartedAt - seatDelay - index * 0.12) / 0.6,
             0,
             1
           )
       const cardEase = 1 - Math.pow(1 - cardProgress, 3)
-      const baseX = Number(card.userData.baseX ?? (index === 0 ? -0.2 : 0.2))
+      const baseX = Number(card.userData.baseX ?? (index === 0 ? -0.17 : 0.17))
       const baseYaw = Number(card.userData.baseYaw ?? 0)
-      const baseRoll = Number(card.userData.baseRoll ?? 0)
-      card.position.set(baseX * cardEase, (1 - cardEase) * 0.12, 0)
-      card.rotation.y = baseYaw * cardEase
-      card.rotation.z = baseRoll * cardEase + (1 - cardEase) * (index === 0 ? -0.34 : 0.34)
+      // Showdown flips a card over its long edge once its face is known.
+      const faceUp = Boolean(seat.holeCards[index]?.face)
+      const flipTarget = faceUp ? 0 : Math.PI
+      const currentFlip = Number(card.userData.flip ?? Math.PI)
+      const flip = reducedMotion
+        ? flipTarget
+        : currentFlip + (flipTarget - currentFlip) * (1 - Math.exp(-delta * 9))
+      card.userData.flip = flip
+      const flipArc = Math.sin(flip) * 0.12
+      card.position.set(baseX * cardEase, index * 0.014 + (1 - cardEase) * 0.12 + flipArc, 0)
+      card.rotation.set(0, baseYaw * cardEase, flip + (1 - cardEase) * (index === 0 ? -0.34 : 0.34))
     })
   } else {
     seat.cards.visible = false
@@ -2095,27 +1806,94 @@ function disposeObject(root: THREE.Object3D) {
   })
 }
 
+/** Head-top anchor, in seat-root space, that each DOM nameplate follows. */
+const NAMEPLATE_ANCHOR = new THREE.Vector3(0, 2.32, 0.08)
+const WAGER_LABEL_LIFT = 0.28
+
+function getTableHeat(runtime: SceneRuntime, time: number) {
+  // A live raise or all-in from one seat makes everyone else react.
+  let heat = 0
+  let sourceId: string | null = null
+  for (const seat of runtime.seats.values()) {
+    if (seat.actionCue !== 'all_in' && seat.actionCue !== 'raise') continue
+    const playback = getActionPlaybackSnapshot(seat.playback, time * 1000)
+    if (!playback.isActive) continue
+    const intensity = seat.actionCue === 'all_in' ? 1 : 0.35 + seat.wagerIntensity * 0.5
+    if (intensity > heat) {
+      heat = intensity
+      sourceId = seat.playerId
+    }
+  }
+  return { heat, sourceId }
+}
+
+/**
+ * Projects each seat's head anchor (and wager stack) to screen space and hands
+ * the DOM layer pixel coordinates, so nameplates stay glued to avatars even as
+ * the camera drifts, pushes in on all-ins, and pans toward winners.
+ */
+function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width: number, height: number) {
+  const scratch = new THREE.Vector3()
+  // The pot readout floats just above the pot chips on the felt.
+  const tableScene = host.closest<HTMLElement>('.table-scene')
+  if (tableScene) {
+    scratch.copy(runtime.pot.group.position)
+    scratch.y += 0.34
+    scratch.project(runtime.camera)
+    tableScene.style.setProperty('--pot-x', `${((scratch.x * 0.5 + 0.5) * width).toFixed(1)}px`)
+    tableScene.style.setProperty('--pot-y', `${((-scratch.y * 0.5 + 0.5) * height).toFixed(1)}px`)
+  }
+  for (const seat of runtime.seats.values()) {
+    let element = runtime.overlayElements.get(seat.playerId)
+    if (!element || !element.isConnected) {
+      element = host.querySelector<HTMLElement>(`[data-seat-player="${CSS.escape(seat.playerId)}"]`) ?? undefined
+      if (element) runtime.overlayElements.set(seat.playerId, element)
+    }
+    if (!element) continue
+
+    const liftY = (seat.lastPose?.bodyPosition[1] ?? 0)
+    scratch.set(NAMEPLATE_ANCHOR.x, NAMEPLATE_ANCHOR.y + liftY, NAMEPLATE_ANCHOR.z)
+    seat.root.localToWorld(scratch)
+    scratch.project(runtime.camera)
+    const x = (scratch.x * 0.5 + 0.5) * width
+    const y = (-scratch.y * 0.5 + 0.5) * height
+    element.style.setProperty('--seat-x', `${x.toFixed(1)}px`)
+    element.style.setProperty('--seat-y', `${y.toFixed(1)}px`)
+    element.style.setProperty('--seat-depth', `${(TABLE_SEAT_SCALES[toVisualSeat(seat.visualSeat)] ?? 1).toFixed(3)}`)
+
+    const wager = runtime.wagers.get(seat.playerId)
+    if (wager) {
+      scratch.copy(wager.target)
+      scratch.y += WAGER_LABEL_LIFT
+      scratch.project(runtime.camera)
+      element.style.setProperty('--bet-x', `${((scratch.x * 0.5 + 0.5) * width - x).toFixed(1)}px`)
+      element.style.setProperty('--bet-y', `${((-scratch.y * 0.5 + 0.5) * height - y).toFixed(1)}px`)
+    }
+  }
+}
+
 function createSceneRuntime(
   canvas: HTMLCanvasElement,
   host: HTMLDivElement,
-  viewRef: MutableRefObject<ThreeTableViewModel>
+  viewRef: MutableRefObject<ThreeTableViewModel>,
+  highlightRef: MutableRefObject<ReadonlyArray<{ rank: string; suit: ThreeCardView['suit'] }>>
 ): SceneRuntime {
   const renderer = new THREE.WebGLRenderer({
     canvas,
-    antialias: true,
+    antialias: false,
     alpha: false,
     powerPreference: 'high-performance',
   })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.22
+  renderer.toneMappingExposure = 1.0
   renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFShadowMap
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap
 
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color('#06100e')
-  scene.fog = new THREE.FogExp2('#06100e', 0.027)
+  scene.background = new THREE.Color('#081413')
+  scene.fog = new THREE.FogExp2('#081413', 0.012)
 
   const camera = new THREE.PerspectiveCamera(DESKTOP_CAMERA_FRAMING.fov, 1, 0.1, 60)
   camera.position.set(...DESKTOP_CAMERA_FRAMING.position)
@@ -2124,17 +1902,27 @@ function createSceneRuntime(
   const baseCameraLookAt = cameraLookAt.clone()
   camera.lookAt(cameraLookAt)
 
-  createLighting(scene)
-  const { floorRing, ceilingRing, particleField } = createRoom(scene)
-  const feltMaterial = createPokerTable(scene)
+  const environment = applyEnvironmentLighting(renderer, scene)
+  const lights = createStageLights(scene)
+  const { neonMaterials } = createRoom(scene)
+  const table = createStylizedTable()
+  scene.add(table.group)
+  const feltMaterial = table.feltMaterial
   const pot = createPotRuntime(scene)
+  const board = createBoardRuntime(scene)
   const maxAnisotropy = renderer.capabilities.getMaxAnisotropy()
-  if (feltMaterial.roughnessMap) {
-    feltMaterial.roughnessMap.anisotropy = Math.min(8, maxAnisotropy)
-    feltMaterial.roughnessMap.needsUpdate = true
+  if (feltMaterial.map) {
+    feltMaterial.map.anisotropy = Math.min(16, maxAnisotropy)
+    feltMaterial.map.needsUpdate = true
   }
 
   const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)')
+  let postFx: PostFx | null = null
+  try {
+    postFx = createPostFx(renderer, scene, camera)
+  } catch (error) {
+    console.warn('Post effects unavailable; rendering directly.', error)
+  }
 
   const runtime = {
     renderer,
@@ -2144,9 +1932,13 @@ function createSceneRuntime(
     seats: new Map<string, SeatRuntime>(),
     wagers: new Map<string, WagerRuntime>(),
     pot,
-    particleField,
-    floorRing,
-    ceilingRing,
+    board,
+    lights,
+    postFx,
+    frameBudget: new FrameBudget(),
+    neonMaterials,
+    overlayElements: new Map<string, HTMLElement>(),
+    debugCamera: null as SceneRuntime['debugCamera'],
     feltMaterial,
     startTime: performance.now(),
     animationFrame: 0,
@@ -2159,18 +1951,24 @@ function createSceneRuntime(
     dispose: () => {},
   } satisfies SceneRuntime
 
+  let viewportWidth = 1
+  let viewportHeight = 1
   const resize = () => {
     const width = Math.max(1, host.clientWidth)
     const height = Math.max(1, host.clientHeight)
+    viewportWidth = width
+    viewportHeight = height
     const renderArea = width * height
     const pixelRatioCap = renderArea > 2_200_000 ? 1.15 : renderArea > 1_300_000 ? 1.35 : 1.5
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelRatioCap))
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, pixelRatioCap)
+    renderer.setPixelRatio(pixelRatio)
     renderer.setSize(width, height, false)
+    runtime.postFx?.setSize(width, height, pixelRatio)
     camera.aspect = width / height
     camera.fov = camera.aspect < 1.28
-      ? 43
+      ? 45
       : camera.aspect > 2.15
-        ? 41
+        ? 38
         : DESKTOP_CAMERA_FRAMING.fov
     camera.updateProjectionMatrix()
   }
@@ -2182,6 +1980,8 @@ function createSceneRuntime(
   let lastTime = (performance.now() - runtime.startTime) / 1000
   const targetCamera = new THREE.Vector3()
   const targetLook = new THREE.Vector3()
+  const winnerFocus = new THREE.Vector3()
+  const accentTarget = new THREE.Vector3()
   const animate = () => {
     if (runtime.disposed || runtime.suspended) return
     runtime.animationFrame = window.requestAnimationFrame(animate)
@@ -2190,27 +1990,66 @@ function createSceneRuntime(
     lastTime = time
     const reducedMotion = runtime.reducedMotion
 
-    runtime.particleField.rotation.y = reducedMotion ? 0 : time * 0.006
-    runtime.particleField.position.y = reducedMotion ? 0 : Math.sin(time * 0.16) * 0.08
-    runtime.floorRing.rotation.z = reducedMotion ? 0 : time * 0.018
-    runtime.ceilingRing.rotation.z = reducedMotion ? 0 : -time * 0.012
-    runtime.feltMaterial.emissiveIntensity = reducedMotion
-      ? 0.22
-      : 0.22 + Math.sin(time * 0.72) * 0.035
+    if (runtime.postFx && runtime.frameBudget.push(delta)) {
+      // Sustained slow frames: drop post effects and keep the table responsive.
+      runtime.postFx.dispose()
+      runtime.postFx = null
+      host.dataset.postFx = 'off'
+    }
 
     const actingSeat = viewRef.current.actingVisualSeat
+    const { heat, sourceId } = getTableHeat(runtime, time)
+    let winnerSeat: SeatRuntime | null = null
     for (const seat of runtime.seats.values()) {
-      animateSeat(seat, time, delta, actingSeat, reducedMotion)
+      animateSeat(seat, time, delta, actingSeat, reducedMotion, seat.playerId === sourceId ? 0 : heat)
+      if (seat.winner && seat.root.visible && !winnerSeat) winnerSeat = seat
     }
     animateWagers(runtime, time, reducedMotion)
     animatePot(runtime, time, reducedMotion)
+    animateBoardRuntime(runtime.board, time, reducedMotion)
 
-    // Keep normal table framing stable so the DOM nameplates stay aligned
-    // with their 3D seats. Player motion still calls out the actor, while the
-    // short all-in impact below is the only camera displacement.
+    // Stage lighting reacts to the table: an ember swell on all-ins, a gold
+    // pool over the winner, and a slow neon flicker in the background.
+    const allInImpact = getAllInCameraImpact(runtime.seats.values(), time, reducedMotion)
+    const accent = runtime.lights.accent
+    if (winnerSeat) {
+      winnerSeat.root.getWorldPosition(accentTarget)
+      accentTarget.y += 2.6
+      accent.color.set('#ffcf73')
+    } else {
+      accentTarget.set(0, 3.2, 0)
+      accent.color.set('#ff7a3d')
+    }
+    accent.position.lerp(accentTarget, 1 - Math.exp(-delta * 4))
+    const accentGoal = winnerSeat ? 26 : allInImpact.strength * 30
+    accent.intensity += (accentGoal - accent.intensity) * (1 - Math.exp(-delta * 5))
+    const flicker = reducedMotion ? 1 : 1 + Math.sin(time * 23) * 0.015 + (Math.sin(time * 1.3) > 0.985 ? -0.35 : 0)
+    runtime.neonMaterials.forEach(material => {
+      material.emissiveIntensity = 2.2 * flicker
+    })
+
+    // A living camera: a slow breathing drift, a subtle lean toward whoever is
+    // acting, a punch-in on all-ins, and a push toward the showdown winner.
+    // Nameplates are re-projected every frame, so they stay attached.
     targetCamera.copy(baseCameraPosition)
     targetLook.copy(baseCameraLookAt)
-    const allInImpact = getAllInCameraImpact(runtime.seats.values(), time, reducedMotion)
+    if (!reducedMotion) {
+      targetCamera.x += Math.sin(time * 0.13) * 0.16
+      targetCamera.y += Math.sin(time * 0.09 + 1.2) * 0.07
+      targetLook.x += Math.sin(time * 0.11 + 0.4) * 0.05
+    }
+    if (actingSeat !== null && actingSeat !== 0 && !winnerSeat) {
+      const actingPosition = TABLE_SEAT_POSITIONS[toVisualSeat(actingSeat)]
+      targetLook.x += actingPosition[0] * 0.035
+      targetLook.z += actingPosition[2] * 0.02
+    }
+    if (winnerSeat) {
+      winnerSeat.root.getWorldPosition(winnerFocus)
+      targetLook.lerp(winnerFocus.setY(1.1), 0.22)
+      targetCamera.x += winnerFocus.x * 0.08
+      targetCamera.z -= 0.9
+      targetCamera.y -= 0.25
+    }
     if (allInImpact.strength > 0) {
       const impactSeat = allInImpact.visualSeat === null
         ? null
@@ -2223,13 +2062,29 @@ function createSceneRuntime(
       targetLook.z += (impactSeat?.[2] ?? 0) * allInImpact.strength * 0.025
     }
     const smoothing = reducedMotion ? 1 : 1 - Math.exp(
-      -delta * (allInImpact.strength > 0 ? 3.8 : 1.65)
+      -delta * (allInImpact.strength > 0 ? 3.8 : winnerSeat ? 1.1 : 1.65)
     )
     camera.position.lerp(targetCamera, smoothing)
     cameraLookAt.lerp(targetLook, smoothing)
+    if (runtime.debugCamera) {
+      camera.position.set(...runtime.debugCamera.position)
+      cameraLookAt.set(...runtime.debugCamera.lookAt)
+      if (runtime.debugCamera.fov && camera.fov !== runtime.debugCamera.fov) {
+        camera.fov = runtime.debugCamera.fov
+        camera.updateProjectionMatrix()
+      }
+    }
     camera.lookAt(cameraLookAt)
+    camera.updateMatrixWorld()
 
-    renderer.render(scene, camera)
+    projectSeatOverlays(runtime, host, viewportWidth, viewportHeight)
+
+    if (runtime.postFx) {
+      runtime.postFx.bloom.strength = 0.36 + (winnerSeat ? 0.22 : 0) + allInImpact.strength * 0.3
+      runtime.postFx.composer.render(delta)
+    } else {
+      renderer.render(scene, camera)
+    }
   }
 
   runtime.pause = () => {
@@ -2268,18 +2123,26 @@ function createSceneRuntime(
     for (const seat of runtime.seats.values()) {
       seat.avatarGeneration += 1
       detachRiggedAvatar(seat)
+      seat.holeCards.forEach(disposeCardMesh)
     }
+    runtime.board.slots.forEach(slot => disposeCardMesh(slot.card))
+    runtime.postFx?.dispose()
+    environment.dispose()
     disposeObject(scene)
+    disposeSceneTextures()
     renderer.dispose()
   }
 
   syncPlayers(runtime, viewRef.current)
   syncWagers(runtime, viewRef.current)
   syncPot(runtime, viewRef.current)
+  syncBoardRuntime(runtime.board, viewRef.current.communityCards, highlightRef.current, 0)
   renderer.render(scene, camera)
   if (!runtime.suspended) animate()
   return runtime
 }
+
+const NO_HIGHLIGHTED_CARDS: ReadonlyArray<{ rank: string; suit: ThreeCardView['suit'] }> = []
 
 export function DesktopPokerRoom3D({
   view,
@@ -2289,14 +2152,17 @@ export function DesktopPokerRoom3D({
   onSelectPlayer,
   cardRevealActions,
   onRequestCardReveal,
+  highlightedCards = NO_HIGHLIGHTED_CARDS,
 }: DesktopPokerRoom3DProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const runtimeRef = useRef<SceneRuntime | null>(null)
   const viewRef = useRef(view)
+  const highlightRef = useRef(highlightedCards)
   const [webGLStatus, setWebGLStatus] = useState<WebGLStatus>('loading')
 
   viewRef.current = view
+  highlightRef.current = highlightedCards
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -2324,8 +2190,12 @@ export function DesktopPokerRoom3D({
     canvas.addEventListener('webglcontextrestored', handleContextRestored)
 
     try {
-      const runtime = createSceneRuntime(canvas, host, viewRef)
+      const runtime = createSceneRuntime(canvas, host, viewRef, highlightRef)
       runtimeRef.current = runtime
+      if (process.env.NODE_ENV !== 'production') {
+        // Development-only handle for inspecting the live scene from devtools.
+        ;(host as HTMLDivElement & { __pokerRuntime?: SceneRuntime }).__pokerRuntime = runtime
+      }
       setWebGLStatus('ready')
     } catch (error) {
       console.error('Unable to start the desktop 3D poker room.', error)
@@ -2347,7 +2217,13 @@ export function DesktopPokerRoom3D({
     syncPlayers(runtimeRef.current, view)
     syncWagers(runtimeRef.current, view)
     syncPot(runtimeRef.current, view)
-  }, [view])
+    syncBoardRuntime(
+      runtimeRef.current.board,
+      view.communityCards,
+      highlightedCards,
+      (performance.now() - runtimeRef.current.startTime) / 1000
+    )
+  }, [view, highlightedCards])
 
   return (
     <div
@@ -2393,6 +2269,7 @@ export function DesktopPokerRoom3D({
           return (
             <div
               key={player.id}
+              data-seat-player={player.id}
               className={`cinematic-seat cinematic-seat-${player.visualSeat} ${player.isHero ? 'is-local-player' : ''} ${player.isActing ? 'is-acting' : ''} ${player.isWinner ? 'is-winner' : ''} ${player.isOutOfHand ? 'is-folded' : ''} ${selectedTargetId === player.id ? 'is-selected' : ''}`}
             >
               <button
