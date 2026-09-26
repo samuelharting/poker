@@ -463,8 +463,8 @@ describe('PokerTable desktop 3D gate', () => {
 
   it.each([
     ['desktop 3D', { '(min-width: 1024px)': true }],
-    ['desktop 2D', { '(min-width: 1024px)': false, '(max-width: 768px)': false }],
-    ['mobile 2D', { '(max-width: 768px)': true }],
+    ['desktop 2D', { '(min-width: 1024px)': false, '(max-width: 1023px)': false }],
+    ['mobile 2D', { '(max-width: 1023px)': true }],
   ])('keeps the card request control beside the opponent cards after a heads-up fold on %s', (label, media) => {
     const state = makeTableState()
     state.phase = 'between_hands'
@@ -769,7 +769,7 @@ describe('PokerTable desktop 3D gate', () => {
     const markup = renderWithMedia(
       {
         '(min-width: 1024px)': true,
-        '(max-width: 768px)': false,
+        '(max-width: 1023px)': false,
       },
       <PokerTable
         state={state}
@@ -848,7 +848,7 @@ describe('PokerTable desktop 3D gate', () => {
     const markup = renderWithMedia(
       {
         '(min-width: 1024px)': true,
-        '(max-width: 768px)': false,
+        '(max-width: 1023px)': false,
       },
       <PokerTable
         state={state}
@@ -1046,7 +1046,7 @@ describe('PokerTable desktop 3D gate', () => {
     const markup = renderWithMedia(
       {
         '(min-width: 1024px)': true,
-        '(max-width: 768px)': false,
+        '(max-width: 1023px)': false,
       },
       <PokerTable
         state={state}
@@ -1113,7 +1113,7 @@ describe('PokerTable desktop 3D gate', () => {
     const markup = renderWithMedia(
       {
         '(min-width: 1024px)': true,
-        '(max-width: 768px)': false,
+        '(max-width: 1023px)': false,
       },
       <PokerTable
         state={state}
@@ -1160,7 +1160,7 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).toContain('player-emote-badge-targeted')
   })
 
-  it('uses a tableless mobile field instead of the table surface on phone viewports', () => {
+  it('draws the 2D felt table with avatar pucks instead of the desktop table surface under 1024px', () => {
     const socialState: SocialSnapshot = {
       active: [],
       chatLog: [],
@@ -1193,7 +1193,7 @@ describe('PokerTable desktop 3D gate', () => {
     const markup = renderWithMedia(
       {
         '(min-width: 1024px)': false,
-        '(max-width: 768px)': true,
+        '(max-width: 1023px)': true,
       },
       <PokerTable
         state={state}
@@ -1227,10 +1227,15 @@ describe('PokerTable desktop 3D gate', () => {
       />
     )
 
+    expect(markup).toContain('data-layout="2d"')
     expect(markup).toContain('mobile-poker-field')
+    expect(markup).toContain('mobile-table-felt')
     expect(markup).toContain('mobile-board-zone')
     expect(markup).toContain('mobile-edge-seat')
-    expect(markup).toContain('mobile-seat-number')
+    expect(markup).toContain('mobile-seat-avatar')
+    expect(markup).toContain('mobile-seat-ring')
+    expect(markup).toContain('--turn-pct:100')
+    expect(markup).not.toContain('mobile-seat-number')
     expect(markup).toContain('mobile-edge-seat-timer')
     expect(markup).toContain('30s')
     expect(markup).toContain('30 seconds left')
@@ -1250,7 +1255,7 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).not.toContain('own-hand-pre-action-mark')
   })
 
-  it('renders mobile betting controls as the reference three-button bottom panel', () => {
+  it('renders the 2D action tray weighted Call > Raise > Fold with a quick-bet row', () => {
     const socialState: SocialSnapshot = {
       active: [],
       chatLog: [],
@@ -1287,7 +1292,7 @@ describe('PokerTable desktop 3D gate', () => {
     const markup = renderWithMedia(
       {
         '(min-width: 1024px)': false,
-        '(max-width: 768px)': true,
+        '(max-width: 1023px)': true,
       },
       <PokerTable
         state={state}
@@ -1322,15 +1327,24 @@ describe('PokerTable desktop 3D gate', () => {
     )
 
     expect(markup).toContain('mobile-betting-panel')
+    expect(markup).toContain('mobile-tray-timer')
     expect(markup).toContain('mobile-bet-row')
-    expect(markup).toContain('mobile-bet-quick mobile-bet-quick-left')
+    for (const label of ['Min', '½ Pot', '¾ Pot', 'Pot', 'All-in']) {
+      expect(markup).toContain(`>${label}</button>`)
+    }
+    expect(markup).toContain('mobile-bet-quick is-active')
     expect(markup).toContain('mobile-bet-amount')
     expect(markup).toContain('mobile-raise-control')
+    expect(markup).toContain('aria-label="Decrease bet"')
+    expect(markup).toContain('aria-label="Increase bet"')
     expect(markup).toContain('mobile-main-actions')
-    expect(markup).toContain('FOLD')
+    expect(markup).toContain('data-action="fold"')
+    expect(markup).toContain('data-action="call"')
+    expect(markup).toContain('data-action="raise"')
+    expect(markup).toContain('Fold')
     expect(markup).toContain('CALL')
     expect(markup).not.toContain('CHECK / CALL')
-    expect(markup).toContain('BET / RAISE')
+    expect(markup).toContain('Raise to')
     expect(markup).toContain('$80')
     expect(markup).toContain('Small Blind')
     expect(markup).toContain('Big Blind')
@@ -1374,7 +1388,7 @@ describe('PokerTable desktop 3D gate', () => {
     const markup = renderWithMedia(
       {
         '(min-width: 1024px)': false,
-        '(max-width: 768px)': true,
+        '(max-width: 1023px)': true,
       },
       <PokerTable
         state={state}
@@ -1517,11 +1531,11 @@ describe('PokerTable table-management controls', () => {
     const state = makeFoldEndedState()
 
     const desktopMarkup = renderTable(state, {
-      '(max-width: 768px)': false,
+      '(max-width: 1023px)': false,
       '(min-width: 1024px)': false,
     })
     const mobileMarkup = renderTable(state, {
-      '(max-width: 768px)': true,
+      '(max-width: 1023px)': true,
       '(min-width: 1024px)': false,
     })
 
@@ -1536,13 +1550,13 @@ describe('PokerTable table-management controls', () => {
     state.winners = [{ playerId: 'villain', amount: 30 }]
 
     const mobileMarkup = renderTable(state, {
-      '(max-width: 768px)': true,
+      '(max-width: 1023px)': true,
       '(min-width: 1024px)': false,
     })
 
     expect(mobileMarkup).toContain('mobile-seat-position-4')
     expect(mobileMarkup).toContain('table-center-winner-chip-trails mobile-winner-chip-trails')
-    expect(mobileMarkup).toContain('--winner-chip-x:50%;--winner-chip-y:11%')
+    expect(mobileMarkup).toContain('--winner-chip-x:50%;--winner-chip-y:6%')
   })
 
   it('sends hero payout chips to the hero lane regardless of their physical seat', () => {
@@ -1551,15 +1565,15 @@ describe('PokerTable table-management controls', () => {
     state.players[1] = { ...state.players[1]!, seatIndex: 7 }
 
     const mobileMarkup = renderTable(state, {
-      '(max-width: 768px)': true,
+      '(max-width: 1023px)': true,
       '(min-width: 1024px)': false,
     })
     const desktopMarkup = renderTable(state, {
-      '(max-width: 768px)': false,
+      '(max-width: 1023px)': false,
       '(min-width: 1024px)': false,
     })
 
-    expect(mobileMarkup).toContain('--winner-chip-x:50%;--winner-chip-y:85%')
+    expect(mobileMarkup).toContain('--winner-chip-x:50%;--winner-chip-y:104%')
     expect(desktopMarkup).toContain('--winner-chip-x:50.5%;--winner-chip-y:88.2%')
   })
 
@@ -1575,11 +1589,11 @@ describe('PokerTable table-management controls', () => {
     state.recentActions = ['Rabbit hunt: flop As Kh Qd | turn Jc | river 10s', ...state.recentActions]
 
     const desktopThreeMarkup = renderTable(state, {
-      '(max-width: 768px)': false,
+      '(max-width: 1023px)': false,
       '(min-width: 1024px)': true,
     })
     const mobileMarkup = renderTable(state, {
-      '(max-width: 768px)': true,
+      '(max-width: 1023px)': true,
       '(min-width: 1024px)': false,
     })
 

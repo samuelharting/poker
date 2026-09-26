@@ -5,15 +5,21 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
 import { CommunityCards } from '@/components/table/CommunityCards'
+import {
+  getSeatActionChip,
+  getSeatInitials,
+  getSeatTone,
+} from '@/components/table/PokerTable'
 
-const polishCss = readFileSync(join(process.cwd(), 'app', 'poker-polish.css'), 'utf8')
+const table2dCss = readFileSync(join(process.cwd(), 'app', 'styles', 'table-2d.css'), 'utf8')
+const layoutSource = readFileSync(join(process.cwd(), 'app', 'layout.tsx'), 'utf8')
 const pokerTableSource = readFileSync(
   join(process.cwd(), 'components', 'table', 'PokerTable.tsx'),
   'utf8'
 )
 
-describe('mobile card layout hardening', () => {
-  it('exposes the number of dealt board cards for the phone layout', () => {
+describe('2D table card layout', () => {
+  it('exposes the number of dealt board cards for the 2D table', () => {
     expect(renderToStaticMarkup(<CommunityCards cards={[]} />)).toContain(
       'data-visible-count="0"'
     )
@@ -27,97 +33,102 @@ describe('mobile card layout hardening', () => {
     )).toContain('data-visible-count="3"')
   })
 
-  it('removes ghost board slots and keeps the real hero hand above its identity', () => {
-    expect(polishCss).toContain(".mobile-board-zone .community-cards[data-visible-count='0']")
-    expect(polishCss).toMatch(
-      /\.mobile-board-zone \.community-card-slot:not\(\.is-live\)\s*\{[^}]*display:\s*none;/s
-    )
-    expect(polishCss).toMatch(
-      /\.mobile-hero-lane \.own-hand-area\s*\{[^}]*order:\s*1;[^}]*transform:\s*none;/s
-    )
-    expect(polishCss).toMatch(
-      /\.table-scene\[data-hero-seat='true'\] \.mobile-hero-lane \.own-hand-area,[\s\S]*?transform:\s*none;/s
-    )
-    expect(polishCss).toMatch(/\.mobile-hero-seat\s*\{[^}]*order:\s*2;/s)
-    expect(polishCss).toMatch(/\.mobile-hero-seat-cards\s*\{[^}]*display:\s*none;/s)
-  })
-
-  it('lifts lower seats above the tray and simplifies tiny card faces', () => {
-    expect(polishCss).toMatch(
-      /\.table-scene\[data-tray-open='true'\] \.mobile-seat-position-1,[\s\S]*?\.mobile-seat-position-7\s*\{[^}]*bottom:\s*24%;/s
-    )
-    expect(polishCss).toMatch(
-      /\.table-scene\[data-tray-open='true'\] \.social-dock\s*\{[^}]*top:\s*calc\(76px \+ env\(safe-area-inset-top\)\);[^}]*bottom:\s*auto;/s
-    )
-    expect(polishCss).toMatch(
-      /\.mobile-board-zone \.card-corner-bottom,[\s\S]*?\.mobile-hero-lane \.card-corner-bottom\s*\{[^}]*display:\s*none;/s
+  it('loads the 2D stylesheet after the legacy layers', () => {
+    expect(layoutSource.indexOf("import './styles/table-2d.css'")).toBeGreaterThan(
+      layoutSource.indexOf("import './poker-polish.css'")
     )
   })
 
-  it('keeps revealed opponent cards separated from each other and the seat badge', () => {
+  it('keeps the board a stable width with printed guides for streets still to come', () => {
+    expect(table2dCss).toMatch(
+      /\.mobile-board-zone \.community-cards\[data-visible-count='0'\] \.community-card-slot\s*\{[^}]*visibility:\s*hidden;/s
+    )
+    expect(table2dCss).toMatch(
+      /\.mobile-board-zone \.community-card-slot:not\(\.is-live\)\s*\{[^}]*border:\s*1\.5px dashed/s
+    )
+    expect(table2dCss).toMatch(
+      /\.mobile-board-zone \.community-card-slot\s*\{[^}]*width:\s*var\(--board-card-w\);/s
+    )
+    expect(table2dCss).toContain('@keyframes boardCardDeal')
+  })
+
+  it('fans the hero hand in the thumb zone and simplifies small card faces', () => {
+    expect(table2dCss).toMatch(
+      /\.mobile-hero-lane \.own-card-slot-left\s*\{[^}]*transform:\s*rotate\(-7deg\)/s
+    )
+    expect(table2dCss).toMatch(
+      /\.mobile-hero-lane \.own-card-slot-right\s*\{[^}]*transform:\s*rotate\(7deg\)/s
+    )
+    expect(table2dCss).toMatch(
+      /\.mobile-hero-lane \.card-corner-bottom,\s*\[data-layout='2d'\] \.mobile-board-zone \.card-corner-bottom\s*\{[^}]*display:\s*none;/s
+    )
+    expect(table2dCss).toMatch(/\.mobile-hero-lane\s*\{[^}]*margin-top:\s*calc\(var\(--hero-card-h\) \* -0\.5\);/s)
+  })
+
+  it('shows revealed opponent hands over the avatar puck, fanned apart', () => {
     expect(pokerTableSource).toContain("hasVisibleHoleCards ? 'has-visible-cards' : ''")
-    expect(polishCss).toMatch(
-      /\.mobile-edge-seat\.has-visible-cards > \.mobile-seat-number\s*\{[^}]*margin-bottom:\s*4px;/s
+    expect(table2dCss).toMatch(
+      /\.mobile-edge-seat-cards\.is-revealed \.card-container:first-child\s*\{[^}]*transform:\s*rotate\(-5deg\);/s
     )
-    expect(polishCss).toMatch(
-      /\.mobile-edge-seat-cards\.is-revealed\s*\{[^}]*gap:\s*4px;/s
-    )
-    expect(polishCss).toMatch(
-      /\.mobile-edge-seat-cards\.is-revealed \.card-container:first-child\s*\{[^}]*transform:\s*rotate\(-3deg\);/s
-    )
-    expect(polishCss).toMatch(
-      /\.mobile-edge-seat-cards\.is-revealed \.card-container:last-child\s*\{[^}]*transform:\s*rotate\(3deg\);/s
-    )
-    expect(polishCss).toMatch(
-      /\.table-scene\[data-showdown='true'\] \.mobile-edge-seat-cards\.is-revealed\s*\{[^}]*margin-top:\s*0;/s
+    expect(table2dCss).toMatch(
+      /\.mobile-edge-seat-cards\.is-revealed \.card-container:last-child\s*\{[^}]*transform:\s*rotate\(5deg\);/s
     )
   })
 
-  it('moves the post-hand mobile reveal controls below the table content', () => {
-    expect(polishCss).toMatch(
-      /\.table-scene\[data-phase='between_hands'\]\[data-show-cards='true'\] \.mobile-hero-lane\s*\{[^}]*bottom:\s*calc\(92px \+ env\(safe-area-inset-bottom\)\);/s
-    )
-    expect(polishCss).toMatch(
-      /@media \(max-width: 390px\) and \(max-height: 740px\)[\s\S]*?\.table-scene\[data-phase='between_hands'\]\[data-show-cards='true'\] \.mobile-hero-lane\s*\{[^}]*bottom:\s*calc\(72px \+ env\(safe-area-inset-bottom\)\);/s
-    )
-  })
-
-  it('animates current-street wagers in front of mobile opponent and hero cards', () => {
+  it('animates wagers out from each seat and collects them into the pot', () => {
     expect(pokerTableSource).toContain('function MobileBetIndicator')
+    expect(pokerTableSource).toContain('function MobileBetCollect')
     expect(pokerTableSource).toContain('key={`${player.id}-${player.bet}`}')
     expect(pokerTableSource).toContain('key={`${visibleOwnPlayer.id}-${visibleOwnPlayer.bet}`}')
     expect(pokerTableSource).toContain('className="mobile-edge-bet-anchor"')
     expect(pokerTableSource).toContain('className="mobile-hero-bet-anchor"')
-    expect(polishCss).toContain('@keyframes mobileBetCommit')
-    expect(polishCss).toMatch(
-      /\.mobile-bet-indicator\s*\{[^}]*animation:\s*mobileBetCommit 420ms/s
-    )
-    expect(polishCss).toMatch(
-      /\.mobile-seat-1 \.mobile-edge-bet-anchor,[\s\S]*?left:\s*calc\(100% \+ 8px\);/s
-    )
-    expect(polishCss).toMatch(
-      /\.mobile-seat-5 \.mobile-edge-bet-anchor,[\s\S]*?right:\s*calc\(100% \+ 8px\);/s
-    )
-    expect(polishCss).toMatch(
-      /\.mobile-seat-0 \.mobile-edge-bet-anchor,[\s\S]*?\.mobile-seat-4 \.mobile-edge-bet-anchor\s*\{[^}]*top:\s*40px;[^}]*left:\s*calc\(100% \+ 6px\);[^}]*transform:\s*none;/s
-    )
-    expect(polishCss).toMatch(
-      /@media \(max-width: 390px\) and \(max-height: 620px\)[\s\S]*?\.table-scene\[data-tray-open='true'\] \.mobile-board-zone\s*\{[^}]*top:\s*31%;/s
-    )
+    expect(table2dCss).toContain('@keyframes mobileBetCommit')
+    expect(table2dCss).toMatch(/\.mobile-bet-indicator\s*\{[^}]*animation:\s*mobileBetCommit 420ms/s)
+    expect(table2dCss).toContain('@keyframes chipsToPot')
+    expect(table2dCss).toContain('calc((50 - var(--sx, 50)) * 1cqw - var(--bx, 0px))')
   })
 
-  it('keeps mobile card reveal controls clear of wager badges', () => {
-    expect(polishCss).toMatch(
-      /\.mobile-card-reveal-control\s*\{[^}]*left:\s*calc\(50% \+ 25px\);[^}]*top:\s*3px;/s
+  it('places every seat on the rail and keeps edge seats on screen', () => {
+    for (let seat = 0; seat <= 7; seat += 1) {
+      expect(table2dCss).toMatch(new RegExp(`\\.mobile-seat-position-${seat} \\{ --sx: \\d+; --sy: \\d+; \\}`))
+    }
+    expect(pokerTableSource).not.toContain('MOBILE_SEAT_NUMBERS_BY_VISUAL_SEAT')
+    expect(pokerTableSource).not.toContain('mobile-seat-number')
+  })
+
+  it('keeps card reveal controls above the seat and at least a comfortable tap size', () => {
+    expect(table2dCss).toMatch(
+      /\.mobile-card-reveal-control\s*\{[^}]*top:\s*calc\(var\(--avatar\) \* -0\.6\);/s
     )
-    expect(polishCss).toMatch(
-      /\.mobile-seat-position-5 \.mobile-card-reveal-control,[\s\S]*?right:\s*calc\(50% \+ 25px\);[^}]*left:\s*auto;/s
+    expect(table2dCss).toMatch(
+      /\.mobile-card-reveal-control \.card-reveal-seat-button\s*\{[^}]*min-width:\s*44px;/s
     )
-    expect(polishCss).toMatch(
-      /\.mobile-seat-position-0 \.mobile-card-reveal-control,[\s\S]*?\.mobile-seat-position-4 \.mobile-card-reveal-control\s*\{[^}]*left:\s*calc\(50% \+ 50px\);[^}]*top:\s*29px;/s
-    )
-    expect(polishCss).toMatch(
-      /\.mobile-seat-position-2 \.mobile-card-reveal-control,[\s\S]*?\.mobile-seat-position-6 \.mobile-card-reveal-control\s*\{[^}]*top:\s*-23px;/s
-    )
+  })
+})
+
+describe('2D seat helpers', () => {
+  it('builds avatar initials without the bot prefix', () => {
+    expect(getSeatInitials('Bot Bluff')).toBe('B')
+    expect(getSeatInitials('Bot Dealer Dan')).toBe('DD')
+    expect(getSeatInitials('sam harting')).toBe('SH')
+    expect(getSeatInitials('   ')).toBe('?')
+  })
+
+  it('uses the jacket colour for the avatar tone, or a stable fallback', () => {
+    expect(getSeatTone({ id: 'a', avatar: { jacketColor: 'emerald' } as never })).toBe('emerald')
+    expect(getSeatTone({ id: 'player-1' })).toBe(getSeatTone({ id: 'player-1' }))
+  })
+
+  it('labels the latest action on the current street', () => {
+    const base = { status: 'active' as const, hasActedThisRound: true }
+    expect(getSeatActionChip({ ...base, lastAction: 'Called $20' })).toEqual({ label: 'Call $20', tone: 'call' })
+    expect(getSeatActionChip({ ...base, lastAction: 'Raised $80' })).toEqual({ label: 'Raise $80', tone: 'raise' })
+    expect(getSeatActionChip({ ...base, lastAction: 'Checked' })).toEqual({ label: 'Check', tone: 'check' })
+    expect(getSeatActionChip({ ...base, lastAction: 'Called $20', hasActedThisRound: false })).toBeNull()
+    expect(getSeatActionChip({ status: 'folded', hasActedThisRound: false })).toEqual({ label: 'Fold', tone: 'fold' })
+    expect(getSeatActionChip({ status: 'all_in', hasActedThisRound: true, lastAction: 'All-in $900' })).toEqual({
+      label: 'All-in',
+      tone: 'all-in',
+    })
   })
 })

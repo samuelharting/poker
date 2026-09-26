@@ -148,19 +148,77 @@ const MOBILE_EDGE_SAFE_SEATS_BY_COUNT: Record<number, number[]> = {
   7: [2, 3, 4, 5, 6, 1, 7],
 }
 
-const MOBILE_SEAT_NUMBERS_BY_VISUAL_SEAT: Record<number, number> = {
-  0: 5,
-  1: 6,
-  2: 7,
-  3: 8,
-  4: 1,
-  5: 2,
-  6: 3,
-  7: 4,
+const SEAT_TONES = ['burgundy', 'midnight', 'emerald', 'ivory', 'gold', 'violet'] as const
+
+function getMobileSeatName(player: Pick<SeatPlayer, 'isBot' | 'nickname'>): string {
+  return player.isBot ? player.nickname.replace(/^Bot\s+/i, '') : player.nickname
 }
 
-function getMobileSeatName(player: OpponentSeat): string {
-  return player.isBot ? player.nickname.replace(/^Bot\s+/i, '') : player.nickname
+/** Avatar puck colour: the player's jacket colour, or a stable pick from their id. */
+export function getSeatTone(player: Pick<SeatPlayer, 'id' | 'avatar'>): string {
+  const jacketColor = player.avatar?.jacketColor
+  if (jacketColor) {
+    return jacketColor
+  }
+
+  let hash = 0
+  for (const character of player.id) {
+    hash = (hash * 31 + character.charCodeAt(0)) >>> 0
+  }
+  return SEAT_TONES[hash % SEAT_TONES.length]!
+}
+
+export function getSeatInitials(name: string): string {
+  const words = name.replace(/^Bot\s+/i, '').trim().split(/\s+/).filter(Boolean)
+  if (words.length === 0) {
+    return '?'
+  }
+
+  if (words.length === 1) {
+    return words[0]!.slice(0, 1).toUpperCase()
+  }
+
+  return `${words[0]!.slice(0, 1)}${words[1]!.slice(0, 1)}`.toUpperCase()
+}
+
+export type SeatActionTone = 'fold' | 'check' | 'call' | 'raise' | 'all-in'
+
+/** Short seat chip for the player's latest action on the current street. */
+export function getSeatActionChip(
+  player: Pick<SeatPlayer, 'status' | 'lastAction' | 'hasActedThisRound'>
+): { label: string; tone: SeatActionTone } | null {
+  if (player.status === 'folded') {
+    return { label: 'Fold', tone: 'fold' }
+  }
+
+  if (player.status === 'all_in') {
+    return { label: 'All-in', tone: 'all-in' }
+  }
+
+  if (!player.lastAction || !player.hasActedThisRound) {
+    return null
+  }
+
+  const normalized = player.lastAction.toLowerCase()
+  const amount = player.lastAction.match(/\$[0-9][0-9,]*/)?.[0]
+
+  if (normalized.startsWith('check')) {
+    return { label: 'Check', tone: 'check' }
+  }
+
+  if (normalized.startsWith('call')) {
+    return { label: amount ? `Call ${amount}` : 'Call', tone: 'call' }
+  }
+
+  if (normalized.startsWith('raise') || normalized.startsWith('bet')) {
+    return { label: amount ? `Raise ${amount}` : 'Raise', tone: 'raise' }
+  }
+
+  if (normalized.startsWith('all')) {
+    return { label: 'All-in', tone: 'all-in' }
+  }
+
+  return null
 }
 
 const EMOTE_OPTIONS = [
@@ -243,15 +301,16 @@ const WINNER_SEAT_TARGETS: Record<number, { x: string; y: string }> = {
   7: { x: '80.5%', y: '78.5%' },
 }
 
+// Seat anchors on the 2D table zone; keep in step with --sx/--sy in app/styles/table-2d.css.
 const MOBILE_WINNER_SEAT_TARGETS: Record<number, { x: string; y: string }> = {
-  0: { x: '50%', y: '85%' },
-  1: { x: '19%', y: '76%' },
-  2: { x: '12%', y: '57%' },
-  3: { x: '20%', y: '29%' },
-  4: { x: '50%', y: '11%' },
-  5: { x: '80%', y: '29%' },
-  6: { x: '88%', y: '57%' },
-  7: { x: '81%', y: '76%' },
+  0: { x: '50%', y: '104%' },
+  1: { x: '13%', y: '78%' },
+  2: { x: '10%', y: '44%' },
+  3: { x: '18%', y: '13%' },
+  4: { x: '50%', y: '6%' },
+  5: { x: '82%', y: '13%' },
+  6: { x: '90%', y: '44%' },
+  7: { x: '87%', y: '78%' },
 }
 
 const SHOW_CARD_OPTIONS: Array<{
@@ -383,6 +442,17 @@ function MobileBetIndicator({
   )
 }
 
+/** A chip that flies from a seat's wager spot into the pot when a street closes. */
+function MobileBetCollect({ className }: { className: string }) {
+  return (
+    <div className={`${className} is-collecting`} aria-hidden="true">
+      <span className="mobile-bet-token" />
+    </div>
+  )
+}
+
+type SeatTimerStyle = CSSProperties & { '--turn-pct'?: number }
+
 function AllInAnnouncement({ announcement }: { announcement: AllInAnnouncementView }) {
   const amountCopy = announcement.amountLabel
     ? `${announcement.amountLabel} in the middle`
@@ -414,10 +484,12 @@ function MobileEdgeSeat({
   visualSeat,
   isActing,
   secondsLeft,
+  timerPercent,
   isWinner = false,
   winnerAmount,
   winnerHandDescription,
   winningCards = [],
+  collectingBet = false,
   cardRevealControl,
   onNameClick,
 }: {
@@ -425,10 +497,12 @@ function MobileEdgeSeat({
   visualSeat: number
   isActing: boolean
   secondsLeft?: number
+  timerPercent?: number
   isWinner?: boolean
   winnerAmount?: number
   winnerHandDescription?: string
   winningCards?: Card[]
+  collectingBet?: boolean
   cardRevealControl?: React.ReactNode
   onNameClick?: (playerId: string) => void
 }) {
@@ -436,7 +510,6 @@ function MobileEdgeSeat({
   const isDisconnected = player.status === 'disconnected' || !player.isConnected
   const isAllIn = player.status === 'all_in'
   const blindRole = player.isBB ? 'big' : player.isSB ? 'small' : null
-  const seatNumber = MOBILE_SEAT_NUMBERS_BY_VISUAL_SEAT[visualSeat] ?? visualSeat + 1
   const mobileSeatName = getMobileSeatName(player)
   const targetTitle = `Target ${player.nickname} for emojis`
   const holeCards = player.holeCards ?? []
@@ -445,95 +518,98 @@ function MobileEdgeSeat({
     holeCards
   )
   const hasVisibleHoleCards = Boolean(visibleLeftCard || visibleRightCard)
-  const statusLabel = isWinner && typeof winnerAmount === 'number' && winnerAmount > 0
-    ? `Won ${formatAmount(winnerAmount)}`
-    : isActing
-      ? 'Turn'
-      : isFolded
-        ? 'Folded'
-        : isAllIn
-          ? 'All-in'
-          : isDisconnected
-            ? 'Away'
-            : null
+  const actionChip = isWinner && typeof winnerAmount === 'number' && winnerAmount > 0
+    ? { label: `Won ${formatAmount(winnerAmount)}`, tone: 'win' }
+    : isDisconnected && !isFolded
+      ? { label: 'Away', tone: 'away' }
+      : getSeatActionChip(player)
   const classes = [
     'mobile-edge-seat',
     `mobile-seat-${visualSeat}`,
     isActing ? 'is-acting' : '',
+    isActing && typeof secondsLeft === 'number' && secondsLeft <= 5 ? 'is-low-time' : '',
     isFolded ? 'is-folded' : '',
+    isAllIn ? 'is-all-in' : '',
     isWinner ? 'is-winner' : '',
     hasVisibleHoleCards ? 'has-visible-cards' : '',
     isDisconnected ? 'is-disconnected' : '',
   ].filter(Boolean).join(' ')
+  const seatStyle: SeatTimerStyle | undefined = isActing && typeof timerPercent === 'number'
+    ? { '--turn-pct': Math.round(timerPercent * 10) / 10 }
+    : undefined
+  const renderSeatCard = (card: Card) => (
+    <PlayingCard
+      card={card}
+      size="xs"
+      highlighted={isWinner && (
+        winningCards.length === 0 || winningCards.some(
+          winningCard => winningCard.rank === card.rank && winningCard.suit === card.suit
+        )
+      )}
+    />
+  )
 
   return (
-    <div className={classes} data-mobile-seat={visualSeat} data-player-status={player.status}>
-      {onNameClick ? (
-        <button
-          type="button"
-          className={`mobile-seat-number ${isActing ? 'is-acting' : ''}`}
-          onClick={() => onNameClick(player.id)}
-          title={targetTitle}
-          aria-label={targetTitle}
-          data-player-target-trigger="avatar"
-        >
-          {seatNumber}
-        </button>
-      ) : (
-        <div className={`mobile-seat-number ${isActing ? 'is-acting' : ''}`}>
-          {seatNumber}
-        </div>
-      )}
-      {isActing && typeof secondsLeft === 'number' && (
-        <div
-          className={`mobile-edge-seat-timer ${secondsLeft <= 5 ? 'is-low' : ''}`}
-          role="timer"
-          aria-label={`${secondsLeft} seconds left`}
-        >
-          {secondsLeft}s
-        </div>
-      )}
-      {player.hasCards && (
-        <div className={`mobile-edge-seat-cards ${hasVisibleHoleCards ? 'is-revealed' : ''}`}>
-          {visibleLeftCard ? (
-            <PlayingCard
-              card={visibleLeftCard}
-              size="xs"
-              highlighted={isWinner && (
-                winningCards.length === 0 || winningCards.some(
-                  card => card.rank === visibleLeftCard.rank && card.suit === visibleLeftCard.suit
-                )
-              )}
-            />
-          ) : (
+    <div
+      className={classes}
+      data-mobile-seat={visualSeat}
+      data-player-status={player.status}
+      data-tone={getSeatTone(player)}
+      style={seatStyle}
+    >
+      <div className="mobile-seat-puck">
+        {isActing && <span className="mobile-seat-ring" aria-hidden="true" />}
+        {player.hasCards && !isFolded && !hasVisibleHoleCards && (
+          <div className="mobile-edge-seat-cards">
             <span className="mobile-edge-card-back" aria-label="Hidden card" />
-          )}
-          {visibleRightCard ? (
-            <PlayingCard
-              card={visibleRightCard}
-              size="xs"
-              highlighted={isWinner && (
-                winningCards.length === 0 || winningCards.some(
-                  card => card.rank === visibleRightCard.rank && card.suit === visibleRightCard.suit
-                )
-              )}
-            />
-          ) : (
             <span className="mobile-edge-card-back" aria-label="Hidden card" />
-          )}
-        </div>
-      )}
-      {player.bet > 0 && (
-        <MobileBetIndicator
-          key={`${player.id}-${player.bet}`}
-          amount={player.bet}
-          ownerLabel={mobileSeatName}
-          className="mobile-edge-bet-anchor"
-        />
-      )}
-      {cardRevealControl && (
-        <div className="mobile-card-reveal-control">{cardRevealControl}</div>
-      )}
+          </div>
+        )}
+        {onNameClick ? (
+          <button
+            type="button"
+            className="mobile-seat-avatar"
+            onClick={() => onNameClick(player.id)}
+            title={targetTitle}
+            aria-label={targetTitle}
+            data-player-target-trigger="avatar"
+          >
+            {getSeatInitials(player.nickname)}
+          </button>
+        ) : (
+          <div className="mobile-seat-avatar" aria-hidden="true">
+            {getSeatInitials(player.nickname)}
+          </div>
+        )}
+        {player.hasCards && hasVisibleHoleCards && (
+          <div className="mobile-edge-seat-cards is-revealed">
+            {visibleLeftCard ? renderSeatCard(visibleLeftCard) : (
+              <span className="mobile-edge-card-back" aria-label="Hidden card" />
+            )}
+            {visibleRightCard ? renderSeatCard(visibleRightCard) : (
+              <span className="mobile-edge-card-back" aria-label="Hidden card" />
+            )}
+          </div>
+        )}
+        {player.isDealer && (
+          <span className="mobile-seat-dealer" title="Dealer" aria-label="Dealer">D</span>
+        )}
+        {blindRole && (
+          <span className={`mobile-blind-role is-${blindRole}`}>
+            <strong aria-hidden="true">{blindRole === 'big' ? 'BB' : 'SB'}</strong>
+            <span className="sr-only">{blindRole === 'big' ? 'Big Blind' : 'Small Blind'}</span>
+          </span>
+        )}
+        {isActing && typeof secondsLeft === 'number' && (
+          <div
+            className={`mobile-edge-seat-timer ${secondsLeft <= 5 ? 'is-low' : ''}`}
+            role="timer"
+            aria-label={`${secondsLeft} seconds left`}
+          >
+            {secondsLeft}s
+          </div>
+        )}
+      </div>
 
       <div className="mobile-edge-seat-main">
         {onNameClick ? (
@@ -550,18 +626,45 @@ function MobileEdgeSeat({
           <div className="mobile-edge-seat-name">{mobileSeatName}</div>
         )}
         <div className="mobile-edge-seat-stack">{formatAmount(player.stack)}</div>
-        {blindRole && (
-          <div className={`mobile-blind-role is-${blindRole}`}>
-            <strong>{blindRole === 'big' ? 'BB' : 'SB'}</strong>
-            <span>{blindRole === 'big' ? 'Big Blind' : 'Small Blind'}</span>
+        {actionChip && (
+          <div
+            key={`${actionChip.tone}-${player.lastActionId ?? actionChip.label}`}
+            className={`mobile-seat-action is-${actionChip.tone}`}
+          >
+            {actionChip.label}
           </div>
         )}
       </div>
 
-      {statusLabel && <div className="mobile-edge-seat-status">{statusLabel}</div>}
       {isWinner && winnerHandDescription && (
         <div className="mobile-edge-winner-hand">{winnerHandDescription}</div>
       )}
+      {player.bet > 0 && (
+        <MobileBetIndicator
+          key={`${player.id}-${player.bet}`}
+          amount={player.bet}
+          ownerLabel={mobileSeatName}
+          className="mobile-edge-bet-anchor"
+        />
+      )}
+      {collectingBet && <MobileBetCollect className="mobile-edge-bet-anchor" />}
+      {cardRevealControl && (
+        <div className="mobile-card-reveal-control">{cardRevealControl}</div>
+      )}
+    </div>
+  )
+}
+
+function MobileOpenSeat({ visualSeat, isInHand }: { visualSeat: number; isInHand: boolean }) {
+  return (
+    <div
+      className={`mobile-edge-seat-position mobile-seat-position-${visualSeat} is-open-seat`}
+      aria-hidden="true"
+    >
+      <div className="mobile-open-seat">
+        <span className="mobile-open-seat-ring" />
+        <span className="mobile-open-seat-label">{isInHand ? 'Wait' : 'Open'}</span>
+      </div>
     </div>
   )
 }
@@ -580,24 +683,27 @@ function MobileHeroSeat({
   const blindRole = player.isBB ? 'big' : player.isSB ? 'small' : null
 
   return (
-    <div className={`mobile-hero-seat ${isActing ? 'is-acting' : ''} ${isWinner ? 'is-winner' : ''}`}>
-      <div className={`mobile-seat-number ${isActing ? 'is-acting' : ''}`}>
-        {MOBILE_SEAT_NUMBERS_BY_VISUAL_SEAT[0]}
+    <div
+      className={`mobile-hero-seat ${isActing ? 'is-acting' : ''} ${isWinner ? 'is-winner' : ''}`}
+      data-tone={getSeatTone(player)}
+    >
+      <div className="mobile-hero-avatar" aria-hidden="true">
+        {getSeatInitials(player.nickname)}
+        {player.isDealer && <span className="mobile-seat-dealer">D</span>}
       </div>
-      <div className="mobile-hero-seat-cards" aria-hidden="true">
-        <span className="mobile-edge-card-back" />
-        <span className="mobile-edge-card-back" />
-      </div>
-      {player.isDealer && <span className="mobile-hero-dealer-badge">D</span>}
-      <div className="mobile-hero-seat-name">You</div>
-      <div className="mobile-hero-seat-stack">{formatAmount(player.stack)}</div>
-      {blindRole && (
-        <div className={`mobile-blind-role is-${blindRole}`}>
-          <strong>{blindRole === 'big' ? 'BB' : 'SB'}</strong>
-          <span>{blindRole === 'big' ? 'Big Blind' : 'Small Blind'}</span>
+      <div className="mobile-hero-meta">
+        <div className="mobile-hero-seat-name">
+          You
+          {blindRole && (
+            <span className={`mobile-blind-role is-${blindRole}`}>
+              <strong aria-hidden="true">{blindRole === 'big' ? 'BB' : 'SB'}</strong>
+              <span className="sr-only">{blindRole === 'big' ? 'Big Blind' : 'Small Blind'}</span>
+            </span>
+          )}
         </div>
-      )}
-      <div className="mobile-hero-seat-status">{status}</div>
+        <div className="mobile-hero-seat-stack">{formatAmount(player.stack)}</div>
+        <div className="mobile-hero-seat-status">{status}</div>
+      </div>
     </div>
   )
 }
@@ -964,7 +1070,8 @@ export function PokerTable({
   onSendTargetEmote,
   onFeedback,
 }: PokerTableProps) {
-  const isMobileViewport = useMediaQuery('(max-width: 768px)')
+  // Every width under 1024px uses the one responsive 2D table; 1024px and up is the 3D room.
+  const isMobileViewport = useMediaQuery('(max-width: 1023px)')
   const shouldRenderDesktopThree = useMediaQuery('(min-width: 1024px)')
   const showdownView = useShowdownPresentation(state)
   const showdownPresentation = showdownView.presentation
@@ -1377,6 +1484,34 @@ export function PokerTable({
     state.serverNow
   )
 
+  // 2D table: when a street closes, fly each wager from its seat into the pot.
+  const streetKey = `${state.handNumber}:${state.round ?? 'none'}:${state.phase}`
+  const betSnapshotRef = useRef<{ key: string; bets: Map<string, number> }>({ key: '', bets: new Map() })
+  const [collectingBetIds, setCollectingBetIds] = useState<Set<string> | null>(null)
+
+  useEffect(() => {
+    const previous = betSnapshotRef.current
+    const currentBets = new Map(
+      state.players.filter(player => player.bet > 0).map(player => [player.id, player.bet] as const)
+    )
+    betSnapshotRef.current = { key: streetKey, bets: currentBets }
+
+    if (!isMobileViewport || !previous.key || previous.key === streetKey || previous.bets.size === 0) {
+      return
+    }
+
+    setCollectingBetIds(new Set(previous.bets.keys()))
+  }, [isMobileViewport, state.players, streetKey])
+
+  useEffect(() => {
+    if (!collectingBetIds) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => setCollectingBetIds(null), 720)
+    return () => window.clearTimeout(timeout)
+  }, [collectingBetIds])
+
   useEffect(() => {
     const activeExpiries = socialState.active.flatMap(entry =>
       [entry.messageExpiresAt, entry.emoteExpiresAt].filter(
@@ -1530,6 +1665,29 @@ export function PokerTable({
   const mobileRaiseBlindCount = state.bigBlind > 0
     ? Math.max(1, Math.round(raiseAmount / state.bigBlind))
     : raiseAmount
+  const canMobileRaise = legalActions.includes('raise') && effectiveMin > 0
+  // Sizing to the whole stack sends the existing all-in action, exactly like the old All In button.
+  const mobileRaiseIsAllIn = Boolean(mobileAllInAction) && (
+    !canMobileRaise || (maxRaise > 0 && raiseAmount >= maxRaise)
+  )
+  const mobileRaiseLabel = mobileRaiseIsAllIn
+    ? 'All-in'
+    : state.currentBet > 0
+      ? 'Raise to'
+      : 'Bet'
+  const mobileRaiseFill = maxRaise > effectiveMin
+    ? Math.round(((raiseAmount - effectiveMin) / (maxRaise - effectiveMin)) * 1000) / 10
+    : 100
+  const mobileQuickBets = [
+    { key: 'min', label: 'Min', amount: effectiveMin },
+    { key: 'half', label: '½ Pot', amount: Math.floor(state.totalPot / 2) },
+    { key: 'three-quarter', label: '¾ Pot', amount: Math.floor((state.totalPot * 3) / 4) },
+    { key: 'pot', label: 'Pot', amount: state.totalPot },
+    { key: 'all-in', label: 'All-in', amount: maxRaise },
+  ]
+  const activeMobileQuickBet = mobileQuickBets.find(quickBet => (
+    clampRaiseAmount(quickBet.amount) === raiseAmount
+  ))?.key
   const checkFoldPreActionControl = showCheckFoldPreAction ? (
     <button
       type="button"
@@ -1635,6 +1793,22 @@ export function PokerTable({
     setTargetEmotePickerOpen(false)
   }, [playerIdSet])
 
+  const showdownCinematic = (
+    <ShowdownCinematic
+      state={state}
+      presentation={showdownPresentation}
+      onSoundCue={onSoundCue}
+    />
+  )
+  const showMobileWinnerSummary = betweenHands &&
+    showWinnerResults &&
+    winnerDisplays.length > 0 &&
+    !hasVisibleRabbitRunout &&
+    !acceptedRunItTwice
+  const mobileOpenSeats = isSpectator || !shouldShowOwnHand
+    ? emptyVisualSeats.map(layout => layout.visualSeat)
+    : []
+
   return (
     <div
       className="table-scene"
@@ -1649,6 +1823,7 @@ export function PokerTable({
       data-run-it-twice={state.runItTwice?.status ?? 'none'}
       data-showdown-stage={showdownPresentation.stage}
       data-settings-open={settingsOpen ? 'true' : 'false'}
+      data-layout={isMobileViewport ? '2d' : 'desktop'}
     >
       {threeTableView ? (
         <DesktopPokerRoom3D
@@ -1661,11 +1836,7 @@ export function PokerTable({
           onRequestCardReveal={onRequestCardReveal}
         />
       ) : null}
-      <ShowdownCinematic
-        state={state}
-        presentation={showdownPresentation}
-        onSoundCue={onSoundCue}
-      />
+      {!isMobileViewport && showdownCinematic}
       {pendingIncomingCardRequest && incomingCardRequester && !settingsOpen ? (
         <CardRevealConsentPrompt
           requesterName={incomingCardRequester.nickname}
@@ -1699,28 +1870,76 @@ export function PokerTable({
       )}
       <div className="table-stage">
         {isMobileViewport ? (
-          <div className="mobile-edge-arena mobile-poker-field" role="region" aria-label="Mobile poker field">
-            <div className="mobile-edge-board mobile-board-zone">
-              <PotDisplay
-                totalPot={state.totalPot}
-                pots={state.pots}
-                currentBet={state.currentBet}
-                toCall={isMyTurn ? Math.max(0, toCall) : 0}
-              />
-              {acceptedRunItTwice ? (
-                <RunItTwiceBoards runItTwice={acceptedRunItTwice} players={state.players} />
-              ) : (
-                <CommunityCards
-                  cards={state.communityCards}
-                  highlightedCards={highlightedWinningCards}
-                />
-              )}
-            </div>
+          <div
+            className="mobile-poker-field"
+            role="region"
+            aria-label="Mobile poker field"
+            data-seat-count={mobileEdgeOpponents.length}
+            data-hero-lane={shouldShowOwnHand && visibleOwnPlayer ? 'true' : 'false'}
+          >
+            <div className="mobile-table-zone">
+              <div className="mobile-table" aria-hidden="true">
+                <div className="mobile-table-felt">
+                  <span className="mobile-table-line" />
+                  <span className="mobile-table-crest">
+                    <span className="mobile-table-crest-suits">♠ ♥ ♣ ♦</span>
+                    <span className="mobile-table-crest-word">Poker Night</span>
+                    <span className="mobile-table-crest-stakes">
+                      No limit · {formatAmount(state.smallBlind)}/{formatAmount(state.bigBlind)}
+                    </span>
+                  </span>
+                </div>
+              </div>
 
-            <div className="mobile-edge-seats" aria-label="Players">
-              {mobileEdgeOpponents
-                .map(player => {
+              <div
+                className="mobile-board-zone"
+                data-board-count={acceptedRunItTwice ? 'twice' : Math.min(state.communityCards.length, 5)}
+              >
+                <div className="mobile-board-header">
+                  {showMobileWinnerSummary ? (
+                    <div className="mobile-edge-winners" role="status" aria-live="assertive" aria-atomic="true">
+                      <div className="mobile-edge-winners-heading">
+                        {winnerDisplays.length > 1 ? 'Split pot' : 'Hand winner'}
+                      </div>
+                      {winnerDisplays.map(winner => (
+                        <div key={winner.playerId} className="mobile-edge-winner-line">
+                          <span>
+                            <b>{formatWinnerPaymentLabel(winner.nickname, winner.venmoUsername)}</b>
+                            {winner.handDescription && <small>{winner.handDescription}</small>}
+                          </span>
+                          <strong>+{formatAmount(winner.amount)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mobile-pot-wrap" key={`pot-${state.totalPot}`}>
+                      <PotDisplay
+                        totalPot={state.totalPot}
+                        pots={state.pots}
+                        currentBet={state.currentBet}
+                        toCall={isMyTurn ? Math.max(0, toCall) : 0}
+                      />
+                    </div>
+                  )}
+                </div>
+                {acceptedRunItTwice ? (
+                  <RunItTwiceBoards runItTwice={acceptedRunItTwice} players={state.players} />
+                ) : (
+                  <CommunityCards
+                    cards={state.communityCards}
+                    highlightedCards={highlightedWinningCards}
+                  />
+                )}
+                <div className="mobile-board-footer">{showdownCinematic}</div>
+              </div>
+
+              <div className="mobile-edge-seats" aria-label="Players">
+                {mobileOpenSeats.map(visualSeat => (
+                  <MobileOpenSeat key={`open-${visualSeat}`} visualSeat={visualSeat} isInHand={isInHand} />
+                ))}
+                {mobileEdgeOpponents.map(player => {
                   const seatSocial = activeSocialByPlayer.get(player.id) ?? {}
+                  const isActingSeat = state.actingPlayerId === player.id
 
                   return (
                     <div
@@ -1730,12 +1949,14 @@ export function PokerTable({
                       <MobileEdgeSeat
                         player={player}
                         visualSeat={player.mobileVisualSeat}
-                        isActing={state.actingPlayerId === player.id}
-                        secondsLeft={state.actingPlayerId === player.id ? turnTimer.secondsLeft : undefined}
+                        isActing={isActingSeat}
+                        secondsLeft={isActingSeat ? turnTimer.secondsLeft : undefined}
+                        timerPercent={isActingSeat ? turnTimer.percent : undefined}
                         isWinner={betweenHands && showWinnerHighlights && winnerAmounts.has(player.id)}
                         winnerAmount={winnerAmounts.get(player.id)}
                         winnerHandDescription={winnerDescriptions.get(player.id)}
                         winningCards={winnerCardsByPlayer.get(player.id)}
+                        collectingBet={Boolean(collectingBetIds?.has(player.id))}
                         cardRevealControl={cardRevealActionByPlayerId.has(player.id) ? (
                           <CardRevealSeatButton
                             action={cardRevealActionByPlayerId.get(player.id)!}
@@ -1753,52 +1974,39 @@ export function PokerTable({
                     </div>
                   )
                 })}
+              </div>
+
+              {betweenHands && showWinnerPayout && winnerDisplays.length > 0 && (
+                <div
+                  className="table-center-winner-chip-trails mobile-winner-chip-trails"
+                  aria-hidden="true"
+                >
+                  {winnerDisplays.map(winner => {
+                    const trailStyle: WinnerChipTrailStyle = {
+                      ['--winner-chip-x']: winner.targetX,
+                      ['--winner-chip-y']: winner.targetY,
+                      ['--winner-chip-delay']: `${winner.delayMs}ms`,
+                    }
+
+                    return (
+                      <div
+                        key={`${winner.playerId}-mobile-trail`}
+                        className="table-center-winner-chip-trail"
+                        style={trailStyle}
+                      >
+                        <ChipStack amount={winner.amount} compact showAmount={false} />
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
 
-            {betweenHands && showWinnerPayout && winnerDisplays.length > 0 && (
-              <div
-                className="table-center-winner-chip-trails mobile-winner-chip-trails"
-                aria-hidden="true"
-              >
-                {winnerDisplays.map(winner => {
-                  const trailStyle: WinnerChipTrailStyle = {
-                    ['--winner-chip-x']: winner.targetX,
-                    ['--winner-chip-y']: winner.targetY,
-                    ['--winner-chip-delay']: `${winner.delayMs}ms`,
-                  }
-
-                  return (
-                    <div
-                      key={`${winner.playerId}-mobile-trail`}
-                      className="table-center-winner-chip-trail"
-                      style={trailStyle}
-                    >
-                      <ChipStack amount={winner.amount} compact showAmount={false} />
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-            {betweenHands && showWinnerResults && winnerDisplays.length > 0 && !hasVisibleRabbitRunout && !acceptedRunItTwice && (
-              <div className="mobile-edge-winners" role="status" aria-live="assertive" aria-atomic="true">
-                <div className="mobile-edge-winners-heading">
-                  {winnerDisplays.length > 1 ? 'Split pot' : 'Hand winner'}
-                </div>
-                {winnerDisplays.map(winner => (
-                  <div key={winner.playerId} className="mobile-edge-winner-line">
-                    <span>
-                      <b>{formatWinnerPaymentLabel(winner.nickname, winner.venmoUsername)}</b>
-                      {winner.handDescription && <small>{winner.handDescription}</small>}
-                    </span>
-                    <strong>Won {formatAmount(winner.amount)}</strong>
-                  </div>
-                ))}
-              </div>
-            )}
-
             {shouldShowOwnHand && visibleOwnPlayer && (
-              <div className="mobile-hero-lane">
+              <div
+                className={`mobile-hero-lane ${isMyTurn ? 'is-acting' : ''}`}
+                data-show-cards={canAdjustShownCards && !settingsOpen ? 'true' : 'false'}
+              >
                 {visibleOwnPlayer.bet > 0 && (
                   <MobileBetIndicator
                     key={`${visibleOwnPlayer.id}-${visibleOwnPlayer.bet}`}
@@ -1806,6 +2014,9 @@ export function PokerTable({
                     ownerLabel="Your"
                     className="mobile-hero-bet-anchor"
                   />
+                )}
+                {collectingBetIds?.has(visibleOwnPlayer.id) && (
+                  <MobileBetCollect className="mobile-hero-bet-anchor" />
                 )}
                 <MobileHeroSeat
                   player={visibleOwnPlayer}
@@ -2015,16 +2226,6 @@ export function PokerTable({
                   ) : null
                 }
               />
-
-              <div
-                className={`mobile-hero-summary ${isMyTurn ? 'is-acting' : ''} ${betweenHands && showWinnerHighlights && myWinnerAmount > 0 ? 'is-winner' : ''}`}
-              >
-                <div className="mobile-hero-summary-card">
-                  <span className="mobile-hero-summary-name">{visibleOwnPlayer.nickname}</span>
-                  <span className="mobile-hero-summary-stack">{formatAmount(visibleOwnPlayer.stack)}</span>
-                </div>
-                <div className="mobile-hero-summary-status">{mobileHeroStatus}</div>
-              </div>
             </>
           )}
         </div>
@@ -2110,7 +2311,7 @@ export function PokerTable({
         />
       )}
 
-      {betweenHands && winnerDisplays.length === 0 && !settingsOpen && (
+      {isMobileViewport && betweenHands && winnerDisplays.length === 0 && !settingsOpen && (
         <MobileBetweenHandsDock
           state={state}
           me={me}
@@ -2127,29 +2328,21 @@ export function PokerTable({
 
       {hasActionTray && me && (
         isMobileViewport ? (
-          <div className="mobile-betting-panel">
-            {legalActions.includes('raise') && effectiveMin > 0 && (
+          <div
+            className="mobile-betting-panel"
+            data-raise={canMobileRaise ? 'true' : 'false'}
+            style={{ ['--turn-pct' as string]: Math.round(turnTimer.percent * 10) / 10 } as CSSProperties}
+          >
+            <div
+              className={`mobile-tray-timer ${turnTimer.secondsLeft <= 5 ? 'is-low' : ''}`}
+              role="timer"
+              aria-label={`${turnTimer.secondsLeft} seconds to act`}
+            >
+              <span className="mobile-tray-timer-fill" aria-hidden="true" />
+              <span className="mobile-tray-timer-label">{turnTimer.secondsLeft}s</span>
+            </div>
+            {canMobileRaise && (
               <>
-                <div className="mobile-bet-row">
-                  <div className="mobile-bet-quick mobile-bet-quick-left">
-                    <button type="button" onClick={() => setClampedRaiseAmount(Math.floor(state.totalPot / 4))}>
-                      1/4
-                    </button>
-                    <button type="button" onClick={() => setClampedRaiseAmount(Math.floor(state.totalPot / 2))}>
-                      1/2
-                    </button>
-                  </div>
-                  <div className="mobile-bet-amount">{formatAmount(raiseAmount)}</div>
-                  <div className="mobile-bet-quick mobile-bet-quick-right">
-                    <button type="button" onClick={() => setClampedRaiseAmount(state.totalPot)}>
-                      Pot
-                    </button>
-                    <button type="button" onClick={mobileAllInAction?.onClick} disabled={!mobileAllInAction}>
-                      All In
-                    </button>
-                  </div>
-                </div>
-
                 <div className="mobile-raise-control">
                   <button
                     type="button"
@@ -2160,6 +2353,10 @@ export function PokerTable({
                     −
                   </button>
                   <div className="mobile-raise-meter">
+                    <div className="mobile-bet-amount" aria-live="polite">
+                      <strong>{formatAmount(raiseAmount)}</strong>
+                      <span className="mobile-raise-bb">{mobileRaiseBlindCount} BB</span>
+                    </div>
                     <input
                       type="range"
                       className="raise-slider mobile-raise-slider"
@@ -2167,9 +2364,10 @@ export function PokerTable({
                       max={maxRaise}
                       step={mobileRaiseStep}
                       value={raiseAmount}
+                      aria-label="Bet amount"
+                      style={{ ['--raise-fill' as string]: `${mobileRaiseFill}%` } as CSSProperties}
                       onChange={event => setClampedRaiseAmount(Number(event.target.value))}
                     />
-                    <div className="mobile-raise-bb">{mobileRaiseBlindCount} BB</div>
                   </div>
                   <button
                     type="button"
@@ -2179,6 +2377,20 @@ export function PokerTable({
                   >
                     +
                   </button>
+                </div>
+
+                <div className="mobile-bet-row" role="group" aria-label="Quick bet sizes">
+                  {mobileQuickBets.map(quickBet => (
+                    <button
+                      key={quickBet.label}
+                      type="button"
+                      className={`mobile-bet-quick ${quickBet.key === activeMobileQuickBet ? 'is-active' : ''} ${quickBet.key === 'all-in' ? 'is-all-in' : ''}`}
+                      aria-pressed={quickBet.key === activeMobileQuickBet}
+                      onClick={() => setClampedRaiseAmount(quickBet.amount)}
+                    >
+                      {quickBet.label}
+                    </button>
+                  ))}
                 </div>
               </>
             )}
@@ -2191,7 +2403,7 @@ export function PokerTable({
                 onClick={mobileFoldAction?.onClick}
                 disabled={!mobileFoldAction}
               >
-                <span>FOLD</span>
+                <span>Fold</span>
               </button>
               <button
                 type="button"
@@ -2205,13 +2417,13 @@ export function PokerTable({
               </button>
               <button
                 type="button"
-                className="mobile-main-action mobile-action-raise"
-                data-action="raise"
-                onClick={mobileBetRaiseAction?.onClick}
-                disabled={!mobileBetRaiseAction}
+                className={`mobile-main-action mobile-action-raise ${mobileRaiseIsAllIn ? 'is-all-in' : ''}`}
+                data-action={mobileRaiseIsAllIn ? 'all_in' : 'raise'}
+                onClick={mobileRaiseIsAllIn ? mobileAllInAction?.onClick : mobileBetRaiseAction?.onClick}
+                disabled={mobileRaiseIsAllIn ? !mobileAllInAction : !mobileBetRaiseAction}
               >
-                <span>BET / RAISE</span>
-                <strong>{formatAmount(raiseAmount)}</strong>
+                <span>{mobileRaiseLabel}</span>
+                <strong>{formatAmount(mobileRaiseIsAllIn && !canMobileRaise ? maxRaise : raiseAmount)}</strong>
               </button>
             </div>
           </div>
@@ -2311,7 +2523,7 @@ export function PokerTable({
         )
       )}
 
-          {betweenHands && winnerDisplays.length === 0 && (
+          {!isMobileViewport && betweenHands && winnerDisplays.length === 0 && (
             <div className="table-side-panels">
               <WaitingPanel
                 state={state}

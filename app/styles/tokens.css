@@ -36,6 +36,17 @@
   --c-cream-50: #fff8ea;
   --c-cream-200: #efe3c8;
 
+  /* 2D table: padded leather rail and seat avatar tones */
+  --c-rail-900: #140c09;
+  --c-rail-700: #2e1c14;
+  --c-rail-500: #4a2e20;
+  --c-tone-burgundy: #93303f;
+  --c-tone-midnight: #26406e;
+  --c-tone-emerald: #0f7d5c;
+  --c-tone-ivory: #cbbd9c;
+  --c-tone-gold: #b8872b;
+  --c-tone-violet: #5a44a6;
+
   /* Text */
   --c-text-1: #f4efe4;
   --c-text-2: #bdc6c1;

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 const css = readFileSync(join(process.cwd(), 'app', 'globals.css'), 'utf8')
 const polishCss = readFileSync(join(process.cwd(), 'app', 'poker-polish.css'), 'utf8')
+const table2dCss = readFileSync(join(process.cwd(), 'app', 'styles', 'table-2d.css'), 'utf8')
 const pokerTableSource = readFileSync(join(process.cwd(), 'components', 'table', 'PokerTable.tsx'), 'utf8')
 const desktopThreeSource = readFileSync(join(process.cwd(), 'components', 'three', 'DesktopPokerRoom3D.tsx'), 'utf8')
 const emojiPickerSource = readFileSync(join(process.cwd(), 'components', 'ui', 'SearchableEmojiPicker.tsx'), 'utf8')
@@ -220,12 +221,16 @@ describe('room UI layering', () => {
       'max-height: min(42svh, 360px);',
       'background:',
     ], polishCss)
+    // 2D table: the result card takes the pot's place above the board, narrow
+    // enough to sit between the side seats.
     expectRule('.mobile-edge-winners', [
-      'left: 12px;',
-      'right: 12px;',
-      'top: calc(50% - 30px);',
-      'max-height: min(42svh, 340px);',
-    ], polishCss)
+      'max-width: min(58cqw, 340px);',
+      'animation: winnerCardIn',
+    ], table2dCss)
+    expectRule('.mobile-board-header', [
+      'position: absolute;',
+      'bottom: calc(100% + clamp(6px, 2cqh, 14px));',
+    ], table2dCss)
     expect(pokerTableSource).toContain('className="table-hand-result-summary"')
     expect(pokerTableSource).toContain("winnerDisplays.length > 1 ? 'Split pot' : 'Hand winner'")
     expect(pokerTableSource).not.toContain('className="table-center-winner-announcement"')
@@ -244,10 +249,14 @@ describe('room UI layering', () => {
       'transform: scale(1.62);',
       'drop-shadow(0 0 13px rgba(255, 220, 115, 0.72))',
     ], polishCss)
-    expectRule('.mobile-winner-chip-trails', [
-      'z-index: calc(var(--room-layer-winner) - 1);',
+    expectRule("[data-layout='2d'] .mobile-winner-chip-trails", [
+      'position: absolute;',
+      'inset: 0;',
       'border-radius: 0;',
-    ], polishCss)
+    ], table2dCss)
+    expectRule("[data-layout='2d'] .mobile-winner-chip-trails .table-center-winner-chip-trail", [
+      'animation: mobileChipPayout 1100ms',
+    ], table2dCss)
   })
 
   it('enlarges showdown cards at their existing seats instead of opening a new screen', () => {
@@ -265,10 +274,14 @@ describe('room UI layering', () => {
       'width: 128px;',
       'z-index: 30;',
     ], polishCss)
-    expectRule(".table-scene[data-showdown='true'] .mobile-edge-seat-cards.is-revealed", [
-      'height: 50px;',
-      'z-index: 18;',
-    ], polishCss)
+    // 2D table: shown hands cover the avatar puck at a readable size.
+    expectRule('.mobile-edge-seat-cards.is-revealed', [
+      'z-index: 3;',
+      'transform: translate(-50%, -50%);',
+    ], table2dCss)
+    expectRule('.mobile-edge-seat-cards.is-revealed .card.card-xs', [
+      'width: calc(var(--avatar) * 0.78);',
+    ], table2dCss)
     expectRule(".desktop-3d-stage[data-phase='between_hands'] .cinematic-hole-cards.has-revealed-cards", [
       'top: -72px;',
       'left: 18px;',
@@ -282,12 +295,12 @@ describe('room UI layering', () => {
       'bottom: auto;',
       'margin-top: 16px;',
     ], polishCss)
-    expectRule(".table-scene[data-phase='between_hands'] .social-dock", [
-      'top: calc(76px + env(safe-area-inset-top));',
-      'right: 10px;',
+    // 2D table: the table-talk toggle sits in the top bar in every phase.
+    expectRule(".table-scene[data-layout='2d'] .social-dock", [
+      'position: fixed;',
+      'top: calc(env(safe-area-inset-top) + (var(--hud-h, 56px) - 44px) / 2);',
       'bottom: auto;',
-      'left: auto;',
-    ], polishCss)
+    ], table2dCss)
     expectRule('.show-cards-toggle', [
       'grid-template-columns: repeat(4, minmax(0, 1fr));',
       'min-width: 220px;',
@@ -385,77 +398,52 @@ describe('room UI layering', () => {
     ])
   })
 
-  it('uses a tableless mobile poker field with reference-style header, seats, board, and controls', () => {
-    expect(css).toContain('Mobile edge arena restructure')
-    expect(css).toContain('Mobile reference poker app layout')
-    expect(polishCss).toContain('Mobile tableless edge layout')
+  it('draws one responsive 2D felt table for every width under 1024px', () => {
+    // The old tableless edge layout and the 769-1023px tablet table are gone.
+    expect(css).not.toContain('Mobile edge arena restructure')
+    expect(polishCss).not.toContain('Mobile tableless edge layout')
+    expect(css).not.toMatch(/@media \(min-width: 769px\) and \(max-width: 1023px\)/)
+    expect(polishCss).not.toMatch(/@media \(min-width: 769px\) and \(max-width: 1023px\)/)
+    expect(pokerTableSource).toContain("useMediaQuery('(max-width: 1023px)')")
+    expect(pokerTableSource).toContain("data-layout={isMobileViewport ? '2d' : 'desktop'}")
 
-    expectRule('.mobile-poker-field', [
-      'position: relative;',
-      'height: 100%;',
-      'overflow: hidden;',
-    ])
-    expectRule('.mobile-board-zone .community-cards', [
-      'position: static;',
-      'transform: none;',
-    ])
-    expectRule('.mobile-seat-number', [
-      'border-radius: 999px;',
-      'background: rgba(255, 255, 255, 0.13);',
-    ])
+    expectRule(".table-scene[data-layout='2d']", [
+      'height: 100dvh;',
+      'padding: calc(var(--hud-h, 56px) + env(safe-area-inset-top)) 0 0;',
+      'flex-direction: column;',
+    ], table2dCss)
+    expectRule('.mobile-table-zone', [
+      'container: zone / size;',
+    ], table2dCss)
+    expectRule('.mobile-table', [
+      'border-radius: 9999px;',
+    ], table2dCss)
+    expectRule('.mobile-table::before', [
+      'border: 1.5px solid rgba(242, 199, 102, 0.55);',
+    ], table2dCss)
     expectRule('.mobile-edge-seat-position', [
       'position: absolute;',
-      'z-index: 2;',
-    ])
-    expectRule('.mobile-hero-lane .own-hand-area', [
-      'position: relative;',
-      'left: auto;',
-      'bottom: auto;',
-    ])
-    expectRule('.table-scene .mobile-hero-lane .own-hand-strength', [
-      'display: inline-flex;',
-      'bottom: calc(100% + 8px);',
-    ], polishCss)
-    expectRule('.mobile-edge-seat-timer', [
-      'position: absolute;',
-      'min-width: 32px;',
-    ], polishCss)
+      'left: clamp(var(--edge), calc(var(--sx) * 1%), calc(100% - var(--edge)));',
+    ], table2dCss)
+    expectRule('.mobile-seat-ring', [
+      'conic-gradient(var(--ring) calc(var(--turn-pct) * 1%)',
+    ], table2dCss)
     expectRule('.room-hud-mobile-topline', [
-      'grid-template-columns: 44px minmax(0, 1fr) 44px;',
-    ])
-    expectRule('.room-hud-mobile-game-pill', [
-      'border-radius: 999px;',
-      'justify-content: center;',
-    ])
+      'grid-template-columns: 44px 44px minmax(0, 1fr) 94px;',
+    ], table2dCss)
     expectRule('.mobile-betting-panel', [
-      'position: fixed;',
-      'bottom: 0;',
-      'border-radius: 18px 18px 0 0;',
-    ])
+      'border-radius: 22px 22px 0 0;',
+      'env(safe-area-inset-bottom)',
+    ], table2dCss)
     expectRule('.mobile-main-actions', [
-      'grid-template-columns: repeat(3, minmax(0, 1fr));',
-    ])
-    expectRule('.mobile-poker-field::before', [
-      'content: none;',
-      'display: none;',
-    ], polishCss)
-    expectRule('.mobile-poker-field::after', [
-      'content: none;',
-      'display: none;',
-    ], polishCss)
-    expectRule(".table-scene[data-phase='in_hand']:not([data-tray-open='true'])", [
-      'padding-bottom: calc(8px + env(safe-area-inset-bottom));',
-    ], polishCss)
-    expectRule('.mobile-edge-seat', [
-      'border: 0;',
-      'background: transparent;',
-      'box-shadow: none;',
-    ], polishCss)
-    expectRule('.mobile-seat-position-2', [
-      'left: env(safe-area-inset-left, 0px);',
-    ], polishCss)
-    expectRule('.mobile-seat-position-6', [
-      'right: env(safe-area-inset-right, 0px);',
-    ], polishCss)
+      'grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr) minmax(0, 1.1fr);',
+    ], table2dCss)
+    expectRule('.mobile-bet-quick', [
+      'min-height: 44px;',
+    ], table2dCss)
+    expectRule('.mobile-raise-step', [
+      'width: 44px;',
+      'height: 44px;',
+    ], table2dCss)
   })
 })
