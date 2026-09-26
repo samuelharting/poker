@@ -821,11 +821,11 @@
  */
 .mobile-seat-0 { --bx: 0px; --by: calc(var(--avatar) * -1.1); }
 .mobile-seat-1 { --bx: calc(var(--avatar) * 0.5 + 36px); --by: -2px; }
-.mobile-seat-2 { --bx: calc(var(--avatar) * 0.5 + 31px); --by: -2px; }
+.mobile-seat-2 { --bx: calc(var(--avatar) * 0.5 + 31px); --by: 8px; }
 .mobile-seat-3 { --bx: 12cqw; --by: calc(var(--avatar) * 0.5 + 62px); }
 .mobile-seat-4 { --bx: 0px; --by: calc(var(--avatar) * 0.5 + 62px); }
 .mobile-seat-5 { --bx: -12cqw; --by: calc(var(--avatar) * 0.5 + 62px); }
-.mobile-seat-6 { --bx: calc(var(--avatar) * -0.5 - 31px); --by: -2px; }
+.mobile-seat-6 { --bx: calc(var(--avatar) * -0.5 - 31px); --by: 8px; }
 .mobile-seat-7 { --bx: calc(var(--avatar) * -0.5 - 36px); --by: -2px; }
 
 .mobile-edge-seat {
