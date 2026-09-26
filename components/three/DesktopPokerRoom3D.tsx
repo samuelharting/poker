@@ -2762,8 +2762,11 @@ function createSceneRuntime(
       // Glance toward whoever is acting, like turning your head at the table.
       const actingPosition = TABLE_SEAT_POSITIONS[toVisualSeat(actingSeat)]
       actingFocus.set(actingPosition[0] * 0.85, 1.05, actingPosition[2] * 0.85)
-      targetLook.lerp(actingFocus, 0.38)
-      targetCamera.x += actingPosition[0] * 0.045
+      targetLook.lerp(actingFocus, 0.34)
+      // Neighbours sit almost beside the camera, so an unclamped glance swings
+      // the board out of frame; keep the felt centre in view.
+      targetLook.x = THREE.MathUtils.clamp(targetLook.x, -0.95, 0.95)
+      targetCamera.x += actingPosition[0] * 0.04
     }
     if (winnerSeat) {
       winnerSeat.root.getWorldPosition(winnerFocus)
