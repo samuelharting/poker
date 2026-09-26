@@ -786,6 +786,8 @@ function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
   seat.cardLocalZ = cardSpot[2]
   seat.anchors.cards = [0, cardSpot[1] + 0.02, cardSpot[2]]
   seat.cards.userData.restY = cardSpot[1]
+  // Dealer puck lies on the felt to the right of the dealer's hole cards.
+  seat.dealerButton.position.set(0.62, cardSpot[1] + 0.03 / scale, cardSpot[2] + 0.12)
   // Selection ring sits on the carpet under the chair.
   seat.ring.position.set(0, (-2 - position[1]) / scale + 0.03, 0.25)
   seat.cards.position.set(0, cardSpot[1], cardSpot[2])
@@ -900,14 +902,16 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     holeCards.push(card)
   }
 
-  const dealerMaterial = createStandardMaterial('#eee4c8', { roughness: 0.55, metalness: 0.12 })
-  materials.push(dealerMaterial)
+  const dealerMaterial = new THREE.MeshStandardMaterial({ color: '#fff8ea', roughness: 0.4, metalness: 0.05 })
+  const dealerFace = new THREE.MeshStandardMaterial({ map: getDealerPuckTexture(), roughness: 0.4 })
+  materials.push(dealerMaterial, dealerFace)
   const dealerButton = addMesh(
     root,
-    new THREE.CylinderGeometry(0.2, 0.2, 0.06, 32),
-    dealerMaterial,
-    [-0.88, 0.51, -1.05]
+    new THREE.CylinderGeometry(0.17, 0.17, 0.05, 36),
+    [dealerMaterial, dealerFace, dealerMaterial],
+    [0.62, 0.5, -1.4]
   )
+  dealerButton.name = 'dealer-puck'
   dealerButton.visible = player.isDealer
 
   const ringMaterial = createStandardMaterial('#d3b65f', {
@@ -1740,6 +1744,29 @@ function getFlipOffInput(seat: SeatRuntime, time: number, seats: ReadonlyMap<str
   flipTargetWorld.y += 1.4
   const local = seat.root.worldToLocal(flipTargetWorld.clone())
   return { elapsed, target: [local.x, local.y, local.z] as Vec3 }
+}
+
+let dealerPuckTexture: THREE.CanvasTexture | null = null
+
+/** Cream puck face with a bold "D" (shared across seats). */
+function getDealerPuckTexture() {
+  if (dealerPuckTexture) return dealerPuckTexture
+  dealerPuckTexture = createCanvasTexture(128, 128, context => {
+    const font = getComputedStyle(document.documentElement).getPropertyValue('--font-unbounded').trim()
+    context.fillStyle = '#fff8ea'
+    context.fillRect(0, 0, 128, 128)
+    context.strokeStyle = '#d9a441'
+    context.lineWidth = 8
+    context.beginPath()
+    context.arc(64, 64, 54, 0, Math.PI * 2)
+    context.stroke()
+    context.fillStyle = '#16191c'
+    context.textAlign = 'center'
+    context.textBaseline = 'middle'
+    context.font = `800 68px ${font ? `${font}, ` : ''}'Arial Black', sans-serif`
+    context.fillText('D', 64, 70)
+  })
+  return dealerPuckTexture
 }
 
 const drinkWristWorld = new THREE.Vector3()
