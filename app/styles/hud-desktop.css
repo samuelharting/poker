@@ -584,3 +584,13 @@
     height: 54px;
   }
 }
+
+/* Between hands the resting hand dims, but its show-cards control stays crisp. */
+.table-scene[data-phase='between_hands'] .own-hand-area {
+  opacity: 1;
+}
+
+.table-scene[data-phase='between_hands'] .own-hand-area .own-card-row,
+.table-scene[data-phase='between_hands'] .own-hand-area .own-hand-strength {
+  opacity: 0.58;
+}

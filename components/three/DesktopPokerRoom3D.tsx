@@ -2105,7 +2105,7 @@ function getTableHeat(runtime: SceneRuntime, time: number) {
  */
 function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width: number, height: number) {
   const scratch = new THREE.Vector3()
-  const placedPlates: Array<{ element: HTMLElement; x: number; y: number }> = []
+  const placedPlates: Array<{ element: HTMLElement; x: number; y: number; extra: number }> = []
   // The pot readout floats just above the pot chips on the felt.
   const tableScene = host.closest<HTMLElement>('.table-scene')
   if (tableScene) {
@@ -2147,7 +2147,11 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
     const y = THREE.MathUtils.clamp((-scratch.y * 0.5 + 0.5) * height, 150, height - 260)
     const pinned = x !== rawX
     element.classList.toggle('is-edge-pinned', pinned)
-    if (!element.classList.contains('is-local-player')) placedPlates.push({ element, x, y })
+    if (!element.classList.contains('is-local-player')) {
+      // Revealed hole cards sit above the plate and need clearance too.
+      const extra = element.querySelector('.has-revealed-cards') ? 62 : 0
+      placedPlates.push({ element, x, y, extra })
+    }
     element.style.setProperty('--seat-x', `${x.toFixed(1)}px`)
     element.style.setProperty('--seat-y', `${y.toFixed(1)}px`)
     element.style.setProperty('--seat-depth', `${(TABLE_SEAT_SCALES[toVisualSeat(seat.visualSeat)] ?? 1).toFixed(3)}`)
@@ -2173,7 +2177,7 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
         const upper = placedPlates[i]!
         const lower = placedPlates[j]!
         const overlapX = plateWidth - Math.abs(upper.x - lower.x)
-        const overlapY = plateHeight - Math.abs(lower.y - upper.y)
+        const overlapY = plateHeight + lower.extra - Math.abs(lower.y - upper.y)
         if (overlapX <= 0 || overlapY <= 0) continue
         if (overlapY < overlapX) lower.y += overlapY
         else lower.x += (lower.x >= upper.x ? 1 : -1) * overlapX
@@ -2195,8 +2199,9 @@ function animateEffects(runtime: SceneRuntime, time: number, delta: number, redu
   const winnerKey = winners.map(seat => seat.playerId).join(',')
   if (winnerKey && winnerKey !== effects.winnerKey && !reducedMotion) {
     for (const seat of winners) {
+      // The hero's burst rains over the table rather than into the camera.
       if (seat.root.visible) seat.root.getWorldPosition(effectPoint)
-      else effectPoint.set(0, 0, 3.6)
+      else effectPoint.set(0, -0.5, 0.6)
       effectPoint.y += 2.3
       burstConfetti(effects.confetti, effectPoint, 110)
     }
