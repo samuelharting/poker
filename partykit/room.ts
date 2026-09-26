@@ -62,6 +62,8 @@ interface TableSettings {
   rabbitHuntingEnabled: boolean
   sevenTwoRuleEnabled: boolean
   sevenTwoBountyPercent: number
+  /** Drinks and Lady Luck. Optional so rooms saved before it existed default to on. */
+  funModeEnabled?: boolean
 }
 
 interface PlayerProfileRecord {
@@ -127,6 +129,7 @@ const DEFAULT_SETTINGS: TableSettings = {
   rabbitHuntingEnabled: false,
   sevenTwoRuleEnabled: true,
   sevenTwoBountyPercent: 2,
+  funModeEnabled: true,
 }
 
 export const AUTO_FOLD_DELAY = DEFAULT_SETTINGS.actionTimerDuration
@@ -701,6 +704,17 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
+    if (msg.funModeEnabled !== undefined) {
+      // Cosmetic, so it applies immediately instead of waiting for the next hand.
+      this.setFunMode(msg.funModeEnabled)
+      const onlyFunMode = Object.keys(msg).every(key => key === 'type' || key === 'funModeEnabled')
+      if (onlyFunMode) {
+        this.sendActionResult(conn, msg.funModeEnabled ? 'Fun mode on: drinks and Lady Luck are back.' : 'Fun mode off: no drinks or Lady Luck.')
+        this.broadcastState()
+        return
+      }
+    }
+
     const settingsPatch: Partial<TableSettings> = {}
     if (msg.smallBlind !== undefined) settingsPatch.smallBlind = msg.smallBlind
     if (msg.bigBlind !== undefined) settingsPatch.bigBlind = msg.bigBlind
@@ -788,6 +802,20 @@ export default class PokerRoom implements PartyServer {
       const message = err instanceof Error ? err.message : 'Run it twice vote failed'
       this.sendActionFailed(conn, message)
     }
+  }
+
+  private isFunModeEnabled(): boolean {
+    return this.data.tableSettings.funModeEnabled !== false
+  }
+
+  /** Turning fun mode off sobers everyone up and sends Lady Luck home. */
+  private setFunMode(enabled: boolean) {
+    this.data.tableSettings.funModeEnabled = enabled
+    if (enabled) return
+    for (const timer of Array.from(this.drinkWaterTimers.values())) clearTimeout(timer)
+    this.drinkWaterTimers.clear()
+    this.drinkLedger = {}
+    this.data.ladyLuck = createLadyLuckTracker()
   }
 
   private applyTableSettings(settings: Partial<TableSettings>) {
@@ -1295,6 +1323,11 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
+    if (!this.isFunModeEnabled()) {
+      this.sendActionFailed(conn, 'Fun mode is off at this table')
+      return
+    }
+
     const entry = this.drinkLedger[playerId] ??= createDrinkLedgerEntry()
     const state = this.data.gameState
     const now = Date.now()
@@ -1751,7 +1784,10 @@ export default class PokerRoom implements PartyServer {
         autoStartDelay: this.data.tableSettings.autoStartDelay,
         pendingTableSettings,
         lobbyPlayers: this.buildLobbyPlayers(),
-        companion: getVisibleLadyLuck(this.data.ladyLuck, this.getSeatedPlayerIds()),
+        funModeEnabled: this.isFunModeEnabled(),
+        companion: this.isFunModeEnabled()
+          ? getVisibleLadyLuck(this.data.ladyLuck, this.getSeatedPlayerIds())
+          : null,
       },
     }
   }
@@ -1992,7 +2028,7 @@ export default class PokerRoom implements PartyServer {
   /** Cosmetic only: feeds the finished hand to the Lady Luck companion rules. */
   private recordLadyLuckOutcome() {
     const state = this.data.gameState
-    if (!state.winners?.length) {
+    if (!state.winners?.length || !this.isFunModeEnabled()) {
       return
     }
 

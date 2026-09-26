@@ -93,6 +93,7 @@ interface PokerTableProps {
     rabbitHuntingEnabled?: boolean
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
+    funModeEnabled?: boolean
   }) => void
   onRemovePlayer: (targetId: string) => void
   onAdjustPlayerStack: (targetId: string, amount: number) => void
@@ -1915,7 +1916,7 @@ export function PokerTable({
                   isWinner={betweenHands && showWinnerHighlights && myWinnerAmount > 0}
                   status={mobileHeroStatus}
                 />
-                <DrinkControls variant="mobile" />
+                {state.funModeEnabled !== false && <DrinkControls variant="mobile" />}
                 <CompanionBadge companion={state.companion} playerId={visibleOwnPlayer.id} placement="hero" canMute />
 
                 <OwnHand
@@ -3052,6 +3053,7 @@ export function SettingsModal({
     rabbitHuntingEnabled?: boolean
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
+    funModeEnabled?: boolean
   }) => void
   onRemovePlayer: (targetId: string) => void
   onAdjustPlayerStack: (targetId: string, amount: number) => void
@@ -3460,6 +3462,32 @@ export function SettingsModal({
 
                 <div className="settings-section">
                   <div className="settings-section-title">Rules</div>
+                  <div className="settings-rule-row">
+                    <div>
+                      <div className="settings-rule-name">Fun mode</div>
+                      <div className="settings-rule-copy">Beer, water and Lady Luck. Turning it off sobers everyone up right away.</div>
+                    </div>
+                    <div className="settings-toggle-row">
+                      <button
+                        type="button"
+                        className={`settings-pill ${state.funModeEnabled !== false ? 'is-active' : ''}`}
+                        aria-pressed={state.funModeEnabled !== false}
+                        disabled={!isConnected}
+                        onClick={() => onUpdateSettings({ funModeEnabled: true })}
+                      >
+                        On
+                      </button>
+                      <button
+                        type="button"
+                        className={`settings-pill ${state.funModeEnabled === false ? 'is-active' : ''}`}
+                        aria-pressed={state.funModeEnabled === false}
+                        disabled={!isConnected}
+                        onClick={() => onUpdateSettings({ funModeEnabled: false })}
+                      >
+                        Off
+                      </button>
+                    </div>
+                  </div>
                   <div className="settings-rule-row">
                     <div>
                       <div className="settings-rule-name">Rabbit hunting</div>

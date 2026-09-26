@@ -64,6 +64,7 @@ export type C2SMessage =
     rabbitHuntingEnabled?: boolean
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
+    funModeEnabled?: boolean
   }
   | { type: 'leave_room' }
   | { type: 'rebuy'; amount: number }
@@ -246,6 +247,9 @@ export function parseC2S(raw: string): C2SMessage | null {
         }
         if (typeof parsed.sevenTwoBountyPercent === 'number') {
           next.sevenTwoBountyPercent = Math.max(0, Number(parsed.sevenTwoBountyPercent))
+        }
+        if (typeof parsed.funModeEnabled === 'boolean') {
+          next.funModeEnabled = parsed.funModeEnabled
         }
         return next
       }
@@ -483,5 +487,6 @@ export interface RoomStorageState {
     rabbitHuntingEnabled?: boolean
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
+    funModeEnabled?: boolean
   }
 }

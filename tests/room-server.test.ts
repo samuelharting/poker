@@ -2264,3 +2264,45 @@ describe('PokerRoom snapshots include bounty metadata', () => {
     expect(snapshot?.state.bounty?.recipientPlayerIds).toEqual([winner.id])
   })
 })
+
+describe('PokerRoom fun mode', () => {
+  it('turns drinks and Lady Luck off immediately and sobers everyone up', () => {
+    const { room, server } = createHarness()
+
+    const host = joinPlayer(server, room, 'host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+    const guest = joinPlayer(server, room, 'guest', 'Bob')
+    seatPlayer(server, guest.connection, 1)
+
+    expect(lastMessage(host.connection, 'room_snapshot')?.state.funModeEnabled).toBe(true)
+
+    send(server, guest.connection, { type: 'order_drink', kind: 'beer' })
+    const drinker = lastMessage(host.connection, 'room_snapshot')?.state.players.find(player => player.nickname === 'Bob')
+    expect(drinker?.drinks?.beers).toBe(1)
+
+    send(server, host.connection, { type: 'update_table_settings', funModeEnabled: false })
+    expect(lastMessage(host.connection, 'action_result')?.message).toBe('Fun mode off: no drinks or Lady Luck.')
+    const off = lastMessage(guest.connection, 'room_snapshot')?.state
+    expect(off?.funModeEnabled).toBe(false)
+    expect(off?.companion).toBeNull()
+    expect(off?.pendingTableSettings).toBeUndefined()
+    expect(off?.players.find(player => player.nickname === 'Bob')?.drinks?.beers).toBe(0)
+
+    send(server, guest.connection, { type: 'order_drink', kind: 'beer' })
+    expect(lastMessage(guest.connection, 'action_failed')?.message).toBe('Fun mode is off at this table')
+
+    send(server, host.connection, { type: 'update_table_settings', funModeEnabled: true })
+    expect(lastMessage(guest.connection, 'room_snapshot')?.state.funModeEnabled).toBe(true)
+  })
+
+  it('only lets the table creator toggle fun mode', () => {
+    const { room, server } = createHarness()
+    const host = joinPlayer(server, room, 'host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+    const guest = joinPlayer(server, room, 'guest', 'Bob')
+    seatPlayer(server, guest.connection, 1)
+
+    send(server, guest.connection, { type: 'update_table_settings', funModeEnabled: false })
+    expect(lastMessage(host.connection, 'room_snapshot')?.state.funModeEnabled).toBe(true)
+  })
+})

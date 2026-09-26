@@ -256,6 +256,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     rabbitHuntingEnabled?: boolean
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
+    funModeEnabled?: boolean
   }) => {
     if (typeof settings.startingStack === 'number' && Number.isFinite(settings.startingStack)) {
       rememberStartingStack(settings.startingStack)

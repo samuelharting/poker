@@ -176,6 +176,8 @@ export interface TableState {
   lobbyPlayers: LobbyPlayer[]
   winners?: HandWinner[]
   bounty?: BountyMetadata
+  /** Drinks and Lady Luck; absent means on. */
+  funModeEnabled?: boolean
   /** "Lady Luck" win-streak companion; null/absent when nobody is hot. */
   companion?: LadyLuckCompanionState | null
 }
