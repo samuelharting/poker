@@ -93,6 +93,10 @@ export function stylizeAvatar(model: THREE.Object3D, previous: readonly THREE.Ma
 
   const outlineMaterials: THREE.Material[] = []
   for (const mesh of skinnedMeshes) {
+    // Legs/feet hide under the table skirt and tiny painted parts don't need
+    // their own ink line; skip them to save draw calls.
+    const vertexCount = mesh.geometry.getAttribute('position').count
+    if (/legs|feet|foot/i.test(mesh.name) || vertexCount < 120) continue
     mesh.geometry.computeBoundingSphere()
     const radius = mesh.geometry.boundingSphere?.radius ?? 1
     const outlineMaterial = createOutlineMaterial(radius * OUTLINE_WIDTH_RATIO)

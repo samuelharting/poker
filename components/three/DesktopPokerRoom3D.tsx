@@ -267,6 +267,7 @@ interface SceneRuntime {
   /** Scene time when community cards last landed. */
   boardRevealAt: number
   anyWinner: boolean
+  chipInstancer: ChipInstancer
   /** Development-only camera override used by scripts/snap-3d.mjs close-ups. */
   debugCamera: { position: Vec3; lookAt: Vec3; fov?: number } | null
   feltMaterial: THREE.MeshStandardMaterial
@@ -571,42 +572,50 @@ function createBackBar(scene: THREE.Scene, brassMaterial: THREE.MeshStandardMate
   // Muted amber, green and smoky glass so the bar reads as a bar, not a toy shelf.
   const bottleColors = ['#8a4a1c', '#3e5b2a', '#b07a2e', '#2f4a44', '#6b2a2a', '#c9a45a', '#4b3a22']
   const random = createSeededRandom(0x0b0771e5)
+  // Every bottle is merged into one mesh (vertex-coloured) so the whole shelf is a single draw.
+  const bottleGeometries: THREE.BufferGeometry[] = []
+  const tint = new THREE.Color()
   for (const [rowIndex, shelfY] of [-0.62, 0.22].entries()) {
     for (let index = 0; index < 11; index += 1) {
       const x = -2.4 + index * 0.48 + (random() - 0.5) * 0.1
       const height = 0.3 + random() * 0.34
       const shoulder = 0.45 + random() * 0.3
       const width = 0.07 + random() * 0.06
-      const color = bottleColors[(index + rowIndex * 3) % bottleColors.length]!
-      const bottleMaterial = new THREE.MeshStandardMaterial({
-        color,
-        emissive: color,
-        emissiveIntensity: 0.18,
-        roughness: 0.08,
-        metalness: 0.15,
-        transparent: true,
-        opacity: 0.88,
-      })
-      const bottle = addMesh(
-        bar,
-        new THREE.LatheGeometry([
-          new THREE.Vector2(0, 0),
-          new THREE.Vector2(width, 0),
-          new THREE.Vector2(width * 1.08, height * shoulder),
-          new THREE.Vector2(width * 0.42, height * (shoulder + 0.16)),
-          new THREE.Vector2(width * 0.36, height),
-          new THREE.Vector2(0, height),
-        ], 14),
-        bottleMaterial,
-        [x, shelfY + 0.035, 0.5]
-      )
-      bottle.castShadow = false
+      const geometry = new THREE.LatheGeometry([
+        new THREE.Vector2(0, 0),
+        new THREE.Vector2(width, 0),
+        new THREE.Vector2(width * 1.08, height * shoulder),
+        new THREE.Vector2(width * 0.42, height * (shoulder + 0.16)),
+        new THREE.Vector2(width * 0.36, height),
+        new THREE.Vector2(0, height),
+      ], 12)
+      geometry.translate(x, shelfY + 0.035, 0.5)
+      tint.set(bottleColors[(index + rowIndex * 3) % bottleColors.length]!)
+      const colors = new Float32Array(geometry.getAttribute('position').count * 3)
+      for (let vertex = 0; vertex < colors.length; vertex += 3) {
+        colors[vertex] = tint.r
+        colors[vertex + 1] = tint.g
+        colors[vertex + 2] = tint.b
+      }
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+      bottleGeometries.push(geometry)
     }
   }
-
-  const shelfGlow = new THREE.PointLight('#5fe0c0', 5, 5, 2)
-  shelfGlow.position.set(0, 0.2, 1.2)
-  bar.add(shelfGlow)
+  const mergedBottles = mergeGeometries(bottleGeometries, false)
+  bottleGeometries.forEach(geometry => geometry.dispose())
+  if (mergedBottles) {
+    const bottles = addMesh(bar, mergedBottles, new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      emissive: '#2a1a0a',
+      emissiveIntensity: 0.25,
+      roughness: 0.08,
+      metalness: 0.15,
+      transparent: true,
+      opacity: 0.9,
+    }))
+    bottles.name = 'back-bar-bottles'
+    bottles.castShadow = false
+  }
 }
 
 function createWallSconce(scene: THREE.Scene, x: number, brassMaterial: THREE.MeshStandardMaterial) {
@@ -631,9 +640,8 @@ function createWallSconce(scene: THREE.Scene, x: number, brassMaterial: THREE.Me
   )
   shade.castShadow = false
 
-  const light = new THREE.PointLight('#ffb865', 3.6, 5, 2)
-  light.position.set(0, 0.2, 0.9)
-  sconce.add(light)
+  // No real light here: the emissive shade reads as lit, and every extra
+  // dynamic light costs every pixel in the room.
 }
 
 function createPendantLamp(scene: THREE.Scene, x: number, z: number, brassMaterial: THREE.MeshStandardMaterial) {
@@ -1394,9 +1402,17 @@ function getChipGeometry() {
   return sharedChipGeometry
 }
 
-function createChipSet(maxChips: number) {
-  const group = new THREE.Group()
-  const materials = CHIP_DENOMINATIONS.flatMap((_, index) => [
+/**
+ * Chips are animated as lightweight proxy meshes on a hidden layer, and drawn
+ * each frame by one InstancedMesh per denomination (≈10 draw calls for every
+ * chip on the table instead of one draw per chip).
+ */
+const CHIP_PROXY_LAYER = 3
+const chipProxies = new Set<THREE.Mesh>()
+let sharedChipMaterials: THREE.MeshStandardMaterial[] | null = null
+
+function getSharedChipMaterials() {
+  sharedChipMaterials ??= CHIP_DENOMINATIONS.flatMap((_, index) => [
     new THREE.MeshStandardMaterial({
       map: getChipEdgeTexture(index),
       roughness: 0.38,
@@ -1410,6 +1426,68 @@ function createChipSet(maxChips: number) {
       envMapIntensity: 0.7,
     }),
   ])
+  sharedChipMaterials.forEach(material => { material.userData.shared = true })
+  return sharedChipMaterials
+}
+
+interface ChipInstancer {
+  meshes: THREE.InstancedMesh[]
+}
+
+const CHIP_INSTANCE_CAPACITY = 520
+
+function createChipInstancer(scene: THREE.Scene): ChipInstancer {
+  const materials = getSharedChipMaterials()
+  const meshes = CHIP_DENOMINATIONS.map((_, index) => {
+    const edge = materials[index * 2]!
+    const face = materials[index * 2 + 1]!
+    const mesh = new THREE.InstancedMesh(getChipGeometry(), [edge, face, face], CHIP_INSTANCE_CAPACITY)
+    mesh.name = `chip-instances-${index}`
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    mesh.frustumCulled = false
+    mesh.count = 0
+    scene.add(mesh)
+    return mesh
+  })
+  return { meshes }
+}
+
+function isChipShown(chip: THREE.Object3D, scene: THREE.Scene) {
+  let node: THREE.Object3D | null = chip
+  while (node) {
+    if (!node.visible) return false
+    if (node === scene) return true
+    node = node.parent
+  }
+  return false
+}
+
+/** Copies every visible chip proxy into its denomination's instanced mesh. */
+function updateChipInstances(instancer: ChipInstancer, scene: THREE.Scene) {
+  const counts = instancer.meshes.map(() => 0)
+  for (const chip of chipProxies) {
+    if (!chip.parent) {
+      chipProxies.delete(chip)
+      continue
+    }
+    if (!isChipShown(chip, scene)) continue
+    const denomination = Number(chip.userData.denomination ?? 0)
+    const mesh = instancer.meshes[denomination]
+    if (!mesh || counts[denomination]! >= CHIP_INSTANCE_CAPACITY) continue
+    chip.updateWorldMatrix(true, false)
+    mesh.setMatrixAt(counts[denomination]!, chip.matrixWorld)
+    counts[denomination]! += 1
+  }
+  instancer.meshes.forEach((mesh, index) => {
+    mesh.count = counts[index]!
+    mesh.instanceMatrix.needsUpdate = true
+  })
+}
+
+function createChipSet(maxChips: number) {
+  const group = new THREE.Group()
+  const materials = getSharedChipMaterials()
   const chipMeshes: THREE.Mesh[] = []
   const chipBasePositions: THREE.Vector3[] = []
   const chipBodyGeometry = getChipGeometry()
@@ -1436,8 +1514,13 @@ function createChipSet(maxChips: number) {
     )
     chip.rotation.y = random() * Math.PI * 2
     chip.userData.baseYaw = chip.rotation.y
+    chip.userData.denomination = styleIndex
     chip.name = `casino-chip-${index}`
     chip.visible = false
+    // Proxy only: the instancer draws it, so hide it from the camera and shadows.
+    chip.layers.set(CHIP_PROXY_LAYER)
+    chip.castShadow = false
+    chipProxies.add(chip)
     chipMeshes.push(chip)
     chipBasePositions.push(chip.position.clone())
   }
@@ -2195,6 +2278,8 @@ function disposeObject(root: THREE.Object3D) {
 
   geometries.forEach(geometry => geometry.dispose())
   materialsToDispose.forEach(material => {
+    // Shared (instanced) materials outlive any one seat or wager group.
+    if (material.userData.shared) return
     for (const value of Object.values(material)) {
       if (value instanceof THREE.Texture) value.dispose()
     }
@@ -2415,6 +2500,9 @@ function createSceneRuntime(
   renderer.toneMappingExposure = 1.0
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  // Shadows refresh every other frame (see animate) to halve their cost.
+  renderer.shadowMap.autoUpdate = false
+  renderer.shadowMap.needsUpdate = true
 
   const scene = new THREE.Scene()
   scene.background = new THREE.Color('#081413')
@@ -2480,6 +2568,7 @@ function createSceneRuntime(
     effects,
     boardRevealAt: Number.NEGATIVE_INFINITY,
     anyWinner: false,
+    chipInstancer: createChipInstancer(scene),
     debugCamera: null as SceneRuntime['debugCamera'],
     feltMaterial,
     startTime: performance.now(),
@@ -2523,6 +2612,7 @@ function createSceneRuntime(
   resize()
 
   let lastTime = (performance.now() - runtime.startTime) / 1000
+  let frameIndex = 0
   const targetCamera = new THREE.Vector3()
   const targetLook = new THREE.Vector3()
   const winnerFocus = new THREE.Vector3()
@@ -2536,11 +2626,15 @@ function createSceneRuntime(
     lastTime = time
     const reducedMotion = runtime.reducedMotion
 
+    frameIndex += 1
+    if (frameIndex % 2 === 0) renderer.shadowMap.needsUpdate = true
     if (runtime.postFx && runtime.frameBudget.push(delta)) {
       // Sustained slow frames: drop post effects and keep the table responsive.
       runtime.postFx.dispose()
       runtime.postFx = null
       host.dataset.postFx = 'off'
+      renderer.setPixelRatio(1)
+      renderer.setSize(viewportWidth, viewportHeight, false)
     }
 
     const actingSeat = viewRef.current.actingVisualSeat
@@ -2629,6 +2723,7 @@ function createSceneRuntime(
 
     updateLadyLuck(runtime, viewRef.current, host, time, delta, reducedMotion, viewportWidth, viewportHeight)
     projectSeatOverlays(runtime, host, viewportWidth, viewportHeight)
+    updateChipInstances(runtime.chipInstancer, scene)
 
     if (runtime.postFx) {
       runtime.postFx.bloom.strength = 0.22 + (winnerSeat ? 0.12 : 0) + allInImpact.strength * 0.12

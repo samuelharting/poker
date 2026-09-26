@@ -66,6 +66,40 @@ console.log('overlay vars', await page.evaluate(() => ({
   potX: document.querySelector('.table-scene')?.style.getPropertyValue('--pot-x'),
   seatX: document.querySelector('.cinematic-seat')?.style.getPropertyValue('--seat-x'),
   postFx: document.querySelector('.desktop-3d-stage')?.dataset.postFx ?? 'on',
+  drawCalls: document.querySelector('.desktop-3d-stage')?.__pokerRuntime?.renderer.info.render.calls,
+  triangles: document.querySelector('.desktop-3d-stage')?.__pokerRuntime?.renderer.info.render.triangles,
+})))
+if (process.env.MESH_BREAKDOWN) console.log('meshBreakdown', await page.evaluate(() => {
+  const runtime = document.querySelector('.desktop-3d-stage')?.__pokerRuntime
+  const counts = {}
+  runtime.scene.traverseVisible(object => {
+    if (!object.isMesh && !object.isPoints) return
+    if (object.layers.mask === 8) return
+    let label = object.name || object.type
+    let node = object.parent
+    while (node && !/^(player-|stylized|board|emerald|art-deco|pendant|framed|chip-instances|neon|light-cone|confetti)/.test(node.name || '')) node = node.parent
+    const key = node ? node.name.replace(/-[a-z0-9_]{6,}$/i, '') : 'root'
+    counts[key] = (counts[key] ?? 0) + (Array.isArray(object.material) ? object.material.length : 1)
+  })
+  return counts
+}))
+if (process.env.MESH_BREAKDOWN) console.log('seatBreakdown', await page.evaluate(() => {
+  const runtime = document.querySelector('.desktop-3d-stage')?.__pokerRuntime
+  const seat = [...runtime.seats.values()].find(s => s.root.visible && s.avatar)
+  const counts = {}
+  seat.root.traverseVisible(object => {
+    if (!object.isMesh) return
+    if (object.layers.mask === 8) return
+    const key = (object.name || object.type).replace(/[-_]?[0-9]+$/, '')
+    counts[key] = (counts[key] ?? 0) + (Array.isArray(object.material) ? object.material.length : 1)
+  })
+  return counts
+}))
+console.log('fps', await page.evaluate(() => new Promise(resolve => {
+  let frames = 0
+  const start = performance.now()
+  const tick = () => { frames += 1; if (performance.now() - start > 3000) resolve(Math.round(frames / 3)); else requestAnimationFrame(tick) }
+  requestAnimationFrame(tick)
 })))
 
 if (process.argv.includes('--sequence')) {

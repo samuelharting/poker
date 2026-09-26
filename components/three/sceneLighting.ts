@@ -50,7 +50,7 @@ export function createStageLights(scene: THREE.Scene): StageLights {
   key.position.set(0.6, 11, 2.4)
   key.target.position.set(0, 0.2, -0.2)
   key.castShadow = true
-  key.shadow.mapSize.set(2048, 2048)
+  key.shadow.mapSize.set(1024, 1024)
   key.shadow.bias = -0.00012
   key.shadow.normalBias = 0.03
   key.shadow.radius = 6

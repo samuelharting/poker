@@ -112,7 +112,7 @@ export function createCardMesh(width: number): CardMesh {
   const backMesh = new THREE.Mesh(geometry.back, backMaterial)
   backMesh.receiveShadow = true
   const edgeMesh = new THREE.Mesh(geometry.edge, edgeMaterial())
-  edgeMesh.castShadow = true
+  edgeMesh.castShadow = false
   edgeMesh.receiveShadow = true
   group.add(edgeMesh, faceMesh, backMesh)
   group.scale.setScalar(width)

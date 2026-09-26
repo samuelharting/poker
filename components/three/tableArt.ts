@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import {
   TABLE_FELT_SEMI_AXIS_X,
   TABLE_FELT_SEMI_AXIS_Z,
@@ -329,6 +330,33 @@ export function createStylizedChair(
   foot.position.set(0, -0.86, 0.2)
   foot.receiveShadow = true
   group.add(foot)
+
+  // Merge the parts into one mesh with two material groups (2 draws instead of 5).
+  const byMaterial = new Map<THREE.Material, THREE.BufferGeometry[]>()
+  group.updateMatrixWorld(true)
+  for (const child of [...group.children]) {
+    const mesh = child as THREE.Mesh
+    if (!mesh.isMesh) continue
+    const geometry = mesh.geometry.clone().applyMatrix4(mesh.matrix)
+    const nonIndexed = geometry.index ? geometry.toNonIndexed() : geometry
+    for (const name of Object.keys(nonIndexed.attributes)) {
+      if (name !== 'position' && name !== 'normal' && name !== 'uv') nonIndexed.deleteAttribute(name)
+    }
+    const list = byMaterial.get(mesh.material as THREE.Material) ?? []
+    list.push(nonIndexed)
+    byMaterial.set(mesh.material as THREE.Material, list)
+    mesh.geometry.dispose()
+    group.remove(mesh)
+  }
+  const materials = [...byMaterial.keys()]
+  const merged = mergeGeometries(materials.map(material => mergeGeometries(byMaterial.get(material)!, false)!), true)
+  if (merged) {
+    const chairMesh = new THREE.Mesh(merged, materials)
+    chairMesh.castShadow = true
+    chairMesh.receiveShadow = true
+    chairMesh.name = 'club-chair-mesh'
+    group.add(chairMesh)
+  }
 
   return { group, materials: [upholsteryMaterial, woodMaterial] }
 }

@@ -121,7 +121,6 @@ export function createAvatarFace(
   }
   const sclera = toon('#fbf8f2')
   const iris = basic('#1d1410')
-  const glint = basic('#ffffff')
   const lid = toon(skinColor ?? '#d9a37c')
   const browMaterial = toon('#2a1a12')
 
@@ -151,20 +150,15 @@ export function createAvatarFace(
     const pupil = new THREE.Group()
     const irisMesh = new THREE.Mesh(pupilDisc, iris)
     irisMesh.scale.setScalar(0.46)
-    const glintMesh = new THREE.Mesh(pupilDisc, glint)
-    glintMesh.scale.setScalar(0.14)
-    glintMesh.position.set(0.14, 0.18, 0.01)
-    pupil.add(irisMesh, glintMesh)
+    pupil.add(irisMesh)
     pupil.position.z = 0.63
     root.add(pupil)
 
     const upperLid = new THREE.Mesh(lidGeometry, lid)
     upperLid.scale.set(0.94, 1.12, 0.7)
     root.add(upperLid)
-    const lowerLid = new THREE.Mesh(lidGeometry, lid)
-    lowerLid.scale.set(0.94, 1.12, 0.7)
-    lowerLid.rotation.x = Math.PI
-    root.add(lowerLid)
+    // A single upper lid handles blinks, squints and droops (one draw per eye).
+    const lowerLid = upperLid
 
     headBone.add(root)
     eyes.push({ root, ball, pupil, upperLid, lowerLid, radius, side })
@@ -266,7 +260,6 @@ export function updateAvatarFace(face: AvatarFaceRig, input: FaceInput) {
     // Positive X swings the upper cap's pole forward over the pupil (closed);
     // negative tucks it up and back (open). The lower cap rises on a squint.
     eye.upperLid.rotation.x = THREE.MathUtils.lerp(1.45, -0.95, Math.min(1.1, open))
-    eye.lowerLid.rotation.x = Math.PI + THREE.MathUtils.lerp(0.95, -0.35, state.squint)
     eye.ball.scale.y = 1.1 * (0.92 + Math.min(0.2, Math.max(0, state.open - 1)))
     eye.pupil.position.x = state.lookX * 0.28
     eye.pupil.position.y = -state.lookY * 0.22
