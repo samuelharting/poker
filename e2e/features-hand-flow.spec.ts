@@ -247,7 +247,18 @@ for (const viewport of ['desktop', 'mobile'] as ViewportName[]) {
           ? guest.page.locator(`[data-seat-player="${hostId}"] .cinematic-seat-reaction`)
           : guest.page.locator('.mobile-edge-social')
         await expect(visible(hostSeatOnGuest).first()).toContainText('\u{1F44D}')
+        // Every quick reaction in the dock sends its emoji.
+        const quickReactions: Array<[string, string]> = [
+          ['wave', '\u{1F44B}'], ['laugh', '\u{1F602}'], ['cool', '\u{1F60E}'], ['skull', '\u{1F480}'],
+          ['cry', '\u{1F62D}'], ['angry', '\u{1F621}'], ['middle finger', '\u{1F595}'], ['thumbs up', '\u{1F44D}'],
+        ]
+        for (const [label, glyph] of quickReactions) {
+          await host.page.getByRole('button', { name: `Send ${label} reaction` }).click()
+          await expect.poll(() => (guest.tap.social?.active ?? []).find((entry: { playerId: string }) => entry.playerId === hostId)?.emote, { message: label }).toBe(glyph)
+        }
         await guest.page.getByRole('button', { name: 'Close table chat' }).first().click()
+        // Close our own chat panel too: an open panel intentionally covers the table.
+        await host.page.getByRole('button', { name: 'Close table chat' }).first().click()
 
         // Targeted quick emote.
         let panel = await openTargetPanel(host, guest.name)

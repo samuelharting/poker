@@ -14,17 +14,17 @@ test('targeted emoji panel owns focus and restores it to the invoking player', a
     await page.goto(appUrl, { waitUntil: 'domcontentloaded' })
     await page.waitForLoadState('networkidle')
 
-    await page.getByLabel('Your nickname').fill('FocusHost')
-    await page.getByLabel('Email').fill('focus@example.com')
-    await page.getByLabel('Venmo username').fill('@focushost')
-    await page.getByRole('button', { name: 'Create Table' }).click()
-
-    await expect(page).toHaveURL(/\/room\/[A-HJ-NP-Z2-9]{6}$/, { timeout: 60000 })
-    const addBot = page.getByRole('button', { name: 'Add bot' }).first()
+    // Nickname-only sign-in. Retry until hydration keeps the typed value.
+    await expect(async () => {
+      await page.getByLabel('Your nickname').fill('FocusHost')
+      await page.getByRole('button', { name: 'Create Table' }).click()
+      await expect(page).toHaveURL(/\/room\/[A-HJ-NP-Z2-9]{6}$/, { timeout: 8000 })
+    }).toPass({ timeout: 60000 })
+    const addBot = page.getByRole('button', { name: 'Add bot' }).filter({ visible: true }).first()
     await expect(addBot).toBeEnabled({ timeout: 60000 })
     await addBot.click()
 
-    const playerTrigger = page.getByRole('button', { name: /Send a reaction to Bot/i }).first()
+    const playerTrigger = page.getByRole('button', { name: /Send a reaction to Bot/i }).filter({ visible: true }).first()
     await expect(playerTrigger).toBeVisible({ timeout: 60000 })
     await playerTrigger.focus()
     await playerTrigger.press('Enter')
@@ -32,7 +32,7 @@ test('targeted emoji panel owns focus and restores it to the invoking player', a
     const closeButton = page.getByRole('button', { name: 'Close target emote panel' })
     await expect(closeButton).toBeFocused()
 
-    await page.getByRole('button', { name: 'Search all emojis' }).click()
+    await page.getByRole('button', { name: 'More emojis' }).click()
     const emojiSearch = page.getByPlaceholder(/Search emojis for Bot/i)
     await expect(emojiSearch).toBeFocused({ timeout: 30000 })
     await page.keyboard.press('Escape')
