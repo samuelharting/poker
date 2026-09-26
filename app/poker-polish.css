@@ -207,16 +207,6 @@
     transform: none;
   }
 
-  .table-scene[data-phase='between_hands'] .table-center-winner-announcement {
-    position: relative !important;
-    inset: auto !important;
-    width: 100%;
-    height: auto !important;
-    min-height: 92px;
-    align-self: start;
-    transform: none !important;
-  }
-
   .community-cards {
     gap: 5px;
   }
@@ -264,7 +254,6 @@
     min-height: 52px;
   }
 
-  .table-side-panels:not(.chat-dock),
   .mobile-between-hands-dock {
     left: auto;
     right: 14px;
@@ -1107,195 +1096,15 @@ input:focus-visible {
 
 /* Animated WebGL desktop table ----------------------------------------- */
 
-.cinematic-room,
-.cinematic-table-model,
 .cinematic-seats {
   display: none;
 }
 
 @media (min-width: 1024px) {
-  .cinematic-room,
-  .cinematic-table-model,
   .cinematic-seats {
     display: block;
     position: absolute;
     inset: 0;
-  }
-
-  .cinematic-room {
-    z-index: 0;
-    overflow: hidden;
-    background:
-      linear-gradient(90deg, rgba(215, 189, 117, 0.035) 1px, transparent 1px),
-      radial-gradient(ellipse at 50% 33%, rgba(31, 100, 79, 0.22), transparent 42%),
-      linear-gradient(180deg, #0b1815 0%, #07110f 58%, #040908 100%);
-    background-size: 150px 100%, auto, auto;
-  }
-
-  .cinematic-room-halo {
-    position: absolute;
-    left: 50%;
-    top: 45%;
-    width: min(82vw, 1180px);
-    height: min(75vh, 700px);
-    border-radius: 50%;
-    background: radial-gradient(ellipse, rgba(39, 135, 101, 0.18), transparent 68%);
-    filter: blur(20px);
-    transform: translate(-50%, -50%);
-  }
-
-  .cinematic-room-mark {
-    position: absolute;
-    left: 50%;
-    top: 11%;
-    display: grid;
-    justify-items: center;
-    gap: 7px;
-    color: rgba(246, 242, 232, 0.86);
-    text-transform: uppercase;
-    transform: translateX(-50%);
-  }
-
-  .cinematic-room-mark span {
-    font-size: clamp(20px, 2vw, 30px);
-    font-weight: 850;
-    letter-spacing: 0.22em;
-  }
-
-  .cinematic-room-mark small {
-    color: rgba(118, 197, 168, 0.7);
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-    font-size: 9px;
-    font-weight: 750;
-    letter-spacing: 0.18em;
-  }
-
-  .cinematic-room-light {
-    position: absolute;
-    top: 14%;
-    width: 2px;
-    height: 52%;
-    border-radius: 999px;
-    opacity: 0.72;
-  }
-
-  .cinematic-room-light::after {
-    content: '';
-    position: absolute;
-    inset: -80px -60px;
-    background: radial-gradient(ellipse, currentColor, transparent 65%);
-    filter: blur(26px);
-    opacity: 0.16;
-  }
-
-  .cinematic-room-light-left {
-    left: 15%;
-    background: #d7bd75;
-    color: #d7bd75;
-  }
-
-  .cinematic-room-light-right {
-    right: 15%;
-    background: #65b99b;
-    color: #65b99b;
-  }
-
-  .cinematic-floor-ring {
-    position: absolute;
-    left: 50%;
-    top: 78%;
-    width: min(86vw, 1180px);
-    height: 34vh;
-    border: 1px solid rgba(215, 189, 117, 0.18);
-    border-radius: 50%;
-    background: radial-gradient(ellipse, rgba(23, 58, 47, 0.25), transparent 62%);
-    box-shadow: inset 0 0 50px rgba(0, 0, 0, 0.5);
-    transform: translate(-50%, -50%);
-  }
-
-  .cinematic-table-model {
-    left: 50%;
-    top: 54%;
-    z-index: 1;
-    width: min(72vw, 1040px);
-    height: min(48vh, 470px);
-    perspective: 950px;
-    transform: translate(-50%, -50%);
-  }
-
-  .cinematic-table-base,
-  .cinematic-table-rail,
-  .cinematic-table-felt {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    border-radius: 50%;
-    transform: translate(-50%, -50%) rotateX(58deg);
-  }
-
-  .cinematic-table-base {
-    width: 100%;
-    height: 100%;
-    border: 22px solid #080d0b;
-    background: #0a100e;
-    box-shadow:
-      0 52px 35px rgba(0, 0, 0, 0.66),
-      0 68px 0 -28px #030605,
-      0 78px 46px rgba(0, 0, 0, 0.68);
-  }
-
-  .cinematic-table-rail {
-    width: calc(100% - 18px);
-    height: calc(100% - 18px);
-    border: 14px solid #b39852;
-    background: #111a17;
-    box-shadow:
-      inset 0 0 0 4px #060a09,
-      inset 0 12px 18px rgba(255, 246, 211, 0.16),
-      0 8px 18px rgba(0, 0, 0, 0.48);
-  }
-
-  .cinematic-table-felt {
-    width: calc(100% - 72px);
-    height: calc(100% - 72px);
-    overflow: hidden;
-    border: 3px solid rgba(239, 218, 151, 0.38);
-    background:
-      radial-gradient(ellipse at 50% 38%, rgba(35, 150, 111, 0.45), transparent 52%),
-      linear-gradient(145deg, #0d7457, #084333);
-    box-shadow:
-      inset 0 0 70px rgba(0, 0, 0, 0.42),
-      inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  }
-
-  .cinematic-table-felt::after {
-    content: '';
-    position: absolute;
-    inset: 11%;
-    border: 1px solid rgba(225, 205, 141, 0.22);
-    border-radius: 50%;
-  }
-
-  .cinematic-table-line {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 48%;
-    height: 34%;
-    border: 1px solid rgba(225, 205, 141, 0.2);
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-  }
-
-  .cinematic-table-monogram {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    color: rgba(231, 215, 166, 0.11);
-    font-size: 82px;
-    font-weight: 900;
-    letter-spacing: -0.08em;
-    transform: translate(-50%, -50%);
   }
 
   .cinematic-seats {
@@ -1444,16 +1253,6 @@ input:focus-visible {
     right: calc(100% + 8px);
     top: 50%;
     transform: translateY(-50%);
-  }
-
-  .table-seat-winner-announcements .table-center-winner-announcement[data-winner-seat='2'],
-  .table-seat-winner-announcements .table-center-winner-announcement[data-winner-seat='6'] {
-    transform: translate(-50%, calc(-100% - 80px));
-  }
-
-  .table-seat-winner-announcements .table-center-winner-announcement[data-winner-seat='3'],
-  .table-seat-winner-announcements .table-center-winner-announcement[data-winner-seat='5'] {
-    transform: translate(-50%, calc(-100% - 32px));
   }
 
   .cinematic-avatar {
@@ -1972,7 +1771,6 @@ input:focus-visible {
   }
 
   .betting-tray-kicker,
-  .betting-tray-turn,
   .timer-bar-shell,
   .raise-slider-row {
     border-color: rgba(255, 255, 255, 0.08);
@@ -2008,7 +1806,6 @@ input:focus-visible {
     background: linear-gradient(180deg, #a44728, #6d251b);
   }
 
-  .table-side-panels:not(.chat-dock),
   .mobile-between-hands-dock {
     left: 20px;
     right: auto;
@@ -4224,14 +4021,6 @@ input:focus-visible {
     line-height: 1.1;
     text-align: center;
     text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .table-scene[data-desktop-three='true'] .betting-tray-turn {
-    min-height: 36px;
-    padding-inline: 10px;
-    flex: 0 0 auto;
-    font-size: 9px;
     white-space: nowrap;
   }
 

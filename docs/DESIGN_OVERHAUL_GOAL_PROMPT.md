@@ -190,6 +190,22 @@ rules or networking change.
   - Restyle the landing page and profile gate to match the table so the first
     impression is premium.
 
+## Owner priorities (added 2026-09-26)
+
+- The **3D should be stylized, not realistic, but look very good**: a
+  cohesive, game-like art style with strong shapes, readable colour and
+  lighting.
+- **Avatars need really good animation.** That means idle life (breathing,
+  weight shifts, glances at the action), expressive reactions to bets, folds,
+  all-ins, wins and losses, card handling, and chip pushes, with smooth
+  blending between states.
+- **Animations and UI polish are the top priority.** The game should feel fun:
+  improve the existing features (showdown, run it twice, rabbit hunt, emotes,
+  all-in moments, winner celebration) so they have juice and impact.
+- **Strict review loop:** once the work seems done, spawn independent auditor
+  agents to critique it very strictly (especially the 3D and animation) and
+  say how to make it better. Apply their fixes, and repeat for **3 rounds**.
+
 ## Guardrails
 
 - Don't change game logic, PartyKit server code, the message protocol, or

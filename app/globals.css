@@ -136,8 +136,7 @@ input {
   pointer-events: none;
 }
 
-.room-hud-main,
-.room-hud-meta {
+.room-hud-main {
   pointer-events: auto;
 }
 
@@ -145,56 +144,11 @@ input {
   display: none;
 }
 
-.room-hud-mobile-browser,
-.room-hud-mobile-toolbar {
-  display: flex;
-}
-
-.room-hud-mobile-address {
-  display: flex;
-  align-items: center;
-}
-
-.room-hud-mobile-address-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.room-hud-mobile-address-lock,
 .room-hud-mobile-settings-icon-wrap {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-}
-
-.room-hud-mobile-address-lock-icon {
-  width: 14px;
-  height: 14px;
-}
-
-.room-hud-mobile-address-site {
-  font-size: 12px;
-  font-weight: 700;
-  color: rgba(255,255,255,0.94);
-}
-
-.room-hud-mobile-settings-label {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.room-hud-mobile-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.room-hud-mobile-pill-strong {
-  font-weight: 800;
 }
 
 .room-hud-main {
@@ -208,14 +162,6 @@ input {
   border: none;
   backdrop-filter: none;
   box-shadow: none;
-}
-
-.room-hud-actions-rail {
-  width: 100%;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  margin-left: 0;
 }
 
 .room-hud-label {
@@ -234,26 +180,12 @@ input {
   color: rgba(255,255,255,0.94);
 }
 
-.room-hud-owner {
-  font-size: 11px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: rgba(255,255,255,0.46);
-}
-
 .room-hud-code-row {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
   min-width: 0;
-}
-
-.room-hud-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-left: 0;
 }
 
 .hud-settings-trigger {
@@ -309,66 +241,6 @@ input {
   letter-spacing: 0.02em;
 }
 
-.room-hud-meta {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.room-hud-meta-card {
-  min-width: 260px;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 4px 0 0;
-  border-radius: 0;
-  background: transparent;
-  border: none;
-  backdrop-filter: none;
-  box-shadow: none;
-}
-
-.room-hud-blinds {
-  font-size: clamp(28px, 2vw, 36px);
-  font-weight: 700;
-  line-height: 1;
-  color: rgba(255,255,255,0.96);
-  font-family: inherit;
-}
-
-.room-hud-chip-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.room-hud-mobile-toggle {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(201, 168, 76, 0.28);
-  background: rgba(201, 168, 76, 0.12);
-  color: var(--gold-light);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
-}
-
-.room-hud-mobile-toggle:hover {
-  background: rgba(201, 168, 76, 0.18);
-  border-color: rgba(232, 201, 109, 0.42);
-  transform: translateY(-1px);
-}
-
-.hud-button,
 .btn-subtle {
   border: 1px solid rgba(255,255,255,0.12);
   background: rgba(255,255,255,0.06);
@@ -379,38 +251,18 @@ input {
   transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
 
-.hud-button {
-  width: 100%;
-  justify-content: flex-start;
-  min-height: 62px;
-  padding: 12px 14px;
-  border-radius: 18px;
-  background: rgba(41, 38, 38, 0.9);
-  border-color: rgba(255,255,255,0.08);
-  color: rgba(255,255,255,0.76);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 11px;
-  font-weight: 700;
-  box-shadow: 0 16px 26px rgba(0,0,0,0.2);
-}
-
-.hud-button:hover,
 .btn-subtle:hover {
   background: rgba(255,255,255,0.12);
   border-color: rgba(255,255,255,0.22);
   transform: translateY(-1px);
 }
 
-.hud-button:disabled,
 .btn-subtle:disabled {
   opacity: 0.45;
   cursor: not-allowed;
   transform: none;
 }
 
-.connection-pill,
-.room-hud-chip,
 .table-chip {
   display: inline-flex;
   align-items: center;
@@ -422,21 +274,6 @@ input {
   font-weight: 600;
 }
 
-.connection-pill {
-  border: 1px solid rgba(201, 168, 76, 0.18);
-  background: rgba(0,0,0,0.48);
-}
-
-.connection-pill.is-live {
-  color: #9fe6a6;
-}
-
-.connection-pill.is-reconnecting {
-  color: #ffb4a8;
-  border-color: rgba(231, 76, 60, 0.28);
-}
-
-.room-hud-chip,
 .table-chip {
   color: rgba(255,255,255,0.72);
   background: rgba(255,255,255,0.06);
@@ -593,83 +430,6 @@ input {
   color: rgba(255,255,255,0.72);
 }
 
-.table-center-winner-announcement {
-  position: absolute;
-  left: 50%;
-  top: 48%;
-  transform: translate(-50%, -50%);
-  width: min(560px, calc(100% - 70px));
-  padding: 22px 24px 20px;
-  border-radius: 34px;
-  z-index: 28;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 12px;
-  background:
-    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.06), transparent 58%),
-    linear-gradient(180deg, rgba(12, 18, 30, 0.98), rgba(3, 6, 12, 0.96));
-  border: 1px solid rgba(246, 228, 171, 0.62);
-  box-shadow:
-    0 30px 60px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(246, 228, 171, 0.14);
-  animation: winnerAnnouncementPulse 700ms cubic-bezier(0.2, 0.9, 0.2, 1);
-  pointer-events: none;
-}
-
-.table-center-winner-title {
-  margin-bottom: 4px;
-  font-size: 32px;
-  font-weight: 800;
-  color: #f8e5a8;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  text-shadow:
-    0 0 14px rgba(246, 228, 171, 0.55),
-    0 3px 14px rgba(0, 0, 0, 0.36);
-}
-
-.table-center-winner-list {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.table-center-winner-line {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  font-size: 15px;
-}
-
-.table-center-winner-name {
-  color: rgba(255, 255, 255, 0.93);
-  text-align: left;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.table-center-winner-amount {
-  color: #f7e7a7;
-  font-size: 18px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.table-center-winner-line .chip-stack-display {
-  margin-left: 4px;
-  transform: translateY(1px) scale(0.92);
-}
-
 .table-center-winner-chip-trails {
   position: absolute;
   inset: 0;
@@ -732,17 +492,6 @@ input {
   box-shadow:
     0 0 0 4px rgba(246, 228, 171, 0.12),
     0 0 22px rgba(246, 228, 171, 0.55);
-}
-
-@keyframes winnerAnnouncementPulse {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, -52%) scale(0.94);
-  }
-  100% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-  }
 }
 
 @keyframes winnerChipTravel {
@@ -1178,14 +927,6 @@ input {
   white-space: nowrap;
 }
 
-.own-hand-strength-kicker {
-  color: var(--hl-gold-soft);
-  font-size: 9px;
-  font-weight: 950;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .own-hand-strength-value {
   min-width: 0;
   overflow: hidden;
@@ -1313,19 +1054,6 @@ input {
   text-shadow: 0 1px 10px rgba(0, 0, 0, 0.58);
 }
 
-.own-hand-bet-stack-anchor {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% - 18px);
-  transform: translateX(-50%);
-  z-index: 4;
-  pointer-events: none;
-}
-
-.own-hand-bet-stack {
-  animation: betStackPop 300ms ease-out;
-}
-
 .own-card-row.is-winner {
   filter:
     drop-shadow(0 0 20px rgba(232, 201, 109, 0.32))
@@ -1413,14 +1141,6 @@ input {
 .mobile-hero-summary.is-winner .mobile-hero-summary-status {
   background: #68b06a;
   color: #f6fff1;
-}
-
-.table-show-cards-panel {
-  position: absolute;
-  top: 16px;
-  right: 18px;
-  z-index: 42;
-  pointer-events: auto;
 }
 
 .show-cards-toggle {
@@ -1653,10 +1373,6 @@ input {
 }
 
 @media (max-width: 720px) {
-  .table-show-cards-panel {
-    top: 10px;
-    right: 10px;
-  }
 
   .show-cards-toggle {
     min-width: 156px;
@@ -2167,217 +1883,6 @@ input {
   filter: grayscale(1);
 }
 
-.table-avatar {
-  position: relative;
-  width: 108px;
-  height: 132px;
-  transform: rotate(var(--avatar-rotation, 0deg)) perspective(700px) rotateX(-8deg);
-  filter: drop-shadow(0 12px 22px rgba(0,0,0,0.35));
-}
-
-.table-avatar.is-acting {
-  filter:
-    drop-shadow(0 0 16px rgba(201, 168, 76, 0.5))
-    drop-shadow(0 14px 20px rgba(0,0,0,0.3));
-}
-
-.table-avatar.is-disconnected {
-  opacity: 0.5;
-  filter: grayscale(0.9) drop-shadow(0 8px 14px rgba(0,0,0,0.25));
-}
-
-.table-avatar-body {
-  position: absolute;
-  inset: 0;
-}
-
-.table-avatar-chair-back {
-  position: absolute;
-  left: 50%;
-  top: 38px;
-  width: 72px;
-  height: 54px;
-  transform: translateX(-50%);
-  border-radius: 22px 22px 10px 10px;
-  background:
-    linear-gradient(180deg, rgba(35, 43, 58, 0.95), rgba(12, 18, 28, 0.95));
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.08),
-    0 12px 24px rgba(0,0,0,0.18);
-}
-
-.table-avatar-chair-seat {
-  position: absolute;
-  left: 50%;
-  bottom: 40px;
-  width: 84px;
-  height: 24px;
-  transform: translateX(-50%);
-  border-radius: 999px;
-  background: linear-gradient(180deg, rgba(26, 34, 48, 0.98), rgba(9, 15, 25, 0.98));
-}
-
-.table-avatar-torso {
-  position: absolute;
-  left: 50%;
-  top: 48px;
-  width: 40px;
-  height: 52px;
-  transform: translateX(-50%);
-  border-radius: 18px;
-  background:
-    linear-gradient(180deg, var(--avatar-accent-light), var(--avatar-accent));
-  border: 2px solid rgba(255,255,255,0.14);
-}
-
-.table-avatar-neck {
-  position: absolute;
-  left: 50%;
-  top: 34px;
-  width: 12px;
-  height: 16px;
-  transform: translateX(-50%);
-  border-radius: 999px;
-  background: var(--avatar-skin);
-}
-
-.table-avatar-head {
-  position: absolute;
-  left: 50%;
-  top: 12px;
-  width: 34px;
-  height: 34px;
-  transform: translateX(-50%);
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 35% 35%, #fff7ef 0%, var(--avatar-skin) 44%, var(--avatar-skin-dark) 100%);
-  box-shadow: inset 0 -2px 0 rgba(0,0,0,0.08);
-}
-
-.table-avatar-eye,
-.table-avatar-mouth {
-  position: absolute;
-  background: rgba(15, 23, 42, 0.82);
-}
-
-.table-avatar-eye {
-  top: 12px;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-}
-
-.table-avatar-eye-left {
-  left: 8px;
-}
-
-.table-avatar-eye-right {
-  right: 8px;
-}
-
-.table-avatar-mouth {
-  left: 50%;
-  bottom: 8px;
-  width: 10px;
-  height: 2px;
-  border-radius: 999px;
-  transform: translateX(-50%);
-}
-
-.table-avatar-upper-arm,
-.table-avatar-forearm,
-.table-avatar-leg,
-.table-avatar-shoe {
-  position: absolute;
-  border-radius: 999px;
-}
-
-.table-avatar-upper-arm {
-  top: 54px;
-  width: 42px;
-  height: 14px;
-  background: linear-gradient(180deg, var(--avatar-accent-light), var(--avatar-accent-dark));
-}
-
-.table-avatar-upper-arm-left {
-  left: 10px;
-  transform: rotate(-34deg);
-}
-
-.table-avatar-upper-arm-right {
-  right: 10px;
-  transform: rotate(34deg);
-}
-
-.table-avatar-forearm {
-  top: 35px;
-  width: 40px;
-  height: 14px;
-  background: linear-gradient(180deg, var(--avatar-accent-light), var(--avatar-accent-dark));
-}
-
-.table-avatar-forearm-left {
-  left: 4px;
-  transform: rotate(-12deg);
-}
-
-.table-avatar-forearm-right {
-  right: 4px;
-  transform: rotate(12deg);
-}
-
-.table-avatar-hand {
-  position: absolute;
-  top: 31px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--avatar-skin);
-  box-shadow: inset 0 -1px 0 rgba(0,0,0,0.1);
-}
-
-.table-avatar-hand-left {
-  left: 0;
-}
-
-.table-avatar-hand-right {
-  right: 0;
-}
-
-.table-avatar-leg {
-  bottom: 24px;
-  width: 18px;
-  height: 40px;
-  background: linear-gradient(180deg, rgba(18, 24, 34, 0.96), rgba(7, 11, 18, 0.96));
-}
-
-.table-avatar-leg-left {
-  left: 34px;
-  transform: rotate(8deg);
-}
-
-.table-avatar-leg-right {
-  right: 34px;
-  transform: rotate(-8deg);
-}
-
-.table-avatar-shoe {
-  bottom: 16px;
-  width: 26px;
-  height: 10px;
-  background: rgba(12, 16, 22, 0.96);
-}
-
-.table-avatar-shoe-left {
-  left: 28px;
-  transform: rotate(4deg);
-}
-
-.table-avatar-shoe-right {
-  right: 28px;
-  transform: rotate(-4deg);
-}
-
 .player-held-cards {
   position: absolute;
   top: -28px;
@@ -2467,8 +1972,7 @@ input {
   animation: betStackPop 300ms ease-out;
 }
 
-.player-bet-stack-anchor,
-.own-hand-bet-stack-anchor {
+.player-bet-stack-anchor {
   display: block;
 }
 
@@ -2504,21 +2008,6 @@ input {
   border: 1px solid #999;
   box-shadow: 0 4px 12px rgba(0,0,0,0.34);
 }
-
-.blind-badge {
-  position: absolute;
-  bottom: -10px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 8px;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.blind-badge.sb { background: #e67e22; color: white; }
-.blind-badge.bb { background: #c0392b; color: white; }
 
 .player-name {
   font-size: 13px;
@@ -2763,218 +2252,10 @@ input {
   pointer-events: none;
 }
 
-.table-side-panels.chat-dock {
-  left: 22px;
-  right: auto;
-  width: min(248px, calc(100vw - 32px));
-  bottom: 18px;
-  flex-direction: column;
-  align-items: stretch;
-  pointer-events: none;
-  z-index: 58;
-}
-
-.chat-panel {
-  width: 100%;
-  pointer-events: auto;
-  overflow: visible;
-  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
-}
-
-.chat-panel.is-collapsed {
-  width: min(96px, 100%);
-  margin-left: 0;
-  padding: 0;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(36, 31, 31, 0.92);
-}
-
-.chat-panel.is-collapsed .chat-panel-toggle-preview {
-  display: none;
-}
-
-.chat-panel.is-collapsed:hover {
-  transform: translateY(-2px);
-  border-color: rgba(201, 168, 76, 0.34);
-  box-shadow: 0 24px 48px rgba(0,0,0,0.34);
-}
-
-.chat-panel.is-expanded {
-  width: min(248px, 100%);
-  padding: 12px;
-  border-radius: 22px;
-}
-
-.chat-panel-toggle {
-  width: 100%;
-  border: none;
-  background: transparent;
-  color: inherit;
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.chat-panel-mini-toggle {
-  min-height: 38px;
-  padding: 8px 10px;
-  gap: 4px;
-}
-
-.chat-panel-mini-pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.chat-panel-mini-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  background: #89bf6f;
-  box-shadow: 0 0 0 4px rgba(104, 168, 103, 0.16);
-  flex-shrink: 0;
-}
-
-.chat-panel-mini-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: rgba(255,255,255,0.94);
-}
-
-.chat-panel-mini-count {
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(104, 168, 103, 0.18);
-  border: 1px solid rgba(120, 190, 118, 0.28);
-  color: #ddf0d6;
-  font-size: 11px;
-  font-weight: 700;
-  margin-left: auto;
-}
-
-.chat-panel-toggle:focus-visible {
-  outline: 2px solid rgba(201, 168, 76, 0.75);
-  outline-offset: -2px;
-}
-
-.chat-panel-toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.chat-panel-toggle-title {
-  display: block;
-  margin-top: 3px;
-  font-size: 16px;
-  font-weight: 700;
-  color: rgba(255,255,255,0.94);
-}
-
-.chat-panel-toggle-preview {
-  display: block;
-  max-width: 100%;
-  color: rgba(255,255,255,0.68);
-  font-size: 11px;
-  line-height: 1.35;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.chat-panel-header-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.chat-panel-collapse {
-  min-height: 34px;
-  padding: 7px 12px;
-}
-
 .table-chip-soft {
   background: rgba(104, 168, 103, 0.18);
   border-color: rgba(120, 190, 118, 0.28);
   color: #ddf0d6;
-}
-
-.chat-log {
-  margin-top: 10px;
-  max-height: 108px;
-  overflow-y: auto;
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 10px;
-  padding: 8px 9px;
-  background: rgba(0,0,0,0.18);
-  scrollbar-width: thin;
-}
-
-.chat-empty {
-  color: rgba(255,255,255,0.45);
-  font-size: 12px;
-}
-
-.chat-entry {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
-}
-
-.chat-entry:last-child {
-  border-bottom: none;
-}
-
-.chat-entry-name {
-  font-size: 11px;
-  color: #dbe9d7;
-}
-
-.chat-entry-body {
-  font-size: 12px;
-  line-height: 1.35;
-  color: rgba(255,255,255,0.9);
-  word-break: break-word;
-  font-family: 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', 'Georgia', serif;
-}
-
-.chat-compose {
-  margin-top: 10px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.chat-compose input {
-  min-width: 0;
-  flex: 1 1 auto;
-  background: rgba(0,0,0,0.18);
-  border: 1px solid rgba(255,255,255,0.12);
-  color: rgba(255,255,255,0.92);
-  border-radius: 10px;
-  height: 34px;
-  padding: 0 10px;
-  outline: none;
-}
-
-.chat-compose input:focus {
-  border-color: rgba(201, 168, 76, 0.45);
-  box-shadow: 0 0 0 2px rgba(201, 168, 76, 0.12);
 }
 
 .chat-emotes {
@@ -2984,10 +2265,6 @@ input {
   justify-content: flex-start;
   align-items: center;
   flex-wrap: wrap;
-}
-
-.chat-emoji-compose {
-  margin-top: 8px;
 }
 
 .emote-button {
@@ -3022,38 +2299,6 @@ input {
 .emote-picker-toggle.is-open {
   background: rgba(104, 168, 103, 0.18);
   border-color: rgba(120, 190, 118, 0.45);
-}
-
-.emoji-picker-panel {
-  margin-top: 10px;
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 8px;
-  padding: 12px;
-  border-radius: 16px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.05);
-  max-height: 208px;
-  overflow-y: auto;
-}
-
-.emoji-picker-option {
-  min-width: 0;
-  height: 40px;
-  border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.1);
-  background: rgba(255,255,255,0.06);
-  color: #fff;
-  font-size: 22px;
-  font-family: 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
-  cursor: pointer;
-  transition: transform 0.15s ease, background 0.2s ease, border-color 0.2s ease;
-}
-
-.emoji-picker-option:hover {
-  background: rgba(255,255,255,0.14);
-  border-color: rgba(201, 168, 76, 0.3);
-  transform: translateY(-1px);
 }
 
 .emoji-picker-shell {
@@ -3149,12 +2394,6 @@ input {
   backdrop-filter: blur(16px);
   pointer-events: auto;
   overflow: hidden;
-}
-
-.host-panel {
-  max-height: calc(100vh - 200px);
-  overflow-y: auto;
-  scrollbar-width: thin;
 }
 
 .table-panel-header {
@@ -3367,10 +2606,6 @@ input {
   border: 1px solid rgba(255,255,255,0.05);
 }
 
-.settings-field-inline {
-  min-width: 180px;
-}
-
 .settings-field {
   display: flex;
   flex-direction: column;
@@ -3394,24 +2629,6 @@ input {
   box-shadow: 0 0 0 2px rgba(201, 168, 76, 0.12);
 }
 
-.host-player-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 16px;
-}
-
-.host-player-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.05);
-}
-
 .host-player-name {
   color: rgba(255,255,255,0.9);
   font-size: 14px;
@@ -3421,10 +2638,6 @@ input {
   margin-top: 2px;
   font-size: 12px;
   color: rgba(255,255,255,0.46);
-}
-
-.host-start-button {
-  margin-top: 16px;
 }
 
 .status-panel {
@@ -3731,94 +2944,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
    WINNERS OVERLAY
    ============================================================ */
 
-.winners-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(0,0,0,0.65);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 40;
-  backdrop-filter: blur(2px);
-}
-
-.winners-card {
-  width: min(420px, calc(100% - 40px));
-  background:
-    linear-gradient(180deg, rgba(14, 20, 34, 0.98), rgba(5, 10, 20, 0.95));
-  border: 1px solid rgba(232, 201, 109, 0.5);
-  border-radius: 22px;
-  padding: 22px 24px;
-  text-align: left;
-  box-shadow: 0 18px 50px rgba(0,0,0,0.35);
-}
-
-.winners-kicker {
-  font-size: 11px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: rgba(255,255,255,0.42);
-}
-
-.winners-title {
-  margin-top: 8px;
-  font-size: 30px;
-  color: #f6e4ab;
-}
-
-.winners-total {
-  margin-top: 4px;
-  font-size: 14px;
-  color: rgba(255,255,255,0.68);
-}
-
-.winners-list {
-  margin-top: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.winner-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.06);
-}
-
-.winner-row.is-hero {
-  border-color: rgba(232, 201, 109, 0.42);
-  background: rgba(232, 201, 109, 0.08);
-}
-
-.winner-name {
-  font-size: 16px;
-  color: rgba(255,255,255,0.92);
-}
-
-.winner-hand {
-  margin-top: 2px;
-  font-size: 12px;
-  color: rgba(255,255,255,0.52);
-}
-
-.winner-amount {
-  font-size: 18px;
-  font-weight: 700;
-  color: #f6e4ab;
-}
-
-.winners-footnote {
-  margin-top: 16px;
-  font-size: 12px;
-  color: rgba(255,255,255,0.54);
-}
-
 /* ============================================================
    ROOM CODE DISPLAY
    ============================================================ */
@@ -3839,10 +2964,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     width: min(1240px, calc(100vw - 130px));
     height: min(780px, calc(100vh - 152px));
     min-height: 600px;
-  }
-
-  .table-side-panels.chat-dock {
-    width: min(260px, calc(100vw - 32px));
   }
 }
 
@@ -3887,10 +3008,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     display: none;
   }
 
-  .room-hud-meta {
-    display: none;
-  }
-
   .room-hud-mobile-bar {
     display: flex;
     flex-direction: column;
@@ -3923,60 +3040,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
   .room-hud-mobile-settings.is-open {
     border-color: rgba(201, 168, 76, 0.34);
     background: rgba(201, 168, 76, 0.12);
-  }
-
-  .room-hud-mobile-center {
-    flex: 1 1 auto;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    text-align: center;
-  }
-
-  .room-hud-mobile-room {
-    font-size: 11px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.5);
-    font-family: 'Courier New', monospace;
-  }
-
-  .room-hud-mobile-blinds {
-    font-size: 15px;
-    font-weight: 700;
-    color: rgba(255,255,255,0.96);
-  }
-
-  .room-hud-mobile-status {
-    min-height: 30px;
-    padding: 0 10px;
-    border-radius: 999px;
-    border: 1px solid rgba(255,255,255,0.08);
-    background: rgba(255,255,255,0.05);
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    font-weight: 700;
-    flex-shrink: 0;
-  }
-
-  .room-hud-mobile-status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    background: currentColor;
-    opacity: 0.9;
-  }
-
-  .room-hud-mobile-status.is-live {
-    color: #9fe6a6;
-  }
-
-  .room-hud-mobile-status.is-reconnecting {
-    color: #ffb4a8;
   }
 
   .table-stage {
@@ -4074,72 +3137,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     pointer-events: auto;
     margin-top: 0;
     z-index: auto;
-  }
-
-  .table-side-panels.chat-dock {
-    position: fixed;
-    left: 10px;
-    right: auto;
-    bottom: calc(env(safe-area-inset-bottom) + 118px);
-    width: auto;
-    max-width: calc(100vw - 20px);
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-    pointer-events: none;
-    z-index: 78;
-    margin-top: 0;
-  }
-
-  .chat-panel.is-collapsed {
-    width: 86px;
-    max-width: 86px;
-    margin-left: 0;
-    border-radius: 14px;
-  }
-
-  .chat-panel.is-expanded {
-    position: fixed;
-    left: 10px;
-    right: 10px;
-    bottom: calc(env(safe-area-inset-bottom) + 118px);
-    width: auto;
-    max-height: min(240px, calc(100svh - 260px));
-    overflow-y: auto;
-  }
-
-  .chat-panel-toggle {
-    padding: 10px 12px;
-  }
-
-  .chat-panel-mini-toggle {
-    min-height: 42px;
-    justify-content: center;
-  }
-
-  .chat-panel-mini-title {
-    font-size: 12px;
-  }
-
-  .chat-panel-mini-count {
-    display: none;
-  }
-
-  .chat-panel-header-actions {
-    justify-content: space-between;
-  }
-
-  .chat-log {
-    max-height: 112px;
-  }
-
-  .chat-compose {
-    flex-wrap: wrap;
-  }
-
-  .chat-compose input,
-  .chat-compose .btn-subtle {
-    width: 100%;
   }
 
   .betting-tray {
@@ -4306,11 +3303,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     color: rgba(255,255,255,0.62);
   }
 
-  .host-start-button {
-    margin-top: 12px;
-    font-size: 13px;
-  }
-
   .settings-grid {
     grid-template-columns: 1fr;
   }
@@ -4466,51 +3458,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
   .hero-inline-status {
     display: none;
   }
-  .table-avatar {
-    width: 76px;
-    height: 96px;
-  }
-  .table-avatar-chair-back {
-    width: 54px;
-    height: 40px;
-    top: 28px;
-  }
-  .table-avatar-chair-seat {
-    width: 64px;
-    bottom: 30px;
-  }
-  .table-avatar-torso {
-    width: 28px;
-    height: 36px;
-    top: 38px;
-  }
-  .table-avatar-head {
-    width: 26px;
-    height: 26px;
-    top: 10px;
-  }
-  .table-avatar-upper-arm {
-    width: 32px;
-    top: 44px;
-  }
-  .table-avatar-upper-arm-left {
-    left: 6px;
-  }
-  .table-avatar-upper-arm-right {
-    right: 6px;
-  }
-  .table-avatar-forearm {
-    width: 30px;
-    top: 28px;
-  }
-  .table-avatar-leg {
-    height: 30px;
-    bottom: 18px;
-  }
-  .table-avatar-shoe {
-    bottom: 12px;
-    width: 20px;
-  }
 
   .seat-0 { top: 84%; }
   .seat-1 { left: 15.5%; top: 76%; }
@@ -4542,11 +3489,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     height: 18px;
     top: -7px;
     right: -7px;
-    font-size: 8px;
-  }
-  .blind-badge {
-    bottom: -8px;
-    padding: 1px 4px;
     font-size: 8px;
   }
   .player-name {
@@ -4623,12 +3565,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     backdrop-filter: none;
   }
 
-  .room-hud-mobile-browser {
-    align-items: stretch;
-    gap: 8px;
-    width: 100%;
-  }
-
   .room-hud-mobile-settings {
     width: 58px;
     height: 58px;
@@ -4646,76 +3582,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     height: 28px;
     border-radius: 999px;
     background: rgba(255,255,255,0.06);
-  }
-
-  .room-hud-mobile-settings-label {
-    color: rgba(255,255,255,0.7);
-  }
-
-  .room-hud-mobile-address {
-    flex: 1 1 auto;
-    min-width: 0;
-    gap: 8px;
-    min-height: 58px;
-    padding: 10px 14px;
-    border-radius: 20px;
-    background: linear-gradient(180deg, rgba(49, 43, 43, 0.98), rgba(25, 22, 22, 0.98));
-    border: 1px solid rgba(255,255,255,0.08);
-    box-shadow: 0 14px 26px rgba(0,0,0,0.26);
-  }
-
-  .room-hud-mobile-address-lock {
-    width: 24px;
-    height: 24px;
-    border-radius: 999px;
-    background: rgba(255,255,255,0.06);
-    color: rgba(255,255,255,0.84);
-  }
-
-  .room-hud-mobile-address-site {
-    font-size: 12px;
-    line-height: 1.1;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .room-hud-mobile-room {
-    font-size: 10px;
-    letter-spacing: 0.2em;
-    color: rgba(255,255,255,0.46);
-  }
-
-  .room-hud-mobile-status {
-    min-height: 58px;
-    padding: 0 12px;
-    border-radius: 18px;
-    background: linear-gradient(180deg, rgba(42, 38, 38, 0.98), rgba(22, 20, 20, 0.98));
-    border-color: rgba(255,255,255,0.08);
-    box-shadow: 0 14px 24px rgba(0,0,0,0.26);
-  }
-
-  .room-hud-mobile-toolbar {
-    width: 100%;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .room-hud-mobile-pill {
-    min-height: 30px;
-    padding: 0 10px;
-    border-radius: 999px;
-    background: rgba(43, 38, 38, 0.94);
-    border: 1px solid rgba(255,255,255,0.08);
-    color: rgba(255,255,255,0.68);
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    box-shadow: 0 10px 20px rgba(0,0,0,0.2);
-  }
-
-  .room-hud-mobile-pill-strong {
-    color: rgba(255,255,255,0.94);
   }
 
   .table-wrapper {
@@ -4836,53 +3702,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     bottom: 188px;
   }
 
-  .table-side-panels.chat-dock {
-    left: 10px;
-    bottom: calc(env(safe-area-inset-bottom) + 128px);
-    width: auto;
-    max-width: calc(100vw - 20px);
-  }
-
-  .chat-panel.is-collapsed {
-    width: 94px;
-    max-width: 94px;
-    border-radius: 16px;
-    background: linear-gradient(180deg, rgba(44, 39, 39, 0.98), rgba(28, 24, 24, 0.98));
-  }
-
-  .chat-panel.is-expanded {
-    bottom: calc(env(safe-area-inset-bottom) + 128px);
-    border-radius: 18px;
-  }
-
-  .chat-panel-mini-toggle {
-    min-height: 52px;
-    justify-content: flex-start;
-  }
-
-  .chat-panel-mini-pill {
-    width: 100%;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-  }
-
-  .chat-panel-mini-dot {
-    display: none;
-  }
-
-  .chat-panel-mini-title {
-    font-size: 10px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.68);
-  }
-
-  .chat-panel-mini-count {
-    display: inline-flex;
-    margin-left: 0;
-  }
-
   .betting-tray {
     left: 10px;
     right: 10px;
@@ -4900,8 +3719,7 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     gap: 12px;
   }
 
-  .betting-tray-kicker,
-  .betting-tray-turn {
+  .betting-tray-kicker {
     min-height: 28px;
     padding: 0 10px;
     border-radius: 999px;
@@ -4918,11 +3736,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     background: rgba(255,255,255,0.08);
     color: rgba(255,255,255,0.72);
     border: 1px solid rgba(255,255,255,0.1);
-  }
-
-  .betting-tray-turn {
-    background: rgba(244, 235, 98, 0.9);
-    color: #2e2816;
   }
 
   .timer-bar-header {
@@ -5128,16 +3941,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     gap: 8px;
   }
 
-  .room-hud-mobile-blinds {
-    font-size: 14px;
-  }
-
-  .room-hud-mobile-status {
-    min-height: 28px;
-    padding: 0 8px;
-    font-size: 10px;
-  }
-
   .table-surface {
     width: min(88vw, 322px);
     height: min(64svh, 530px);
@@ -5158,34 +3961,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     width: min(280px, calc(100% - 22px));
     padding: 14px 14px 12px;
     border-radius: 22px;
-  }
-
-  .table-center-winner-announcement {
-    width: min(360px, calc(100% - 18px));
-    padding: 14px 14px 12px;
-    border-radius: 20px;
-    gap: 8px;
-    top: 50%;
-  }
-
-  .table-center-winner-title {
-    font-size: 20px;
-    letter-spacing: 0.08em;
-  }
-
-  .table-center-winner-list {
-    gap: 7px;
-  }
-
-  .table-center-winner-line {
-    font-size: 12px;
-    padding: 8px 10px;
-    grid-template-columns: 1fr auto;
-    row-gap: 2px;
-  }
-
-  .table-center-winner-amount {
-    font-size: 14px;
   }
 
   .table-center-winner-chip-trail .chip-stack-display {
@@ -5211,21 +3986,11 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     width: 100%;
   }
 
-  .emoji-picker-panel {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-
-  .winners-title {
-    font-size: 24px;
-  }
-
   .hero-inline-status {
     display: none;
   }
 
-  .table-chip,
-  .connection-pill,
-  .room-hud-chip {
+  .table-chip {
     min-height: 30px;
     padding: 0 10px;
     font-size: 11px;
@@ -5283,15 +4048,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     height: 34px;
     border-radius: 6px;
   }
-  .first-person-body {
-    width: min(220px, 70vw);
-    height: 78px;
-    margin-bottom: -22px;
-  }
-  .first-person-forearm {
-    width: 80px;
-    height: 24px;
-  }
 
   .btn-action {
     min-height: 46px;
@@ -5320,30 +4076,10 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     padding: calc(8px + env(safe-area-inset-top)) 8px 0;
   }
 
-  .room-hud-mobile-browser {
-    gap: 7px;
-  }
-
   .room-hud-mobile-settings {
     width: 54px;
     height: 54px;
     border-radius: 16px;
-  }
-
-  .room-hud-mobile-address {
-    min-height: 54px;
-    padding: 9px 12px;
-    border-radius: 18px;
-  }
-
-  .room-hud-mobile-address-site {
-    font-size: 11px;
-  }
-
-  .room-hud-mobile-pill {
-    min-height: 28px;
-    padding: 0 9px;
-    font-size: 9px;
   }
 
   .table-wrapper {
@@ -5403,15 +4139,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     min-height: 32px;
     padding: 0 10px;
     font-size: 10px;
-  }
-
-  .table-side-panels.chat-dock {
-    bottom: calc(env(safe-area-inset-bottom) + 120px);
-  }
-
-  .chat-panel.is-collapsed {
-    width: 88px;
-    max-width: 88px;
   }
 
   .betting-tray {
@@ -5650,12 +4377,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
   top: -8px;
   right: -8px;
   font-size: 8px;
-}
-
-.blind-badge {
-  bottom: -8px;
-  font-size: 7px;
-  padding: 1px 4px;
 }
 
 .player-name {
@@ -6013,12 +4734,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     right: -9px;
   }
 
-  .blind-badge {
-    bottom: -10px;
-    font-size: 8px;
-    padding: 1px 5px;
-  }
-
   .player-name {
     max-width: 92px;
     font-size: 12px;
@@ -6075,14 +4790,12 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     font-size: 18px;
   }
 
-  .player-bet-stack .chip-stack,
-  .own-hand-bet-stack .chip-stack {
+  .player-bet-stack .chip-stack {
     transform: scale(1.22);
     transform-origin: center bottom;
   }
 
-  .player-bet-stack .chip-stack-amount.is-compact,
-  .own-hand-bet-stack .chip-stack-amount.is-compact {
+  .player-bet-stack .chip-stack-amount.is-compact {
     min-height: 26px;
     padding: 2px 11px;
     font-size: 22px;
@@ -6150,10 +4863,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
 
   .table-scene[data-tray-open='true'] .own-hand-area {
     bottom: 92px;
-  }
-
-  .own-hand-bet-stack-anchor {
-    top: -18px;
   }
 
   .table-scene[data-hero-seat='true'] .own-hand-area {
@@ -6518,8 +5227,7 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     padding: calc(10px + env(safe-area-inset-top)) 12px 0;
   }
 
-  .room-hud-main,
-  .room-hud-meta {
+  .room-hud-main {
     display: none;
   }
 
@@ -6566,12 +5274,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     background: rgba(255,255,255,0.06);
   }
 
-  .room-hud-mobile-settings-label {
-    font-size: 8px;
-    letter-spacing: 0.12em;
-    color: rgba(255,255,255,0.68);
-  }
-
   .room-hud-mobile-identity {
     min-width: 0;
     display: flex;
@@ -6584,127 +5286,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     background:
       linear-gradient(180deg, rgba(49, 44, 44, 0.98), rgba(25, 22, 22, 0.98));
     box-shadow: 0 12px 26px rgba(0,0,0,0.24);
-  }
-
-  .room-hud-mobile-title-row,
-  .room-hud-mobile-room-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .room-hud-mobile-brand {
-    min-width: 0;
-    font-size: 13px;
-    font-weight: 800;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.94);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .room-hud-mobile-seated {
-    flex-shrink: 0;
-    min-height: 24px;
-    padding: 0 8px;
-    border-radius: 999px;
-    border: 1px solid rgba(255,255,255,0.08);
-    background: rgba(255,255,255,0.06);
-    color: rgba(255,255,255,0.72);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-
-  .room-hud-mobile-room-label {
-    flex-shrink: 0;
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.42);
-  }
-
-  .room-hud-mobile-room-code {
-    min-width: 0;
-    font-size: 17px;
-    font-weight: 800;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.96);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .room-hud-mobile-status {
-    min-width: 68px;
-    padding: 0 12px;
-    border-radius: 16px;
-    border: 1px solid rgba(255,255,255,0.08);
-    background: linear-gradient(180deg, rgba(42, 37, 37, 0.98), rgba(23, 20, 20, 0.98));
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    box-shadow: 0 12px 24px rgba(0,0,0,0.24);
-    white-space: nowrap;
-  }
-
-  .room-hud-mobile-status span:last-child {
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.04em;
-  }
-
-  .room-hud-mobile-status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    background: currentColor;
-    box-shadow: 0 0 0 4px rgba(255,255,255,0.06);
-  }
-
-  .room-hud-mobile-status.is-live {
-    color: #9fe3ac;
-  }
-
-  .room-hud-mobile-status.is-reconnecting {
-    color: #ffb3a6;
-  }
-
-  .room-hud-mobile-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    width: 100%;
-  }
-
-  .room-hud-mobile-pill {
-    min-height: 28px;
-    padding: 0 10px;
-    border-radius: 999px;
-    border: 1px solid rgba(255,255,255,0.08);
-    background: rgba(37, 33, 33, 0.94);
-    color: rgba(255,255,255,0.68);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    box-shadow: 0 10px 18px rgba(0,0,0,0.18);
-  }
-
-  .room-hud-mobile-pill-strong {
-    color: rgba(255,255,255,0.94);
   }
 
   .table-scene {
@@ -6790,12 +5371,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     font-size: 7px;
   }
 
-  .blind-badge {
-    bottom: -8px;
-    font-size: 6px;
-    padding: 1px 4px;
-  }
-
   .player-stack {
     top: -28px;
     min-height: 18px;
@@ -6848,8 +5423,7 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     right: calc(100% + 10px);
   }
 
-  .player-bet-stack .chip-stack,
-  .own-hand-bet-stack .chip-stack {
+  .player-bet-stack .chip-stack {
     transform: scale(0.92);
     transform-origin: center bottom;
   }
@@ -6991,8 +5565,7 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     gap: 8px;
   }
 
-  .betting-tray-kicker,
-  .betting-tray-turn {
+  .betting-tray-kicker {
     min-height: 26px;
     padding: 0 9px;
     font-size: 9px;
@@ -7027,22 +5600,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
     min-height: 48px;
     border-radius: 16px;
     font-size: 12px;
-  }
-
-  .table-side-panels:not(.chat-dock) {
-    display: none;
-  }
-
-  .table-side-panels.chat-dock {
-    left: 10px;
-    right: 10px;
-    bottom: calc(env(safe-area-inset-bottom) + 124px);
-    width: auto;
-    max-width: calc(100vw - 20px);
-  }
-
-  .chat-panel.is-expanded {
-    max-height: min(220px, calc(100svh - 270px));
   }
 
   .mobile-between-hands-dock {
@@ -7090,29 +5647,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
   .room-hud-mobile-identity {
     padding: 9px 10px;
     border-radius: 16px;
-  }
-
-  .room-hud-mobile-brand {
-    font-size: 12px;
-  }
-
-  .room-hud-mobile-seated,
-  .room-hud-mobile-pill {
-    font-size: 9px;
-  }
-
-  .room-hud-mobile-room-code {
-    font-size: 15px;
-  }
-
-  .room-hud-mobile-status {
-    min-width: 62px;
-    padding: 0 10px;
-    border-radius: 14px;
-  }
-
-  .room-hud-mobile-status span:last-child {
-    font-size: 10px;
   }
 
   .table-scene {
@@ -7233,22 +5767,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
    ============================================================ */
 
 @media (max-width: 768px) {
-  .table-show-cards-panel {
-    top: auto;
-    right: auto;
-    left: 50%;
-    bottom: calc(82px + env(safe-area-inset-bottom));
-    transform: translateX(-50%);
-    z-index: 84;
-  }
-
-  .table-scene[data-phase='between_hands'] .table-show-cards-panel {
-    bottom: calc(92px + env(safe-area-inset-bottom));
-  }
-
-  .table-scene[data-tray-open='true'] .table-show-cards-panel {
-    bottom: calc(152px + env(safe-area-inset-bottom));
-  }
 
   .show-cards-toggle {
     min-width: 170px;
@@ -7388,16 +5906,12 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
   }
 
   .table-scene[data-player-count='7'] .player-bet-stack .chip-stack,
-  .table-scene[data-player-count='7'] .own-hand-bet-stack .chip-stack,
-  .table-scene[data-player-count='8'] .player-bet-stack .chip-stack,
-  .table-scene[data-player-count='8'] .own-hand-bet-stack .chip-stack {
+  .table-scene[data-player-count='8'] .player-bet-stack .chip-stack {
     transform: scale(0.8);
   }
 
   .table-scene[data-player-count='7'] .player-bet-stack .chip-stack-amount.is-compact,
-  .table-scene[data-player-count='7'] .own-hand-bet-stack .chip-stack-amount.is-compact,
-  .table-scene[data-player-count='8'] .player-bet-stack .chip-stack-amount.is-compact,
-  .table-scene[data-player-count='8'] .own-hand-bet-stack .chip-stack-amount.is-compact {
+  .table-scene[data-player-count='8'] .player-bet-stack .chip-stack-amount.is-compact {
     min-height: 12px;
     padding: 0 5px;
     font-size: 10px;
@@ -7416,17 +5930,6 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
 }
 
 @media (max-width: 480px) {
-  .table-show-cards-panel {
-    bottom: calc(76px + env(safe-area-inset-bottom));
-  }
-
-  .table-scene[data-phase='between_hands'] .table-show-cards-panel {
-    bottom: calc(88px + env(safe-area-inset-bottom));
-  }
-
-  .table-scene[data-tray-open='true'] .table-show-cards-panel {
-    bottom: calc(146px + env(safe-area-inset-bottom));
-  }
 
   .show-cards-toggle {
     min-width: 156px;
@@ -7568,9 +6071,7 @@ input:focus-visible {
 }
 
 .landing-status-strip span,
-.table-chip,
-.room-hud-chip,
-.connection-pill {
+.table-chip {
   min-height: 32px;
   border: 1px solid var(--hl-line);
   background: rgba(255, 255, 255, 0.045);
@@ -7774,7 +6275,6 @@ input:focus-visible {
 }
 
 .room-hud-room-pill,
-.room-hud-meta-card,
 .hud-settings-trigger,
 .table-panel,
 .betting-tray,
@@ -7813,23 +6313,6 @@ input:focus-visible {
 
 .hud-settings-trigger-icon {
   background: rgba(242, 222, 161, 0.08);
-}
-
-.room-hud-meta-card {
-  width: min(340px, 32vw);
-  min-width: 300px;
-  border-radius: 22px;
-  padding: 14px 16px;
-}
-
-.room-hud-blinds {
-  color: var(--hl-text);
-  font-size: clamp(25px, 2.2vw, 34px);
-  font-weight: 900;
-}
-
-.connection-pill.is-live {
-  color: #94e8a8;
 }
 
 .table-scene {
@@ -8009,8 +6492,7 @@ input:focus-visible {
   font-weight: 950;
 }
 
-.table-waiting-banner,
-.table-center-winner-announcement {
+.table-waiting-banner {
   border-radius: 24px;
   border-color: rgba(242, 222, 161, 0.32);
   background:
@@ -8018,7 +6500,6 @@ input:focus-visible {
     linear-gradient(180deg, rgba(13, 14, 14, 0.97), rgba(6, 8, 9, 0.97));
 }
 
-.table-center-winner-title,
 .table-waiting-title {
   color: var(--hl-gold-soft);
   font-weight: 900;
@@ -8074,8 +6555,7 @@ input:focus-visible {
   gap: 10px;
 }
 
-.betting-tray-kicker,
-.betting-tray-turn {
+.betting-tray-kicker {
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
@@ -8086,11 +6566,6 @@ input:focus-visible {
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-}
-
-.betting-tray-turn {
-  background: rgba(216, 185, 106, 0.2);
-  color: var(--hl-gold-soft);
 }
 
 .timer-bar {
@@ -8167,12 +6642,6 @@ input:focus-visible {
 .table-side-panels {
   left: 22px;
   top: 228px;
-  width: 252px;
-}
-
-.table-side-panels.chat-dock {
-  left: 22px;
-  bottom: 22px;
   width: 252px;
 }
 
@@ -8292,8 +6761,7 @@ input:focus-visible {
     padding: calc(10px + env(safe-area-inset-top)) 10px 0;
   }
 
-  .room-hud-main,
-  .room-hud-meta {
+  .room-hud-main {
     display: none;
   }
 
@@ -8310,8 +6778,7 @@ input:focus-visible {
   }
 
   .room-hud-mobile-settings,
-  .room-hud-mobile-identity,
-  .room-hud-mobile-status {
+  .room-hud-mobile-identity {
     border: 1px solid var(--hl-line);
     background: rgba(16, 15, 14, 0.94);
     box-shadow: 0 12px 26px rgba(0, 0, 0, 0.26);
@@ -8326,25 +6793,6 @@ input:focus-visible {
   .room-hud-mobile-identity {
     border-radius: 16px;
     padding: 9px 11px;
-  }
-
-  .room-hud-mobile-status {
-    border-radius: 16px;
-  }
-
-  .room-hud-mobile-brand,
-  .room-hud-mobile-room-code {
-    color: var(--hl-text);
-  }
-
-  .room-hud-mobile-toolbar {
-    gap: 6px;
-  }
-
-  .room-hud-mobile-pill {
-    min-height: 27px;
-    background: rgba(16, 15, 14, 0.86);
-    border-color: var(--hl-line);
   }
 
   .table-scene {
@@ -8522,25 +6970,8 @@ input:focus-visible {
     display: none !important;
   }
 
-  .table-show-cards-panel {
-    right: 10px;
-    bottom: calc(120px + env(safe-area-inset-bottom));
-  }
-
-  .table-scene[data-tray-open='true'] .table-show-cards-panel {
-    bottom: calc(236px + env(safe-area-inset-bottom));
-  }
-
-  .hero-inline-status,
-  .table-side-panels:not(.chat-dock) {
+  .hero-inline-status {
     display: none !important;
-  }
-
-  .table-side-panels.chat-dock {
-    left: 10px;
-    right: 10px;
-    bottom: calc(132px + env(safe-area-inset-bottom));
-    width: auto;
   }
 
   .betting-tray {
@@ -8644,10 +7075,6 @@ input:focus-visible {
 @media (max-width: 380px) {
   .room-hud-mobile-topline {
     grid-template-columns: 48px minmax(0, 1fr) 66px;
-  }
-
-  .room-hud-mobile-status span:last-child {
-    font-size: 10px;
   }
 
   .table-scene {
@@ -8791,50 +7218,6 @@ input:focus-visible {
     padding: 10px 9px 9px;
   }
 
-  .room-hud-meta {
-    display: flex;
-    margin-left: auto;
-  }
-
-  .room-hud-meta-card {
-    min-width: 320px;
-    max-width: 340px;
-    align-items: stretch;
-    padding: 14px 16px 15px;
-    border-radius: 24px;
-    background:
-      radial-gradient(circle at 100% 0%, rgba(201, 168, 76, 0.15), transparent 36%),
-      linear-gradient(180deg, rgba(18, 22, 32, 0.88), rgba(8, 11, 18, 0.9));
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.26);
-    backdrop-filter: blur(16px);
-    gap: 10px;
-  }
-
-  .room-hud[data-phase='in_hand'] .room-hud-meta-card {
-    min-width: 300px;
-    max-width: 320px;
-    padding: 12px 14px 14px;
-    background:
-      radial-gradient(circle at 100% 0%, rgba(201, 168, 76, 0.12), transparent 34%),
-      linear-gradient(180deg, rgba(14, 18, 27, 0.82), rgba(7, 9, 15, 0.86));
-  }
-
-  .room-hud-chip-row {
-    gap: 8px;
-  }
-
-  .room-hud-blinds {
-    font-size: clamp(26px, 2vw, 34px);
-    line-height: 0.98;
-  }
-
-  .room-hud[data-phase='in_hand'] .room-hud-blinds {
-    font-size: clamp(24px, 1.8vw, 30px);
-  }
-
-  .connection-pill,
-  .room-hud-chip,
   .table-chip {
     min-height: 34px;
     padding: 0 13px;
@@ -9067,23 +7450,8 @@ input:focus-visible {
     grid-column: 1 / -1;
   }
 
-  .table-side-panels.chat-dock {
-    left: 22px;
-    bottom: 22px;
-    width: var(--desktop-left-rail);
-  }
-
-  .chat-panel.is-expanded {
-    width: 100%;
-  }
-
   .targeted-emote-panel {
     margin-top: 0;
-  }
-
-  .table-show-cards-panel {
-    top: 16px;
-    right: 16px;
   }
 
   .show-cards-toggle {
@@ -9307,14 +7675,12 @@ input:focus-visible {
     transform: translate(-88%, -50%);
   }
 
-  .player-bet-stack .chip-stack,
-  .own-hand-bet-stack .chip-stack {
+  .player-bet-stack .chip-stack {
     transform: scale(1.06);
     transform-origin: center bottom;
   }
 
-  .player-bet-stack .chip-stack-amount.is-compact,
-  .own-hand-bet-stack .chip-stack-amount.is-compact {
+  .player-bet-stack .chip-stack-amount.is-compact {
     min-height: 22px;
     padding: 2px 9px;
     font-size: 18px;
@@ -9336,25 +7702,6 @@ input:focus-visible {
 
   .table-scene[data-hero-seat='true'] .seat-0 .player-stack {
     font-size: 32px;
-  }
-
-  .table-center-winner-announcement {
-    top: 48.5%;
-    width: min(500px, calc(100% - 110px));
-    padding: 18px 20px 16px;
-  }
-
-  .table-center-winner-title {
-    font-size: 27px;
-  }
-
-  .table-center-winner-line {
-    padding: 10px 14px;
-    font-size: 14px;
-  }
-
-  .table-center-winner-amount {
-    font-size: 17px;
   }
 
   .table-center-winner-chip-trail .chip-stack-display {
@@ -9446,8 +7793,7 @@ input:focus-visible {
     gap: 6px;
   }
 
-  .betting-tray-kicker,
-  .betting-tray-turn {
+  .betting-tray-kicker {
     min-height: 24px;
     padding: 0 8px;
     font-size: 8px;
@@ -9511,37 +7857,6 @@ input:focus-visible {
 
   .room-hud-mobile-identity {
     padding: 8px 9px;
-  }
-
-  .room-hud-mobile-brand {
-    font-size: 10px;
-    letter-spacing: 0.08em;
-  }
-
-  .room-hud-mobile-seated {
-    min-height: 22px;
-    padding: 0 6px;
-    font-size: 8px;
-  }
-
-  .room-hud-mobile-room-code {
-    font-size: 14px;
-    letter-spacing: 0.1em;
-  }
-
-  .room-hud-mobile-status {
-    min-width: 58px;
-    padding: 0 7px;
-    gap: 5px;
-  }
-
-  .room-hud-mobile-status span:last-child {
-    font-size: 9px;
-  }
-
-  .room-hud-mobile-pill {
-    padding: 0 8px;
-    font-size: 8px;
   }
 
   .table-scene[data-tray-open='true'] {
@@ -9660,13 +7975,11 @@ input:focus-visible {
     border-radius: 8px;
   }
 
-  .table-scene[data-tray-open='true'] .player-bet-stack .chip-stack,
-  .table-scene[data-tray-open='true'] .own-hand-bet-stack .chip-stack {
+  .table-scene[data-tray-open='true'] .player-bet-stack .chip-stack {
     transform: scale(0.88);
   }
 
-  .table-scene[data-tray-open='true'] .player-bet-stack .chip-stack-amount.is-compact,
-  .table-scene[data-tray-open='true'] .own-hand-bet-stack .chip-stack-amount.is-compact {
+  .table-scene[data-tray-open='true'] .player-bet-stack .chip-stack-amount.is-compact {
     min-height: 18px;
     padding: 1px 7px;
     font-size: 14px;
@@ -9802,9 +8115,7 @@ body {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 }
 
-.table-waiting-banner,
-.table-center-winner-announcement,
-.room-hud-meta-card {
+.table-waiting-banner {
   box-shadow:
     0 24px 54px rgba(0, 0, 0, 0.42),
     inset 0 1px 0 rgba(255, 255, 255, 0.035);
@@ -9815,9 +8126,6 @@ body {
 }
 
 @media (min-width: 1100px) {
-  .table-side-panels:not(.chat-dock) {
-    bottom: auto;
-  }
 
   .status-panel {
     align-self: flex-start;
@@ -9956,85 +8264,6 @@ body {
   display: none;
 }
 
-.three-scene-label {
-  min-width: max-content;
-  user-select: none;
-  pointer-events: none;
-  text-align: center;
-  font-weight: 800;
-  letter-spacing: 0;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.65);
-  white-space: pre-line;
-}
-
-.three-scene-label-wrapper,
-.three-scene-label-wrapper *,
-.three-table-label-wrapper,
-.three-table-label-wrapper * {
-  pointer-events: none !important;
-}
-
-.three-emote-reaction {
-  min-width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(242, 222, 161, 0.44);
-  border-radius: 999px;
-  background: rgba(6, 9, 9, 0.62);
-  box-shadow:
-    0 10px 24px rgba(0, 0, 0, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  color: #fff7df;
-  font-family: 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
-  font-size: 28px;
-  line-height: 1;
-  pointer-events: none;
-  transform-origin: center;
-  user-select: none;
-}
-
-.three-emote-reaction[data-targeted='true'] {
-  border-color: rgba(242, 222, 161, 0.68);
-  background: rgba(28, 18, 10, 0.72);
-}
-
-.three-table-amount-label,
-.three-table-action-label,
-.three-table-stack-label {
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(217, 181, 109, 0.34);
-  border-radius: 5px;
-  background: rgba(10, 18, 16, 0.58);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.22);
-  color: #f0d89e;
-  font-weight: 950;
-  letter-spacing: 0;
-  text-align: center;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.62);
-  white-space: nowrap;
-}
-
-.three-table-amount-label {
-  width: 92px;
-  height: 36px;
-  font-size: 11px;
-}
-
-.three-table-action-label {
-  width: 76px;
-  height: 25px;
-  color: #d7e6df;
-  font-size: 8px;
-}
-
-.three-table-stack-label {
-  width: 54px;
-  height: 25px;
-  font-size: 8px;
-}
-
 @media (max-width: 1023px) {
   .desktop-3d-stage {
     display: none !important;
@@ -10118,11 +8347,9 @@ body {
   .community-cards,
   .pot-display,
   .table-waiting-banner,
-  .table-center-winner-announcement,
   .own-hand-area,
   .betting-tray,
-  .table-side-panels,
-  .table-show-cards-panel {
+  .table-side-panels {
     pointer-events: auto;
   }
 
@@ -10415,11 +8642,6 @@ body {
     color: rgba(245, 240, 229, 0.8);
   }
 
-  .betting-tray-turn {
-    min-height: 34px;
-    border: 1px solid rgba(242, 222, 161, 0.26);
-  }
-
   .timer-bar-shell,
   .raise-slider-row {
     padding: 10px;
@@ -10675,11 +8897,6 @@ body {
     width: fit-content;
   }
 
-  .room-hud-meta-card {
-    min-width: 292px;
-    max-width: 324px;
-  }
-
   .table-scene[data-phase='in_hand'] {
     --desktop-left-rail: clamp(130px, 10vw, 176px);
   }
@@ -10760,10 +8977,6 @@ body {
     top: 236px;
     width: clamp(236px, 18vw, 300px);
   }
-
-  .table-side-panels:not(.chat-dock) {
-    bottom: auto;
-  }
 }
 
 @media (min-width: 1100px) and (max-width: 1360px) {
@@ -10805,19 +9018,6 @@ body {
 
   .room-hud-mobile-topline {
     grid-template-columns: 54px minmax(0, 1fr) 76px;
-  }
-
-  .room-hud-mobile-brand {
-    max-width: 14ch;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .room-hud-mobile-room-code {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .seat-1 {
@@ -11092,8 +9292,7 @@ button.player-seat-marker:focus-visible {
   z-index: var(--room-layer-turn);
 }
 
-.table-side-panels,
-.table-side-panels.chat-dock {
+.table-side-panels {
   z-index: var(--room-layer-side-panel);
 }
 
@@ -11101,16 +9300,8 @@ button.player-seat-marker:focus-visible {
   z-index: var(--room-layer-between-dock);
 }
 
-.table-show-cards-panel {
-  z-index: var(--room-layer-show-cards);
-}
-
 .betting-tray {
   z-index: var(--room-layer-action-tray);
-}
-
-.table-center-winner-announcement {
-  z-index: var(--room-layer-winner);
 }
 
 .table-center-winner-chip-trail {
@@ -11186,10 +9377,6 @@ button.player-seat-marker:focus-visible {
     height: 16px;
   }
 
-  .room-hud-mobile-settings-label {
-    display: none;
-  }
-
   .room-hud-mobile-identity {
     min-height: 38px;
     padding: 0 10px;
@@ -11200,82 +9387,6 @@ button.player-seat-marker:focus-visible {
     justify-content: space-between;
     gap: 8px;
     box-shadow: 0 8px 16px rgba(0, 0, 0, 0.22);
-  }
-
-  .room-hud-mobile-title-row,
-  .room-hud-mobile-room-row {
-    display: contents;
-  }
-
-  .room-hud-mobile-seated,
-  .room-hud-mobile-room-label {
-    display: none;
-  }
-
-  .room-hud-mobile-brand {
-    max-width: none;
-    flex: 1 1 auto;
-    min-width: 0;
-    font-size: 11px;
-    letter-spacing: 0.08em;
-  }
-
-  .room-hud-mobile-room-code {
-    flex: 0 0 auto;
-    max-width: 7ch;
-    font-size: 13px;
-    letter-spacing: 0.08em;
-  }
-
-  .room-hud-mobile-room-code::before {
-    content: 'Room ';
-    color: rgba(245, 240, 229, 0.46);
-    font-size: 9px;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-  }
-
-  .room-hud-mobile-status {
-    min-width: 56px;
-    min-height: 38px;
-    padding: 0 7px;
-    border-radius: 12px;
-    gap: 4px;
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.22);
-  }
-
-  .room-hud-mobile-status span:last-child {
-    font-size: 9px;
-    letter-spacing: 0;
-  }
-
-  .room-hud-mobile-status-dot {
-    width: 6px;
-    height: 6px;
-    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
-  }
-
-  .room-hud-mobile-toolbar {
-    flex-wrap: nowrap;
-    gap: 4px;
-    overflow: hidden;
-  }
-
-  .room-hud-mobile-pill {
-    flex: 1 1 0;
-    min-width: 0;
-    min-height: 22px;
-    padding: 0 6px;
-    font-size: 8px;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    box-shadow: none;
-  }
-
-  .room-hud-mobile-pill-strong {
-    flex: 1.35 1 0;
   }
 
   .table-scene {
@@ -11398,12 +9509,6 @@ button.player-seat-marker:focus-visible {
     height: 14px;
     font-size: 7px;
     border-width: 1px;
-  }
-
-  .blind-badge {
-    bottom: -7px;
-    padding: 1px 4px;
-    font-size: 6px;
   }
 
   .player-name,
@@ -11572,8 +9677,7 @@ button.player-seat-marker:focus-visible {
     gap: 6px;
   }
 
-  .betting-tray-kicker,
-  .betting-tray-turn {
+  .betting-tray-kicker {
     min-height: 22px;
     padding: 0 7px;
     font-size: 8px;
@@ -11607,20 +9711,6 @@ button.player-seat-marker:focus-visible {
 @media (max-width: 380px) {
   .room-hud-mobile-topline {
     grid-template-columns: 36px minmax(0, 1fr) 52px;
-  }
-
-  .room-hud-mobile-brand {
-    font-size: 10px;
-  }
-
-  .room-hud-mobile-room-code {
-    max-width: 6ch;
-    font-size: 12px;
-  }
-
-  .room-hud-mobile-status {
-    min-width: 52px;
-    padding: 0 6px;
   }
 
   .table-wrapper {
@@ -11675,23 +9765,12 @@ button.player-seat-marker:focus-visible {
   opacity: 0.64;
 }
 
-.settings-lock-banner,
 .settings-roster-summary,
 .spectator-rail-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-}
-
-.settings-lock-banner {
-  min-height: 38px;
-  padding: 0 12px;
-  border: 1px solid rgba(242, 222, 161, 0.18);
-  border-radius: 8px;
-  background: rgba(216, 185, 106, 0.08);
-  color: rgba(245, 240, 229, 0.76);
-  font-size: 13px;
 }
 
 .settings-rule-row {
@@ -12055,14 +10134,6 @@ button.player-seat-marker:focus-visible {
   .table-scene[data-hero-seat='true'] .own-hand-area {
     bottom: calc(64px + env(safe-area-inset-bottom));
   }
-
-  .room-hud-mobile-toolbar {
-    gap: 5px;
-  }
-
-  .room-hud-mobile-pill {
-    border-radius: 999px;
-  }
 }
 
 /* Pot display: pull the value forward as the focal element. */
@@ -12174,57 +10245,8 @@ button.player-seat-marker:focus-visible {
   z-index: var(--room-layer-winner);
 }
 
-.table-seat-winner-announcements .table-center-winner-announcement {
-  left: var(--winner-announcement-x);
-  top: var(--winner-announcement-y);
-  transform: translate(-50%, -96%);
-  width: min(224px, calc(100% - 40px));
-  padding: 8px 9px;
-  border-radius: 10px;
-  gap: 5px;
-  box-shadow:
-    0 14px 28px rgba(0, 0, 0, 0.44),
-    0 0 0 1px rgba(246, 228, 171, 0.1);
-  animation-delay: var(--winner-announcement-delay);
-}
-
-.table-seat-winner-announcements .table-center-winner-title {
-  margin: 0;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-}
-
-.table-seat-winner-announcements .table-center-winner-line {
-  width: 100%;
-  padding: 5px 7px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  font-size: 10px;
-  gap: 5px;
-}
-
-.table-seat-winner-announcements .table-center-winner-amount {
-  font-size: 11px;
-}
-
 .table-seat-winner-announcements .chip-stack-display {
   transform: translateY(1px) scale(0.64);
-}
-
-@media (max-width: 768px) {
-  .table-seat-winner-announcements .table-center-winner-announcement {
-    width: min(196px, calc(100% - 24px));
-    padding: 7px;
-    transform: translate(-50%, -92%);
-  }
-
-  .table-seat-winner-announcements .table-center-winner-title {
-    font-size: 9px;
-  }
-
-  .table-seat-winner-announcements .table-center-winner-line {
-    grid-template-columns: minmax(0, 1fr) auto;
-    font-size: 9px;
-  }
 }
 
 /* ============================================================
@@ -12327,10 +10349,6 @@ button.player-seat-marker:focus-visible {
     box-shadow: none;
   }
 
-  .room-hud-mobile-browser {
-    gap: 6px;
-  }
-
   .room-hud-mobile-settings {
     width: 38px;
     height: 38px;
@@ -12348,54 +10366,8 @@ button.player-seat-marker:focus-visible {
     background: transparent;
   }
 
-  .room-hud-mobile-settings-label {
-    display: none;
-  }
-
-  .room-hud-mobile-address {
-    flex: 1 1 auto;
-    min-height: 38px;
-    padding: 0 12px;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: none;
-    gap: 8px;
-  }
-
-  .room-hud-mobile-address-lock {
-    width: 16px;
-    height: 16px;
-    background: transparent;
-  }
-
-  .room-hud-mobile-address-site {
-    font-size: 11px;
-    letter-spacing: 0.06em;
-    color: rgba(255, 255, 255, 0.78);
-  }
-
-  .room-hud-mobile-room {
-    font-size: 9px;
-    letter-spacing: 0.16em;
-    color: rgba(255, 255, 255, 0.42);
-  }
-
-  .room-hud-mobile-status {
-    min-height: 38px;
-    padding: 0 10px;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: none;
-    font-size: 10px;
-  }
-
   /* The second-row toolbar (HOST / HAND LIVE / BLINDS) is redundant —
      stake info already lives in the table center copy. Hide it. */
-  .room-hud-mobile-toolbar {
-    display: none;
-  }
 
   /* Push the HUD's safe-area chrome down a bit so the table breathes */
   .table-scene {
@@ -12472,10 +10444,6 @@ button.player-seat-marker:focus-visible {
   }
 
   /* --- Best-hand pill: simpler, smaller --- */
-  .own-hand-best-hand {
-    padding: 4px 10px;
-    font-size: 10px;
-  }
 
   /* --- Betting tray: simpler, more breathing room --- */
   .betting-tray {
@@ -12492,9 +10460,6 @@ button.player-seat-marker:focus-visible {
 
   /* Hide the standalone "YOUR TURN" text pill on the right —
      the active-state styling on the kicker already conveys it. */
-  .betting-tray-turn {
-    display: none;
-  }
 
   .timer-bar-header {
     display: none;
@@ -12566,16 +10531,10 @@ button.player-seat-marker:focus-visible {
   }
 
   /* When the tray is open, hide the best-hand pill so cards have room */
-  .table-scene[data-tray-open='true'] .own-hand-best-hand {
-    display: none;
-  }
 }
 
 /* Extra-tight phones */
 @media (max-width: 400px) {
-  .room-hud-mobile-address-site {
-    font-size: 10px;
-  }
 
   .pot-display-value {
     font-size: 20px;
@@ -12622,8 +10581,7 @@ button.player-seat-marker:focus-visible {
   }
 
   .room-hud-mobile-settings,
-  .room-hud-mobile-identity,
-  .room-hud-mobile-status {
+  .room-hud-mobile-identity {
     height: 38px;
     min-height: 38px;
     border-radius: 12px;
@@ -12639,13 +10597,6 @@ button.player-seat-marker:focus-visible {
     padding: 0;
   }
 
-  .room-hud-mobile-settings-label,
-  .room-hud-mobile-seated,
-  .room-hud-mobile-room-label,
-  .room-hud-mobile-toolbar {
-    display: none !important;
-  }
-
   .room-hud-mobile-identity {
     min-width: 0;
     padding: 0 10px;
@@ -12653,48 +10604,6 @@ button.player-seat-marker:focus-visible {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 8px;
-  }
-
-  .room-hud-mobile-title-row,
-  .room-hud-mobile-room-row {
-    display: contents;
-  }
-
-  .room-hud-mobile-brand {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 11px;
-    letter-spacing: 0.08em;
-  }
-
-  .room-hud-mobile-room-code {
-    max-width: 7ch;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 12px;
-    letter-spacing: 0.08em;
-  }
-
-  .room-hud-mobile-room-code::before {
-    content: 'Room ';
-    color: rgba(245, 240, 229, 0.45);
-    font-size: 9px;
-    font-weight: 800;
-  }
-
-  .room-hud-mobile-status {
-    min-width: 58px;
-    padding: 0 7px;
-    gap: 4px;
-    justify-content: center;
-  }
-
-  .room-hud-mobile-status span:last-child {
-    font-size: 9px;
-    letter-spacing: 0;
   }
 
   .table-scene {
@@ -12877,7 +10786,6 @@ button.player-seat-marker:focus-visible {
     font-size: 9px;
   }
 
-  .betting-tray-turn,
   .timer-bar-header {
     display: none;
   }
@@ -12966,10 +10874,6 @@ button.player-seat-marker:focus-visible {
 
   .room-hud-mobile-topline {
     grid-template-columns: 36px minmax(0, 1fr) 52px;
-  }
-
-  .room-hud-mobile-status {
-    min-width: 52px;
   }
 }
 
@@ -13136,8 +11040,7 @@ button.player-seat-marker:focus-visible {
   }
 
   .room-hud-mobile-settings,
-  .room-hud-mobile-identity,
-  .room-hud-mobile-status {
+  .room-hud-mobile-identity {
     height: 34px;
     min-height: 34px;
     border-radius: 10px;
@@ -13165,48 +11068,6 @@ button.player-seat-marker:focus-visible {
     display: flex;
     align-items: center;
     justify-content: center;
-  }
-
-  .room-hud-mobile-room-row {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .room-hud-mobile-room-code {
-    color: #f2dea1;
-    font-size: 12px;
-    font-weight: 950;
-    letter-spacing: 0.08em;
-  }
-
-  .room-hud-mobile-room-code::before {
-    content: 'Room ';
-    color: rgba(245, 240, 229, 0.42);
-    font-size: 8px;
-    font-weight: 850;
-  }
-
-  .room-hud-mobile-status {
-    min-width: 54px;
-    padding: 0 6px;
-    justify-content: center;
-    gap: 4px;
-  }
-
-  .room-hud-mobile-status span:last-child {
-    font-size: 9px;
-    letter-spacing: 0;
-  }
-
-  .room-hud-mobile-status-dot {
-    width: 6px;
-    height: 6px;
-  }
-
-  .room-hud-mobile-toolbar {
-    display: none !important;
   }
 
   .table-scene {
@@ -13652,7 +11513,6 @@ button.player-seat-marker:focus-visible {
     overflow: auto;
   }
 
-  .betting-tray-turn,
   .timer-bar-header {
     display: none;
   }
@@ -13724,14 +11584,6 @@ button.player-seat-marker:focus-visible {
 @media (max-width: 380px) {
   .room-hud-mobile-topline {
     grid-template-columns: 32px minmax(0, 1fr) 32px;
-  }
-
-  .room-hud-mobile-brand {
-    font-size: 9px;
-  }
-
-  .room-hud-mobile-room-code {
-    font-size: 11px;
   }
 
   .mobile-edge-seat {
@@ -13826,8 +11678,7 @@ button.player-seat-marker:focus-visible {
   }
 
   .room-hud-mobile-settings,
-  .room-hud-mobile-identity,
-  .room-hud-mobile-status {
+  .room-hud-mobile-identity {
     border-radius: 8px;
   }
 
@@ -13841,14 +11692,6 @@ button.player-seat-marker:focus-visible {
 
   .room-hud-mobile-identity {
     padding: 0;
-  }
-
-  .room-hud-mobile-room-code {
-    font-size: 11px;
-  }
-
-  .room-hud-mobile-room-code::before {
-    font-size: 7px;
   }
 }
 
