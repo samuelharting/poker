@@ -1617,6 +1617,15 @@ export function PokerTable({
       }, [])
   }, [betweenHands, state.winners, state.players, winnerSeatMap, winnerSeatTargets])
   const showDesktopWaitingBanner = betweenHands && !isMobileViewport && winnerDisplays.length === 0
+  // Auto-deal needs two funded seats. When a hand leaves fewer (e.g. a heads-up
+  // bust), keep the lobby controls reachable once the showdown has played out.
+  const fundedSeatCount = state.players.filter(player => (
+    player.stack > 0 && player.status !== 'disconnected' && player.status !== 'sitting_out'
+  )).length
+  const showLobbyControls = betweenHands && (
+    winnerDisplays.length === 0 ||
+    (fundedSeatCount < 2 && (!showdownPresentation.isShowdown || showdownPresentation.complete))
+  )
   const showManualRabbitHunt = canManualRabbitHunt(state) && Boolean(onRabbitHunt)
   const hasVisibleRabbitRunout = betweenHands &&
     state.round !== 'showdown' &&
@@ -2329,7 +2338,7 @@ export function PokerTable({
         />
       )}
 
-      {isMobileViewport && betweenHands && winnerDisplays.length === 0 && !settingsOpen && (
+      {isMobileViewport && showLobbyControls && !settingsOpen && (
         <MobileBetweenHandsDock
           state={state}
           me={me}
@@ -2541,7 +2550,7 @@ export function PokerTable({
         )
       )}
 
-          {!isMobileViewport && betweenHands && winnerDisplays.length === 0 && (
+          {!isMobileViewport && showLobbyControls && (
             <div className="table-side-panels">
               <WaitingPanel
                 state={state}

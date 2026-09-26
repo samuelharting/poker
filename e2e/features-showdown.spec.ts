@@ -27,7 +27,8 @@ async function recordAnimations(player: Player) {
   await recordAttribute(page, '.all-in-announcement', 'aria-label', 'allin')
   if (player.viewport === 'desktop') {
     await page.evaluate(() => {
-      const store = ((window as unknown as { __qaLongTasks?: number[] }).__qaLongTasks = [])
+      const store: number[] = []
+      ;(window as unknown as { __qaLongTasks?: number[] }).__qaLongTasks = store
       try {
         new PerformanceObserver(list => {
           for (const entry of list.getEntries()) store.push(Math.round(entry.duration))
