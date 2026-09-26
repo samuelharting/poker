@@ -395,11 +395,9 @@ export function getFeltTexture(layout: FeltLayout) {
     context.fillStyle = 'rgba(255, 236, 190, 0.2)'
     context.textAlign = 'center'
     context.textBaseline = 'middle'
-    context.font = `700 ${height * 0.055}px ${font}`
-    context.fillText('POKER  NIGHT', width / 2, crestY)
-    context.font = `600 ${height * 0.022}px ${font}`
-    context.fillStyle = 'rgba(255, 236, 190, 0.16)'
-    context.fillText('PRIVATE  TABLE  ·  NO  LIMIT  HOLD’EM', width / 2, crestY + height * 0.055)
+    // The room already says POKER NIGHT (neon + HUD); the felt just names the game.
+    context.font = `600 ${height * 0.03}px ${font}`
+    context.fillText('NO  LIMIT  HOLD’EM', width / 2, crestY)
 
     const crestTopY = toY(layout.boardZ) - cardH / 2 - height * 0.12
     for (const [index, suit] of (['spades', 'hearts', 'clubs', 'diamonds'] as const).entries()) {

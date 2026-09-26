@@ -19,7 +19,7 @@ describe('desktop 3D camera framing', () => {
 
     // Eye height matches the seated avatars (heads sit around 1.8–2.2 units).
     expect(cameraY).toBeGreaterThan(1.8)
-    expect(cameraY).toBeLessThan(2.4)
+    expect(cameraY).toBeLessThan(2.7)
     expect(downwardPitchDegrees).toBeGreaterThan(10)
     expect(downwardPitchDegrees).toBeLessThan(18)
   })

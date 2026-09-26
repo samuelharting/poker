@@ -118,6 +118,11 @@ function describeHand(rank: HandRank, best5: Card[]): string {
     }
     return map[r]
   }
+  // Plural rank names read naturally: Sixes, not "Sixs".
+  const rankPlural = (r: Rank): string => {
+    const name = rankName(r)
+    return name === 'Six' ? 'Sixes' : `${name}s`
+  }
 
   switch (rank) {
     case 'royal_flush': return 'Royal Flush'
@@ -125,32 +130,32 @@ function describeHand(rank: HandRank, best5: Card[]): string {
     case 'four_of_a_kind': {
       const groups = groupByRank(best5)
       const quad = Array.from(groups.entries()).find(([, cards]) => cards.length === 4)!
-      return `Four of a Kind, ${rankName(quad[0])}s`
+      return `Four of a Kind, ${rankPlural(quad[0])}`
     }
     case 'full_house': {
       const groups = groupByRank(best5)
       const trip = Array.from(groups.entries()).find(([, cards]) => cards.length === 3)!
       const pair = Array.from(groups.entries()).find(([, cards]) => cards.length === 2)!
-      return `Full House, ${rankName(trip[0])}s full of ${rankName(pair[0])}s`
+      return `Full House, ${rankPlural(trip[0])} full of ${rankPlural(pair[0])}`
     }
     case 'flush': return `Flush, ${rankName(sorted[0]!.rank)}-high`
     case 'straight': return `Straight, ${rankName(sorted[0]!.rank)}-high`
     case 'three_of_a_kind': {
       const groups = groupByRank(best5)
       const trip = Array.from(groups.entries()).find(([, cards]) => cards.length === 3)!
-      return `Three of a Kind, ${rankName(trip[0])}s`
+      return `Three of a Kind, ${rankPlural(trip[0])}`
     }
     case 'two_pair': {
       const groups = groupByRank(best5)
       const pairs = Array.from(groups.entries())
         .filter(([, cards]) => cards.length === 2)
         .sort((a, b) => rankValue(b[0]) - rankValue(a[0]))
-      return `Two Pair, ${rankName(pairs[0]![0])}s and ${rankName(pairs[1]![0])}s`
+      return `Two Pair, ${rankPlural(pairs[0]![0])} and ${rankPlural(pairs[1]![0])}`
     }
     case 'pair': {
       const groups = groupByRank(best5)
       const pair = Array.from(groups.entries()).find(([, cards]) => cards.length === 2)!
-      return `Pair of ${rankName(pair[0])}s`
+      return `Pair of ${rankPlural(pair[0])}`
     }
     case 'high_card': return `${rankName(sorted[0]!.rank)}-high`
   }

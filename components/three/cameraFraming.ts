@@ -5,7 +5,7 @@ export type CameraPoint = readonly [number, number, number]
  * eye height as the seated avatars, pitched down just enough to read the board.
  */
 export const DESKTOP_CAMERA_FRAMING = {
-  fov: 56,
-  position: [0, 2.1, 5.55] as CameraPoint,
-  lookAt: [0, 0.62, -1.3] as CameraPoint,
+  fov: 60,
+  position: [0, 2.45, 6.35] as CameraPoint,
+  lookAt: [0, 0.6, -1.25] as CameraPoint,
 } as const

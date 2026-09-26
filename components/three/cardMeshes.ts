@@ -183,8 +183,6 @@ export function createBoardRuntime(scene: THREE.Scene): BoardRuntime {
       transparent: true,
       opacity: 0,
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      toneMapped: false,
     })
     const highlightMesh = new THREE.Mesh(glowGeometry, highlightMaterial)
     highlightMesh.position.set(x, FELT_TOP_Y + 0.004, BOARD_Z)
@@ -254,7 +252,7 @@ export function animateBoardRuntime(board: BoardRuntime, time: number, reducedMo
     slot.card.group.rotation.set(prop, (1 - travel) * 0.6, Math.PI * (1 - flip))
     slot.card.group.position.y += Math.sin(prop) * BOARD_CARD_DEPTH * 0.5
 
-    const glow = slot.highlighted ? 0.55 + (reducedMotion ? 0 : Math.sin(time * 4 + index) * 0.2) : 0
+    const glow = slot.highlighted ? 0.5 + (reducedMotion ? 0 : Math.sin(time * 4 + index) * 0.12) : 0
     slot.highlightMesh.visible = glow > 0
     slot.highlightMaterial.opacity = glow
     const lift = slot.highlighted && progress >= 1 ? 0.04 : 0

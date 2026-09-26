@@ -557,9 +557,9 @@ function createBackBar(scene: THREE.Scene, brassMaterial: THREE.MeshStandardMate
   addMesh(bar, new THREE.BoxGeometry(6.2, 3.1, 0.3), woodMaterial).castShadow = false
 
   const backLight = new THREE.MeshStandardMaterial({
-    color: '#0f3d36',
-    emissive: '#1f8f78',
-    emissiveIntensity: 0.55,
+    color: '#0b2622',
+    emissive: '#12574a',
+    emissiveIntensity: 0.35,
     roughness: 0.4,
   })
   addMesh(bar, new THREE.BoxGeometry(5.6, 2.5, 0.05), backLight, [0, 0.05, 0.17])
@@ -568,30 +568,33 @@ function createBackBar(scene: THREE.Scene, brassMaterial: THREE.MeshStandardMate
     addMesh(bar, new THREE.BoxGeometry(5.5, 0.07, 0.42), brassMaterial, [0, y, 0.38])
   }
 
-  const bottleColors = ['#b8364a', '#e0922f', '#1faa76', '#f2c766', '#8e6cf0', '#3f7fe0']
+  // Muted amber, green and smoky glass so the bar reads as a bar, not a toy shelf.
+  const bottleColors = ['#8a4a1c', '#3e5b2a', '#b07a2e', '#2f4a44', '#6b2a2a', '#c9a45a', '#4b3a22']
   const random = createSeededRandom(0x0b0771e5)
   for (const [rowIndex, shelfY] of [-0.62, 0.22].entries()) {
     for (let index = 0; index < 11; index += 1) {
       const x = -2.4 + index * 0.48 + (random() - 0.5) * 0.1
-      const height = 0.36 + random() * 0.22
+      const height = 0.3 + random() * 0.34
+      const shoulder = 0.45 + random() * 0.3
+      const width = 0.07 + random() * 0.06
       const color = bottleColors[(index + rowIndex * 3) % bottleColors.length]!
       const bottleMaterial = new THREE.MeshStandardMaterial({
         color,
         emissive: color,
-        emissiveIntensity: 0.42,
-        roughness: 0.12,
-        metalness: 0.1,
+        emissiveIntensity: 0.18,
+        roughness: 0.08,
+        metalness: 0.15,
         transparent: true,
-        opacity: 0.92,
+        opacity: 0.88,
       })
       const bottle = addMesh(
         bar,
         new THREE.LatheGeometry([
           new THREE.Vector2(0, 0),
-          new THREE.Vector2(0.1, 0),
-          new THREE.Vector2(0.11, height * 0.62),
-          new THREE.Vector2(0.05, height * 0.82),
-          new THREE.Vector2(0.04, height),
+          new THREE.Vector2(width, 0),
+          new THREE.Vector2(width * 1.08, height * shoulder),
+          new THREE.Vector2(width * 0.42, height * (shoulder + 0.16)),
+          new THREE.Vector2(width * 0.36, height),
           new THREE.Vector2(0, height),
         ], 14),
         bottleMaterial,
@@ -618,9 +621,9 @@ function createWallSconce(scene: THREE.Scene, x: number, brassMaterial: THREE.Me
     sconce,
     new THREE.CylinderGeometry(0.16, 0.3, 0.38, 24, 1, true),
     new THREE.MeshStandardMaterial({
-      color: '#ffcf8a',
-      emissive: '#ffb45c',
-      emissiveIntensity: 1.3,
+      color: '#ffb66b',
+      emissive: '#ff9a40',
+      emissiveIntensity: 1.6,
       side: THREE.DoubleSide,
       roughness: 0.6,
     }),
@@ -663,8 +666,7 @@ function createPendantLamp(scene: THREE.Scene, x: number, z: number, brassMateri
     new THREE.MeshStandardMaterial({
       color: '#fff3d6',
       emissive: '#ffd9a0',
-      emissiveIntensity: 6,
-      toneMapped: false,
+      emissiveIntensity: 2.2,
     }),
     [0, 0.02, 0]
   )
@@ -715,7 +717,6 @@ function createRoom(scene: THREE.Scene) {
     envMapIntensity: 1.2,
   })
   addMesh(scene, new THREE.BoxGeometry(32, 0.08, 0.34), brassMaterial, [0, -0.08, -9.3])
-  addMesh(scene, new THREE.BoxGeometry(32, 0.06, 0.12), brassMaterial, [0, 4.6, -9.4])
 
   createBackBar(scene, brassMaterial)
   for (const x of [-4.6, 4.6]) createWallSconce(scene, x, brassMaterial)
@@ -2552,7 +2553,7 @@ function createSceneRuntime(
     accent.position.lerp(accentTarget, 1 - Math.exp(-delta * 4))
     const accentGoal = winnerSeat ? 18 : allInImpact.strength * 12
     accent.intensity += (accentGoal - accent.intensity) * (1 - Math.exp(-delta * 5))
-    const flicker = reducedMotion ? 1 : 1 + Math.sin(time * 23) * 0.015 + (Math.sin(time * 1.3) > 0.985 ? -0.35 : 0)
+    const flicker = reducedMotion ? 1 : 1 + Math.sin(time * 23) * 0.012
     runtime.neonMaterials.forEach(material => {
       material.emissiveIntensity = 1.25 * flicker
     })
@@ -2572,8 +2573,8 @@ function createSceneRuntime(
       // Glance toward whoever is acting, like turning your head at the table.
       const actingPosition = TABLE_SEAT_POSITIONS[toVisualSeat(actingSeat)]
       actingFocus.set(actingPosition[0] * 0.85, 1.05, actingPosition[2] * 0.85)
-      targetLook.lerp(actingFocus, 0.3)
-      targetCamera.x += actingPosition[0] * 0.05
+      targetLook.lerp(actingFocus, 0.5)
+      targetCamera.x += actingPosition[0] * 0.07
     }
     if (winnerSeat) {
       winnerSeat.root.getWorldPosition(winnerFocus)

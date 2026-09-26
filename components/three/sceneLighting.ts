@@ -16,7 +16,7 @@ export function applyEnvironmentLighting(renderer: THREE.WebGLRenderer, scene: T
   const environment = new RoomEnvironment()
   const target = pmrem.fromScene(environment, 0.035)
   scene.environment = target.texture
-  scene.environmentIntensity = 0.42
+  scene.environmentIntensity = 0.3
   environment.traverse(object => {
     const mesh = object as THREE.Mesh
     mesh.geometry?.dispose()
@@ -43,7 +43,7 @@ export interface StageLights {
  * dark room, and a green bounce off the felt onto faces.
  */
 export function createStageLights(scene: THREE.Scene): StageLights {
-  const fill = new THREE.HemisphereLight('#b9d8ff', '#1a0f08', 0.55)
+  const fill = new THREE.HemisphereLight('#b9d8ff', '#1a0f08', 0.34)
   scene.add(fill)
 
   const key = new THREE.SpotLight('#ffe2b0', 105, 30, 0.6, 0.7, 1.6)

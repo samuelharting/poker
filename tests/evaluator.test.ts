@@ -110,3 +110,16 @@ describe('compareHands', () => {
     expect(compareHands(a, b)).toBe(0)
   })
 })
+
+describe('hand descriptions', () => {
+  it('pluralises sixes correctly', () => {
+    const result = evaluateHand([
+      { rank: '6', suit: 'hearts' },
+      { rank: '6', suit: 'spades' },
+      { rank: 'K', suit: 'clubs' },
+      { rank: '9', suit: 'diamonds' },
+      { rank: '2', suit: 'clubs' },
+    ])
+    expect(result.description).toBe('Pair of Sixes')
+  })
+})
