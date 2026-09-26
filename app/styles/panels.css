@@ -2525,7 +2525,7 @@
 .all-in-announcement {
   position: fixed;
   left: 50%;
-  top: clamp(150px, 30vh, 280px);
+  top: clamp(170px, 35vh, 330px);
   z-index: var(--room-layer-all-in, 226);
   display: grid;
   justify-items: center;
@@ -2842,6 +2842,11 @@
 
   .table-scene[data-layout='desktop'] .social-dock-panel {
     order: -1;
+  }
+
+  /* Sit on the empty felt in front of the far seats, not over their avatars. */
+  .table-scene[data-desktop-three='true'] .table-waiting-banner {
+    top: 62%;
   }
 
   /* Table controls own the bottom-right between hands (where the action tray
