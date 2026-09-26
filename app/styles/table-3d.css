@@ -594,3 +594,29 @@
     transform: translateY(-2px) scale(1.12);
   }
 }
+
+/* Lady Luck speech bubble, projected above her head */
+
+.desktop-3d-stage .lady-luck-bubble-3d {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 5;
+  max-width: 240px;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 143, 199, 0.7);
+  border-radius: 18px 18px 18px 4px;
+  background: linear-gradient(180deg, #ffe3f1, #ffc4e1);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4), 0 0 22px rgba(255, 110, 180, 0.35);
+  color: #4a0f2c;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
+  pointer-events: none;
+  transform: translate3d(var(--bubble-x, -999px), var(--bubble-y, -999px), 0) translate(-10%, -100%);
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+
+.desktop-3d-stage .lady-luck-bubble-3d[data-visible='false'] {
+  opacity: 0;
+}

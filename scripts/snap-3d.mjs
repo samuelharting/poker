@@ -69,13 +69,14 @@ console.log('overlay vars', await page.evaluate(() => ({
 })))
 
 if (process.argv.includes('--sequence')) {
-  // Frame sequence of the far side of the table to review motion over time.
-  await page.evaluate(() => {
+  // Frame sequence to review motion over time (SEQ_CAMERA overrides the view).
+  const camera = process.env.SEQ_CAMERA
+    ? JSON.parse(process.env.SEQ_CAMERA)
+    : { position: [0, 3.6, 3.2], lookAt: [0, 1.0, -3.2], fov: 50 }
+  await page.evaluate(cameraSetting => {
     const host = document.querySelector('.desktop-3d-stage')
-    if (host?.__pokerRuntime) {
-      host.__pokerRuntime.debugCamera = { position: [0, 3.6, 3.2], lookAt: [0, 1.0, -3.2], fov: 50 }
-    }
-  })
+    if (host?.__pokerRuntime) host.__pokerRuntime.debugCamera = cameraSetting
+  }, camera)
   for (let frame = 0; frame < 16; frame += 1) {
     await clickVisible(page, /^(Check|Call)/)
     await clickVisible(page, /^Deal next hand$/)

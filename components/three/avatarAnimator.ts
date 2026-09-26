@@ -55,6 +55,8 @@ export interface AvatarPose {
   cardLift: number
   /** 0..1 how far a drink is raised to the mouth (for the prop's tilt). */
   drinkLift: number
+  /** 0..1 middle finger extended (the flick-off gesture). */
+  middleFinger: number
 }
 
 export interface AvatarAnimatorInput {
@@ -85,6 +87,8 @@ export interface AvatarAnimatorInput {
   /** 0..10 beers deep. */
   drunkLevel?: number
   passedOut?: boolean
+  /** A flick-off aimed at another seat: seconds elapsed and the target in seat space. */
+  flipOff?: { elapsed: number; target: Vec3 } | null
 }
 
 interface Spring {
@@ -113,7 +117,8 @@ export interface AvatarAnimatorState {
 }
 
 const BONE_CHANNELS = ANIMATED_BONES.length * 3
-const CHANNEL_COUNT = BONE_CHANNELS + 3 + 3 + 2 + 3 + 3 + 1 + 1
+const CHANNEL_COUNT = BONE_CHANNELS + 3 + 3 + 2 + 3 + 3 + 1 + 1 + 1
+export const FLIP_OFF_SECONDS = 2.4
 const DRINK_SECONDS = 2.6
 const PEEK_DURATION = 2.1
 
@@ -163,6 +168,7 @@ function emptyPose(): AvatarPose {
     bodyRotation: [0, 0, 0],
     cardLift: 0,
     drinkLift: 0,
+    middleFinger: 0,
   }
 }
 
@@ -532,6 +538,31 @@ export function computeAvatarTargetPose(
     pose.bodyPosition[2] -= 0.08
   }
 
+  // 15. The flick-off: turn to the target, raise the fist, pump it twice.
+  if (input.flipOff && !input.passedOut) {
+    const { elapsed, target } = input.flipOff
+    const raise = envelope(elapsed, FLIP_OFF_SECONDS, 0.28, 0.4)
+    const pump = (Math.max(0, Math.sin(Math.min(1, Math.max(0, (elapsed - 0.35) / 0.9)) * Math.PI * 2)) * 0.5) * motion
+    const shoulder = anchors.shoulderR
+    const dx = target[0] - shoulder[0]
+    const dz = target[2] - shoulder[2]
+    const length = Math.hypot(dx, dz) || 1
+    const turn = Math.atan2(-dx, -dz)
+    const reach = 0.36 + 0.12 * pump
+    const goal: Vec3 = [
+      shoulder[0] + (dx / length) * reach,
+      shoulder[1] + 0.18 + 0.08 * pump,
+      shoulder[2] + (dz / length) * reach,
+    ]
+    blendTo(pose.handR, goal, raise)
+    add(bones.Chest, -0.06, turn * 0.3, 0, raise)
+    add(bones.Head, -0.1, turn * 0.45, 0.12, raise)
+    add(bones.WristR, -0.3, 0, 0, raise)
+    pose.fingerCurlR = pose.fingerCurlR * (1 - raise) + raise
+    pose.middleFinger = raise
+    pose.bodyPosition[2] -= 0.05 * pump * raise
+  }
+
   pose.fingerCurlR = clamp01(pose.fingerCurlR)
   pose.fingerCurlL = clamp01(pose.fingerCurlL)
   return pose
@@ -551,6 +582,7 @@ function writeChannels(pose: AvatarPose, out: number[]) {
   for (const value of [...pose.bodyPosition, ...pose.bodyRotation]) out[index++] = value
   out[index++] = pose.cardLift
   out[index++] = pose.drinkLift
+  out[index++] = pose.middleFinger
 }
 
 function readChannels(values: readonly number[]): AvatarPose {
@@ -567,6 +599,7 @@ function readChannels(values: readonly number[]): AvatarPose {
   pose.bodyRotation = [values[index++]!, values[index++]!, values[index++]!]
   pose.cardLift = values[index++]!
   pose.drinkLift = values[index++]!
+  pose.middleFinger = values[index++]!
   return pose
 }
 

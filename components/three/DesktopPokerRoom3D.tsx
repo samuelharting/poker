@@ -31,6 +31,7 @@ import {
 import {
   ANIMATED_BONES,
   createAvatarAnimatorState,
+  FLIP_OFF_SECONDS,
   updateAvatarAnimator,
   type AvatarAnchors,
   type AvatarAnimatorState,
@@ -40,6 +41,14 @@ import { getArmChain, solveArmIK } from './avatarIK'
 import { applyBlink, getBlinkAmount, stylizeAvatar, type StylizedAvatar } from './avatarStyle'
 import { createAvatarFace, disposeAvatarFace, updateAvatarFace, type AvatarFaceRig, type FaceMood } from './avatarFace'
 import { createDrinkProp, disposeDrinkProp, DRINK_DURATION, type DrinkProp } from './drinkProps'
+import {
+  createCompanion,
+  disposeCompanion,
+  getCompanionBubbleAnchor,
+  getCompanionLine,
+  updateCompanion,
+  type CompanionRuntime,
+} from './companion3D'
 import { DESKTOP_CAMERA_FRAMING } from './cameraFraming'
 import {
   animateBoardRuntime,
@@ -147,6 +156,7 @@ interface SeatRuntime {
   drinkStartedAt: number
   drunkLevel: number
   passedOut: boolean
+  flipOff: { startedAt: number; targetId: string } | null
   skinBaseColor: THREE.Color | null
   loser: boolean
   lastPose: AvatarPose | null
@@ -226,6 +236,8 @@ interface SceneRuntime {
   frameBudget: FrameBudget
   neonMaterials: THREE.MeshStandardMaterial[]
   overlayElements: Map<string, HTMLElement>
+  /** Lady Luck, the win-streak companion. */
+  companion: CompanionRuntime | null
   /** Development-only camera override used by scripts/snap-3d.mjs close-ups. */
   debugCamera: { position: Vec3; lookAt: Vec3; fov?: number } | null
   feltMaterial: THREE.MeshStandardMaterial
@@ -908,6 +920,7 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     drinkStartedAt: Number.NEGATIVE_INFINITY,
     drunkLevel: player.drinks?.level ?? 0,
     passedOut: player.drinks?.passedOut ?? false,
+    flipOff: null,
     skinBaseColor: null,
     loser: false,
     lastPose: null,
@@ -1631,6 +1644,25 @@ function solveSeatArms(seat: SeatRuntime, pose: AvatarPose) {
   }
 }
 
+const flipTargetWorld = new THREE.Vector3()
+
+/** Converts an active flick-off into animator input (target in seat space). */
+function getFlipOffInput(seat: SeatRuntime, time: number, seats: ReadonlyMap<string, SeatRuntime>) {
+  const gesture = seat.flipOff
+  if (!gesture) return null
+  const elapsed = time - gesture.startedAt
+  if (elapsed > FLIP_OFF_SECONDS) {
+    seat.flipOff = null
+    return null
+  }
+  const target = seats.get(gesture.targetId)
+  if (target) target.root.getWorldPosition(flipTargetWorld)
+  else flipTargetWorld.set(0, 0, 4.4)
+  flipTargetWorld.y += 1.4
+  const local = seat.root.worldToLocal(flipTargetWorld.clone())
+  return { elapsed, target: [local.x, local.y, local.z] as Vec3 }
+}
+
 const drinkWristWorld = new THREE.Vector3()
 const drinkKnuckleWorld = new THREE.Vector3()
 const drinkForward = new THREE.Vector3()
@@ -1683,7 +1715,8 @@ function animateSeat(
   delta: number,
   actingVisualSeat: number | null,
   reducedMotion: boolean,
-  tableHeat = 0
+  tableHeat = 0,
+  runtimeSeats: ReadonlyMap<string, SeatRuntime> = new Map()
 ) {
   // Furniture and table props stay grounded. Only the player breathes, shifts,
   // and reacts to action playback.
@@ -1730,6 +1763,7 @@ function animateSeat(
     drinkElapsed: time - seat.drinkStartedAt < DRINK_DURATION ? time - seat.drinkStartedAt : null,
     drunkLevel: seat.drunkLevel,
     passedOut: seat.passedOut,
+    flipOff: getFlipOffInput(seat, time, runtimeSeats),
   })
   seat.lastPose = pose
 
@@ -1808,7 +1842,9 @@ function animateSeat(
       applyBlink(seat.avatarStyle, blink)
     }
     for (const name of FINGER_BONES_R) {
-      applyAvatarBoneOffset(seat, bones.get(name), pose.fingerCurlR * 0.55, 0, 0)
+      // During a flick-off the middle finger straightens while the rest curl.
+      const middle = name.startsWith('Middle') ? 1 - pose.middleFinger : 1
+      applyAvatarBoneOffset(seat, bones.get(name), pose.fingerCurlR * 0.55 * middle + (middle < 1 ? -0.1 * pose.middleFinger : 0), 0, 0)
     }
     for (const name of FINGER_BONES_L) {
       applyAvatarBoneOffset(seat, bones.get(name), pose.fingerCurlL * 0.55, 0, 0)
@@ -2059,6 +2095,51 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
   }
 }
 
+const companionBubbleWorld = new THREE.Vector3()
+
+/** Drives Lady Luck beside her owner's seat and floats her speech bubble. */
+function updateLadyLuck(
+  runtime: SceneRuntime,
+  view: ThreeTableViewModel,
+  host: HTMLDivElement,
+  time: number,
+  delta: number,
+  reducedMotion: boolean,
+  width: number,
+  height: number
+) {
+  const companion = runtime.companion
+  if (!companion) return
+  const state = view.companion ?? null
+  const owner = state ? view.players.find(player => player.id === state.ownerId) ?? null : null
+  const ownerSeat = owner ? runtime.seats.get(owner.id)?.root ?? null : null
+  updateCompanion(companion, {
+    time,
+    delta,
+    reducedMotion,
+    camera: runtime.camera,
+    state,
+    ownerSeat,
+    ownerIsHero: Boolean(owner?.isHero),
+    ownerFolded: owner?.status === 'folded',
+  })
+
+  const bubble = host.querySelector<HTMLElement>('.lady-luck-bubble-3d')
+  if (!bubble) return
+  const line = getCompanionLine(companion)
+  if (!line || !getCompanionBubbleAnchor(companion, companionBubbleWorld)) {
+    bubble.dataset.visible = 'false'
+    return
+  }
+  companionBubbleWorld.project(runtime.camera)
+  const x = THREE.MathUtils.clamp((companionBubbleWorld.x * 0.5 + 0.5) * width, 140, width - 140)
+  const y = THREE.MathUtils.clamp((-companionBubbleWorld.y * 0.5 + 0.5) * height, 90, height - 200)
+  bubble.dataset.visible = 'true'
+  if (bubble.textContent !== line) bubble.textContent = line
+  bubble.style.setProperty('--bubble-x', `${x.toFixed(1)}px`)
+  bubble.style.setProperty('--bubble-y', `${y.toFixed(1)}px`)
+}
+
 function createSceneRuntime(
   canvas: HTMLCanvasElement,
   host: HTMLDivElement,
@@ -2097,6 +2178,12 @@ function createSceneRuntime(
   const feltMaterial = table.feltMaterial
   const pot = createPotRuntime(scene)
   const board = createBoardRuntime(scene)
+  let companion: CompanionRuntime | null = null
+  try {
+    companion = createCompanion(scene)
+  } catch (error) {
+    console.warn('Lady Luck could not be created.', error)
+  }
   const maxAnisotropy = renderer.capabilities.getMaxAnisotropy()
   if (feltMaterial.map) {
     feltMaterial.map.anisotropy = Math.min(16, maxAnisotropy)
@@ -2125,6 +2212,7 @@ function createSceneRuntime(
     frameBudget: new FrameBudget(),
     neonMaterials,
     overlayElements: new Map<string, HTMLElement>(),
+    companion,
     debugCamera: null as SceneRuntime['debugCamera'],
     feltMaterial,
     startTime: performance.now(),
@@ -2192,7 +2280,7 @@ function createSceneRuntime(
     const { heat, sourceId } = getTableHeat(runtime, time)
     let winnerSeat: SeatRuntime | null = null
     for (const seat of runtime.seats.values()) {
-      animateSeat(seat, time, delta, actingSeat, reducedMotion, seat.playerId === sourceId ? 0 : heat)
+      animateSeat(seat, time, delta, actingSeat, reducedMotion, seat.playerId === sourceId ? 0 : heat, runtime.seats)
       if (seat.winner && seat.root.visible && !winnerSeat) winnerSeat = seat
     }
     animateWagers(runtime, time, reducedMotion)
@@ -2271,6 +2359,7 @@ function createSceneRuntime(
     camera.lookAt(cameraLookAt)
     camera.updateMatrixWorld()
 
+    updateLadyLuck(runtime, viewRef.current, host, time, delta, reducedMotion, viewportWidth, viewportHeight)
     projectSeatOverlays(runtime, host, viewportWidth, viewportHeight)
 
     if (runtime.postFx) {
@@ -2320,6 +2409,7 @@ function createSceneRuntime(
       seat.holeCards.forEach(disposeCardMesh)
     }
     runtime.board.slots.forEach(slot => disposeCardMesh(slot.card))
+    if (runtime.companion) disposeCompanion(runtime.companion)
     runtime.postFx?.dispose()
     environment.dispose()
     disposeObject(scene)
@@ -2406,6 +2496,20 @@ export function DesktopPokerRoom3D({
     }
   }, [])
 
+  const seenGesturesRef = useRef(new Set<string>())
+  useEffect(() => {
+    const runtime = runtimeRef.current
+    if (!runtime) return
+    const now = (performance.now() - runtime.startTime) / 1000
+    for (const reaction of emoteReactions) {
+      if (seenGesturesRef.current.has(reaction.id)) continue
+      seenGesturesRef.current.add(reaction.id)
+      if (!reaction.emote.includes('\u{1F595}') || !reaction.targeted) continue
+      const sender = runtime.seats.get(reaction.senderId)
+      if (sender) sender.flipOff = { startedAt: now, targetId: reaction.targetId }
+    }
+  }, [emoteReactions])
+
   useEffect(() => {
     if (!runtimeRef.current) return
     syncPlayers(runtimeRef.current, view)
@@ -2444,6 +2548,7 @@ export function DesktopPokerRoom3D({
         className="desktop-3d-canvas"
         aria-label="Animated 3D poker room"
       />
+      <div className="lady-luck-bubble-3d" data-visible="false" aria-live="polite" />
 
       {webGLStatus === 'loading' && (
         <div className="three-webgl-status" role="status">Warming up the 3D table…</div>
