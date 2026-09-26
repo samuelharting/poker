@@ -222,6 +222,9 @@ interface WagerRuntime {
   target: THREE.Vector3
   startedAt: number
   animating: boolean
+  /** End-of-street sweep into the pot. */
+  collectStartedAt: number
+  collectCount: number
   motionProfile: PokerActionMotionProfile
 }
 
@@ -1439,6 +1442,8 @@ function createWagerRuntime(
     target,
     startedAt: now,
     animating: false,
+    collectStartedAt: Number.NEGATIVE_INFINITY,
+    collectCount: 0,
     motionProfile: getPokerActionMotionProfile(player.actionCue, {
       actionKey: player.actionKey,
       playerId: player.id,
@@ -1486,6 +1491,12 @@ function syncWagers(runtime: SceneRuntime, view: ThreeTableViewModel) {
       wager.group.position.copy(wager.target)
     }
 
+    if (wager.amount > 0 && player.bet === 0 && view.phase === 'in_hand') {
+      // The street closed: sweep this stack into the pot instead of popping it.
+      wager.collectStartedAt = now
+      wager.collectCount = getWagerChipCount(wager.amount, view.bigBlind, wager.chipMeshes.length)
+      wager.animating = false
+    }
     wager.amount = player.bet
     wager.actionKey = player.actionKey
     if (actionChanged) {
@@ -1495,9 +1506,12 @@ function syncWagers(runtime: SceneRuntime, view: ThreeTableViewModel) {
         wagerIntensity: player.wagerIntensity,
       })
     }
-    const chipCount = view.phase === 'in_hand'
-      ? getWagerChipCount(player.bet, view.bigBlind, wager.chipMeshes.length)
-      : 0
+    const collecting = now - wager.collectStartedAt < WAGER_COLLECT_SECONDS
+    const chipCount = collecting
+      ? wager.collectCount
+      : view.phase === 'in_hand'
+        ? getWagerChipCount(player.bet, view.bigBlind, wager.chipMeshes.length)
+        : 0
     wager.group.visible = chipCount > 0
     wager.chipMeshes.forEach((chip, index) => {
       chip.visible = index < chipCount
@@ -1522,8 +1536,27 @@ function resetChipTransforms(chips: THREE.Mesh[], basePositions: THREE.Vector3[]
   })
 }
 
+const WAGER_COLLECT_SECONDS = 0.55
+
 function animateWagers(runtime: SceneRuntime, time: number, reducedMotion: boolean) {
   for (const wager of runtime.wagers.values()) {
+    const collectProgress = (time - wager.collectStartedAt) / WAGER_COLLECT_SECONDS
+    if (collectProgress >= 0 && collectProgress < 1 && !reducedMotion) {
+      const potPosition = runtime.pot.group.position
+      const position = interpolateWagerArc(
+        [wager.target.x, wager.target.y, wager.target.z],
+        [potPosition.x, potPosition.y, potPosition.z],
+        collectProgress,
+        0.12
+      )
+      wager.group.position.set(position[0], position[1], position[2])
+      wager.group.visible = true
+      continue
+    }
+    if (collectProgress >= 1 && wager.amount === 0 && wager.group.visible) {
+      wager.group.visible = false
+      wager.group.position.copy(wager.target)
+    }
     if (!wager.animating) continue
 
     if (reducedMotion) {
