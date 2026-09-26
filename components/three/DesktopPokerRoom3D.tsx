@@ -816,8 +816,12 @@ function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
   // The player's own chips sit to the right of their cards, just inside the rail.
   const stackSpot = at(-0.26, FELT_TOP_Y)
   seat.anchors.stack = [0.62 / scale, stackSpot[1] + 0.06, stackSpot[2]]
-  seat.stack.group.position.set(0.62 / scale, stackSpot[1], stackSpot[2])
-  seat.stack.group.scale.setScalar(1 / scale)
+  // The stack is a world object (not a child of the seat) so the hero, whose
+  // seat is hidden, still sees their own chips in front of them.
+  const stackWorld = seat.root.localToWorld(new THREE.Vector3(0.62 / scale, stackSpot[1], stackSpot[2]))
+  seat.stack.group.position.copy(stackWorld)
+  seat.stack.group.rotation.set(0, seat.root.rotation.y, 0)
+  seat.stack.group.scale.setScalar(1)
   const tapSpot = at(-0.18, FELT_TOP_Y + 0.02)
   seat.anchors.tap = [0.16 / scale, tapSpot[1], tapSpot[2]]
   const betWorld = getTableWagerAnchor(safeSeat)
@@ -879,7 +883,6 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
   const chairGroup = chair.group
   const personalStack = createChipSet(20)
   personalStack.group.name = `personal-stack-${player.id}`
-  root.add(personalStack.group)
   materials.push(...chair.materials)
 
   const body = new THREE.Group()
@@ -1347,6 +1350,37 @@ function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number) {
   seat.ring.material.emissive.set(ringColor)
 }
 
+const OUTFIT_HATS = ['none', 'fedora', 'cowboy', 'beanie', 'visor', 'crown'] as const
+const OUTFIT_JACKETS = ['none', 'tuxedo', 'leather', 'varsity', 'western', 'smoking'] as const
+const OUTFIT_MODELS = ['business_man', 'casual', 'hoodie', 'worker', 'punk', 'adventurer'] as const
+
+/**
+ * Bots often share a look. For display only, nudge any repeated model+outfit
+ * combination to a different model/hat/jacket so the table never has clones.
+ */
+function withDistinctOutfits(players: ThreePlayerView[]): ThreePlayerView[] {
+  const used = new Set<string>()
+  const usedModels = new Map<string, number>()
+  return players.map((player, index) => {
+    let profile = player.avatarProfile
+    const keyOf = (candidate: typeof profile) => `${candidate.modelKey}|${candidate.hat}|${candidate.jacket}|${candidate.glasses}`
+    let attempt = 0
+    while ((used.has(keyOf(profile)) || (usedModels.get(profile.modelKey) ?? 0) >= 2) && attempt < 12) {
+      attempt += 1
+      const model = OUTFIT_MODELS[(OUTFIT_MODELS.indexOf(profile.modelKey as typeof OUTFIT_MODELS[number]) + attempt) % OUTFIT_MODELS.length]!
+      profile = {
+        ...profile,
+        modelKey: model as typeof profile.modelKey,
+        hat: OUTFIT_HATS[(index + attempt) % OUTFIT_HATS.length] as typeof profile.hat,
+        jacket: OUTFIT_JACKETS[(index * 2 + attempt) % OUTFIT_JACKETS.length] as typeof profile.jacket,
+      }
+    }
+    used.add(keyOf(profile))
+    usedModels.set(profile.modelKey, (usedModels.get(profile.modelKey) ?? 0) + 1)
+    return profile === player.avatarProfile ? player : { ...player, avatarProfile: profile }
+  })
+}
+
 function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
   const now = (performance.now() - runtime.startTime) / 1000
   const activeIds = new Set(view.players.map(player => player.id))
@@ -1356,17 +1390,20 @@ function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
     seat.avatarGeneration += 1
     detachRiggedAvatar(seat)
     runtime.scene.remove(seat.root)
+    seat.stack.group.removeFromParent()
     disposeObject(seat.root)
     runtime.seats.delete(playerId)
   }
 
   const hasWinner = view.players.some(player => player.isWinner)
-  for (const player of view.players) {
+  const displayPlayers = withDistinctOutfits(view.players)
+  for (const player of displayPlayers) {
     let seat = runtime.seats.get(player.id)
     if (!seat) {
       seat = createSeatRuntime(player, now)
       runtime.seats.set(player.id, seat)
       runtime.scene.add(seat.root)
+      runtime.scene.add(seat.stack.group)
     }
     syncSeat(seat, player, now)
     // Personal chip stack: denser for deeper stacks, capped for readability.
@@ -1600,7 +1637,7 @@ function syncWagers(runtime: SceneRuntime, view: ThreeTableViewModel) {
     const amountIncreased = player.bet > wager.amount
     wager.visualSeat = visualSeat
     const ownerSeat = runtime.seats.get(player.id)
-    if (ownerSeat && ownerSeat.root.visible) {
+    if (ownerSeat) {
       // Chips leave the player's own stack (where the hand grabs them).
       ownerSeat.stack.group.getWorldPosition(wager.start)
       wager.start.y = TABLE_WAGER_Y
