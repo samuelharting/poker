@@ -1,0 +1,19 @@
+/*
+ * Shared card-back design for every 2D card (hero hand, mobile seats, board).
+ * Mirrors the 3D card back painted in components/three/sceneTextures.ts:
+ * ruby body, cream frame, gold lattice, brass spade medallion.
+ */
+
+.card-container .card .card-back,
+.card .card-back {
+  border: 0;
+  background:
+    radial-gradient(circle at 50% 50%, var(--c-brass-200) 0 9%, var(--c-brass-500) 13%, #6d4a13 16%, transparent 16.5%),
+    repeating-linear-gradient(45deg, transparent 0 9px, rgba(255, 214, 150, 0.22) 9px 11px),
+    repeating-linear-gradient(-45deg, transparent 0 9px, rgba(255, 214, 150, 0.22) 9px 11px),
+    linear-gradient(180deg, #c9303f, #8e1a2b);
+  box-shadow:
+    inset 0 0 0 5px #fff4de,
+    inset 0 0 0 7px rgba(255, 226, 170, 0.75),
+    inset 0 0 0 9px #8e1a2b;
+}

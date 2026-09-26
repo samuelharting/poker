@@ -1,11 +1,11 @@
 export type CameraPoint = readonly [number, number, number]
 
 /**
- * A seated desktop view: low enough to face the other players across the
- * table, but still pitched down enough to keep bets and the board readable.
+ * First-person seated view: the camera sits in the hero's chair at the same
+ * eye height as the seated avatars, pitched down just enough to read the board.
  */
 export const DESKTOP_CAMERA_FRAMING = {
-  fov: 40,
-  position: [0, 5.9, 12.2] as CameraPoint,
-  lookAt: [0, 0.4, -0.6] as CameraPoint,
+  fov: 56,
+  position: [0, 2.1, 5.55] as CameraPoint,
+  lookAt: [0, 0.62, -1.3] as CameraPoint,
 } as const

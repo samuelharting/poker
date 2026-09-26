@@ -60,6 +60,6 @@ describe('desktop opponent panel readability', () => {
     expect(sceneSource).not.toContain('getTurnCameraPose(actingSeat)')
     expect(sceneSource).toContain('getAllInCameraImpact(runtime.seats.values(), time, reducedMotion)')
     expect(sceneSource).toContain('const microShake = Math.sin(time * 61)')
-    expect(sceneSource).toContain('targetCamera.z -= allInImpact.strength * 0.72')
+    expect(sceneSource).toContain('targetCamera.z -= allInImpact.strength * 0.3')
   })
 })

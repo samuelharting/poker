@@ -9,7 +9,7 @@ const sceneSource = readFileSync(
 )
 
 describe('desktop 3D camera framing', () => {
-  it('uses a seated perspective while keeping the table surface readable', () => {
+  it('sits the camera in the hero chair at avatar eye height', () => {
     const [, cameraY, cameraZ] = DESKTOP_CAMERA_FRAMING.position
     const [, lookAtY, lookAtZ] = DESKTOP_CAMERA_FRAMING.lookAt
     const downwardPitchDegrees = Math.atan2(
@@ -17,10 +17,11 @@ describe('desktop 3D camera framing', () => {
       cameraZ - lookAtZ
     ) * 180 / Math.PI
 
-    // Raised and pulled back so all eight seats and their plates fit on screen.
-    expect(cameraY).toBe(5.9)
-    expect(downwardPitchDegrees).toBeGreaterThan(20)
-    expect(downwardPitchDegrees).toBeLessThan(25)
+    // Eye height matches the seated avatars (heads sit around 1.8–2.2 units).
+    expect(cameraY).toBeGreaterThan(1.8)
+    expect(cameraY).toBeLessThan(2.4)
+    expect(downwardPitchDegrees).toBeGreaterThan(10)
+    expect(downwardPitchDegrees).toBeLessThan(18)
   })
 
   it('wires the shared framing into the live Three.js camera', () => {

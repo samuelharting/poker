@@ -159,6 +159,8 @@ export interface BoardRuntime {
 }
 
 const DEALER_ORIGIN = new THREE.Vector3(0, FELT_TOP_Y + 1.6, -3.2)
+/** Radians the board leans toward the hero's seat. */
+const BOARD_TILT = 0.32
 
 /** Five community cards that deal out of the far side and flip onto the felt. */
 export function createBoardRuntime(scene: THREE.Scene): BoardRuntime {
@@ -246,8 +248,11 @@ export function animateBoardRuntime(board: BoardRuntime, time: number, reducedMo
     scratch.y += Math.sin(travel * Math.PI) * 0.35 + (1 - flip) * 0.06
     const landing = progress >= 1 ? 0 : Math.sin(THREE.MathUtils.clamp((progress - 0.88) / 0.12, 0, 1) * Math.PI) * 0.015
     slot.card.group.position.set(scratch.x, scratch.y + landing, scratch.z)
-    // Face down (rotation PI) while travelling, flipping over the long edge.
-    slot.card.group.rotation.set(0, (1 - travel) * 0.6, Math.PI * (1 - flip))
+    // Face down (rotation PI) while travelling, flipping over the long edge,
+    // then propped slightly toward the seated player so the board reads easily.
+    const prop = BOARD_TILT * flip
+    slot.card.group.rotation.set(prop, (1 - travel) * 0.6, Math.PI * (1 - flip))
+    slot.card.group.position.y += Math.sin(prop) * BOARD_CARD_DEPTH * 0.5
 
     const glow = slot.highlighted ? 0.55 + (reducedMotion ? 0 : Math.sin(time * 4 + index) * 0.2) : 0
     slot.highlightMesh.visible = glow > 0

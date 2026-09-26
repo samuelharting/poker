@@ -53,6 +53,8 @@ export interface AvatarPose {
   bodyRotation: Vec3
   /** 0..1 how far the player has lifted their hole cards to peek. */
   cardLift: number
+  /** 0..1 how far a drink is raised to the mouth (for the prop's tilt). */
+  drinkLift: number
 }
 
 export interface AvatarAnimatorInput {
@@ -78,6 +80,11 @@ export interface AvatarAnimatorInput {
   idleTell: PlayerAvatarIdleTell
   celebration: PlayerAvatarCelebration
   anchors: AvatarAnchors
+  /** An in-progress drink: seconds since it started. */
+  drinkElapsed?: number | null
+  /** 0..10 beers deep. */
+  drunkLevel?: number
+  passedOut?: boolean
 }
 
 interface Spring {
@@ -106,7 +113,8 @@ export interface AvatarAnimatorState {
 }
 
 const BONE_CHANNELS = ANIMATED_BONES.length * 3
-const CHANNEL_COUNT = BONE_CHANNELS + 3 + 3 + 2 + 3 + 3 + 1
+const CHANNEL_COUNT = BONE_CHANNELS + 3 + 3 + 2 + 3 + 3 + 1 + 1
+const DRINK_SECONDS = 2.6
 const PEEK_DURATION = 2.1
 
 export function createAvatarAnimatorState(seedSource: string): AvatarAnimatorState {
@@ -154,6 +162,7 @@ function emptyPose(): AvatarPose {
     bodyPosition: [0, 0, 0],
     bodyRotation: [0, 0, 0],
     cardLift: 0,
+    drinkLift: 0,
   }
 }
 
@@ -477,6 +486,52 @@ export function computeAvatarTargetPose(
     pose.bodyPosition[2] += 0.08 * rise
   }
 
+  // 12. Drunkenness: a loose, growing sway, lolling head, and hiccups.
+  const drunk = clamp01((input.drunkLevel ?? 0) / 10)
+  if (drunk > 0 && !input.passedOut) {
+    const wobble = Math.sin(time * (0.9 + drunk * 0.6) + seed * 9) * motion
+    const loll = Math.sin(time * 1.35 + seed * 4) * motion
+    add(bones.Torso, 0, 0.05 * wobble * drunk, 0.16 * wobble * drunk)
+    add(bones.Chest, 0.06 * drunk, 0, 0.05 * loll * drunk)
+    add(bones.Head, 0.08 * drunk + 0.06 * loll * drunk, 0.1 * wobble * drunk, 0.22 * loll * drunk)
+    pose.handR[0] += 0.04 * wobble * drunk
+    pose.handL[0] += 0.04 * wobble * drunk
+    if ((input.drunkLevel ?? 0) >= 5) {
+      const period = 3.2 + seed * 2
+      const hiccup = Math.max(0, 1 - Math.abs(positiveModulo(time + seed * 13, period) - 0.1) / 0.12) * motion
+      add(bones.Chest, -0.14 * hiccup, 0, 0)
+      add(bones.Head, -0.18 * hiccup, 0, 0)
+      pose.bodyPosition[1] += 0.05 * hiccup
+    }
+  }
+
+  // 13. Drinking: grab the glass, lift it to the mouth, tip the head back, set it down.
+  if (input.drinkElapsed !== null && input.drinkElapsed !== undefined && !input.passedOut) {
+    const elapsed = input.drinkElapsed
+    const holding = envelope(elapsed, DRINK_SECONDS, 0.35, 0.35)
+    const lift = smoothStep((elapsed - 0.35) / 0.45) * smoothStep((DRINK_SECONDS - 0.4 - elapsed) / 0.45)
+    blendTo(pose.handR, offset(anchors.railR, -0.08, 0.08, 0.05), holding)
+    blendTo(pose.handR, offset(anchors.chin, 0.03, -0.06, -0.1), lift)
+    add(bones.Head, -0.38 * lift, 0, 0)
+    add(bones.Chest, -0.1 * lift, 0, 0)
+    pose.fingerCurlR = pose.fingerCurlR * (1 - holding) + 1 * holding
+    pose.drinkLift = lift
+  }
+
+  // 14. Passed out: face-down on the rail, arms sprawled.
+  if (input.passedOut) {
+    add(bones.Chest, 0.75, 0, 0.05)
+    add(bones.Torso, 0.3, 0, 0)
+    add(bones.Neck, 0.3, 0.2, 0)
+    add(bones.Head, 0.35, 0.25, 0.2)
+    blendTo(pose.handR, offset(anchors.railR, 0.18, -0.04, -0.2), 1)
+    blendTo(pose.handL, offset(anchors.railL, -0.18, -0.04, -0.2), 1)
+    pose.fingerCurlR = 0.05
+    pose.fingerCurlL = 0.05
+    pose.bodyPosition[1] -= 0.08
+    pose.bodyPosition[2] -= 0.08
+  }
+
   pose.fingerCurlR = clamp01(pose.fingerCurlR)
   pose.fingerCurlL = clamp01(pose.fingerCurlL)
   return pose
@@ -495,6 +550,7 @@ function writeChannels(pose: AvatarPose, out: number[]) {
   out[index++] = pose.fingerCurlL
   for (const value of [...pose.bodyPosition, ...pose.bodyRotation]) out[index++] = value
   out[index++] = pose.cardLift
+  out[index++] = pose.drinkLift
 }
 
 function readChannels(values: readonly number[]): AvatarPose {
@@ -510,6 +566,7 @@ function readChannels(values: readonly number[]): AvatarPose {
   pose.bodyPosition = [values[index++]!, values[index++]!, values[index++]!]
   pose.bodyRotation = [values[index++]!, values[index++]!, values[index++]!]
   pose.cardLift = values[index++]!
+  pose.drinkLift = values[index++]!
   return pose
 }
 

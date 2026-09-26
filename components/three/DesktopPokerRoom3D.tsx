@@ -39,6 +39,7 @@ import {
 import { getArmChain, solveArmIK } from './avatarIK'
 import { applyBlink, getBlinkAmount, stylizeAvatar, type StylizedAvatar } from './avatarStyle'
 import { createAvatarFace, disposeAvatarFace, updateAvatarFace, type AvatarFaceRig, type FaceMood } from './avatarFace'
+import { createDrinkProp, disposeDrinkProp, DRINK_DURATION, type DrinkProp } from './drinkProps'
 import { DESKTOP_CAMERA_FRAMING } from './cameraFraming'
 import {
   animateBoardRuntime,
@@ -141,6 +142,12 @@ interface SeatRuntime {
   anchorsFromRig: boolean
   avatarStyle: StylizedAvatar | null
   face: AvatarFaceRig | null
+  drinkProp: DrinkProp | null
+  drinkId: string
+  drinkStartedAt: number
+  drunkLevel: number
+  passedOut: boolean
+  skinBaseColor: THREE.Color | null
   loser: boolean
   lastPose: AvatarPose | null
   dealerButton: THREE.Mesh
@@ -896,6 +903,12 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     anchorsFromRig: false,
     avatarStyle: null,
     face: null,
+    drinkProp: null,
+    drinkId: player.drinks?.lastDrink?.id ?? '',
+    drinkStartedAt: Number.NEGATIVE_INFINITY,
+    drunkLevel: player.drinks?.level ?? 0,
+    passedOut: player.drinks?.passedOut ?? false,
+    skinBaseColor: null,
     loser: false,
     lastPose: null,
     dealerButton,
@@ -988,6 +1001,8 @@ function detachRiggedAvatar(seat: SeatRuntime) {
 
   disposeAvatarFace(seat.face)
   seat.face = null
+  disposeDrinkProp(seat.drinkProp)
+  seat.drinkProp = null
   seat.avatar = null
   seat.avatarStyle = null
   seat.avatarMixer = null
@@ -1072,6 +1087,7 @@ async function requestRiggedAvatar(
     seat.avatar = { ...avatar, materials: style.materials }
     seat.avatarStyle = style
     seat.face = createAvatarFace(avatar.model, avatar.bones.get('Head'), style.materials, style.skinColor)
+    seat.skinBaseColor = style.skinColor ? style.skinColor.clone() : null
     seat.avatarMount.add(avatar.root)
     seat.avatarMount.position.set(0, AVATAR_SEAT_LIFT, 0)
     seat.anchorsFromRig = false
@@ -1148,6 +1164,20 @@ function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number) {
   seat.actionCue = player.actionCue
   seat.wagerIntensity = player.wagerIntensity
   syncSeatAppearance(seat, player.avatarProfile)
+
+  const drinks = player.drinks
+  seat.drunkLevel = drinks?.level ?? 0
+  seat.passedOut = drinks?.passedOut ?? false
+  const lastDrink = drinks?.lastDrink ?? null
+  if (lastDrink && lastDrink.id !== seat.drinkId) {
+    seat.drinkId = lastDrink.id
+    seat.drinkStartedAt = now
+    if (!seat.drinkProp || seat.drinkProp.kind !== lastDrink.kind) {
+      disposeDrinkProp(seat.drinkProp)
+      seat.drinkProp = createDrinkProp(lastDrink.kind)
+      seat.root.parent?.add(seat.drinkProp.group)
+    }
+  }
 
   seat.playback = advanceActionPlaybackState(
     seat.playback,
@@ -1601,6 +1631,49 @@ function solveSeatArms(seat: SeatRuntime, pose: AvatarPose) {
   }
 }
 
+const drinkWristWorld = new THREE.Vector3()
+const drinkKnuckleWorld = new THREE.Vector3()
+const drinkForward = new THREE.Vector3()
+
+/** Keeps the drink in the right hand and tips it toward the mouth as it rises. */
+function placeDrinkProp(seat: SeatRuntime, pose: AvatarPose, time: number) {
+  const prop = seat.drinkProp
+  if (!prop) return
+  const active = time - seat.drinkStartedAt < DRINK_DURATION && !seat.passedOut && seat.root.visible
+  prop.group.visible = active
+  if (!active) return
+  const wrist = seat.avatar?.bones.get('WristR')
+  const knuckle = seat.avatar?.bones.get('Middle1R')
+  if (!wrist) {
+    prop.group.visible = false
+    return
+  }
+  wrist.getWorldPosition(drinkWristWorld)
+  if (knuckle) {
+    knuckle.getWorldPosition(drinkKnuckleWorld)
+    drinkWristWorld.lerp(drinkKnuckleWorld, 0.7)
+  }
+  const scale = seat.root.scale.x
+  // Sit the glass in front of the palm (toward the table) so fingers wrap it.
+  drinkForward.set(0, 0, -1).applyQuaternion(seat.root.quaternion)
+  prop.group.position.copy(drinkWristWorld).addScaledVector(drinkForward, 0.07 * scale)
+  prop.group.position.y -= 0.14 * scale * (1 - pose.drinkLift * 0.6)
+  prop.group.rotation.set(0, seat.root.rotation.y, 0)
+  prop.group.rotateX(pose.drinkLift * 1.35)
+  prop.group.scale.setScalar(scale * 1.35)
+}
+
+/** Rosy cheeks creep in as the beers go down. */
+function flushCheeks(seat: SeatRuntime) {
+  const skin = seat.avatar?.materials.find(material => /^skin$/i.test(material.name)) as THREE.MeshToonMaterial | undefined
+  if (!skin?.color || !seat.skinBaseColor) return
+  const flush = Math.min(1, seat.drunkLevel / 10) * 0.38
+  skin.color.copy(seat.skinBaseColor).lerp(DRUNK_FLUSH, flush)
+  if (seat.folded) skin.color.multiplyScalar(0.5)
+}
+
+const DRUNK_FLUSH = new THREE.Color('#ff6b6b')
+
 const FINGER_BONES_R = ['Index1R', 'Middle1R', 'Ring1R', 'Pinky1R', 'Index2R', 'Middle2R', 'Ring2R', 'Pinky2R'] as const
 const FINGER_BONES_L = ['Index1L', 'Middle1L', 'Ring1L', 'Pinky1L', 'Index2L', 'Middle2L', 'Ring2L', 'Pinky2L'] as const
 
@@ -1654,6 +1727,9 @@ function animateSeat(
     idleTell: seat.avatarProfile.idleTell,
     celebration: seat.avatarProfile.celebration,
     anchors: seat.anchors,
+    drinkElapsed: time - seat.drinkStartedAt < DRINK_DURATION ? time - seat.drinkStartedAt : null,
+    drunkLevel: seat.drunkLevel,
+    passedOut: seat.passedOut,
   })
   seat.lastPose = pose
 
@@ -1705,7 +1781,9 @@ function animateSeat(
     seat.avatar.model.updateMatrixWorld(true)
     if (!seat.anchorsFromRig) measureRigAnchors(seat)
     solveSeatArms(seat, pose)
-    const blink = reducedMotion ? 0 : getBlinkAmount(time, seat.animator.seed)
+    const blink = seat.passedOut ? 1 : reducedMotion ? 0 : getBlinkAmount(time, seat.animator.seed)
+    placeDrinkProp(seat, pose, time)
+    flushCheeks(seat)
     if (seat.face) {
       const mood: FaceMood = seat.winner
         ? 'happy'
@@ -1715,7 +1793,7 @@ function animateSeat(
             ? 'surprised'
             : seat.acting
               ? 'focused'
-              : seat.folded
+              : seat.folded || seat.drunkLevel >= 4
                 ? 'bored'
                 : 'neutral'
       updateAvatarFace(seat.face, {
@@ -1912,12 +1990,13 @@ function getTableHeat(runtime: SceneRuntime, time: number) {
  */
 function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width: number, height: number) {
   const scratch = new THREE.Vector3()
+  const placedPlates: Array<{ element: HTMLElement; x: number; y: number }> = []
   // The pot readout floats just above the pot chips on the felt.
   const tableScene = host.closest<HTMLElement>('.table-scene')
   if (tableScene) {
     scratch.copy(runtime.pot.group.position)
-    scratch.z += 0.42
-    scratch.y += 0.02
+    scratch.x += 0.42
+    scratch.y += 0.12
     scratch.project(runtime.camera)
     tableScene.style.setProperty('--pot-x', `${((scratch.x * 0.5 + 0.5) * width).toFixed(1)}px`)
     tableScene.style.setProperty('--pot-y', `${((-scratch.y * 0.5 + 0.5) * height).toFixed(1)}px`)
@@ -1934,8 +2013,15 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
     scratch.set(NAMEPLATE_ANCHOR.x, NAMEPLATE_ANCHOR.y + liftY, NAMEPLATE_ANCHOR.z)
     seat.root.localToWorld(scratch)
     scratch.project(runtime.camera)
-    const x = (scratch.x * 0.5 + 0.5) * width
-    const y = (-scratch.y * 0.5 + 0.5) * height
+    // Neighbours beside or behind the seated camera pin to the screen edge.
+    const behind = scratch.z > 1
+    const rawX = (scratch.x * 0.5 + 0.5) * width * (behind ? -1 : 1)
+    const margin = 110
+    const x = THREE.MathUtils.clamp(rawX, margin, width - margin)
+    const y = THREE.MathUtils.clamp((-scratch.y * 0.5 + 0.5) * height, 150, height - 260)
+    const pinned = x !== rawX
+    element.classList.toggle('is-edge-pinned', pinned)
+    if (!element.classList.contains('is-local-player')) placedPlates.push({ element, x, y })
     element.style.setProperty('--seat-x', `${x.toFixed(1)}px`)
     element.style.setProperty('--seat-y', `${y.toFixed(1)}px`)
     element.style.setProperty('--seat-depth', `${(TABLE_SEAT_SCALES[toVisualSeat(seat.visualSeat)] ?? 1).toFixed(3)}`)
@@ -1948,6 +2034,28 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
       element.style.setProperty('--bet-x', `${((scratch.x * 0.5 + 0.5) * width - x).toFixed(1)}px`)
       element.style.setProperty('--bet-y', `${((-scratch.y * 0.5 + 0.5) * height - y).toFixed(1)}px`)
     }
+  }
+  // Resolve collisions: nudge plates apart so no two nameplates overlap, even
+  // when the camera pushes in or neighbours pin to the same screen edge.
+  const plateWidth = 196
+  const plateHeight = 72
+  placedPlates.sort((a, b) => a.y - b.y)
+  for (let pass = 0; pass < 3; pass += 1) {
+    for (let i = 0; i < placedPlates.length; i += 1) {
+      for (let j = i + 1; j < placedPlates.length; j += 1) {
+        const upper = placedPlates[i]!
+        const lower = placedPlates[j]!
+        const overlapX = plateWidth - Math.abs(upper.x - lower.x)
+        const overlapY = plateHeight - Math.abs(lower.y - upper.y)
+        if (overlapX <= 0 || overlapY <= 0) continue
+        if (overlapY < overlapX) lower.y += overlapY
+        else lower.x += (lower.x >= upper.x ? 1 : -1) * overlapX
+      }
+    }
+  }
+  for (const plate of placedPlates) {
+    plate.element.style.setProperty('--seat-x', `${THREE.MathUtils.clamp(plate.x, 110, width - 110).toFixed(1)}px`)
+    plate.element.style.setProperty('--seat-y', `${plate.y.toFixed(1)}px`)
   }
 }
 
@@ -2044,11 +2152,14 @@ function createSceneRuntime(
     renderer.setSize(width, height, false)
     runtime.postFx?.setSize(width, height, pixelRatio)
     camera.aspect = width / height
+    // Narrow windows widen the lens so the far seats stay in view.
     camera.fov = camera.aspect < 1.28
-      ? 45
-      : camera.aspect > 2.15
-        ? 38
-        : DESKTOP_CAMERA_FRAMING.fov
+      ? 66
+      : camera.aspect < 1.5
+        ? 61
+        : camera.aspect > 2.15
+          ? 50
+          : DESKTOP_CAMERA_FRAMING.fov
     camera.updateProjectionMatrix()
   }
   const resizeObserver = new ResizeObserver(resize)
@@ -2060,6 +2171,7 @@ function createSceneRuntime(
   const targetCamera = new THREE.Vector3()
   const targetLook = new THREE.Vector3()
   const winnerFocus = new THREE.Vector3()
+  const actingFocus = new THREE.Vector3()
   const accentTarget = new THREE.Vector3()
   const animate = () => {
     if (runtime.disposed || runtime.suspended) return
@@ -2113,21 +2225,24 @@ function createSceneRuntime(
     targetCamera.copy(baseCameraPosition)
     targetLook.copy(baseCameraLookAt)
     if (!reducedMotion) {
-      targetCamera.x += Math.sin(time * 0.13) * 0.16
-      targetCamera.y += Math.sin(time * 0.09 + 1.2) * 0.07
+      // Seated breathing: a gentle head sway rather than a floating camera.
+      targetCamera.x += Math.sin(time * 0.13) * 0.07
+      targetCamera.y += Math.sin(time * 0.09 + 1.2) * 0.035
       targetLook.x += Math.sin(time * 0.11 + 0.4) * 0.05
     }
     if (actingSeat !== null && actingSeat !== 0 && !winnerSeat) {
+      // Glance toward whoever is acting, like turning your head at the table.
       const actingPosition = TABLE_SEAT_POSITIONS[toVisualSeat(actingSeat)]
-      targetLook.x += actingPosition[0] * 0.035
-      targetLook.z += actingPosition[2] * 0.02
+      actingFocus.set(actingPosition[0] * 0.85, 1.05, actingPosition[2] * 0.85)
+      targetLook.lerp(actingFocus, 0.3)
+      targetCamera.x += actingPosition[0] * 0.05
     }
     if (winnerSeat) {
       winnerSeat.root.getWorldPosition(winnerFocus)
       targetLook.lerp(winnerFocus.setY(1.1), 0.22)
-      targetCamera.x += winnerFocus.x * 0.08
-      targetCamera.z -= 0.9
-      targetCamera.y -= 0.25
+      targetCamera.x += winnerFocus.x * 0.04
+      targetCamera.z -= 0.35
+      targetCamera.y += 0.05
     }
     if (allInImpact.strength > 0) {
       const impactSeat = allInImpact.visualSeat === null
@@ -2135,13 +2250,13 @@ function createSceneRuntime(
         : TABLE_SEAT_POSITIONS[toVisualSeat(allInImpact.visualSeat)]
       const microShake = Math.sin(time * 61) * allInImpact.strength * 0.026
       targetCamera.x += microShake + (impactSeat?.[0] ?? 0) * allInImpact.strength * 0.018
-      targetCamera.y -= allInImpact.strength * 0.16
-      targetCamera.z -= allInImpact.strength * 0.72
+      targetCamera.y -= allInImpact.strength * 0.06
+      targetCamera.z -= allInImpact.strength * 0.3
       targetLook.x += (impactSeat?.[0] ?? 0) * allInImpact.strength * 0.035
       targetLook.z += (impactSeat?.[2] ?? 0) * allInImpact.strength * 0.025
     }
     const smoothing = reducedMotion ? 1 : 1 - Math.exp(
-      -delta * (allInImpact.strength > 0 ? 3.8 : winnerSeat ? 1.1 : 1.65)
+      -delta * (allInImpact.strength > 0 ? 3.8 : winnerSeat ? 1.1 : 1.35)
     )
     camera.position.lerp(targetCamera, smoothing)
     cameraLookAt.lerp(targetLook, smoothing)
@@ -2395,6 +2510,13 @@ export function DesktopPokerRoom3D({
                 <span className="cinematic-seat-panel">
                 <span className="cinematic-seat-topline">
                   <strong>{player.nickname}</strong>
+                  {player.drinks?.passedOut ? (
+                    <em className="cinematic-drink-badge is-passed-out" aria-label="Passed out">💤</em>
+                  ) : (player.drinks?.level ?? 0) > 0 ? (
+                    <em className="cinematic-drink-badge" aria-label={`${player.drinks.level} drinks deep`}>
+                      🍺{player.drinks.level}
+                    </em>
+                  ) : null}
                   {player.blindRole && (
                     <em className={`cinematic-blind-role is-${player.blindRole}`}>
                       <b>{player.blindRole === 'big' ? 'BB' : 'SB'}</b>

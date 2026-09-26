@@ -564,3 +564,33 @@
   white-space: nowrap;
   animation: winner-toast-in 420ms var(--ease-pop) both;
 }
+
+/* Drinks: beer count / passed-out badge on the plate */
+
+.desktop-3d-stage .cinematic-seat .cinematic-drink-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: rgba(242, 169, 59, 0.2);
+  color: #ffd79a;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-drink-badge.is-passed-out {
+  background: rgba(169, 139, 255, 0.22);
+  color: var(--c-violet-400);
+  animation: drink-snore 1.6s ease-in-out infinite;
+}
+
+@keyframes drink-snore {
+  50% {
+    transform: translateY(-2px) scale(1.12);
+  }
+}
