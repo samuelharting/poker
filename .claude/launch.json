@@ -7,6 +7,12 @@
       "runtimeArgs": ["run", "dev:next"],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "poker-party",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["partykit", "dev"],
+      "port": 1999
     }
   ]
 }

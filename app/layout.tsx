@@ -4,10 +4,13 @@ import './styles/tokens.css'
 import './globals.css'
 import './styles/base.css'
 import './poker-polish.css'
+import './styles/table-3d.css'
+import './styles/hud-desktop.css'
 import './styles/panels.css'
 import './styles/table-2d.css'
 import './styles/drinks.css'
 import './styles/companion.css'
+import './styles/cards.css'
 
 const jakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],
