@@ -6,23 +6,6 @@
  * language for the live table without risking the gameplay-specific animation rules.
  */
 
-:root {
-  --pn-bg: #06100e;
-  --pn-panel: rgba(8, 17, 15, 0.9);
-  --pn-panel-solid: #0a1513;
-  --pn-panel-raised: #10201c;
-  --pn-line: rgba(213, 192, 126, 0.18);
-  --pn-line-strong: rgba(224, 202, 134, 0.34);
-  --pn-gold: #d7bd75;
-  --pn-gold-bright: #f3dda0;
-  --pn-mint: #76c5a8;
-  --pn-felt: #0b614a;
-  --pn-text: #f6f2e8;
-  --pn-muted: #9eaaa5;
-  --pn-danger: #d6645b;
-  --pn-radius: 20px;
-}
-
 /* Tablet / compact desktop bridge --------------------------------------- */
 
 @media (min-width: 769px) and (max-width: 1023px) {
@@ -299,7 +282,7 @@ html,
 body {
   background: var(--pn-bg);
   color: var(--pn-text);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-ui);
 }
 
 button,
@@ -520,7 +503,8 @@ input:focus-visible {
   border-color: var(--pn-line);
   background: rgba(2, 8, 7, 0.58);
   color: var(--pn-gold-bright);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
 }
 
 .settings-footer {
@@ -1419,7 +1403,8 @@ input:focus-visible {
 
   .cinematic-seat-meta b {
     color: #8ee4af;
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 12px;
   }
 
@@ -1446,7 +1431,8 @@ input:focus-visible {
     color: var(--pn-gold-bright);
     display: inline-flex;
     align-items: center;
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 10px;
     font-weight: 800;
     transform: translateX(-50%);
@@ -1579,7 +1565,8 @@ input:focus-visible {
 
   .room-code {
     color: var(--pn-gold-bright);
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 12px;
     letter-spacing: 0.14em;
   }
@@ -1880,7 +1867,8 @@ input:focus-visible {
 
   .room-hud-mobile-stakes {
     color: var(--pn-gold);
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 11px;
   }
 
@@ -2014,7 +2002,8 @@ input:focus-visible {
   .mobile-edge-seat-stack,
   .mobile-hero-seat-stack {
     color: #8ee4af;
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 11px;
     text-shadow: none;
   }
@@ -2391,7 +2380,7 @@ input:focus-visible {
   background: rgba(242, 222, 161, 0.08);
   color: #f2dea1;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-  font-family: Georgia, serif;
+  font-family: var(--font-display);
   font-size: 15px;
   font-weight: 800;
 }
@@ -2417,7 +2406,7 @@ input:focus-visible {
 .run-it-twice-copy h2 {
   margin: 5px 0 6px;
   color: #fffaf0;
-  font-family: Georgia, serif;
+  font-family: var(--font-display);
   font-size: clamp(29px, 5vw, 38px);
   line-height: 1;
   letter-spacing: -0.035em;
@@ -2545,7 +2534,8 @@ input:focus-visible {
   border-radius: 50%;
   background: rgba(242, 222, 161, 0.06);
   color: #f2dea1;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   font-weight: 900;
 }
@@ -2616,7 +2606,7 @@ input:focus-visible {
 
 .run-it-twice-board-label strong {
   color: #f2dea1;
-  font-family: Georgia, serif;
+  font-family: var(--font-display);
   font-size: 23px;
   line-height: 0.9;
 }
@@ -2671,7 +2661,8 @@ input:focus-visible {
 
 .run-it-twice-board-result strong {
   color: #69dca8;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
 }
 
@@ -3422,7 +3413,8 @@ input:focus-visible {
 
 .table-hand-result-amount {
   color: var(--pn-gold-bright);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
   font-size: 22px;
   line-height: 1;
   text-shadow: 0 0 18px rgba(243, 221, 160, 0.24);
@@ -3532,7 +3524,8 @@ input:focus-visible {
   .mobile-edge-winners .mobile-edge-winner-line > strong {
     overflow: visible;
     color: var(--pn-gold-bright);
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 17px;
     line-height: 1;
     white-space: nowrap;
@@ -4372,7 +4365,8 @@ input:focus-visible {
   }
 
   .mobile-bet-indicator strong {
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 10px;
     font-weight: 950;
     line-height: 1;
@@ -4585,7 +4579,8 @@ input:focus-visible {
     background: rgba(18, 20, 18, 0.96);
     color: #ffd469;
     box-shadow: 0 5px 12px rgba(0, 0, 0, 0.48);
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 10px;
     font-weight: 950;
     line-height: 1;

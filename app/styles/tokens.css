@@ -1,0 +1,128 @@
+/*
+ * Poker Night design tokens: the single source of truth for colour, type,
+ * spacing, radii, elevation and motion. See docs/design-audit/AUDIT.md.
+ * Legacy token names are mapped onto these at the bottom so older rules keep
+ * rendering in the new palette until they are rewritten.
+ */
+:root {
+  /* Ink: backgrounds and the panel stack */
+  --c-ink-950: #05090a;
+  --c-ink-900: #0a1112;
+  --c-ink-800: #101a1b;
+  --c-ink-700: #172426;
+  --c-ink-600: #213134;
+  --c-ink-500: #2d4145;
+
+  /* Felt */
+  --c-felt-900: #073a2c;
+  --c-felt-700: #0b5e47;
+  --c-felt-600: #0e7657;
+  --c-felt-500: #12916b;
+  --c-felt-300: #39c795;
+
+  /* Brass: primary accent */
+  --c-brass-700: #9c6f22;
+  --c-brass-500: #d9a441;
+  --c-brass-400: #f2c766;
+  --c-brass-200: #ffe7ad;
+
+  /* Signals */
+  --c-ember-500: #ff7a3d;
+  --c-ember-300: #ffb27f;
+  --c-ruby-600: #c23a47;
+  --c-ruby-500: #e2505c;
+  --c-sky-400: #7fd0ff;
+  --c-violet-400: #a98bff;
+  --c-cream-50: #fff8ea;
+  --c-cream-200: #efe3c8;
+
+  /* Text */
+  --c-text-1: #f4efe4;
+  --c-text-2: #bdc6c1;
+  --c-text-3: #8a9792;
+  --c-text-on-brass: #2a1a04;
+
+  /* Surfaces */
+  --surface-glass: rgba(10, 17, 18, 0.78);
+  --surface-glass-strong: rgba(10, 17, 18, 0.92);
+  --surface-raised: linear-gradient(180deg, rgba(33, 49, 52, 0.96), rgba(16, 26, 27, 0.96));
+  --line-soft: rgba(244, 239, 228, 0.08);
+  --line: rgba(244, 239, 228, 0.14);
+  --line-brass: rgba(242, 199, 102, 0.42);
+
+  /* Typography */
+  --font-ui: var(--font-jakarta), 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: var(--font-unbounded), 'Unbounded', var(--font-ui);
+  --fs-11: 0.6875rem;
+  --fs-12: 0.75rem;
+  --fs-14: 0.875rem;
+  --fs-16: 1rem;
+  --fs-20: 1.25rem;
+  --fs-24: 1.5rem;
+  --fs-32: 2rem;
+  --fs-44: 2.75rem;
+  --fs-64: 4rem;
+  --tracking-caps: 0.12em;
+
+  /* Spacing (4px base) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 48px;
+
+  /* Radii */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 26px;
+  --r-pill: 999px;
+
+  /* Elevation */
+  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 18px rgba(0, 0, 0, 0.28);
+  --shadow-2: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 18px 40px rgba(0, 0, 0, 0.42);
+  --shadow-3: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 32px 80px rgba(0, 0, 0, 0.6);
+  --glow-brass: 0 0 0 1px rgba(242, 199, 102, 0.55), 0 0 24px rgba(242, 199, 102, 0.35);
+  --glow-felt: 0 0 0 1px rgba(57, 199, 149, 0.55), 0 0 24px rgba(57, 199, 149, 0.3);
+  --glow-ember: 0 0 0 1px rgba(255, 122, 61, 0.6), 0 0 28px rgba(255, 122, 61, 0.4);
+  --glow-sky: 0 0 0 2px rgba(127, 208, 255, 0.85), 0 0 18px rgba(127, 208, 255, 0.35);
+
+  /* Motion */
+  --dur-fast: 120ms;
+  --dur-base: 220ms;
+  --dur-slow: 420ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in: cubic-bezier(0.5, 0, 0.75, 0);
+  --ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Legacy aliases, mapped onto the new palette */
+  --felt-dark: var(--c-felt-900);
+  --felt-mid: var(--c-felt-700);
+  --felt-light: var(--c-felt-600);
+  --felt-highlight: var(--c-felt-500);
+  --gold: var(--c-brass-500);
+  --gold-light: var(--c-brass-400);
+  --gold-dark: var(--c-brass-700);
+  --navy: var(--c-ink-900);
+  --navy-light: var(--c-ink-800);
+  --card-red: #d23a44;
+  --card-black: #16191c;
+  --pn-bg: var(--c-ink-900);
+  --pn-panel: var(--surface-glass-strong);
+  --pn-panel-solid: var(--c-ink-800);
+  --pn-panel-raised: var(--c-ink-700);
+  --pn-line: var(--line);
+  --pn-line-strong: var(--line-brass);
+  --pn-gold: var(--c-brass-400);
+  --pn-gold-bright: var(--c-brass-200);
+  --pn-mint: var(--c-felt-300);
+  --pn-felt: var(--c-felt-700);
+  --pn-text: var(--c-text-1);
+  --pn-muted: var(--c-text-2);
+  --pn-danger: var(--c-ruby-500);
+  --pn-radius: var(--r-lg);
+}

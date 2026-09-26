@@ -2,46 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ============================================================
-   CSS Custom Properties
-   ============================================================ */
-:root {
-  --felt-dark: #0f2606;
-  --felt-mid: #1a3d0a;
-  --felt-light: #2d5a1b;
-  --felt-highlight: #3a7322;
-  --gold: #c9a84c;
-  --gold-light: #e8c96d;
-  --gold-dark: #9b7d2e;
-  --navy: #0a0e1a;
-  --navy-light: #141929;
-  --card-red: #c0392b;
-  --card-black: #1a1a1a;
-}
-
-/* ============================================================
-   Base
-   ============================================================ */
-* {
-  box-sizing: border-box;
-}
-
-html,
-body {
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  background: var(--navy);
-  color: #e8e8e8;
-  font-family: 'Georgia', 'Times New Roman', serif;
-  overflow: hidden;
-  overflow-x: hidden;
-}
-
-button,
-input {
-  font: inherit;
-}
+/* Tokens live in app/styles/tokens.css; base element styles in app/styles/base.css. */
 
 /* ============================================================
    POKER TABLE - 2.5D FIRST-PERSON PERSPECTIVE
@@ -66,7 +27,7 @@ input {
     linear-gradient(180deg, #2f2b2b 0%, #241f1f 100%);
   overflow: hidden;
   position: relative;
-  font-family: 'Trebuchet MS', 'Avenir Next', 'Segoe UI', sans-serif;
+  font-family: var(--font-ui);
 }
 
 .room-shell::before,
@@ -699,7 +660,7 @@ input {
   font-size: 1.04em;
   font-weight: 850;
   line-height: 1;
-  font-family: 'Georgia', serif;
+  font-family: var(--font-display);
   letter-spacing: 0;
 }
 
@@ -1047,7 +1008,8 @@ input {
 
 .hero-table-bet-value {
   color: #fff7d6;
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
   font-size: 18px;
   font-weight: 950;
   line-height: 1;
@@ -1693,7 +1655,8 @@ input {
   font-size: 58px;
   font-weight: 700;
   color: #ffffff;
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
   line-height: 1;
 }
 
@@ -2584,7 +2547,8 @@ input {
   border: 1px solid rgba(255,255,255,0.08);
   background: rgba(255,255,255,0.04);
   color: rgba(255,255,255,0.82);
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
@@ -2949,7 +2913,8 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
    ============================================================ */
 
 .room-code {
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0.18em;
   font-size: 0.95rem;
   color: rgba(255,255,255,0.56);
@@ -5971,9 +5936,7 @@ html,
 body {
   background: var(--hl-bg);
   color: var(--hl-text);
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
+  font-family: var(--font-ui);
   letter-spacing: 0;
 }
 
@@ -8575,7 +8538,8 @@ body {
   }
 
   .pot-to-call-value {
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 18px;
     font-weight: 950;
   }
@@ -8667,7 +8631,8 @@ body {
 
   .raise-input {
     height: 50px;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 21px;
     font-weight: 950;
   }
@@ -8699,7 +8664,8 @@ body {
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 20px;
     font-weight: 950;
     letter-spacing: 0;
@@ -8784,7 +8750,8 @@ body {
   border-radius: 999px;
   background: rgba(8, 19, 17, 0.76);
   color: #f7e6ab;
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
   font-size: 17px;
   font-weight: 950;
   line-height: 32px;
@@ -10956,7 +10923,8 @@ button.player-seat-marker:focus-visible {
   .hero-bottom-summary-stack {
     padding-left: 10px;
     border-left: 1px solid rgba(242, 222, 161, 0.2);
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 15px;
     font-weight: 950;
     color: #f2dea1;
@@ -11299,7 +11267,8 @@ button.player-seat-marker:focus-visible {
 
   .mobile-edge-seat-stack {
     color: #f2dea1;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 10px;
     font-weight: 950;
     line-height: 1;
@@ -11374,7 +11343,8 @@ button.player-seat-marker:focus-visible {
   .mobile-edge-winner-line strong {
     flex: 0 0 auto;
     color: #f2dea1;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 11px;
   }
 
@@ -11472,7 +11442,8 @@ button.player-seat-marker:focus-visible {
 
   .mobile-hero-summary-stack {
     color: #f2dea1;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
     font-size: 12px;
     font-weight: 950;
   }
