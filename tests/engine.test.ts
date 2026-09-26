@@ -783,7 +783,8 @@ describe('toTableState', () => {
 
   it('keeps surviving opponent cards hidden until they explicitly show them', () => {
     const state = startHand(setup2Players())
-    const hero = state.players[0]!
+    // The hero is the player who folds; the survivor is the villain.
+    const hero = state.players.find(player => player.id === state.actingPlayerId)!
 
     const finished = processAction(state, state.actingPlayerId!, 'fold')
     const villain = finished.phase === 'between_hands'

@@ -832,11 +832,13 @@ describe('PokerRoom timer handling', () => {
   it('shows every hand to a player once they move into spectator mode', () => {
     const { room, server } = createHarness()
 
+    // Heads-up the button (seat 1) acts first; seat the guest out of turn so
+    // moving them to the rail does not end the hand.
     const host = joinPlayer(server, room, 'host', 'Alice')
-    seatPlayer(server, host.connection, 0)
+    seatPlayer(server, host.connection, 1)
 
     const guest = joinPlayer(server, room, 'guest', 'Bob')
-    seatPlayer(server, guest.connection, 1)
+    seatPlayer(server, guest.connection, 0)
 
     send(server, host.connection, { type: 'start_game' })
     send(server, host.connection, { type: 'set_player_spectator', targetId: guest.playerId, spectator: true })

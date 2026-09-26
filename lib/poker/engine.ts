@@ -235,14 +235,14 @@ function applyBountyPayout(
   state: InternalGameState,
   winnerTotals: Map<string, number>
 ): BountyMetadata {
-  if (!state.sevenTwoRuleEnabled) {
+  if (!state.sevenTwoRuleEnabled || !(state.sevenTwoBountyPercent > 0)) {
     return {
       active: false,
       amount: 0,
       percentage: state.sevenTwoBountyPercent,
       contributors: [],
       recipientPlayerIds: [],
-      reason: '7-2 rule disabled',
+      reason: state.sevenTwoRuleEnabled ? '7-2 bounty set to 0%' : '7-2 rule disabled',
     }
   }
 
@@ -354,7 +354,9 @@ function applyHandPayouts(
   if (bounty.active) {
     addAction(
       state,
-      `${bounty.recipientPlayerIds.join(', ')} won bounty ${bounty.amount}`
+      `${bounty.recipientPlayerIds
+        .map(id => state.players.find(player => player.id === id)?.nickname ?? 'Player')
+        .join(', ')} won the 7-2 bounty $${bounty.amount}`
     )
   }
 }
@@ -465,12 +467,15 @@ export function startHand(state: InternalGameState): InternalGameState {
     s.players[dealerPlayerIdx]!.isDealer = true
   }
 
-  // SB = next after dealer
-  const sbSeatIndex = nextSeatIndex(
-    s.players,
-    s.dealerSeatIndex,
-    p => eligible.some(e => e.id === p.id)
-  )
+  // SB = next after dealer. Heads-up, the button itself posts the small blind
+  // so it acts first preflop and last on every later street.
+  const sbSeatIndex = eligible.length === 2
+    ? s.dealerSeatIndex
+    : nextSeatIndex(
+      s.players,
+      s.dealerSeatIndex,
+      p => eligible.some(e => e.id === p.id)
+    )
   const sbPlayerIdx = seatIndexToPlayerIndex(s.players, sbSeatIndex)
 
   // BB = next after SB
