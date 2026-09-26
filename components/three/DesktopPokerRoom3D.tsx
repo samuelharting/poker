@@ -2163,8 +2163,9 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
   }
   // Resolve collisions: nudge plates apart so no two nameplates overlap, even
   // when the camera pushes in or neighbours pin to the same screen edge.
-  const plateWidth = 196
-  const plateHeight = 72
+  const compact = width < 1366 || height < 820
+  const plateWidth = compact ? 168 : 196
+  const plateHeight = compact ? 62 : 72
   placedPlates.sort((a, b) => a.y - b.y)
   for (let pass = 0; pass < 3; pass += 1) {
     for (let i = 0; i < placedPlates.length; i += 1) {
