@@ -57,7 +57,7 @@ describe('drink components', () => {
   it('offers beer and water to a seated player and shows their level', () => {
     const html = renderWithDrinks(<DrinkControls variant="desktop" />, drinks({ level: 4, beers: 4 }))
     expect(html).toContain('Crack a beer (4 so far)')
-    expect(html).toContain('Order a water')
+    expect(html).toContain('Drink a water')
     expect(html).toContain('Tipsy')
     expect(html).toContain('data-tier="tipsy"')
     expect(html.match(/class="is-full"/g)).toHaveLength(4)
@@ -78,10 +78,10 @@ describe('drink components', () => {
     expect(vision).toContain('You passed out')
   })
 
-  it('shows pending water on the water button', () => {
+  it('does not count waters on the water button', () => {
     const html = renderWithDrinks(<DrinkControls variant="desktop" />, drinks({ level: 3, beers: 3, waters: 1, sobering: 1 }))
-    expect(html).toContain('1 still kicking in')
-    expect(html).toContain('is-sobering')
+    expect(html).not.toContain('kicking in')
+    expect(html).not.toContain('is-sobering')
   })
 
   it('renders seat badges for other players', () => {
