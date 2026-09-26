@@ -146,6 +146,22 @@ export async function snap(page: Page, name: string): Promise<string> {
   fs.mkdirSync(QA_DIR, { recursive: true })
   const file = path.join(QA_DIR, `${name}.png`)
   await page.screenshot({ path: file, fullPage: false }).catch(() => undefined)
+  const metrics = await page.evaluate(() => {
+    const scroller = document.scrollingElement ?? document.documentElement
+    return {
+      url: location.href,
+      viewport: `${innerWidth}x${innerHeight}`,
+      scrollTop: scroller.scrollTop,
+      scrollHeight: scroller.scrollHeight,
+      scrollLeft: scroller.scrollLeft,
+      scrollWidth: scroller.scrollWidth,
+      phase: document.querySelector('.table-scene')?.getAttribute('data-phase'),
+      layout: document.querySelector('.table-scene')?.getAttribute('data-layout'),
+    }
+  }).catch(() => null)
+  if (metrics) {
+    fs.writeFileSync(file.replace(/\.png$/, '.json'), JSON.stringify(metrics, null, 2))
+  }
   return file
 }
 
@@ -447,4 +463,61 @@ export async function clickOrReport(
     await locator.press('Enter')
     return 'keyboard'
   }
+}
+
+/**
+ * Host creates a room on `viewports[0]`; everyone else joins by link in order
+ * (so seats are 0, 1, 2, ...). Applies table settings before anyone plays.
+ */
+export async function startTable(
+  browser: Browser,
+  prefix: string,
+  viewports: ViewportName[],
+  settings: TableSettingsInput
+): Promise<Player[]> {
+  const players: Player[] = []
+  for (const [index, viewport] of viewports.entries()) {
+    players.push(await newPlayer(browser, `${prefix}${index === 0 ? 'Host' : `P${index}`}${viewport === 'desktop' ? 'D' : 'M'}`, viewport))
+  }
+  const [host, ...guests] = players
+  const { roomUrl } = await createTable(host!)
+  for (const guest of guests) {
+    await joinTable(guest, roomUrl)
+  }
+  await expect(tableScene(host!.page)).toHaveAttribute('data-player-count', String(players.length))
+  await saveTableSettings(host!.page, settings)
+  await closeSettings(host!.page)
+  return players
+}
+
+/** Go all-in with the viewport's own controls. */
+export async function goAllIn(player: Player) {
+  const page = player.page
+  if (player.viewport === 'mobile') {
+    const quickAllIn = visible(page.getByRole('group', { name: 'Quick bet sizes' }).getByRole('button', { name: 'All-in' }))
+    if (await quickAllIn.count()) {
+      await quickAllIn.first().click()
+    }
+  }
+  await actionButton(page, 'all_in').click()
+}
+
+/** Check when free, otherwise call. */
+export async function checkOrCall(player: Player) {
+  const check = actionButton(player.page, 'check')
+  if (await check.count()) {
+    await check.click()
+    return 'check'
+  }
+  await actionButton(player.page, 'call').click()
+  return 'call'
+}
+
+export function isSubsequence(values: string[], expected: string[]): boolean {
+  let cursor = 0
+  for (const value of values) {
+    if (value === expected[cursor]) cursor += 1
+    if (cursor === expected.length) return true
+  }
+  return cursor === expected.length
 }
