@@ -468,6 +468,8 @@ function AllInAnnouncement({ announcement }: { announcement: AllInAnnouncementVi
       aria-live="assertive"
       aria-label={`${announcement.nickname} is all in`}
     >
+      <span className="all-in-flare" aria-hidden="true" />
+      <span className="all-in-shockwave" aria-hidden="true" />
       <div className="all-in-chip-burst" aria-hidden="true">
         {Array.from({ length: 10 }, (_, index) => (
           <span key={index} className="all-in-chip" />
@@ -2566,6 +2568,14 @@ export function PokerTable({
   )
 }
 
+function PanelCloseIcon() {
+  return (
+    <svg className="panel-close-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M5 5l10 10M15 5L5 15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 function TableSocialDock({
   chatLog,
   isConnected,
@@ -2606,7 +2616,7 @@ function TableSocialDock({
               onClick={() => setIsOpen(false)}
               aria-label="Close table chat"
             >
-              ×
+              <PanelCloseIcon />
             </button>
           </div>
 
@@ -2882,7 +2892,7 @@ function TargetedEmotePanel({
           onClick={onClose}
           aria-label="Close target emote panel"
         >
-          x
+          <PanelCloseIcon />
         </button>
       </div>
 
@@ -3363,19 +3373,20 @@ export function SettingsModal({
         onClick={event => event.stopPropagation()}
       >
         <div className="settings-modal-header">
-          <div>
+          <div className="settings-modal-heading">
             <div className="table-panel-kicker">Table console</div>
             <div id="table-settings-dialog-title" className="table-panel-title">Table menu</div>
           </div>
-          <button type="button" className="btn-subtle" onClick={onClose}>
+          <button type="button" className="btn-subtle settings-close" onClick={onClose}>
             Close
           </button>
         </div>
 
-        <div className="settings-tabs">
+        <div className="settings-tabs" data-active={activeTab}>
           <button
             type="button"
             className={`settings-tab ${activeTab === 'general' ? 'is-active' : ''}`}
+            aria-pressed={activeTab === 'general'}
             onClick={() => setActiveTab('general')}
           >
             Settings
@@ -3383,6 +3394,7 @@ export function SettingsModal({
           <button
             type="button"
             className={`settings-tab ${activeTab === 'avatar' ? 'is-active' : ''}`}
+            aria-pressed={activeTab === 'avatar'}
             onClick={() => setActiveTab('avatar')}
           >
             Outfit
@@ -3390,6 +3402,7 @@ export function SettingsModal({
           <button
             type="button"
             className={`settings-tab ${activeTab === 'players' ? 'is-active' : ''}`}
+            aria-pressed={activeTab === 'players'}
             onClick={() => setActiveTab('players')}
           >
             Players ({state.lobbyPlayers.length})
@@ -3398,9 +3411,12 @@ export function SettingsModal({
 
         {activeTab === 'general' && (
           <div className="settings-modal-body">
-            <div className="settings-section">
-              <div className="settings-section-title">Room actions</div>
-              <div className="settings-room-code">Room code: {roomCode}</div>
+            <div className="settings-section settings-room-section">
+              <div className="settings-section-title">Room</div>
+              <div className="settings-room-code">
+                <span>Room code: </span>
+                <strong>{roomCode}</strong>
+              </div>
               <div className="settings-inline-controls">
                 <button type="button" className="btn-subtle" onClick={onCopyRoom}>
                   Copy code
@@ -3424,36 +3440,39 @@ export function SettingsModal({
               </div>
             </div>
 
-            <div className="settings-section">
-              <div className="settings-section-title">Cards</div>
-              <div className="settings-toggle-row">
-                <button
-                  type="button"
-                  className={`settings-pill ${suitColorMode === 'two' ? 'is-active' : ''}`}
-                  aria-pressed={suitColorMode === 'two'}
-                  onClick={() => onSetSuitColorMode('two')}
-                >
-                  2-color suits
-                </button>
-                <button
-                  type="button"
-                  className={`settings-pill ${suitColorMode === 'four' ? 'is-active' : ''}`}
-                  aria-pressed={suitColorMode === 'four'}
-                  onClick={() => onSetSuitColorMode('four')}
-                >
-                  4-color suits
-                </button>
-              </div>
-            </div>
-
             <div className="settings-section settings-audio-section">
-              <div>
-                <div className="settings-section-title">Soundscape</div>
-                <div className="settings-section-copy">
-                  Card, chip, action, and showdown sounds play in both table views.
+              <div className="settings-section-title">Cards &amp; sound</div>
+              <div className="settings-rule-row">
+                <div>
+                  <div className="settings-rule-name">Suit colors</div>
+                  <div className="settings-rule-copy">Four colors make flushes easier to spot.</div>
+                </div>
+                <div className="settings-toggle-row">
+                  <button
+                    type="button"
+                    className={`settings-pill ${suitColorMode === 'two' ? 'is-active' : ''}`}
+                    aria-pressed={suitColorMode === 'two'}
+                    onClick={() => onSetSuitColorMode('two')}
+                  >
+                    2-color suits
+                  </button>
+                  <button
+                    type="button"
+                    className={`settings-pill ${suitColorMode === 'four' ? 'is-active' : ''}`}
+                    aria-pressed={suitColorMode === 'four'}
+                    onClick={() => onSetSuitColorMode('four')}
+                  >
+                    4-color suits
+                  </button>
                 </div>
               </div>
               <div className="settings-rule-row settings-audio-controls">
+                <div>
+                  <div className="settings-rule-name">Soundscape</div>
+                  <div className="settings-rule-copy">
+                    Card, chip, action, and showdown sounds play in both table views.
+                  </div>
+                </div>
                 <div className="settings-toggle-row">
                   <button
                     type="button"
@@ -3472,19 +3491,23 @@ export function SettingsModal({
                     Muted
                   </button>
                 </div>
-                <label className="settings-volume-field">
-                  <span>Volume {Math.round(Math.max(0, Math.min(1, soundVolume)) * 100)}%</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={Math.round(Math.max(0, Math.min(1, soundVolume)) * 100)}
-                    aria-label="Table sound volume"
-                    onChange={event => onSetSoundVolume(Number(event.target.value) / 100)}
-                  />
-                </label>
               </div>
+              <label
+                className="settings-volume-field"
+                data-muted={soundMuted ? 'true' : 'false'}
+                style={{ ['--volume-fill' as string]: `${Math.round(Math.max(0, Math.min(1, soundVolume)) * 100)}%` } as CSSProperties}
+              >
+                <span>Volume {Math.round(Math.max(0, Math.min(1, soundVolume)) * 100)}%</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={Math.round(Math.max(0, Math.min(1, soundVolume)) * 100)}
+                  aria-label="Table sound volume"
+                  onChange={event => onSetSoundVolume(Number(event.target.value) / 100)}
+                />
+              </label>
             </div>
 
             {isHost ? (
@@ -3786,6 +3809,14 @@ export function SettingsModal({
 
                 return (
                   <div key={player.id} className={`settings-player-row ${player.isSpectator ? 'is-spectator' : ''}`}>
+                    <span
+                      className="settings-player-avatar"
+                      data-tone={getSeatTone(player)}
+                      data-connected={player.isConnected ? 'true' : 'false'}
+                      aria-hidden="true"
+                    >
+                      {getSeatInitials(player.nickname)}
+                    </span>
                     <div className="settings-player-main">
                       <div className="settings-player-title-row">
                         <div className="host-player-name">{player.nickname}</div>
@@ -3796,7 +3827,7 @@ export function SettingsModal({
                         </div>
                       </div>
                       <div className="host-player-meta">
-                        {formatAmount(player.stack)} {'\u00b7'} {getLobbyStatusLabel(state, player)}
+                        <strong>{formatAmount(player.stack)}</strong> {'\u00b7'} {getLobbyStatusLabel(state, player)}
                       </div>
                     </div>
                     {isHost && <div className="settings-player-actions">
@@ -3927,27 +3958,37 @@ function WaitingPanel({
   return (
     <div className="table-panel status-panel">
       <div className="table-panel-header">
-        <div>
-          <div className="table-panel-kicker">Table controls</div>
-          <div className="table-panel-title">{statusText}</div>
-        </div>
-        <div className="status-panel-header-pills">
-          <span className="table-chip table-chip-soft">{seatedCount} seated</span>
-          <span className="table-chip">{openSeats} open</span>
-        </div>
-      </div>
-      <div className="status-panel-stats">
-        <span className="table-chip">Blinds {formatAmount(state.smallBlind)}/{formatAmount(state.bigBlind)}</span>
-        <span className="table-chip">Buy-in {formatAmount(state.startingStack)}</span>
+        <div className="table-panel-kicker">Table controls</div>
         {lobbyMe?.isSpectator && <span className="table-chip chip-warning">Spectating</span>}
       </div>
+      <div className="table-panel-title">{statusText}</div>
+      <div className="status-panel-seats">
+        <div className="status-panel-pips" aria-hidden="true">
+          {Array.from({ length: 8 }, (_, index) => (
+            <i key={index} className={index < seatedCount ? 'is-filled' : ''} />
+          ))}
+        </div>
+        <span>{seatedCount} seated · {openSeats} open</span>
+      </div>
+      <dl className="status-panel-stats">
+        <div>
+          <dt>Blinds</dt>
+          <dd>{formatAmount(state.smallBlind)}/{formatAmount(state.bigBlind)}</dd>
+        </div>
+        <div>
+          <dt>Buy-in</dt>
+          <dd>{formatAmount(state.startingStack)}</dd>
+        </div>
+      </dl>
       <div className="table-panel-note">
         {spectatorRail
           ? spectatorRail.message
           : !isHost
             ? 'The game creator manages players and starts the table.'
             : me
-              ? `You are seated with ${formatAmount(me.stack)} and blinds are ${formatAmount(state.smallBlind)}/${formatAmount(state.bigBlind)}.`
+              ? seatedCount < 2
+                ? 'Add a bot or share the room code to fill a seat.'
+                : 'Everyone settled? Deal the cards.'
               : 'Seat assignment is being restored.'}
       </div>
       {spectatorRail && (
