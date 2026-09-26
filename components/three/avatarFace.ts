@@ -31,6 +31,7 @@ interface BrowRig {
 export interface AvatarFaceRig {
   eyes: EyeRig[]
   brows: BrowRig[]
+  mouth: { smile: THREE.Mesh; line: THREE.Mesh; ring: THREE.Mesh } | null
   materials: THREE.Material[]
   geometries: THREE.BufferGeometry[]
   /** Smoothed expression channels. */
@@ -91,7 +92,8 @@ export function createAvatarFace(
   model: THREE.Object3D,
   headBone: THREE.Bone | undefined,
   materials: readonly THREE.Material[],
-  skinColor: THREE.Color | null
+  skinColor: THREE.Color | null,
+  eyewear: 'none' | 'round' | 'aviator' | 'shades' | string = 'none'
 ): AvatarFaceRig | null {
   if (!headBone) return null
   const eyePoints = collectRegion(model, headBone, /^eye$/i)
@@ -137,12 +139,13 @@ export function createAvatarFace(
     const eyeCenter = box.getCenter(new THREE.Vector3())
     const root = new THREE.Group()
     root.name = 'cartoon-eye'
-    root.position.copy(eyeCenter).addScaledVector(forward, radius * 0.25)
+    // Clear glasses sit in front: keep the eyes tucked in behind the lenses.
+    root.position.copy(eyeCenter).addScaledVector(forward, radius * (eyewear === 'none' ? 0.22 : 0.02))
     root.quaternion.copy(quaternion)
     root.scale.setScalar(radius)
 
     const ball = new THREE.Mesh(sphere, sclera)
-    ball.scale.set(0.9, 1.1, 0.62)
+    ball.scale.set(0.9, 1.1, eyewear === 'none' ? 0.62 : 0.45)
     root.add(ball)
 
     const pupil = new THREE.Group()
@@ -175,7 +178,7 @@ export function createAvatarFace(
   for (const eye of eyes) {
     const browBox = eye.side === 1 ? browSplit?.right : browSplit?.left
     const base = browBox
-      ? browBox.getCenter(new THREE.Vector3()).addScaledVector(forward, radius * 0.35)
+      ? browBox.getCenter(new THREE.Vector3()).addScaledVector(forward, radius * 0.5).add(new THREE.Vector3(0, radius * 0.45, 0))
       : eye.root.position.clone().add(new THREE.Vector3(0, radius * 1.5, 0))
     const mesh = new THREE.Mesh(browGeometry, browMaterial)
     mesh.name = 'cartoon-brow'
@@ -189,9 +192,37 @@ export function createAvatarFace(
   paintOver(materials, /^eye$/i, skinColor)
   paintOver(materials, /^eyebrows?$/i, skinColor)
 
+  // Opaque sunglasses hide the eyes (and brows sit above the frames).
+  const shaded = eyewear === 'shades' || eyewear === 'aviator'
+  for (const eye of eyes) eye.root.visible = !shaded
+
+  // A simple cartoon mouth under the eyes that changes with mood.
+  const mouthMaterial = basic('#3a1410')
+  const mouthCenter = eyes[0]!.root.position.clone().lerp(eyes[1]!.root.position, 0.5)
+    .add(new THREE.Vector3(0, -radius * 2.5, 0))
+  const arc = new THREE.TorusGeometry(radius * 0.9, radius * 0.14, 6, 18, Math.PI)
+  const line = new THREE.CapsuleGeometry(radius * 0.13, radius * 1.1, 3, 6)
+  line.rotateZ(Math.PI / 2)
+  const ring = new THREE.TorusGeometry(radius * 0.38, radius * 0.14, 6, 18)
+  geometries.push(arc, line, ring)
+  const makeMouthPart = (geometry: THREE.BufferGeometry) => {
+    const mesh = new THREE.Mesh(geometry, mouthMaterial)
+    mesh.position.copy(mouthCenter)
+    mesh.quaternion.copy(quaternion)
+    mesh.name = 'cartoon-mouth'
+    headBone.add(mesh)
+    return mesh
+  }
+  const smile = makeMouthPart(arc)
+  const mouthLine = makeMouthPart(line)
+  const mouthRing = makeMouthPart(ring)
+  mouthRing.visible = false
+  smile.visible = false
+
   return {
     eyes,
     brows,
+    mouth: { smile, line: mouthLine, ring: mouthRing },
     materials: created,
     geometries,
     state: { open: 1, lookX: 0, lookY: 0, browLift: 0, browTilt: 0, squint: 0 },
@@ -240,6 +271,16 @@ export function updateAvatarFace(face: AvatarFaceRig, input: FaceInput) {
     eye.pupil.position.x = state.lookX * 0.28
     eye.pupil.position.y = -state.lookY * 0.22
   }
+  if (face.mouth) {
+    const { smile, line, ring } = face.mouth
+    const mood = input.mood
+    smile.visible = mood === 'happy' || mood === 'sad'
+    // The arc opens upward for a smile and flips for a frown.
+    smile.rotation.z = mood === 'sad' ? 0 : Math.PI
+    ring.visible = mood === 'surprised'
+    line.visible = !smile.visible && !ring.visible
+    line.scale.x = mood === 'focused' ? 0.7 : 1
+  }
   for (const brow of face.brows) {
     const lift = state.browLift * face.eyes[0]!.radius * 0.6
     brow.mesh.position.set(brow.base.x, brow.base.y + lift, brow.base.z)
@@ -251,6 +292,7 @@ export function disposeAvatarFace(face: AvatarFaceRig | null) {
   if (!face) return
   face.eyes.forEach(eye => eye.root.removeFromParent())
   face.brows.forEach(brow => brow.mesh.removeFromParent())
+  if (face.mouth) Object.values(face.mouth).forEach(mesh => mesh.removeFromParent())
   face.materials.forEach(material => material.dispose())
   face.geometries.forEach(geometry => geometry.dispose())
 }

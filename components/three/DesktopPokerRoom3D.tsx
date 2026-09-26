@@ -1214,7 +1214,7 @@ async function requestRiggedAvatar(
     const style = stylizeAvatar(avatar.model, avatar.materials)
     seat.avatar = { ...avatar, materials: style.materials }
     seat.avatarStyle = style
-    seat.face = createAvatarFace(avatar.model, avatar.bones.get('Head'), style.materials, style.skinColor)
+    seat.face = createAvatarFace(avatar.model, avatar.bones.get('Head'), style.materials, style.skinColor, seat.avatarProfile.glasses)
     seat.skinBaseColor = style.skinColor ? style.skinColor.clone() : null
     seat.avatarMount.add(avatar.root)
     seat.avatarMount.position.set(0, AVATAR_SEAT_LIFT, 0)
