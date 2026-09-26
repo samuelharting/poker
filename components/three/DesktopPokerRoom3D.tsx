@@ -2495,7 +2495,7 @@ function createSceneRuntime(
       accent.color.set('#ff7a3d')
     }
     accent.position.lerp(accentTarget, 1 - Math.exp(-delta * 4))
-    const accentGoal = winnerSeat ? 26 : allInImpact.strength * 30
+    const accentGoal = winnerSeat ? 18 : allInImpact.strength * 12
     accent.intensity += (accentGoal - accent.intensity) * (1 - Math.exp(-delta * 5))
     const flicker = reducedMotion ? 1 : 1 + Math.sin(time * 23) * 0.015 + (Math.sin(time * 1.3) > 0.985 ? -0.35 : 0)
     runtime.neonMaterials.forEach(material => {
@@ -2558,7 +2558,7 @@ function createSceneRuntime(
     projectSeatOverlays(runtime, host, viewportWidth, viewportHeight)
 
     if (runtime.postFx) {
-      runtime.postFx.bloom.strength = 0.22 + (winnerSeat ? 0.2 : 0) + allInImpact.strength * 0.3
+      runtime.postFx.bloom.strength = 0.22 + (winnerSeat ? 0.12 : 0) + allInImpact.strength * 0.12
       runtime.postFx.composer.render(delta)
     } else {
       renderer.render(scene, camera)
