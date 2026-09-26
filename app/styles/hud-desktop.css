@@ -594,3 +594,28 @@
 .table-scene[data-phase='between_hands'] .own-hand-area .own-hand-strength {
   opacity: 0.58;
 }
+
+/* Critic fixes for small desktop windows */
+.table-scene[data-desktop-three='true'] .own-hand-turn-chip {
+  align-self: center;
+  flex: none;
+  width: auto;
+  max-width: max-content;
+}
+
+@media (min-width: 1024px) and (max-width: 1180px) {
+  .table-scene[data-desktop-three='true'] .betting-tray {
+    width: 348px;
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-slider-row {
+    grid-template-columns: 1fr 76px;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1365px) {
+  .room-shell .drink-buttons .drink-button-label,
+  .room-shell .drink-meter-label {
+    display: none;
+  }
+}

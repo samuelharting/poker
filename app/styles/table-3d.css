@@ -633,3 +633,45 @@
   transform: translate(-50%, -100%);
   pointer-events: none;
 }
+
+/* Critic fixes: readable blind chips, reveal pill off the name, no stray bets */
+
+.desktop-3d-stage .cinematic-seat .cinematic-blind-role {
+  min-width: 26px;
+  height: 18px;
+  justify-content: center;
+  padding: 0 7px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35) inset;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-blind-role b {
+  display: inline;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.desktop-3d-stage .cinematic-seat .card-reveal-seat-button,
+.desktop-3d-stage .cinematic-seat .cinematic-card-reveal-control {
+  top: -12px;
+  left: auto;
+  right: -10px;
+  bottom: auto;
+  min-height: 0;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--line-brass);
+  border-radius: var(--r-pill);
+  background: var(--c-ink-800);
+  color: var(--c-brass-200);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  transform: none;
+  z-index: 2;
+}
+
+.desktop-3d-stage .cinematic-seat.is-edge-pinned .cinematic-seat-bet {
+  display: none;
+}
