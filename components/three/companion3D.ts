@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { ThreeTableViewModel } from './tableViewModel'
+import { TABLE_FELT_SEMI_AXIS_X, TABLE_FELT_SEMI_AXIS_Z } from './tableWagerLayout'
 import {
   getLadyLuckMoodContext,
   hashLadyLuckSeed,
@@ -70,11 +71,13 @@ export const COMPANION_SEAT_OFFSET = { x: 0.92, y: 0, z: 0.36 } as const
 export const COMPANION_PLAYER_HEAD = { x: 0, y: 1.58, z: -0.16 } as const
 export const COMPANION_PLAYER_SHOULDER = { x: 0.2, y: 1.32, z: -0.12 } as const
 /**
- * Hero placement: where her chest sits in normalised device coordinates. Lower
- * left keeps her clear of the desktop action panel (bottom right).
+ * Hero placement in normalised device coordinates: horizontal position and the
+ * screen height of the top of her head. Left side keeps her clear of the
+ * desktop action panel (bottom right). Works for any camera height / fov.
  */
-export const HERO_COMPANION_NDC = { x: -0.8, y: -0.42 } as const
-export const HERO_COMPANION_CHEST_HEIGHT = 1.55
+export const HERO_COMPANION_NDC = { x: -0.82, headY: 0.55 } as const
+/** Keep-out ellipse around the felt so the hero companion never stands on the table. */
+const HERO_TABLE_KEEP_OUT = { x: TABLE_FELT_SEMI_AXIS_X + 1.1, z: TABLE_FELT_SEMI_AXIS_Z + 1.1 } as const
 /** Model height in local units at scale 1. */
 export const COMPANION_HEIGHT = 2.6
 
@@ -177,26 +180,46 @@ export function computeSeatCompanionPlacement(
 export function computeHeroCompanionPlacement(
   camera: THREE.Camera,
   floorY = -0.08,
-  ndc: { x: number; y: number } = HERO_COMPANION_NDC
+  ndc: { x: number; headY: number } = HERO_COMPANION_NDC
 ): CompanionPlacement {
   camera.updateMatrixWorld()
   const origin = camera.getWorldPosition(new THREE.Vector3())
-  const through = new THREE.Vector3(ndc.x, ndc.y, 0.5).unproject(camera)
-  const direction = through.sub(origin).normalize()
-  // Put her chest on the chosen screen point: solve for the ray distance
-  // where it crosses chest height above the floor.
-  const chestY = floorY + HERO_COMPANION_CHEST_HEIGHT
-  let distance = 8
-  if (direction.y < -1e-3) {
-    distance = (chestY - origin.y) / direction.y
+  const direction = new THREE.Vector3(ndc.x, 0, 0.5).unproject(camera).sub(origin)
+  direction.y = 0
+  if (direction.lengthSq() < 1e-8) direction.set(0, 0, -1)
+  direction.normalize()
+
+  // Pick the distance along that bearing where the top of her head lands on
+  // the requested screen height (works for any camera height / fov).
+  const probe = new THREE.Vector3()
+  const headNdc = (distance: number) => probe
+    .copy(origin)
+    .addScaledVector(direction, distance)
+    .setY(floorY + COMPANION_HEIGHT * 0.96)
+    .project(camera).y
+  let bestDistance = 6
+  let bestError = Infinity
+  for (let distance = 1.6; distance <= 14; distance += 0.1) {
+    const error = Math.abs(headNdc(distance) - ndc.headY)
+    if (error < bestError) {
+      bestError = error
+      bestDistance = distance
+    }
   }
-  distance = THREE.MathUtils.clamp(distance, 3, 12)
-  const position = origin.clone().addScaledVector(direction, distance)
+  // Never stand on the table: step back toward the camera until clear of the rail.
+  const inTable = (distance: number) => {
+    const x = origin.x + direction.x * distance
+    const z = origin.z + direction.z * distance
+    return (x / HERO_TABLE_KEEP_OUT.x) ** 2 + (z / HERO_TABLE_KEEP_OUT.z) ** 2 < 1
+  }
+  while (bestDistance > 1.6 && inTable(bestDistance)) bestDistance -= 0.1
+
+  const position = origin.clone().addScaledVector(direction, bestDistance)
   position.y = floorY
-  // Face the viewer, turned toward screen centre where "you" sit.
-  const centre = new THREE.Vector3(0, 0, 0.5).unproject(camera)
+  // Face the viewer, turned a little toward screen centre where "you" sit.
   const towardCamera = yawToward(position, origin)
-  const towardCentre = yawToward(position, new THREE.Vector3(centre.x, floorY, position.z))
+  const centre = new THREE.Vector3(0, 0, 0.5).unproject(camera)
+  const towardCentre = yawToward(position, new THREE.Vector3(centre.x, floorY, centre.z))
   const yaw = towardCamera + angleDelta(towardCamera, towardCentre) * 0.3
   const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw))
   const inward = ndc.x > 0 ? -1 : 1

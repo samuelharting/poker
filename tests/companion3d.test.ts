@@ -22,7 +22,13 @@ import {
   type CompanionState,
 } from '@/components/three/companion3D'
 import { LADY_LUCK_LINES } from '@/lib/ladyLuckLines'
-import { TABLE_SEAT_POSITIONS, TABLE_SEAT_SCALES, type TableVisualSeat } from '@/components/three/tableWagerLayout'
+import {
+  TABLE_FELT_SEMI_AXIS_X,
+  TABLE_FELT_SEMI_AXIS_Z,
+  TABLE_SEAT_POSITIONS,
+  TABLE_SEAT_SCALES,
+  type TableVisualSeat,
+} from '@/components/three/tableWagerLayout'
 import { DESKTOP_CAMERA_FRAMING } from '@/components/three/cameraFraming'
 
 function makeCamera() {
@@ -96,9 +102,23 @@ describe('companion3D math helpers', () => {
   })
 })
 
-describe('companion3D placement', () => {
-  it('stands her beside the owner seat at the seat scale, on the side away from his head on screen', () => {
-    const camera = makeCamera()
+const LEGACY_OVERVIEW = { fov: 40, position: [0, 5.9, 12.2], lookAt: [0, 0.4, -0.6] } as const
+const CAMERAS = [
+  ['current desktop framing', DESKTOP_CAMERA_FRAMING],
+  ['high overview framing', LEGACY_OVERVIEW],
+] as const
+
+function makeFramedCamera(framing: { fov: number; position: readonly number[]; lookAt: readonly number[] }) {
+  const camera = new THREE.PerspectiveCamera(framing.fov, 1440 / 900, 0.1, 60)
+  camera.position.set(framing.position[0]!, framing.position[1]!, framing.position[2]!)
+  camera.lookAt(new THREE.Vector3(framing.lookAt[0]!, framing.lookAt[1]!, framing.lookAt[2]!))
+  camera.updateMatrixWorld()
+  return camera
+}
+
+describe.each(CAMERAS)('companion3D placement (%s)', (_label, framing) => {
+  it('stands her beside the owner seat at the seat scale, apart from his head on screen', () => {
+    const camera = makeFramedCamera(framing)
     for (const visualSeat of [1, 2, 3, 4, 5, 6, 7] as TableVisualSeat[]) {
       const seat = makeSeat(visualSeat)
       const side = chooseCompanionSide(seat, camera)
@@ -108,21 +128,26 @@ describe('companion3D placement', () => {
       const offset = placement.position.clone().sub(seatPosition)
       expect(offset.length()).toBeGreaterThan(0.7)
       expect(offset.length()).toBeLessThan(1.3)
+      const head = placement.head!.clone().project(camera)
+      if (Math.abs(head.x) > 0.85 || head.z > 1) continue // the seat itself is off screen
       const ndc = placement.position.clone().setY(placement.position.y + 1.3).project(camera)
       expect(Math.abs(ndc.x)).toBeLessThan(1)
-      const head = placement.head!.clone().project(camera)
       expect(Math.abs(ndc.x - head.x)).toBeGreaterThan(0.02)
     }
   })
 
-  it('puts the hero companion in the lower-left of the frame, clear of the action panel', () => {
-    const camera = makeCamera()
+  it('puts the hero companion on the left of the frame, on the floor and off the table', () => {
+    const camera = makeFramedCamera(framing)
     const placement = computeHeroCompanionPlacement(camera)
-    const chest = placement.position.clone().setY(placement.position.y + 1.55).project(camera)
-    expect(chest.x).toBeCloseTo(-0.8, 1)
-    expect(chest.y).toBeCloseTo(-0.42, 1)
+    expect(placement.position.y).toBeCloseTo(-0.08)
+    const chest = placement.position.clone().setY(placement.position.y + 1.5).project(camera)
+    expect(chest.x).toBeLessThan(-0.5)
+    expect(chest.x).toBeGreaterThan(-1)
     const head = placement.position.clone().setY(placement.position.y + 2.5).project(camera)
-    expect(head.y).toBeLessThan(0.6)
+    expect(head.y).toBeLessThan(0.95)
+    expect(head.y).toBeGreaterThan(-0.4)
+    const { x, z } = placement.position
+    expect((x / TABLE_FELT_SEMI_AXIS_X) ** 2 + (z / TABLE_FELT_SEMI_AXIS_Z) ** 2).toBeGreaterThan(1)
   })
 })
 
