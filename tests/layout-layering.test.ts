@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 const css = readFileSync(join(process.cwd(), 'app', 'globals.css'), 'utf8')
 const polishCss = readFileSync(join(process.cwd(), 'app', 'poker-polish.css'), 'utf8')
 const table2dCss = readFileSync(join(process.cwd(), 'app', 'styles', 'table-2d.css'), 'utf8')
+const panelsCss = readFileSync(join(process.cwd(), 'app', 'styles', 'panels.css'), 'utf8')
 const pokerTableSource = readFileSync(join(process.cwd(), 'components', 'table', 'PokerTable.tsx'), 'utf8')
 const desktopThreeSource = readFileSync(join(process.cwd(), 'components', 'three', 'DesktopPokerRoom3D.tsx'), 'utf8')
 const emojiPickerSource = readFileSync(join(process.cwd(), 'components', 'ui', 'SearchableEmojiPicker.tsx'), 'utf8')
@@ -41,7 +42,7 @@ describe('room UI layering', () => {
     ])
     expectRule('.settings-modal-overlay', [
       'z-index: var(--room-layer-modal);',
-    ])
+    ], panelsCss)
     expectRule(".table-scene[data-settings-open='true']", [
       'z-index: var(--room-layer-modal);',
     ])
@@ -91,30 +92,31 @@ describe('room UI layering', () => {
     expect(pokerTableSource).toContain('{!fullPickerOpen && (')
     expect(pokerTableSource).toContain('{!fullPickerOpen && quickEmotes.map')
 
+    // Desktop: floats above the table-talk toggle in the bottom-left corner.
     expectRule('.table-panel.targeted-emote-panel', [
       'position: fixed;',
-      'width: min(300px, calc(100vw - 44px));',
-      'max-height: min(760px, calc(100dvh - 44px));',
+      'width: min(320px, calc(100vw - 40px));',
+      'max-height: min(680px, calc(100dvh - 180px));',
       'overflow-y: auto;',
       'overscroll-behavior: contain;',
-    ], polishCss)
+    ], panelsCss)
     expectRule('.table-panel.targeted-emote-panel.is-picker-open', [
-      'width: min(360px, calc(100vw - 44px));',
-    ], polishCss)
+      'width: min(360px, calc(100vw - 40px));',
+    ], panelsCss)
     expectRule('.targeted-emote-panel.is-picker-open .table-panel-header', [
       'position: sticky;',
       'top: 0;',
-    ], polishCss)
+    ], panelsCss)
     expectRule('.targeted-emote-panel .emoji-picker-shell', [
       'width: 100%;',
       'max-width: 100%;',
       'min-width: 0;',
-    ])
+    ], panelsCss)
     expectRule('.targeted-emote-panel .EmojiPickerReact', [
       'width: 100% !important;',
       'max-width: 100% !important;',
       'min-width: 0 !important;',
-    ])
+    ], panelsCss)
 
     expect(pokerTableSource).toContain('height="clamp(240px, calc(100dvh - 260px), 360px)"')
     expect(emojiPickerSource).toContain('height?: string | number')
@@ -131,18 +133,19 @@ describe('room UI layering', () => {
   })
 
   it('places all-in announcements above active controls without using the modal layer', () => {
-    expect(css).toContain('All-in announcement pop')
+    expect(panelsCss).toContain('All-in: slam, shake, ember flare, chip burst')
     expect(css).toContain('--room-layer-all-in: 226;')
 
     expectRule('.all-in-announcement', [
       'position: fixed;',
       'z-index: var(--room-layer-all-in, 226);',
       'pointer-events: none;',
-      'animation: allInAnnouncementPop 2600ms cubic-bezier(0.18, 0.86, 0.26, 1) forwards;',
-    ])
+      'animation: allInSlam 2600ms var(--ease-out) forwards;',
+    ], panelsCss)
+    expect(panelsCss).toContain('@keyframes allInSlam')
     expectRule('.all-in-chip', [
       'animation: allInChipBurst 920ms cubic-bezier(0.16, 0.9, 0.18, 1) forwards;',
-    ])
+    ], panelsCss)
   })
 
   it('declutters desktop center overlays while the action tray is open', () => {
@@ -290,11 +293,11 @@ describe('room UI layering', () => {
   })
 
   it('keeps settings, between-hand chat, and four-card reveal controls collision free', () => {
+    // The save bar sticks to the bottom of the scrolling settings body.
     expectRule('.settings-footer', [
-      'position: static;',
-      'bottom: auto;',
-      'margin-top: 16px;',
-    ], polishCss)
+      'position: sticky;',
+      'z-index: 2;',
+    ], panelsCss)
     // 2D table: the table-talk toggle sits in the top bar in every phase.
     expectRule(".table-scene[data-layout='2d'] .social-dock", [
       'position: fixed;',
@@ -304,11 +307,11 @@ describe('room UI layering', () => {
     expectRule('.show-cards-toggle', [
       'grid-template-columns: repeat(4, minmax(0, 1fr));',
       'min-width: 220px;',
-    ], polishCss)
+    ], panelsCss)
     expectRule('.show-cards-toggle-button', [
       'min-width: 0;',
       'padding-inline: 8px;',
-    ], polishCss)
+    ], panelsCss)
     expectRule(".table-scene[data-tray-open='true'] .cinematic-seat-7", [
       'right: 12px;',
       'bottom: 44%;',

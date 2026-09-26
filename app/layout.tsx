@@ -4,6 +4,7 @@ import './styles/tokens.css'
 import './globals.css'
 import './styles/base.css'
 import './poker-polish.css'
+import './styles/panels.css'
 import './styles/table-2d.css'
 import './styles/companion.css'
 

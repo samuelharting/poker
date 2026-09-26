@@ -709,6 +709,8 @@ function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
   seat.cardLocalZ = cardSpot[2]
   seat.anchors.cards = [0, cardSpot[1] + 0.02, cardSpot[2]]
   seat.cards.userData.restY = cardSpot[1]
+  // Selection ring sits on the carpet under the chair.
+  seat.ring.position.set(0, (-2 - position[1]) / scale + 0.03, 0.25)
   seat.cards.position.set(0, cardSpot[1], cardSpot[2])
   seat.anchorsFromRig = false
 }
@@ -839,7 +841,7 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     roughness: 0.3,
     metalness: 0.42,
   })
-  const ring = addMesh(root, new THREE.TorusGeometry(0.82, 0.035, 8, 64), ringMaterial, [0, 0.03, 0.2]) as THREE.Mesh<THREE.TorusGeometry, THREE.MeshStandardMaterial>
+  const ring = addMesh(root, new THREE.TorusGeometry(1.05, 0.05, 8, 72), ringMaterial, [0, 0.03, 0.2]) as THREE.Mesh<THREE.TorusGeometry, THREE.MeshStandardMaterial>
   ring.rotation.x = Math.PI / 2
 
   const winnerHalo = addMesh(
