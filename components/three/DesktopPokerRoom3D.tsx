@@ -196,6 +196,11 @@ interface PotRuntime {
   materials: THREE.MeshStandardMaterial[]
   visibleChipCount: number
   bounceStartedAt: number
+  /** Winner ids the pot was last paid out to ('' when no payout is showing). */
+  payoutKey: string
+  payoutStartedAt: number
+  payoutCount: number
+  payoutTargets: THREE.Vector3[]
 }
 
 interface SceneRuntime {
@@ -1471,27 +1476,48 @@ function animateWagers(runtime: SceneRuntime, time: number, reducedMotion: boole
 }
 
 function createPotRuntime(scene: THREE.Scene): PotRuntime {
-  const pot = createChipSet(18)
+  const pot = createChipSet(30)
   pot.group.name = 'table-pot-chip-mound'
-  pot.group.position.set(0, FELT_TOP_Y, 0.95)
+  pot.group.position.set(0, FELT_TOP_Y, 1.28)
   pot.group.scale.setScalar(1.15)
   scene.add(pot.group)
   return {
     ...pot,
     visibleChipCount: 0,
     bounceStartedAt: Number.NEGATIVE_INFINITY,
+    payoutKey: '',
+    payoutStartedAt: Number.NEGATIVE_INFINITY,
+    payoutCount: 0,
+    payoutTargets: [],
   }
 }
 
+const POT_PAYOUT_SECONDS = 1.35
+
 function syncPot(runtime: SceneRuntime, view: ThreeTableViewModel) {
+  const now = (performance.now() - runtime.startTime) / 1000
   const count = getWagerChipCount(view.collectedPot, view.bigBlind, runtime.pot.chipMeshes.length)
-  if (count > runtime.pot.visibleChipCount) {
-    runtime.pot.bounceStartedAt = (performance.now() - runtime.startTime) / 1000
+  const pot = runtime.pot
+  const winners = view.players.filter(player => player.isWinner)
+  const winnerKey = winners.map(player => player.id).join(',')
+  if (winners.length > 0 && winnerKey !== pot.payoutKey) {
+    // Showdown payout: the pot's chips arc across the felt to each winner.
+    pot.payoutKey = winnerKey
+    pot.payoutStartedAt = now
+    pot.payoutCount = Math.max(pot.visibleChipCount, count, 6)
+    pot.payoutTargets = winners.map(winner => toVector3(getTableWagerStartPoint(toVisualSeat(winner.visualSeat))))
+  } else if (winners.length === 0) {
+    pot.payoutKey = ''
+    pot.payoutTargets = []
   }
-  runtime.pot.visibleChipCount = count
-  runtime.pot.group.visible = count > 0
-  runtime.pot.chipMeshes.forEach((chip, index) => {
-    chip.visible = index < count
+  if (count > pot.visibleChipCount && !pot.payoutKey) {
+    pot.bounceStartedAt = now
+  }
+  pot.visibleChipCount = count
+  const shown = pot.payoutKey ? Math.min(pot.chipMeshes.length, pot.payoutCount) : count
+  pot.group.visible = shown > 0
+  pot.chipMeshes.forEach((chip, index) => {
+    chip.visible = index < shown
   })
 
   const host = runtime.renderer.domElement.parentElement
@@ -1503,6 +1529,31 @@ function syncPot(runtime: SceneRuntime, view: ThreeTableViewModel) {
 }
 
 function animatePot(runtime: SceneRuntime, time: number, reducedMotion: boolean) {
+  const pot = runtime.pot
+  if (pot.payoutKey && pot.payoutTargets.length > 0) {
+    const elapsed = reducedMotion ? POT_PAYOUT_SECONDS : time - pot.payoutStartedAt
+    const localTarget = new THREE.Vector3()
+    pot.chipMeshes.forEach((chip, index) => {
+      const base = pot.chipBasePositions[index]
+      const target = pot.payoutTargets[index % pot.payoutTargets.length]
+      if (!base || !target) return
+      localTarget.copy(target)
+      pot.group.worldToLocal(localTarget)
+      const chipProgress = THREE.MathUtils.clamp((elapsed - index * 0.03) / 0.7, 0, 1)
+      const position = interpolateWagerArc(
+        [base.x, base.y, base.z],
+        [localTarget.x, base.y, localTarget.z],
+        chipProgress,
+        0.9
+      )
+      chip.position.set(position[0], position[1], position[2])
+      chip.rotation.x = chipProgress * Math.PI * 2 * (index % 2 === 0 ? 1 : -1)
+      chip.visible = index < pot.payoutCount && chipProgress < 1
+    })
+    pot.group.visible = elapsed < POT_PAYOUT_SECONDS
+    return
+  }
+
   const progress = reducedMotion
     ? 1
     : THREE.MathUtils.clamp((time - runtime.pot.bounceStartedAt) / 0.72, 0, 1)
@@ -1838,7 +1889,8 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
   const tableScene = host.closest<HTMLElement>('.table-scene')
   if (tableScene) {
     scratch.copy(runtime.pot.group.position)
-    scratch.y += 0.34
+    scratch.z += 0.42
+    scratch.y += 0.02
     scratch.project(runtime.camera)
     tableScene.style.setProperty('--pot-x', `${((scratch.x * 0.5 + 0.5) * width).toFixed(1)}px`)
     tableScene.style.setProperty('--pot-y', `${((-scratch.y * 0.5 + 0.5) * height).toFixed(1)}px`)

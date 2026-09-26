@@ -12,10 +12,10 @@ export const FELT_TOP_Y = 0.4
 export const RAIL_WIDTH = 0.66
 export const RAIL_PEAK_Y = FELT_TOP_Y + 0.26
 
-export const BOARD_CARD_WIDTH = 0.62
+export const BOARD_CARD_WIDTH = 0.8
 export const BOARD_CARD_DEPTH = BOARD_CARD_WIDTH * (88 / 63)
-export const BOARD_CARD_GAP = 0.12
-export const BOARD_Z = -0.12
+export const BOARD_CARD_GAP = 0.14
+export const BOARD_Z = -0.3
 export const BOARD_XS = [-2, -1, 0, 1, 2].map(index => index * (BOARD_CARD_WIDTH + BOARD_CARD_GAP))
 
 export const FELT_LAYOUT: FeltLayout = {

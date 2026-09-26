@@ -49,6 +49,17 @@ await page.waitForFunction(
   { timeout: 60000 }
 ).catch(() => {})
 await sleep(waitSeconds * 1000)
+if (process.argv.includes('--advance')) {
+  // Play check/call until the board shows at least the flop.
+  const deadline = Date.now() + 40000
+  while (Date.now() < deadline) {
+    const board = Number(await page.locator('.community-cards').first().getAttribute('data-visible-count').catch(() => 0))
+    if (board >= 3) break
+    await clickVisible(page, /^(Check|Call)/)
+    await sleep(600)
+  }
+  await sleep(1800)
+}
 await page.screenshot({ path: path.join(outDir, 'overview.png') })
 console.log('saved overview')
 console.log('overlay vars', await page.evaluate(() => ({
