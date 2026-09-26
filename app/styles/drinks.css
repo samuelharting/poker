@@ -480,12 +480,12 @@
 }
 
 /* Pulsing blur + double vision on the table itself (never on the action tray). */
-:root[data-drunk-tier] :is(.desktop-3d-stage, .mobile-table-zone, .table-wrapper) {
+:root[data-drunk-tier] :is(.desktop-3d-stage, .mobile-poker-field > :not(.mobile-hero-lane), .table-wrapper) {
   filter: blur(calc(var(--drunk-blur, 0px) * var(--drunk-phase)));
 }
 
 /* Wasted: colours start to swim too */
-:root[data-drunk-tier='wasted'] :is(.desktop-3d-stage, .mobile-table-zone, .table-wrapper) {
+:root[data-drunk-tier='wasted'] :is(.desktop-3d-stage, .mobile-poker-field > :not(.mobile-hero-lane), .table-wrapper) {
   filter:
     blur(calc(var(--drunk-blur, 0px) * var(--drunk-phase)))
     saturate(calc(1 + var(--drunk-phase) * 0.35))
@@ -509,7 +509,7 @@
 
 /* Gentle sway from tipsy upward */
 :root:is([data-drunk-tier='tipsy'], [data-drunk-tier='drunk'], [data-drunk-tier='wasted'])
-  :is(.desktop-3d-stage, .mobile-table-zone, .mobile-hero-lane, .own-hand-area) {
+  :is(.desktop-3d-stage, .mobile-poker-field > :not(.mobile-hero-lane), .mobile-hero-lane, .own-hand-area) {
   animation: drunk-sway calc(var(--drunk-pulse, 7s) * 1.35) ease-in-out infinite;
 }
 
@@ -878,7 +878,7 @@
     --drunk-phase: 0.55;
   }
 
-  :root[data-drunk-tier] :is(.desktop-3d-stage, .mobile-table-zone, .mobile-hero-lane, .own-hand-area),
+  :root[data-drunk-tier] :is(.desktop-3d-stage, .mobile-poker-field > :not(.mobile-hero-lane), .mobile-hero-lane, .own-hand-area),
   :root[data-drunk-hiccup] .room-shell,
   :root[data-drunk-wobble] :is(.mobile-main-action, .bet-action-row .btn-action),
   :root[data-drunk-misread] :is(.own-card-row, .community-cards),
