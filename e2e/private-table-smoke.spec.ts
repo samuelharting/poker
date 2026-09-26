@@ -4,7 +4,7 @@ const appUrl = process.env.POKER_APP_URL ?? 'http://localhost:3000'
 
 test.setTimeout(150000)
 
-test('private table create, guest join, feedback, and live hand smoke', async ({ browser }) => {
+test('private table create, guest join, room code copy, and live hand smoke', async ({ browser }) => {
   const hostContext = await browser.newContext({
     viewport: { width: 1440, height: 900 },
     permissions: ['clipboard-read', 'clipboard-write'],
@@ -21,9 +21,9 @@ test('private table create, guest join, feedback, and live hand smoke', async ({
     await hostPage.waitForLoadState('networkidle')
     await expect(hostPage.getByRole('heading', { name: 'Poker Night' })).toBeVisible()
 
+    // Sign-in is nickname-only; the old Email / Venmo fields are gone.
+    await expect(hostPage.getByLabel('Email')).toHaveCount(0)
     await hostPage.getByLabel('Your nickname').fill('HostSam')
-    await hostPage.getByLabel('Email').fill('host@example.com')
-    await hostPage.getByLabel('Venmo username').fill('@hostsam')
     await hostPage.getByRole('button', { name: 'Create Table' }).click()
 
     await expect(hostPage).toHaveURL(/\/room\/[A-HJ-NP-Z2-9]{6}$/, { timeout: 60000 })
@@ -32,38 +32,37 @@ test('private table create, guest join, feedback, and live hand smoke', async ({
     expect(roomCode).toMatch(/^[A-HJ-NP-Z2-9]{6}$/)
 
     await expect(hostPage.getByText(roomCode).first()).toBeVisible({ timeout: 60000 })
-    await hostPage.getByRole('button', { name: 'Open settings' }).last().click()
-    await expect(hostPage.getByRole('button', { name: 'Copy code' })).toBeVisible()
-    await hostPage.getByRole('button', { name: 'Copy code' }).click({ force: true })
-    await expect(hostPage.getByText('Room code copied.')).toBeVisible()
-    await hostPage.getByRole('button', { name: 'Close settings' }).last().click()
+    await hostPage.getByRole('button', { name: 'Open settings' }).filter({ visible: true }).first().click()
+    const menu = hostPage.getByRole('dialog', { name: 'Table menu' })
+    await expect(menu.getByRole('button', { name: 'Copy code' })).toBeVisible()
+    await menu.getByRole('button', { name: 'Copy code' }).click()
+    // Copy feedback is intentionally silent in the room; verify the clipboard instead.
+    await expect.poll(() => hostPage.evaluate(() => navigator.clipboard.readText())).toBe(roomCode)
+    await menu.getByRole('button', { name: 'Close', exact: true }).click()
     await expect(hostPage.getByRole('button', { name: 'Copy code' })).toBeHidden()
 
     await guestPage.goto(roomUrl, { waitUntil: 'domcontentloaded' })
     await guestPage.waitForLoadState('networkidle')
     await expect(guestPage.getByRole('heading', { name: 'Take your seat' })).toBeVisible()
     await guestPage.getByLabel('Your nickname').fill('GuestAva')
-    await guestPage.getByLabel('Email').fill('guest@example.com')
-    await guestPage.getByLabel('Venmo username').fill('@guestava')
     await guestPage.getByRole('button', { name: 'Enter Room' }).click()
 
-    await expect(guestPage.getByText(roomCode).first()).toBeVisible({ timeout: 60000 })
+    await expect(guestPage.locator('.table-scene')).toBeVisible({ timeout: 60000 })
+    await expect(hostPage.locator('.table-scene')).toHaveAttribute('data-player-count', '2', { timeout: 45000 })
 
-    await expect.poll(async () => hostPage.evaluate(() => document.body.innerText), {
-      timeout: 45000,
-    }).toMatch(/2 seated|POT \$|Your turn|Fold timer/i)
+    // The creator must deal the first hand explicitly; later hands auto-deal.
+    const start = hostPage.getByRole('button', { name: 'Start game' }).filter({ visible: true }).first()
+    await expect(start).toBeEnabled({ timeout: 45000 })
+    await start.click()
 
-    // Fresh private tables auto-start after the second player sits. Waiting for
-    // the hand avoids racing the transient Start game button as the countdown
-    // replaces the lobby controls.
     await Promise.all([
-      expect.poll(async () => hostPage.evaluate(() => document.body.innerText), {
-        timeout: 45000,
-      }).toMatch(/Your turn|Fold timer|FOLD|CHECK \/ CALL|CALL \$|POT \$/i),
-      expect.poll(async () => guestPage.evaluate(() => document.body.innerText), {
-        timeout: 45000,
-      }).toMatch(/GuestAva|Your turn|Fold timer|POT \$/i),
+      expect(hostPage.locator('.table-scene')).toHaveAttribute('data-phase', 'in_hand', { timeout: 45000 }),
+      expect(guestPage.locator('.table-scene')).toHaveAttribute('data-phase', 'in_hand', { timeout: 45000 }),
     ])
+    await expect.poll(async () => (
+      await hostPage.locator('[data-action="fold"]').filter({ visible: true }).count() +
+      await guestPage.locator('[data-action="fold"]').filter({ visible: true }).count()
+    ), { timeout: 45000 }).toBe(1)
   } finally {
     await Promise.allSettled([hostContext.close(), guestContext.close()])
   }
