@@ -80,6 +80,8 @@ export interface ThreePlayerView {
   wagerIntensity: number
   lastAction?: string
   lastActionId?: string
+  /** Nameplate chip: only this street's action (or All-in), so old streets don't linger. */
+  statusAction?: string
   drinks: ThreePlayerDrinks
 }
 
@@ -365,6 +367,11 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
         wagerIntensity: getWagerIntensity(actionCue, actionAmount, state.bigBlind),
         lastAction: player.lastAction,
         lastActionId: player.lastActionId,
+        statusAction: player.status === 'all_in'
+          ? 'All-in'
+          : state.phase === 'in_hand' && !player.hasActedThisRound
+            ? undefined
+            : player.lastAction,
         drinks: toThreePlayerDrinks(player.drinks),
       }
     })

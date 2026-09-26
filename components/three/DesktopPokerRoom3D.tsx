@@ -321,7 +321,7 @@ function createSeededRandom(seed: number) {
 function getStatusLabel(player: ThreePlayerView): string {
   if (player.isOutOfHand) return 'Folded'
   if (player.isActing) return 'Acting'
-  return player.lastAction ?? ''
+  return player.statusAction ?? ''
 }
 
 function CinematicCardSlot({
@@ -490,14 +490,19 @@ function createNeonSignTexture(text: string) {
     context.textAlign = 'center'
     context.textBaseline = 'middle'
     context.font = `800 104px ${font ? `${font}, ` : ''}'Arial Black', sans-serif`
-    context.shadowColor = '#ff9a5c'
-    context.shadowBlur = 36
-    context.strokeStyle = '#ffd0a8'
-    context.lineWidth = 10
+    // Neon tube: a saturated glow and stroke around a warm (not white) core,
+    // so bloom reads as neon rather than a blown-out white blob.
+    context.shadowColor = '#ff5a3a'
+    context.shadowBlur = 22
+    context.strokeStyle = '#ff7f57'
+    context.lineWidth = 7
     context.strokeText(text, 512, 132)
-    context.shadowBlur = 12
-    context.fillStyle = '#fff4e6'
+    context.shadowBlur = 0
+    context.fillStyle = '#ffc9a3'
     context.fillText(text, 512, 132)
+    context.strokeStyle = 'rgba(255, 244, 230, 0.85)'
+    context.lineWidth = 1.5
+    context.strokeText(text, 512, 132)
   })
 }
 
@@ -748,11 +753,12 @@ function createRoom(scene: THREE.Scene) {
     map: createNeonSignTexture('POKER NIGHT'),
     emissive: '#ffffff',
     emissiveMap: createNeonSignTexture('POKER NIGHT'),
-    emissiveIntensity: 1.25,
+    emissiveIntensity: 0.95,
     transparent: true,
     depthWrite: false,
     toneMapped: false,
   })
+  neonMaterial.userData.baseEmissive = 0.95
   const neon = addMesh(scene, new THREE.PlaneGeometry(4.4, 1.1), neonMaterial, [0, 3.58, -9.3])
   neon.name = 'neon-sign'
   neon.castShadow = false
@@ -2453,14 +2459,36 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
         if (overlapX <= 0 || overlapY <= 0) continue
         if (overlapY < overlapX) lower.y += overlapY
         else lower.x += (lower.x >= upper.x ? 1 : -1) * overlapX
+        // Clamp inside the pass so the screen edge can't undo a nudge.
+        lower.x = THREE.MathUtils.clamp(lower.x, 110, width - 110)
       }
     }
   }
   for (const plate of placedPlates) {
-    plate.element.style.setProperty('--seat-x', `${THREE.MathUtils.clamp(plate.x, 110, width - 110).toFixed(1)}px`)
-    plate.element.style.setProperty('--seat-y', `${plate.y.toFixed(1)}px`)
+    // Steady plates: ignore sub-pixel sway, ease real moves, and freeze a plate
+    // under the pointer so it can be clicked (targeted emotes).
+    const previous = plateScreenPositions.get(plate.element)
+    let x = plate.x
+    let y = plate.y
+    if (previous) {
+      const hovered = plate.element.matches(':hover')
+      const dx = x - previous.x
+      const dy = y - previous.y
+      if (hovered || Math.hypot(dx, dy) < 4) {
+        x = previous.x
+        y = previous.y
+      } else {
+        x = previous.x + dx * 0.35
+        y = previous.y + dy * 0.35
+      }
+    }
+    plateScreenPositions.set(plate.element, { x, y })
+    plate.element.style.setProperty('--seat-x', `${x.toFixed(1)}px`)
+    plate.element.style.setProperty('--seat-y', `${y.toFixed(1)}px`)
   }
 }
+
+const plateScreenPositions = new WeakMap<HTMLElement, { x: number; y: number }>()
 
 const effectPoint = new THREE.Vector3()
 
@@ -2766,19 +2794,23 @@ function createSceneRuntime(
     const allInImpact = getAllInCameraImpact(runtime.seats.values(), time, reducedMotion)
     const accent = runtime.lights.accent
     if (winnerSeat) {
+      // Pool of gold over and slightly behind the winner (pushed away from the
+      // board) so it rims the player instead of flooding the felt and cards.
       winnerSeat.root.getWorldPosition(accentTarget)
-      accentTarget.y += 2.6
+      accentTarget.x *= 1.18
+      accentTarget.z *= 1.18
+      accentTarget.y += 2.9
       accent.color.set('#ffcf73')
     } else {
-      accentTarget.set(0, 3.2, 0)
+      accentTarget.set(0, 4.6, -0.4)
       accent.color.set('#ff7a3d')
     }
     accent.position.lerp(accentTarget, 1 - Math.exp(-delta * 4))
-    const accentGoal = winnerSeat ? 18 : allInImpact.strength * 12
+    const accentGoal = winnerSeat ? 8 : allInImpact.strength * 5
     accent.intensity += (accentGoal - accent.intensity) * (1 - Math.exp(-delta * 5))
     const flicker = reducedMotion ? 1 : 1 + Math.sin(time * 23) * 0.012
     runtime.neonMaterials.forEach(material => {
-      material.emissiveIntensity = 1.25 * flicker
+      material.emissiveIntensity = Number(material.userData.baseEmissive ?? 1) * flicker
     })
 
     // A living camera: a slow breathing drift, a subtle lean toward whoever is
