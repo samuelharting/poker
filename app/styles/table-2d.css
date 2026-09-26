@@ -522,7 +522,8 @@
   left: 50%;
   bottom: calc(100% + 4px);
   display: flex;
-  gap: 6px;
+  flex-direction: row;
+  gap: 8px;
   margin: 0;
   padding: 2px 8px;
   border: 0;
@@ -2790,9 +2791,9 @@ button.mobile-seat-avatar:active {
   .mobile-seat-position-7 { --sx: 79; --sy: 82; }
 
   .mobile-seat-1 { --bx: calc(var(--avatar) * 0.5 + 44px); --by: -30px; }
-  .mobile-seat-3 { --bx: 8cqw; --by: calc(var(--avatar) * 0.5 + 44px); }
+  .mobile-seat-3 { --bx: 9cqw; --by: calc(var(--avatar) * 0.5 + 60px); }
   .mobile-seat-4 { --bx: calc(var(--plate-w) * 0.5 + 34px); --by: 4px; }
-  .mobile-seat-5 { --bx: -8cqw; --by: calc(var(--avatar) * 0.5 + 44px); }
+  .mobile-seat-5 { --bx: -9cqw; --by: calc(var(--avatar) * 0.5 + 60px); }
   .mobile-seat-7 { --bx: calc(var(--avatar) * -0.5 - 44px); --by: -30px; }
 
   .mobile-edge-winners-heading {
