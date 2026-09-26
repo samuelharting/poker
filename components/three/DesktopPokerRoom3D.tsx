@@ -42,6 +42,22 @@ import { applyBlink, getBlinkAmount, stylizeAvatar, type StylizedAvatar } from '
 import { createAvatarFace, disposeAvatarFace, updateAvatarFace, type AvatarFaceRig, type FaceMood } from './avatarFace'
 import { createDrinkProp, disposeDrinkProp, DRINK_DURATION, type DrinkProp } from './drinkProps'
 import {
+  animateConfetti,
+  animateLightCone,
+  animateShockwave,
+  burstConfetti,
+  createConfetti,
+  createLightCone,
+  createShockwave,
+  disposeConfetti,
+  disposeLightCone,
+  disposeShockwave,
+  triggerShockwave,
+  type Confetti,
+  type LightCone,
+  type Shockwave,
+} from './sceneEffects'
+import {
   createCompanion,
   disposeCompanion,
   getCompanionBubbleAnchor,
@@ -70,6 +86,7 @@ import {
 } from './sceneLighting'
 import {
   disposeSceneTextures,
+  drawSuit,
   getChipEdgeTexture,
   getChipFaceTexture,
   CHIP_DENOMINATIONS,
@@ -238,6 +255,7 @@ interface SceneRuntime {
   overlayElements: Map<string, HTMLElement>
   /** Lady Luck, the win-streak companion. */
   companion: CompanionRuntime | null
+  effects: { cone: LightCone; confetti: Confetti; shockwave: Shockwave; winnerKey: string; allInKey: string }
   /** Development-only camera override used by scripts/snap-3d.mjs close-ups. */
   debugCamera: { position: Vec3; lookAt: Vec3; fov?: number } | null
   feltMaterial: THREE.MeshStandardMaterial
@@ -461,6 +479,63 @@ function createNeonSignTexture(text: string) {
   })
 }
 
+function createPosterTexture(title: string, subtitle: string, suit: 'spades' | 'hearts') {
+  return createCanvasTexture(512, 720, context => {
+    const font = getComputedStyle(document.documentElement).getPropertyValue('--font-unbounded').trim()
+    const family = `${font ? `${font}, ` : ''}'Arial Black', sans-serif`
+    const background = context.createLinearGradient(0, 0, 0, 720)
+    background.addColorStop(0, suit === 'hearts' ? '#3a0f1a' : '#0f2a2a')
+    background.addColorStop(1, '#0a0c0e')
+    context.fillStyle = background
+    context.fillRect(0, 0, 512, 720)
+    context.strokeStyle = 'rgba(242, 199, 102, 0.8)'
+    context.lineWidth = 6
+    context.strokeRect(22, 22, 468, 676)
+    context.strokeStyle = 'rgba(242, 199, 102, 0.35)'
+    context.lineWidth = 2
+    context.strokeRect(36, 36, 440, 648)
+    for (let ray = 0; ray < 18; ray += 1) {
+      const angle = (ray / 18) * Math.PI * 2
+      context.strokeStyle = 'rgba(242, 199, 102, 0.08)'
+      context.lineWidth = 18
+      context.beginPath()
+      context.moveTo(256, 300)
+      context.lineTo(256 + Math.cos(angle) * 420, 300 + Math.sin(angle) * 420)
+      context.stroke()
+    }
+    drawSuit(context, suit, 256, 290, 250, suit === 'hearts' ? '#e2505c' : '#f2c766')
+    context.textAlign = 'center'
+    context.fillStyle = '#fff4de'
+    context.font = `800 62px ${family}`
+    context.fillText(title, 256, 560)
+    context.fillStyle = 'rgba(242, 199, 102, 0.9)'
+    context.font = `600 24px ${family}`
+    context.fillText(subtitle, 256, 610)
+  })
+}
+
+function createPoster(
+  scene: THREE.Scene,
+  x: number,
+  title: string,
+  subtitle: string,
+  suit: 'spades' | 'hearts',
+  brassMaterial: THREE.MeshStandardMaterial
+) {
+  const poster = new THREE.Group()
+  poster.name = 'framed-poster'
+  poster.position.set(x, 2.1, -9.3)
+  scene.add(poster)
+  addMesh(poster, new THREE.BoxGeometry(1.9, 2.6, 0.08), brassMaterial).castShadow = false
+  const art = addMesh(
+    poster,
+    new THREE.PlaneGeometry(1.72, 2.42),
+    new THREE.MeshStandardMaterial({ map: createPosterTexture(title, subtitle, suit), roughness: 0.6 }),
+    [0, 0, 0.045]
+  )
+  art.castShadow = false
+}
+
 function createBackBar(scene: THREE.Scene, brassMaterial: THREE.MeshStandardMaterial) {
   const bar = new THREE.Group()
   bar.name = 'emerald-back-bar'
@@ -634,6 +709,8 @@ function createRoom(scene: THREE.Scene) {
   createBackBar(scene, brassMaterial)
   for (const x of [-4.6, 4.6]) createWallSconce(scene, x, brassMaterial)
   for (const x of [-9.4, 9.4]) createWallSconce(scene, x, brassMaterial)
+  createPoster(scene, -7, 'ALL IN', 'NO GUTS · NO GLORY', 'hearts', brassMaterial)
+  createPoster(scene, 7, 'ROYAL', 'FLUSH OR BUST', 'spades', brassMaterial)
   createPendantLamp(scene, -2.6, -0.4, brassMaterial)
   createPendantLamp(scene, 2.6, -0.4, brassMaterial)
 
@@ -2097,6 +2174,36 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
   }
 }
 
+const effectPoint = new THREE.Vector3()
+
+/** Light cone breathing, winner confetti and all-in shockwaves. */
+function animateEffects(runtime: SceneRuntime, time: number, delta: number, reducedMotion: boolean) {
+  const effects = runtime.effects
+  const winners = [...runtime.seats.values()].filter(seat => seat.winner)
+  const winnerKey = winners.map(seat => seat.playerId).join(',')
+  if (winnerKey && winnerKey !== effects.winnerKey && !reducedMotion) {
+    for (const seat of winners) {
+      if (seat.root.visible) seat.root.getWorldPosition(effectPoint)
+      else effectPoint.set(0, 0, 3.6)
+      effectPoint.y += 2.3
+      burstConfetti(effects.confetti, effectPoint, 110)
+    }
+  }
+  effects.winnerKey = winnerKey
+
+  for (const seat of runtime.seats.values()) {
+    if (seat.actionCue !== 'all_in' || !seat.actionKey || seat.actionKey === effects.allInKey) continue
+    effects.allInKey = seat.actionKey
+    const anchor = getTableWagerAnchor(toVisualSeat(seat.visualSeat))
+    effectPoint.set(anchor[0], FELT_TOP_Y + 0.01, anchor[2])
+    if (!reducedMotion) triggerShockwave(effects.shockwave, effectPoint, time)
+  }
+
+  animateLightCone(effects.cone, time, reducedMotion, winners.length > 0 ? 1 : 0)
+  animateConfetti(effects.confetti, delta)
+  animateShockwave(effects.shockwave, time)
+}
+
 const companionBubbleWorld = new THREE.Vector3()
 
 /** Drives Lady Luck beside her owner's seat and floats her speech bubble. */
@@ -2181,6 +2288,13 @@ function createSceneRuntime(
   const pot = createPotRuntime(scene)
   const board = createBoardRuntime(scene)
   let companion: CompanionRuntime | null = null
+  const effects = {
+    cone: createLightCone(scene, new THREE.Vector3(0, 7.2, -0.35), FELT_TOP_Y, 4.2),
+    confetti: createConfetti(scene),
+    shockwave: createShockwave(scene),
+    winnerKey: '',
+    allInKey: '',
+  }
   try {
     companion = createCompanion(scene)
   } catch (error) {
@@ -2215,6 +2329,7 @@ function createSceneRuntime(
     neonMaterials,
     overlayElements: new Map<string, HTMLElement>(),
     companion,
+    effects,
     debugCamera: null as SceneRuntime['debugCamera'],
     feltMaterial,
     startTime: performance.now(),
@@ -2288,6 +2403,7 @@ function createSceneRuntime(
     animateWagers(runtime, time, reducedMotion)
     animatePot(runtime, time, reducedMotion)
     animateBoardRuntime(runtime.board, time, reducedMotion)
+    animateEffects(runtime, time, delta, reducedMotion)
 
     // Stage lighting reacts to the table: an ember swell on all-ins, a gold
     // pool over the winner, and a slow neon flicker in the background.
@@ -2412,6 +2528,9 @@ function createSceneRuntime(
     }
     runtime.board.slots.forEach(slot => disposeCardMesh(slot.card))
     if (runtime.companion) disposeCompanion(runtime.companion)
+    disposeLightCone(runtime.effects.cone)
+    disposeConfetti(runtime.effects.confetti)
+    disposeShockwave(runtime.effects.shockwave)
     runtime.postFx?.dispose()
     environment.dispose()
     disposeObject(scene)
