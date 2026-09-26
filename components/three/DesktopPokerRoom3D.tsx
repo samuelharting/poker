@@ -828,6 +828,9 @@ function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
   const betLocal = toSeatLocal(seat, betWorld[0], betWorld[1] + 0.05, betWorld[2])
   seat.anchors.betSpot = betLocal
   seat.anchors.board = toSeatLocal(seat, 0, FELT_TOP_Y + 0.1, BOARD_Z)
+  // Cards are dealt from the middle of the table (in the cards group's space).
+  const dealFrom = toSeatLocal(seat, 0, FELT_TOP_Y + 0.3, -0.2)
+  seat.cards.userData.dealFrom = [dealFrom[0], dealFrom[1] - cardSpot[1], dealFrom[2] - cardSpot[2]]
   seat.anchors.drinkRest = [-0.66 / scale, stackSpot[1] + 0.02, stackSpot[2] + 0.08]
   // Dealer puck lies on the felt to the left of the dealer's hole cards.
   seat.dealerButton.position.set(-0.62, cardSpot[1] + 0.03 / scale, cardSpot[2] + 0.12)
@@ -2246,11 +2249,6 @@ function animateSeat(
   }
 
   if (seat.hadCards) {
-    const seatDelay = (seat.visualSeat % 4) * 0.07
-    const dealProgress = reducedMotion
-      ? 1
-      : THREE.MathUtils.clamp((time - seat.dealStartedAt - seatDelay) / 0.7, 0, 1)
-    const eased = 1 - Math.pow(1 - dealProgress, 3)
     const actionCardsVisible = playback.cue === 'fold' ? tablePose.cards.visible : true
     seat.cards.visible = seat.keepFoldedCardsVisible || (
       actionCardsVisible && (!seat.folded || playback.isActive)
@@ -2260,24 +2258,24 @@ function animateSeat(
     // Cards fly in from the dealer (table centre) and slide into place.
     seat.cards.position.set(
       tablePose.cards.position[0],
-      restY + (1 - eased) * 0.9 + tablePose.cards.position[1] + peekLift * 0.05,
-      seat.cardLocalZ * (0.35 + eased * 0.65) + tablePose.cards.position[2] * 0.6
+      restY + tablePose.cards.position[1] + peekLift * 0.05,
+      seat.cardLocalZ + tablePose.cards.position[2] * 0.6
     )
     seat.cards.rotation.set(
       tablePose.cards.rotation[0] - peekLift * 0.5,
       tablePose.cards.rotation[1],
-      (1 - eased) * (seat.visualSeat % 2 === 0 ? 0.8 : -0.8) + tablePose.cards.rotation[2]
+      tablePose.cards.rotation[2]
     )
+    const dealFrom = (seat.cards.userData.dealFrom as Vec3 | undefined) ?? [0, 0.3, -1.5]
     seat.cards.scale.setScalar(1)
     seat.cardMeshes.forEach((card, index) => {
+      // Dealt clockwise from the dealer, one card per player per round.
+      const dealDelay = (seat.visualSeat + index * 8) * 0.075
       const cardProgress = reducedMotion
         ? 1
-        : THREE.MathUtils.clamp(
-            (time - seat.dealStartedAt - seatDelay - index * 0.12) / 0.6,
-            0,
-            1
-          )
+        : THREE.MathUtils.clamp((time - seat.dealStartedAt - dealDelay) / 0.46, 0, 1)
       const cardEase = 1 - Math.pow(1 - cardProgress, 3)
+      card.visible = cardProgress > 0
       const baseX = Number(card.userData.baseX ?? (index === 0 ? -0.17 : 0.17))
       const baseYaw = Number(card.userData.baseYaw ?? 0)
       // Showdown flips a card over its long edge once its face is known.
@@ -2289,8 +2287,14 @@ function animateSeat(
         : currentFlip + (flipTarget - currentFlip) * (1 - Math.exp(-delta * 9))
       card.userData.flip = flip
       const flipArc = Math.sin(flip) * 0.12
-      card.position.set(baseX * cardEase, index * 0.014 + (1 - cardEase) * 0.12 + flipArc, 0)
-      card.rotation.set(0, baseYaw * cardEase, flip + (1 - cardEase) * (index === 0 ? -0.34 : 0.34))
+      const travel = 1 - cardEase
+      card.position.set(
+        baseX * cardEase + dealFrom[0] * travel,
+        index * 0.014 + flipArc + dealFrom[1] * travel + Math.sin(cardProgress * Math.PI) * 0.28,
+        dealFrom[2] * travel
+      )
+      // Cards skim in spinning and settle flat and square.
+      card.rotation.set(0, baseYaw * cardEase + travel * Math.PI * 2.5, flip)
     })
   } else {
     seat.cards.visible = false
@@ -2746,8 +2750,8 @@ function createSceneRuntime(
       // Glance toward whoever is acting, like turning your head at the table.
       const actingPosition = TABLE_SEAT_POSITIONS[toVisualSeat(actingSeat)]
       actingFocus.set(actingPosition[0] * 0.85, 1.05, actingPosition[2] * 0.85)
-      targetLook.lerp(actingFocus, 0.5)
-      targetCamera.x += actingPosition[0] * 0.07
+      targetLook.lerp(actingFocus, 0.38)
+      targetCamera.x += actingPosition[0] * 0.045
     }
     if (winnerSeat) {
       winnerSeat.root.getWorldPosition(winnerFocus)

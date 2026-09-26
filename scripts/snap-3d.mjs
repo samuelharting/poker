@@ -42,7 +42,17 @@ await page.waitForSelector('.desktop-3d-stage[data-webgl-status="ready"]', { tim
 await sleep(2500)
 await clickVisible(page, 'Fill seats')
 await sleep(1500)
+if (process.argv.includes('--deal')) {
+  await page.waitForFunction(() => Number(document.querySelector('.desktop-3d-stage')?.dataset.avatarModelsLoaded ?? 0) >= 6, null, { timeout: 60000 }).catch(() => {})
+  await sleep(1500)
+}
 await clickVisible(page, /^Start game$/)
+if (process.argv.includes('--deal')) {
+  // Burst of frames to review the deal animation.
+  for (let frame = 0; frame < 6; frame += 1) {
+    await page.screenshot({ path: path.join(outDir, `deal-${frame}.png`) })
+  }
+}
 await page.waitForFunction(
   () => Number(document.querySelector('.desktop-3d-stage')?.dataset.avatarModelsLoaded ?? 0) >= 6,
   null,
