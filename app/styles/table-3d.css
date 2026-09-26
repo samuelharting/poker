@@ -620,3 +620,16 @@
 .desktop-3d-stage .lady-luck-bubble-3d[data-visible='false'] {
   opacity: 0;
 }
+
+/* The hero's bet label rides on their 3D chips. */
+.table-scene[data-desktop-three='true'] .hero-table-bet {
+  position: fixed;
+  left: var(--hero-bet-x, 50%);
+  top: var(--hero-bet-y, 70%);
+  right: auto;
+  bottom: auto;
+  z-index: 4;
+  margin: 0;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+}

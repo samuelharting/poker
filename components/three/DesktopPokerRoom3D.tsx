@@ -617,8 +617,8 @@ function createWallSconce(scene: THREE.Scene, x: number, brassMaterial: THREE.Me
   )
   shade.castShadow = false
 
-  const light = new THREE.PointLight('#ffb865', 7, 6, 2)
-  light.position.set(0, 0.2, 0.7)
+  const light = new THREE.PointLight('#ffb865', 3.6, 5, 2)
+  light.position.set(0, 0.2, 0.9)
   sconce.add(light)
 }
 
@@ -2117,6 +2117,17 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
     tableScene.style.setProperty('--pot-y', `${((-scratch.y * 0.5 + 0.5) * height).toFixed(1)}px`)
   }
   for (const seat of runtime.seats.values()) {
+    if (!seat.root.visible && tableScene) {
+      // The hero's own bet label rides on their chips in front of the camera.
+      const heroWager = runtime.wagers.get(seat.playerId)
+      if (heroWager) {
+        scratch.copy(heroWager.target)
+        scratch.y += 0.2
+        scratch.project(runtime.camera)
+        tableScene.style.setProperty('--hero-bet-x', `${((scratch.x * 0.5 + 0.5) * width).toFixed(1)}px`)
+        tableScene.style.setProperty('--hero-bet-y', `${((-scratch.y * 0.5 + 0.5) * height).toFixed(1)}px`)
+      }
+    }
     let element = runtime.overlayElements.get(seat.playerId)
     if (!element || !element.isConnected) {
       element = host.querySelector<HTMLElement>(`[data-seat-player="${CSS.escape(seat.playerId)}"]`) ?? undefined
@@ -2289,7 +2300,7 @@ function createSceneRuntime(
   const board = createBoardRuntime(scene)
   let companion: CompanionRuntime | null = null
   const effects = {
-    cone: createLightCone(scene, new THREE.Vector3(0, 7.2, -0.35), FELT_TOP_Y, 4.2),
+    cone: createLightCone(scene, new THREE.Vector3(0, 7.2, -0.35), FELT_TOP_Y, 3.6),
     confetti: createConfetti(scene),
     shockwave: createShockwave(scene),
     winnerKey: '',

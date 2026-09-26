@@ -23,7 +23,7 @@ export function createLightCone(scene: THREE.Scene, apex: THREE.Vector3, baseY: 
     blending: THREE.AdditiveBlending,
     uniforms: {
       color: { value: new THREE.Color('#ffe2b0') },
-      intensity: { value: 0.16 },
+      intensity: { value: 0.06 },
       height: { value: height },
     },
     vertexShader: /* glsl */ `
@@ -64,7 +64,7 @@ export function createLightCone(scene: THREE.Scene, apex: THREE.Vector3, baseY: 
 }
 
 export function animateLightCone(cone: LightCone, time: number, reducedMotion: boolean, boost: number) {
-  cone.material.uniforms.intensity!.value = 0.14 + boost * 0.12 + (reducedMotion ? 0 : Math.sin(time * 0.7) * 0.012)
+  cone.material.uniforms.intensity!.value = 0.05 + boost * 0.07 + (reducedMotion ? 0 : Math.sin(time * 0.7) * 0.006)
 }
 
 export function disposeLightCone(cone: LightCone) {
