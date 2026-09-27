@@ -514,21 +514,29 @@
   );
 }
 
-/* Gentle sway from 'drunk' (5+) upward. Not at 'tipsy': everyone sits
-   down in the sweet spot now, and a table (seat buttons, your cards) drifting
-   under the cursor from the first hand interferes with play. */
-:root:is([data-drunk-tier='drunk'], [data-drunk-tier='wasted'])
+/* Gentle sway from tipsy upward */
+:root:is([data-drunk-tier='tipsy'], [data-drunk-tier='drunk'], [data-drunk-tier='wasted'])
   :is(.desktop-3d-stage, .mobile-poker-field > :not(.mobile-hero-lane), .mobile-hero-lane, .own-hand-area) {
   animation: drunk-sway calc(var(--drunk-pulse, 7s) * 1.35) ease-in-out infinite;
 }
 
-:root:is([data-drunk-tier='drunk'], [data-drunk-tier='wasted']) .mobile-hero-lane,
-:root:is([data-drunk-tier='drunk'], [data-drunk-tier='wasted']) .own-hand-area {
+:root:is([data-drunk-tier='tipsy'], [data-drunk-tier='drunk'], [data-drunk-tier='wasted']) .mobile-hero-lane,
+:root:is([data-drunk-tier='tipsy'], [data-drunk-tier='drunk'], [data-drunk-tier='wasted']) .own-hand-area {
   animation-delay: -1.2s;
 }
 
+/* Everyone sits down 'tipsy' (the sweet spot): the layers keep their sway
+   animation (so the pulsing blur and ghosting stay composited, which is
+   cheap) but at zero amplitude, so the table, seat buttons and your cards
+   never drift under the cursor. The real sway starts at 'drunk' (5+). */
+:root[data-drunk-tier='tipsy']
+  :is(.desktop-3d-stage, .mobile-poker-field > :not(.mobile-hero-lane), .mobile-hero-lane, .own-hand-area) {
+  --drunk-sway-px: 0px;
+  --drunk-sway-deg: 0deg;
+}
+
 /* Hide the edges of the 3D room while it sways */
-:root:is([data-drunk-tier='drunk'], [data-drunk-tier='wasted']) .desktop-3d-stage {
+:root:is([data-drunk-tier='tipsy'], [data-drunk-tier='drunk'], [data-drunk-tier='wasted']) .desktop-3d-stage {
   scale: 1.045;
 }
 
