@@ -5,7 +5,7 @@ describe('house rules: sips, scared money and the bubble', () => {
   const board = [card('2', 'clubs'), card('7', 'diamonds'), card('9', 'hearts'), card('J', 'spades'), card('4', 'clubs')]
   const base = { drinkCapable: true, folded: false, startStack: 1000, endStack: 1000, won: 0 }
 
-  it('a lost showdown is a sip (half a beer)', () => {
+  it('a lost showdown is a beer', () => {
     const outcomes = computeHouseRules({
       showdown: true,
       boards: [board],
@@ -16,7 +16,7 @@ describe('house rules: sips, scared money and the bubble', () => {
     })
     const loser = outcomes.find(outcome => outcome.playerId === 'lose')!
     expect(loser.beerRules).toContain('lost_showdown')
-    expect(loser.beers).toBe(0.5)
+    expect(loser.beers).toBe(1)
   })
 
   it('three folds in a row cost a beer (scared money)', () => {
@@ -50,5 +50,14 @@ describe("house rules: dealer's round", () => {
   it('skips a dealer who was not dealt in', () => {
     const outcomes = computeHouseRules({ showdown: false, boards: [[]], players: [{ ...base, id: 'dealer', startStack: undefined }], dealerId: 'dealer' })
     expect(outcomes).toEqual([])
+  })
+})
+
+describe('house rules: waterfall', () => {
+  it('on a waterfall hand everyone dealt in drinks', () => {
+    const base = { drinkCapable: true, folded: true, holeCards: [], startStack: 1000, endStack: 1000, won: 0 }
+    const outcomes = computeHouseRules({ showdown: false, boards: [[]], players: [{ ...base, id: 'a' }, { ...base, id: 'b' }, { ...base, id: 'watcher', startStack: undefined }], waterfall: true })
+    expect(outcomes.map(outcome => outcome.playerId).sort()).toEqual(['a', 'b'])
+    expect(outcomes.every(outcome => outcome.beerRules.includes('waterfall'))).toBe(true)
   })
 })

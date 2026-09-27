@@ -61,6 +61,8 @@ class MockRoom {
 function setup() {
   const room = new MockRoom()
   const server = new PokerRoom(room as unknown as Room)
+  // Random thirst off unless a test turns it on.
+  server.autoBeerRandom = () => 1
   return { room, server }
 }
 

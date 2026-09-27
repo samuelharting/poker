@@ -74,7 +74,7 @@ export function DrinkControls({
     ? 'You are passed out'
     : chaserSeconds > 0
       ? `Chaser: a water now takes 2 off at once (${chaserSeconds}s)`
-      : 'Slow water: takes 2 off when the next hand starts.'
+      : 'Water: sobers you up 1.5 in a few seconds.'
 
   return (
     <div
@@ -143,7 +143,7 @@ export function DrinkControls({
             />
           ))}
         </span>
-        {myDrinks.waterNextHand > 0 && <span className="drink-meter-water" title="Water lands next hand">💧</span>}
+        {myDrinks.waterNextHand > 0 && <span className="drink-meter-water" title="Water kicking in">💧</span>}
       </div>
 
     </div>

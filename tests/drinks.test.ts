@@ -85,7 +85,7 @@ describe('drink ledger rules (buzz economy)', () => {
     expect(order(entry, 'water', 1_000 + DRINK_COOLDOWN_MS).ok).toBe(true)
   })
 
-  it('queues slow water (-2) for the start of the next hand, with no per-hand limit', () => {
+  it('queues water (-1.5 each) until its timer lands it, with no per-hand limit', () => {
     const entry = createDrinkLedgerEntry()
     entry.level = 7
     const first = order(entry, 'water', 60_000)
@@ -93,10 +93,10 @@ describe('drink ledger rules (buzz economy)', () => {
     expect(first).toMatchObject({ ok: true, water: { levels: BUZZ.waterLevels } })
     expect(second.ok).toBe(true)
     expect(entry.level).toBe(7)
-    expect(toPublicDrinkState(entry)).toMatchObject({ sobering: 2, waterNextHand: 4 })
+    expect(toPublicDrinkState(entry)).toMatchObject({ sobering: 2, waterNextHand: 3 })
 
-    expect(applyQueuedWaters(entry)).toBe(4)
-    expect(entry.level).toBe(3)
+    expect(applyQueuedWaters(entry)).toBe(3)
+    expect(entry.level).toBe(4)
     expect(toPublicDrinkState(entry)).toMatchObject({ sobering: 0, waterNextHand: 0 })
     expect(applyQueuedWaters(entry)).toBe(0)
   })
@@ -120,17 +120,11 @@ describe('drink ledger rules (buzz economy)', () => {
     expect(applyQueuedWaters(entry)).toBe(0)
   })
 
-  it('sobers by half a level per completed hand', () => {
+  it('never sobers on its own: water is the only way down', () => {
     const entry = createDrinkLedgerEntry()
     entry.level = 2
-    expect(applyHandCompleted(entry)).toBe(true)
-    expect(entry.level).toBe(1.5)
-    applyHandCompleted(entry)
-    applyHandCompleted(entry)
-    applyHandCompleted(entry)
-    expect(entry.level).toBe(0)
-    expect(applyHandCompleted(entry)).toBe(false)
-    expect(entry.level).toBe(0)
+    for (let hand = 0; hand < 6; hand += 1) applyHandCompleted(entry)
+    expect(entry.level).toBe(2)
   })
 
   it('blacks out at 10 for a few seconds, never waiting for a hand, then wakes at 1 hungover for about a hand', () => {

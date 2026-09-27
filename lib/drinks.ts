@@ -58,9 +58,17 @@ export const BUZZ = {
   sweetSpotMin: 3,
   sweetSpotMax: 6,
   beerLevels: 1,
-  /** Water (not a chaser) takes this off at the start of the next hand. */
-  waterLevels: 2,
-  soberingPerHand: 0.5,
+  /** Water (not a chaser) takes this off WATER_LANDS_MS after ordering (a beer is +1). */
+  waterLevels: 1.5,
+  // No natural sobering (owner): water is the only way down.
+  soberingPerHand: 0,
+  /**
+   * Random thirst: every autoBeerEveryMs each drink-capable seated player has
+   * autoBeerChance of automatically downing a beer (any time, even mid-hand;
+   * blackouts are visual only), so accidental blackouts happen.
+   */
+  autoBeerEveryMs: 30_000,
+  autoBeerChance: 0.3,
   wakeLevel: 1,
   /** Blackout length on the server; the first-person beat below plays inside it. */
   blackoutMs: 4_500,
@@ -85,6 +93,8 @@ export const WAKE_UP_LEVEL = BUZZ.wakeLevel
 export const DRINK_COOLDOWN_MS = 3_000
 /** The sip animation; a chaser or a spiked glass lands once it finishes. */
 export const WATER_KICK_IN_MS = 3_000
+/** An ordinary water lands this long after ordering (owner: fast, not next hand). */
+export const WATER_LANDS_MS = 5_000
 /** A bought shot hits harder than a beer. */
 export const SHOT_LEVEL_BOOST = 3
 /** Each player may buy one shot for someone every this many hands. */
@@ -359,7 +369,7 @@ export function orderDrink(entry: DrinkLedgerEntry, context: DrinkOrderContext):
       entry.level = clampLevel(entry.level - CHASER_LEVELS)
       return { ok: true, passedOut: false, chaser: true }
     }
-    // Slow water: lands at the start of the next hand.
+    // Water lands WATER_LANDS_MS later (the room times it).
     const water: PendingWater = { id: context.drinkId, levels: BUZZ.waterLevels }
     entry.pendingWaters.push(water)
     return { ok: true, passedOut: false, water }
@@ -593,6 +603,17 @@ export function applyQueuedWaters(entry: DrinkLedgerEntry): number {
   if (entry.passedOut) return 0
   const before = entry.level
   entry.level = clampLevel(entry.level - levels)
+  return before - entry.level
+}
+
+/** Lands one queued water now (its timer ran out). Returns the levels removed. */
+export function applyQueuedWater(entry: DrinkLedgerEntry, waterId: string): number {
+  const water = entry.pendingWaters.find(pending => pending.id === waterId)
+  if (!water) return 0
+  entry.pendingWaters = entry.pendingWaters.filter(pending => pending.id !== waterId)
+  if (entry.passedOut) return 0
+  const before = entry.level
+  entry.level = clampLevel(entry.level - water.levels)
   return before - entry.level
 }
 

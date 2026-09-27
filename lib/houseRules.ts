@@ -18,6 +18,7 @@
  * - scared_money: folded 3 dealt-in hands in a row (1); the streak then resets.
  * - bubble: at the end of each orbit the shortest stack at the table drinks (1).
  * - dealer: dealer's round, whoever had the button this hand drinks (1).
+ * - waterfall: every WATERFALL_EVERY_HANDS hands the whole table drinks (1).
  * Water:
  * - big_win: won a pot worth more than 50% of the hand-start stack: a free,
  *   instant -2 water.
@@ -29,15 +30,17 @@ import { compareHands, evaluateHand } from './poker/evaluator'
 import type { Card, HandResult } from './poker/types'
 
 export type HouseShotRule = 'seven_two' | 'rivered' | 'cheers'
-export type HouseBeerRule = 'big_loss' | 'bad_beat' | 'lost_showdown' | 'scared_money' | 'bubble' | 'dealer'
+export type HouseBeerRule = 'big_loss' | 'bad_beat' | 'lost_showdown' | 'scared_money' | 'bubble' | 'dealer' | 'waterfall'
 
 export const HOUSE_SHOT_RULES: readonly HouseShotRule[] = ['seven_two', 'rivered', 'cheers']
 /** Forced beers from one hand never exceed this. */
 export const HOUSE_BEER_CAP = 2
 /** Win a pot worth more than this share of your hand-start stack: free water. */
 export const BIG_WIN_FRACTION = 0.5
-/** Losing any showdown: a sip. */
-export const LOST_SHOWDOWN_BEERS = 0.5
+/** Losing any showdown: a beer (owner wanted more automatic drinking). */
+export const LOST_SHOWDOWN_BEERS = 1
+/** Every this many hands the whole table drinks together. */
+export const WATERFALL_EVERY_HANDS = 12
 /** Folds in a row (dealt-in hands) that cost a beer. */
 export const SCARED_MONEY_FOLDS = 3
 /** Quads (rankIndex 7) or better at showdown: cheers. */
@@ -69,6 +72,8 @@ export interface HouseRuleHand {
   bubbleIds?: readonly string[]
   /** Who had the dealer button this hand (dealer's round). */
   dealerId?: string | null
+  /** A waterfall hand: everyone dealt in drinks. */
+  waterfall?: boolean
 }
 
 export interface HouseRuleOutcome {
@@ -181,6 +186,10 @@ export function computeHouseRules(hand: HouseRuleHand): HouseRuleOutcome[] {
     if (hand.dealerId && hand.dealerId === player.id && player.startStack !== undefined) {
       beers += 1
       beerRules.push('dealer')
+    }
+    if (hand.waterfall && player.startStack !== undefined) {
+      beers += 1
+      beerRules.push('waterfall')
     }
     beers = Math.min(HOUSE_BEER_CAP, beers)
 

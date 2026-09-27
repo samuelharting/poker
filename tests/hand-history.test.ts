@@ -129,6 +129,8 @@ describe('PokerRoom hand history snapshot', () => {
       getConnections: () => connections.values(),
     }
     const server = new PokerRoom(room as unknown as Room)
+  // Random thirst off unless a test turns it on.
+  server.autoBeerRandom = () => 1
     const join = (id: string, nickname: string) => {
       const connection = {
         id,

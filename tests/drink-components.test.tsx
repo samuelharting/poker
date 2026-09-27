@@ -57,7 +57,7 @@ describe('drink components', () => {
   it('offers beer and water to a seated player and shows their buzz on the dot meter', () => {
     const html = renderWithDrinks(<DrinkControls variant="desktop" />, drinks({ level: 4, beers: 4 }))
     expect(html).toContain('Crack a beer (4 so far)')
-    expect(html).toContain('Slow water')
+    expect(html).toContain('sobers you up 1.5')
     expect(html).toContain('data-tier="tipsy"')
     expect(html).toContain('class="drink-meter"')
     expect((html.match(/class="is-full"/g) ?? []).length).toBe(4)

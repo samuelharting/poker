@@ -60,6 +60,8 @@ function createTable() {
     broadcast: () => {},
   }
   const server = new PokerRoom(room as unknown as Room)
+  // Random thirst off unless a test turns it on.
+  server.autoBeerRandom = () => 1
   const internals = server as unknown as Internals
   // Deterministic: first human candidate, first eligible target.
   internals.mushroomRandom = () => 0

@@ -43,6 +43,8 @@ import {
 import {
   applyHandCompleted as applyDrinkHandCompleted,
   applyQueuedWaters,
+  applyQueuedWater,
+  WATER_LANDS_MS,
   chooseBotDrink,
   computeSoberTax,
   BUZZ,
@@ -95,7 +97,7 @@ import {
   type MushroomTable,
 } from '../lib/mushroom'
 import { CHIP_FLICK_COOLDOWN_MS, HOUSE_ID, type PrankEvent, type PrankKind } from '../lib/pranks'
-import { computeHouseRules } from '../lib/houseRules'
+import { computeHouseRules, WATERFALL_EVERY_HANDS } from '../lib/houseRules'
 import {
   DEFAULT_LEDGER_SETTINGS,
   MAX_CHIP_VALUE,
@@ -331,6 +333,9 @@ export default class PokerRoom implements PartyServer {
   private botDrinkTimers = new Set<ReturnType<typeof setTimeout>>()
   /** Injectable so tests can make bot drinking deterministic. */
   botDrinkRandom: () => number = Math.random
+  /** Random thirst (BUZZ.autoBeerChance every BUZZ.autoBeerEveryMs); injectable for tests. */
+  autoBeerRandom: () => number = Math.random
+  private autoBeerTimer: ReturnType<typeof setInterval> | null = null
   /** Last chip flick per sender (cosmetic prank rate limit). */
   private lastChipFlickAt = new Map<string, number>()
   /** Bought shots waiting for their target to be out of the hand, oldest first. */
@@ -2026,6 +2031,8 @@ export default class PokerRoom implements PartyServer {
     if (result.water && this.isFunModeEnabled() && drinkSpikedWater(this.mushrooms, playerId)) {
       discardQueuedWater(entry, result.water.id)
       this.scheduleSpikedWater(playerId, result.water.id)
+    } else if (result.water) {
+      this.scheduleWaterLanding(playerId, result.water.id)
     }
 
     if (result.passedOut) {
@@ -2213,6 +2220,36 @@ export default class PokerRoom implements PartyServer {
     return delivered
   }
 
+  /** Runs the random-thirst clock only while fun mode is on and a drink-capable player is seated. */
+  private syncAutoBeerTimer() {
+    const wanted = this.isFunModeEnabled() &&
+      this.data.gameState.players.some(player => this.isDrinkCapable(player))
+    if (wanted && !this.autoBeerTimer) {
+      this.autoBeerTimer = setInterval(() => this.rollAutoBeers(), BUZZ.autoBeerEveryMs)
+    } else if (!wanted && this.autoBeerTimer) {
+      clearInterval(this.autoBeerTimer)
+      this.autoBeerTimer = null
+    }
+  }
+
+  /** Each drink-capable seated player may down a beer on their own (accidental blackouts welcome). */
+  private rollAutoBeers() {
+    if (!this.isFunModeEnabled()) return
+    const state = this.data.gameState
+    const now = Date.now()
+    let drank = false
+    for (const player of state.players) {
+      if (!this.isDrinkCapable(player)) continue
+      const entry = this.drinkLedger[player.id] ??= this.newSeatedDrinkEntry()
+      if (entry.passedOut || this.autoBeerRandom() >= BUZZ.autoBeerChance) continue
+      const blackedOut = forceBeers(entry, 1, { drinkId: generateId(10), now, handNumber: state.handNumber })
+      this.broadcastDrinkEvent(player.id, 'house_beer', 1)
+      if (blackedOut) this.handlePassedOut(player.id)
+      drank = true
+    }
+    if (drank) this.broadcastState()
+  }
+
   /** Holds unfolded cards in a live hand (all-in counts). */
   private isHoldingLiveCards(target: InternalPlayer): boolean {
     return isLiveInHand({
@@ -2336,6 +2373,7 @@ export default class PokerRoom implements PartyServer {
       })),
       bubbleIds,
       dealerId: state.players.find(player => player.isDealer)?.id ?? null,
+      waterfall: state.handNumber > 0 && state.handNumber % WATERFALL_EVERY_HANDS === 0,
     })
     for (const outcome of outcomes) {
       if (outcome.beerRules.includes('scared_money')) this.foldStreaks.set(outcome.playerId, 0)
@@ -2427,6 +2465,20 @@ export default class PokerRoom implements PartyServer {
       }, delay)
       this.botDrinkTimers.add(timer)
     }
+  }
+
+  /** An ordinary water sobers them up WATER_LANDS_MS after ordering. */
+  private scheduleWaterLanding(playerId: string, waterId: string) {
+    const timerKey = `${playerId}:${waterId}`
+    const timer = setTimeout(() => {
+      this.drinkWaterTimers.delete(timerKey)
+      const entry = this.drinkLedger[playerId]
+      if (entry && applyQueuedWater(entry, waterId) > 0) {
+        this.broadcastDrinkEvent(playerId, 'water_kicked_in')
+      }
+      this.broadcastState()
+    }, WATER_LANDS_MS)
+    this.drinkWaterTimers.set(timerKey, timer)
   }
 
   /** The spiked glass lands once the sip is down: the trip starts (or queues if they're live). */
@@ -3857,6 +3909,7 @@ export default class PokerRoom implements PartyServer {
     this.syncAllInRunout()
     this.deliverQueuedShots()
     this.syncPendingBlackouts()
+    this.syncAutoBeerTimer()
     this.syncTrips()
     this.syncMushroomPrompt()
     const socialSnapshot = this.buildSocialSnapshotMessage()

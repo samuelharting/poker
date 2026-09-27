@@ -39,6 +39,8 @@ function createRoom() {
     broadcast: () => {},
   }
   const server = new PokerRoom(room as unknown as Room)
+  // Random thirst off unless a test turns it on.
+  server.autoBeerRandom = () => 1
   const join = (id: string, nickname: string, seatIndex: number) => {
     const connection = new MockConnection(id) as unknown as Connection
     connections.set(id, connection)

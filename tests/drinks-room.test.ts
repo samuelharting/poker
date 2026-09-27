@@ -56,6 +56,8 @@ function createTable() {
     broadcast: () => {},
   }
   const server = new PokerRoom(room as unknown as Room)
+  // Random thirst off unless a test turns it on.
+  server.autoBeerRandom = () => 1
   // These rules are easier to read from a sober start; real seats begin at BUZZ.startLevel.
   server.seatedStartLevel = 0
 
@@ -176,7 +178,7 @@ describe('PokerRoom drinks', () => {
     expect(last(connection, 'action_failed')?.message).toContain('Join the room')
   })
 
-  it('slow water lands at the start of the next hand (-2)', () => {
+  it('water sobers you up 1.5 about five seconds after you order it', () => {
     vi.useFakeTimers()
     const { server, join } = createTable()
     const alice = join('alice', 'Alice', 0)
@@ -184,18 +186,17 @@ describe('PokerRoom drinks', () => {
     setLevel(server, alice, 5)
 
     alice.send({ type: 'order_drink', kind: 'water' })
-    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({ level: 5, sobering: 1, waterNextHand: 2, waters: 1 })
+    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({ level: 5, sobering: 1, waters: 1 })
     expect(drinkEvents(bob.connection).at(-1)?.kind).toBe('water')
 
-    vi.advanceTimersByTime(30_000)
+    vi.advanceTimersByTime(4_900)
     expect(seatState(bob, alice.playerId)?.drinks?.level).toBe(5)
-
-    alice.send({ type: 'start_game' })
-    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({ level: 3, sobering: 0, waterNextHand: 0 })
+    vi.advanceTimersByTime(200)
+    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({ level: 3.5, sobering: 0 })
     expect(drinkEvents(bob.connection).some(event => event.kind === 'water_kicked_in' && event.playerId === alice.playerId)).toBe(true)
   })
 
-  it('sobers everyone by half a level per completed hand', () => {
+  it('never sobers anyone on their own between hands', () => {
     vi.useFakeTimers()
     const { server, join } = createTable()
     const alice = join('alice', 'Alice', 0)
@@ -206,7 +207,8 @@ describe('PokerRoom drinks', () => {
       alice.send({ type: 'start_game' })
       expect(state(alice).handNumber).toBe(hand)
       foldHandOut(alice, bob)
-      expect(seatState(bob, alice.playerId)?.drinks?.level).toBe(4 - hand * 0.5)
+      // House rules may add drinks; nothing ever takes them away except water.
+      expect(seatState(bob, alice.playerId)!.drinks!.level).toBeGreaterThanOrEqual(4)
     }
   })
 
@@ -387,5 +389,34 @@ describe('PokerRoom seated buzz', () => {
     expect(BUZZ.startLevel).toBe(0)
     expect(createSeatedDrinkLedgerEntry().level).toBe(0)
     expect(BUZZ.soberPenaltiesEnabled).toBe(false)
+  })
+})
+
+describe('PokerRoom random thirst', () => {
+  it('every 30s each drink-capable player may down a beer on their own, and it can black them out', () => {
+    vi.useFakeTimers()
+    const { server, join } = createTable()
+    const alice = join('alice', 'Alice', 0)
+    const bob = join('bob', 'Bob', 1)
+    alice.send({ type: 'set_drink_capable', capable: true })
+    bob.send({ type: 'set_drink_capable', capable: true })
+    setLevel(server, alice, 9)
+    server.autoBeerRandom = () => 0
+    // Seated, no hand running: the thirst clock still ticks.
+    vi.advanceTimersByTime(30_050)
+    expect(seatState(bob, alice.playerId)?.drinks?.passedOut).toBe(true)
+    expect(seatState(bob, bob.playerId)!.drinks!.level).toBeGreaterThanOrEqual(1)
+  })
+
+  it('never fires with fun mode off', () => {
+    vi.useFakeTimers()
+    const { server, join } = createTable()
+    const alice = join('alice', 'Alice', 0)
+    join('bob', 'Bob', 1)
+    alice.send({ type: 'set_drink_capable', capable: true })
+    alice.send({ type: 'update_table_settings', funModeEnabled: false })
+    server.autoBeerRandom = () => 0
+    vi.advanceTimersByTime(120_000)
+    expect(seatState(alice, alice.playerId)?.drinks?.level ?? 0).toBe(0)
   })
 })

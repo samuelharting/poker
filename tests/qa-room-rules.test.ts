@@ -52,6 +52,8 @@ interface Client {
 function harness() {
   const room = new MockRoom()
   const server = new PokerRoom(room as unknown as Room)
+  // Random thirst off unless a test turns it on.
+  server.autoBeerRandom = () => 1
 
   const send = (client: Client | Connection, message: C2SMessage) => {
     const connection = 'connection' in client ? client.connection : client

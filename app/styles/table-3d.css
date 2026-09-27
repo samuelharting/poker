@@ -759,3 +759,28 @@
 .desktop-3d-stage .cinematic-seat .plate-icon svg {
   display: block;
 }
+
+/* Hand result sits bottom-left, above the drink dock: never over opponents'
+   revealed winning cards (top) or the board / your hand (centre). */
+.table-scene[data-desktop-three='true'] .table-seat-winner-announcements {
+  inset: auto auto 96px 24px;
+  justify-content: flex-start;
+}
+
+.table-scene[data-desktop-three='true'] .table-hand-result-summary {
+  min-width: 260px;
+  max-width: min(420px, calc(50vw - 150px));
+}
+
+@media (max-height: 820px) {
+  .table-scene[data-desktop-three='true'] .table-seat-winner-announcements {
+    bottom: 84px;
+  }
+}
+
+.table-scene[data-desktop-three='true'] .table-hand-result-player strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
