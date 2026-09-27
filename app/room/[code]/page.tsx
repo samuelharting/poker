@@ -350,6 +350,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
       serverNow={tableState?.serverNow}
       isConnected={isConnected}
       onOrder={orderDrink}
+      onTakeShot={() => sendMessage({ type: 'take_shot' })}
     >
     <div className="room-shell">
       <RoomHud

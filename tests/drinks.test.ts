@@ -57,16 +57,14 @@ function drinkBeers(entry: DrinkLedgerEntry, count: number, start = 0, overrides
 }
 
 describe('drink ledger rules (buzz economy)', () => {
-  it('adds one level per beer, one beer per hand, and changes the lastDrink id every time', () => {
+  it('adds one level per beer, as many beers as you like, and changes the lastDrink id every time', () => {
     const entry = createDrinkLedgerEntry()
     order(entry, 'beer', 0, { handNumber: 1 })
     const firstId = entry.lastDrink?.id
-    expect(order(entry, 'beer', DRINK_COOLDOWN_MS, { handNumber: 1 })).toEqual({
-      ok: false,
-      reason: ONE_BEER_PER_HAND_REASON,
-    })
-    expect(toPublicDrinkState(entry).beerReadyAtHand).toBe(2)
-    order(entry, 'beer', DRINK_COOLDOWN_MS * 2, { handNumber: 2 })
+    // Owner: no per-hand limit, only the short order cooldown.
+    expect(order(entry, 'beer', DRINK_COOLDOWN_MS, { handNumber: 1 }).ok).toBe(true)
+    expect(toPublicDrinkState(entry).beerReadyAtHand).toBe(0)
+    void ONE_BEER_PER_HAND_REASON
 
     expect(entry.level).toBe(2)
     expect(entry.beers).toBe(2)

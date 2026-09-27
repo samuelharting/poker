@@ -62,6 +62,8 @@ export const BUZZ = {
   waterLevels: 1.5,
   // No natural sobering (owner): water is the only way down.
   soberingPerHand: 0,
+  /** Owner: drink as many beers as you want (only the short order cooldown). */
+  oneBeerPerHand: false,
   /**
    * Random thirst: every autoBeerEveryMs each drink-capable seated player has
    * autoBeerChance of automatically downing a beer (any time, even mid-hand;
@@ -319,7 +321,7 @@ export function toPublicDrinkState(entry: DrinkLedgerEntry | undefined, handNumb
     // Filled in by the room from its delivery queue.
     shotsWaiting: 0,
     waterNextHand: clampLevel(entry.pendingWaters.reduce((sum, water) => sum + water.levels, 0)),
-    beerReadyAtHand: entry.lastBeerHand === null ? 0 : entry.lastBeerHand + 1,
+    beerReadyAtHand: !BUZZ.oneBeerPerHand || entry.lastBeerHand === null ? 0 : entry.lastBeerHand + 1,
     soberHands: entry.soberHands,
     soberTax: entry.soberTax && (handNumber === undefined || entry.soberTax.hand === handNumber) ? entry.soberTax.amount : 0,
     hungover: entry.hungoverThroughHand !== null,
@@ -352,7 +354,7 @@ export function orderDrink(entry: DrinkLedgerEntry, context: DrinkOrderContext):
     return { ok: false, reason: 'Easy there. One drink every 3 seconds.' }
   }
 
-  if (context.kind === 'beer' && entry.lastBeerHand !== null && entry.lastBeerHand >= context.handNumber) {
+  if (BUZZ.oneBeerPerHand && context.kind === 'beer' && entry.lastBeerHand !== null && entry.lastBeerHand >= context.handNumber) {
     return { ok: false, reason: ONE_BEER_PER_HAND_REASON }
   }
 

@@ -103,6 +103,7 @@ export type C2SMessage =
   | { type: 'order_drink'; kind: DrinkKind }
   /** Buy another seated player a shot (+3 drunk levels). */
   | { type: 'buy_shot'; targetId: string }
+  | { type: 'take_shot' }
   /** Flick a (cosmetic) chip at another seated player's head. */
   | { type: 'flick_chip'; targetId: string }
   /** This client can (desktop 3D) or cannot (phone / 2D layout) order drinks. */
@@ -387,6 +388,9 @@ export function parseC2S(raw: string): C2SMessage | null {
         const kind = parsed.kind
         return kind === 'beer' || kind === 'water' ? { type, kind } : null
       }
+
+      case 'take_shot':
+        return { type }
 
       case 'buy_shot':
       case 'flick_chip': {

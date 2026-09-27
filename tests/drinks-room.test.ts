@@ -121,7 +121,7 @@ afterEach(() => {
 })
 
 describe('PokerRoom drinks', () => {
-  it('broadcasts a beer to every player, one beer per hand', () => {
+  it('broadcasts a beer to every player, with no per-hand limit', () => {
     vi.useFakeTimers()
     const { join } = createTable()
     const alice = join('alice', 'Alice', 0)
@@ -132,7 +132,7 @@ describe('PokerRoom drinks', () => {
     alice.send({ type: 'order_drink', kind: 'beer' })
 
     const seen = seatState(bob, alice.playerId)?.drinks
-    expect(seen).toMatchObject({ level: 1, beers: 1, passedOut: false, lastDrink: { kind: 'beer' }, beerReadyAtHand: 1 })
+    expect(seen).toMatchObject({ level: 1, beers: 1, passedOut: false, lastDrink: { kind: 'beer' }, beerReadyAtHand: 0 })
     expect(drinkEvents(bob.connection).at(-1)).toMatchObject({
       kind: 'beer',
       playerId: alice.playerId,
@@ -142,11 +142,7 @@ describe('PokerRoom drinks', () => {
     })
 
     vi.advanceTimersByTime(DRINK_COOLDOWN_MS)
-    alice.send({ type: 'order_drink', kind: 'beer' })
-    expect(last(alice.connection, 'action_failed')?.message).toBe(ONE_BEER_PER_HAND_REASON)
-    expect(seatState(bob, alice.playerId)?.drinks?.level).toBe(1)
-
-    alice.send({ type: 'start_game' })
+    void ONE_BEER_PER_HAND_REASON
     alice.send({ type: 'order_drink', kind: 'beer' })
     const next = seatState(bob, alice.playerId)?.drinks
     expect(next?.level).toBe(2)
@@ -418,5 +414,35 @@ describe('PokerRoom random thirst', () => {
     server.autoBeerRandom = () => 0
     vi.advanceTimersByTime(120_000)
     expect(seatState(alice, alice.playerId)?.drinks?.level ?? 0).toBe(0)
+  })
+})
+
+describe('PokerRoom take a shot yourself', () => {
+  it('pours a +3 shot for yourself, as many as you like (just the order cooldown), and can black you out', () => {
+    vi.useFakeTimers()
+    const { join } = createTable()
+    const alice = join('alice', 'Alice', 0)
+    const bob = join('bob', 'Bob', 1)
+    alice.send({ type: 'set_drink_capable', capable: true })
+    alice.send({ type: 'take_shot' })
+    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({ level: 3, shots: 1 })
+    alice.send({ type: 'take_shot' })
+    expect(seatState(bob, alice.playerId)?.drinks?.level).toBe(3)
+    vi.advanceTimersByTime(DRINK_COOLDOWN_MS)
+    alice.send({ type: 'take_shot' })
+    vi.advanceTimersByTime(DRINK_COOLDOWN_MS)
+    alice.send({ type: 'take_shot' })
+    vi.advanceTimersByTime(DRINK_COOLDOWN_MS)
+    alice.send({ type: 'take_shot' })
+    expect(seatState(bob, alice.playerId)?.drinks?.passedOut).toBe(true)
+  })
+
+  it('refuses phone players and fun mode off', () => {
+    vi.useFakeTimers()
+    const { join } = createTable()
+    const alice = join('alice', 'Alice', 0)
+    join('bob', 'Bob', 1)
+    alice.send({ type: 'take_shot' })
+    expect(last(alice.connection, 'action_failed')?.message).toBe('No bar service here')
   })
 })

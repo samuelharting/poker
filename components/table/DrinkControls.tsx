@@ -55,7 +55,7 @@ export function DrinkControls({
     return null
   }
 
-  const { myDrinks, canOrder, order, lastOrderAt } = drinks
+  const { myDrinks, canOrder, order, takeShot, lastOrderAt } = drinks
   const disabled = !canOrder || isCooling
   const beerUsed = myDrinks.beerReadyAtHand > handNumber
   // The meter shows your real buzz; screen effects (profile) only start at 6.
@@ -126,6 +126,17 @@ export function DrinkControls({
               />
             </svg>
           )}
+        </button>
+        <button
+          type="button"
+          className="drink-button is-shot"
+          onClick={takeShot}
+          disabled={disabled}
+          aria-label={myDrinks.passedOut ? 'You are passed out' : 'Take a shot (+3)'}
+          title={myDrinks.passedOut ? 'You are passed out' : 'Take a shot (+3)'}
+        >
+          <span className="drink-button-glyph" aria-hidden="true">🥃</span>
+          <span className="drink-button-label">Shot</span>
         </button>
         {isCooling && lastOrderAt !== null && (
           <span key={lastOrderAt} className="drink-cooldown" aria-hidden="true" />

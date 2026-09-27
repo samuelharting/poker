@@ -63,6 +63,7 @@ import {
   orderDrink,
   BLACKOUT_MS,
   PASS_OUT_LEVEL,
+  DRINK_COOLDOWN_MS,
   CHASER_WINDOW_MS,
   WAKE_UP_LEVEL,
   WATER_KICK_IN_MS,
@@ -560,6 +561,9 @@ export default class PokerRoom implements PartyServer {
           break
         case 'buy_shot':
           this.handleBuyShot(sender, msg.targetId)
+          break
+        case 'take_shot':
+          this.handleTakeShot(sender)
           break
         case 'flick_chip':
           this.handleFlickChip(sender, msg.targetId)
@@ -2400,6 +2404,41 @@ export default class PokerRoom implements PartyServer {
       handNumber: state.handNumber,
       targetIsLive: state.phase === 'in_hand' && state.actingPlayerId === target.id,
     }
+  }
+
+  /** Take a shot yourself, as many as you like (just the order cooldown). */
+  private handleTakeShot(conn: Connection) {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    const player = playerId ? this.getPlayer(playerId) : null
+    if (!playerId || !player) {
+      this.sendActionFailed(conn, 'Take a seat before taking a shot')
+      return
+    }
+    if (!this.isFunModeEnabled() || !this.isDrinkCapable(player)) {
+      this.sendActionFailed(conn, 'No bar service here')
+      return
+    }
+    const entry = this.drinkLedger[playerId] ??= this.newSeatedDrinkEntry()
+    const now = Date.now()
+    if (entry.passedOut) {
+      this.sendActionFailed(conn, 'You are out cold')
+      return
+    }
+    if (entry.lastOrderAt !== null && now - entry.lastOrderAt < DRINK_COOLDOWN_MS) {
+      this.sendActionFailed(conn, 'Easy, one at a time')
+      return
+    }
+    entry.lastOrderAt = now
+    const result = pourHouseShot(entry, { handNumber: this.data.gameState.handNumber, now })
+    if (!result.ok) return
+    this.broadcastPrankEvent('house_shot', HOUSE_ID, playerId, {
+      level: entry.level,
+      levelAdded: result.levelAdded,
+      passedOut: result.passedOut,
+    }, player.nickname)
+    if (result.passedOut) this.handlePassedOut(playerId)
+    this.sendActionResult(conn)
+    this.broadcastState()
   }
 
   private handleFlickChip(conn: Connection, targetId: string) {

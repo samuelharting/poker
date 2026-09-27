@@ -26,6 +26,8 @@ export interface DrinkContextValue {
   lastOrderAt: number | null
   canOrder: boolean
   order: (kind: DrinkKind) => void
+  /** Take a shot yourself (+3), as many as you like. */
+  takeShot: () => void
 }
 
 const DrinkContext = createContext<DrinkContextValue | null>(null)
@@ -37,6 +39,7 @@ export function DrinkProvider({
   serverNow,
   isConnected,
   onOrder,
+  onTakeShot,
   children,
 }: {
   yourId: string
@@ -46,6 +49,7 @@ export function DrinkProvider({
   serverNow?: number
   isConnected: boolean
   onOrder: (kind: DrinkKind) => void
+  onTakeShot?: () => void
   children: ReactNode
 }) {
   const [lastOrderAt, setLastOrderAt] = useState<number | null>(null)
@@ -81,6 +85,15 @@ export function DrinkProvider({
     onOrder(kind)
   }, [canOrder, lastOrderAt, onOrder])
 
+  const takeShot = useCallback(() => {
+    const now = Date.now()
+    if (!canOrder || !onTakeShot || (lastOrderAt !== null && now - lastOrderAt < DRINK_COOLDOWN_MS)) {
+      return
+    }
+    setLastOrderAt(now)
+    onTakeShot()
+  }, [canOrder, lastOrderAt, onTakeShot])
+
   const value = useMemo<DrinkContextValue>(() => ({
     yourId,
     isSeated,
@@ -93,7 +106,8 @@ export function DrinkProvider({
     lastOrderAt,
     canOrder,
     order,
-  }), [canOrder, events, serverOffsetMs, isConnected, isSeated, lastOrderAt, myDrinks, nicknames, order, profile, yourId])
+    takeShot,
+  }), [canOrder, events, serverOffsetMs, isConnected, isSeated, lastOrderAt, myDrinks, nicknames, order, profile, takeShot, yourId])
 
   return <DrinkContext.Provider value={value}>{children}</DrinkContext.Provider>
 }

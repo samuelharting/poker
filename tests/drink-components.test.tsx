@@ -82,7 +82,8 @@ describe('drink components', () => {
     const passedOut = drinks({ level: 10, beers: 10, passedOut: true })
     const controls = renderWithDrinks(<DrinkControls variant="mobile" />, passedOut)
     expect(controls).toContain('Out cold</span>')
-    expect(controls.match(/disabled=""/g)).toHaveLength(2)
+    // Beer, water and shot are all off while out cold.
+    expect(controls.match(/disabled=""/g)).toHaveLength(3)
 
     const vision = renderWithDrinks(<DrunkVisionLayer />, passedOut)
     expect(vision).not.toContain('passed out')
