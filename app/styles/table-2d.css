@@ -2737,3 +2737,90 @@
     width: min(100%, 720px);
   }
 }
+
+/* ============================================================
+   Arena: opponents around the edges like a real table
+   (left side, across the top, right side), board in the middle,
+   hero below. Slots come from getMobileSeatSlot() in PokerTable.
+   ============================================================ */
+
+.mobile-arena {
+  --chip-w: clamp(86px, 25cqw, 150px);
+  --edge: 2px;
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  container: arena / size;
+}
+
+.mobile-arena > .mobile-seat-grid {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+}
+
+.mobile-arena .mobile-edge-seat-position[data-slot] {
+  position: absolute;
+  width: var(--chip-w);
+  max-width: none;
+  flex: none;
+  pointer-events: auto;
+}
+
+/* Tall screens (portrait phones, tablets): two seats down each side */
+.mobile-arena [data-slot='tl'] { left: var(--edge); top: 0; }
+.mobile-arena [data-slot='t'] { left: calc(50% - var(--chip-w) / 2); top: 0; }
+.mobile-arena [data-slot='tr'] { right: var(--edge); top: 0; }
+.mobile-arena [data-slot='l2'] { left: var(--edge); top: 25%; }
+.mobile-arena [data-slot='r2'] { right: var(--edge); top: 25%; }
+.mobile-arena [data-slot='l1'] { left: var(--edge); bottom: 0; }
+.mobile-arena [data-slot='r1'] { right: var(--edge); bottom: 0; }
+.mobile-arena [data-slot='b'] { left: calc(50% - var(--chip-w) / 2); bottom: 0; }
+
+/* With three across the top, the middle one sits a touch lower so the row reads as an arc */
+.mobile-arena:has([data-slot='tl']) [data-slot='t'] { top: 3%; }
+
+/* Board and pot sit in the middle band, between the side seats */
+.mobile-arena > .mobile-board-zone {
+  --board-card-w: clamp(38px, min(16cqw, 15cqh), 80px);
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  top: 60%;
+  translate: 0 -50%;
+  flex: none;
+  min-height: 0;
+  justify-content: center;
+  padding-bottom: 0;
+  container: none;
+}
+
+/* Only the edge seats that actually overlap the board band need it narrower */
+.mobile-arena:has([data-slot='l2'], [data-slot='r2']) > .mobile-board-zone {
+  top: 62%;
+}
+
+/* Short screens (landscape phones): seats hug the four corners and the top edge */
+@container arena (max-height: 440px) {
+  /* A container query cannot restyle the arena itself, so size its layers. */
+  .mobile-arena > .mobile-seat-grid,
+  .mobile-arena > .mobile-board-zone {
+    --chip-w: clamp(84px, 16cqw, 120px);
+  }
+
+  .mobile-arena [data-slot='tl'] { left: calc(28% - var(--chip-w) / 2); }
+  .mobile-arena [data-slot='tr'] { left: calc(72% - var(--chip-w) / 2); right: auto; }
+  .mobile-arena [data-slot='l2'] { top: 0; }
+  .mobile-arena [data-slot='r2'] { top: 0; }
+
+  .mobile-arena > .mobile-board-zone,
+  .mobile-arena:has([data-slot='l2'], [data-slot='r2']) > .mobile-board-zone {
+    --board-card-w: clamp(34px, min(8cqw, 30cqh), 72px);
+    left: calc(var(--chip-w) + 8px);
+    right: calc(var(--chip-w) + 8px);
+    top: 64%;
+  }
+}

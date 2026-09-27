@@ -1039,3 +1039,24 @@
   }
 }
 
+
+/* The room code copies on click */
+.room-hud-room-pill.is-copyable {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color var(--dur-base) var(--ease-out), background var(--dur-base) var(--ease-out);
+}
+
+.room-hud-room-pill.is-copyable:hover {
+  border-color: rgba(233, 199, 116, 0.5);
+}
+
+.room-hud-room-pill.is-copyable:focus-visible {
+  outline: 2px solid var(--c-sky-400);
+  outline-offset: 2px;
+}
+
+.room-hud-room-pill.is-copied .room-hud-room-label {
+  color: var(--c-emerald-300, #6ee7b7);
+}

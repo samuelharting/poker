@@ -324,6 +324,25 @@ const SHOW_CARD_OPTIONS: Array<{
   { mode: 'none', label: 'both cards', shortLabel: 'Muck' },
 ]
 
+/**
+ * Mobile seats sit around the edges of the screen like a real table, clockwise
+ * from the hero's left: up the left side, across the top, down the right.
+ */
+const MOBILE_SEAT_SLOTS: Record<number, string[]> = {
+  1: ['t'],
+  2: ['tl', 'tr'],
+  3: ['l2', 't', 'r2'],
+  4: ['l2', 'tl', 'tr', 'r2'],
+  5: ['l1', 'l2', 't', 'r2', 'r1'],
+  6: ['l1', 'l2', 'tl', 'tr', 'r2', 'r1'],
+  7: ['l1', 'l2', 'tl', 't', 'tr', 'r2', 'r1'],
+  8: ['l1', 'l2', 'tl', 't', 'tr', 'r2', 'r1', 'b'],
+}
+
+export function getMobileSeatSlot(index: number, count: number): string {
+  return MOBILE_SEAT_SLOTS[Math.min(Math.max(count, 1), 8)]?.[index] ?? 't'
+}
+
 function getEmoteGlyph(emote?: string): string | undefined {
   return EMOTE_OPTIONS.find(option => option.id === emote)?.glyph ?? emote
 }
@@ -2194,12 +2213,13 @@ export function PokerTable({
             data-seat-count={mobileEdgeOpponents.length}
             data-hero-lane={shouldShowOwnHand && visibleOwnPlayer ? 'true' : 'false'}
           >
+            <div className="mobile-arena">
             <div
               className="mobile-seat-grid mobile-edge-seats"
               aria-label="Players"
               data-seat-count={mobileEdgeOpponents.length}
             >
-              {mobileEdgeOpponents.map(player => {
+              {mobileEdgeOpponents.map((player, seatIndex) => {
                 const seatSocial = activeSocialByPlayer.get(player.id) ?? {}
                 const isActingSeat = state.actingPlayerId === player.id
 
@@ -2207,6 +2227,7 @@ export function PokerTable({
                   <div
                     key={player.id}
                     className={`mobile-edge-seat-position mobile-seat-position-${player.visualSeat}`}
+                    data-slot={getMobileSeatSlot(seatIndex, mobileEdgeOpponents.length)}
                   >
                     <MobileEdgeSeat
                       player={player}
@@ -2296,6 +2317,7 @@ export function PokerTable({
                 <div className="mobile-rabbit-label">Rabbit hunt — not played</div>
               )}
               <div className="mobile-board-footer">{showdownCinematic}</div>
+            </div>
             </div>
 
             {shouldShowOwnHand && visibleOwnPlayer && (

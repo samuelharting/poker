@@ -1,6 +1,49 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import type { GamePhase } from '@/lib/poker/types'
+
+/** Copies text, falling back to a hidden textarea where the Clipboard API is blocked. */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    const area = document.createElement('textarea')
+    area.value = text
+    area.setAttribute('readonly', '')
+    area.style.position = 'fixed'
+    area.style.opacity = '0'
+    document.body.appendChild(area)
+    area.select()
+    const ok = document.execCommand('copy')
+    area.remove()
+    return ok
+  }
+}
+
+/** The room code as a button: click to copy it for friends. */
+function RoomCodeButton({ roomCode }: { roomCode: string }) {
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 1600)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  return (
+    <button
+      type="button"
+      className={`room-hud-room-pill is-copyable ${copied ? 'is-copied' : ''}`}
+      title="Copy room code"
+      aria-label={copied ? `Room code ${roomCode} copied` : `Copy room code ${roomCode}`}
+      onClick={async () => setCopied(await copyText(roomCode))}
+    >
+      <span className="room-hud-room-label">{copied ? 'Copied' : 'Room'}</span>
+      <span className="room-code">{roomCode}</span>
+    </button>
+  )
+}
 
 interface RoomHudProps {
   roomCode: string
@@ -121,10 +164,7 @@ export function RoomHud({
       <div className="room-hud-main room-hud-share-panel">
         <div className="room-hud-code-row">
           <span className="room-brand-wordmark">Poker Night</span>
-          <div className="room-hud-room-pill">
-            <span className="room-hud-room-label">Room</span>
-            <span className="room-code">{roomCode}</span>
-          </div>
+          <RoomCodeButton roomCode={roomCode} />
         </div>
         <div className="room-hud-label">Table controls</div>
         <div className="room-hud-control-row">
