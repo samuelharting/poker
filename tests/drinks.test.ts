@@ -158,6 +158,9 @@ describe('drink state normalization and copy', () => {
       lastDrink: null,
       passedOut: false,
       sobering: 0,
+      shots: 0,
+      shotReadyAtHand: 0,
+      shotReceivableAtHand: 0,
     })
     expect(normalizeDrinkState(null)).toEqual(toPublicDrinkState(undefined))
   })

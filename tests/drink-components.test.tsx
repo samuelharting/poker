@@ -30,7 +30,7 @@ function seat(id: string, drinks?: PlayerDrinkState): SeatPlayer {
 }
 
 function drinks(overrides: Partial<PlayerDrinkState> = {}): PlayerDrinkState {
-  return { level: 0, beers: 0, waters: 0, lastDrink: null, passedOut: false, sobering: 0, ...overrides }
+  return { level: 0, beers: 0, waters: 0, lastDrink: null, passedOut: false, sobering: 0, shots: 0, shotReadyAtHand: 0, shotReceivableAtHand: 0, ...overrides }
 }
 
 function renderWithDrinks(node: React.ReactNode, me: PlayerDrinkState | undefined, seated = true) {

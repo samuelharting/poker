@@ -8,8 +8,10 @@ import {
   type PlayerAvatarCustomization,
 } from '../lib/profile'
 import { DRINK_EVENT_KINDS, type DrinkEvent, type DrinkKind } from '../lib/drinks'
+import { isValidPrankEvent, type PrankEvent } from '../lib/pranks'
 
 export type { DrinkEvent, DrinkKind } from '../lib/drinks'
+export type { PrankEvent } from '../lib/pranks'
 
 export interface TableChatEntry {
   id: string
@@ -77,6 +79,10 @@ export type C2SMessage =
   | { type: 'table_chat'; message: string; targetId?: string }
   | { type: 'table_emote'; emote: string; targetId?: string }
   | { type: 'order_drink'; kind: DrinkKind }
+  /** Buy another seated player a shot (+3 drunk levels). */
+  | { type: 'buy_shot'; targetId: string }
+  /** Flick a (cosmetic) chip at another seated player's head. */
+  | { type: 'flick_chip'; targetId: string }
   | { type: 'companion_mute' }
   /** The sender is privately looking at (squeezing) their own hole cards. */
   | { type: 'peek_cards'; peeking: boolean }
@@ -92,6 +98,7 @@ export type S2CMessage =
   | { type: 'action_failed'; message: string }
   | { type: 'error'; message: string }
   | { type: 'drink_event'; event: DrinkEvent }
+  | { type: 'prank_event'; event: PrankEvent }
   /** This connection no longer speaks for a player (kicked, opened elsewhere, name in use). */
   | { type: 'session_ended'; reason: SessionEndedReason; message: string }
   /** Table-wide heads-up, e.g. a new host. */
@@ -324,6 +331,12 @@ export function parseC2S(raw: string): C2SMessage | null {
         return kind === 'beer' || kind === 'water' ? { type, kind } : null
       }
 
+      case 'buy_shot':
+      case 'flick_chip': {
+        const targetId = typeof parsed.targetId === 'string' ? parsed.targetId.trim() : ''
+        return targetId && targetId.length <= 64 ? { type, targetId } : null
+      }
+
       case 'companion_mute':
         return { type }
 
@@ -387,6 +400,18 @@ export function parseS2C(raw: string): S2CMessage | null {
       case 'drink_event':
         return isValidDrinkEvent(parsed.event)
           ? { type, event: { ...parsed.event, nickname: sanitizeText(parsed.event.nickname, 40) } }
+          : null
+
+      case 'prank_event':
+        return isValidPrankEvent(parsed.event)
+          ? {
+            type,
+            event: {
+              ...parsed.event,
+              fromNickname: sanitizeText(parsed.event.fromNickname, 40),
+              targetNickname: sanitizeText(parsed.event.targetNickname, 40),
+            },
+          }
           : null
 
       case 'session_ended': {

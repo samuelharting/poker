@@ -11,6 +11,18 @@
  *   the normal fold path when action reaches them; they wake up at the start of
  *   the next hand they did not pass out in, at WAKE_UP_LEVEL (6).
  * - Rate limit: one drink per DRINK_COOLDOWN_MS (3s) per player.
+ * - Shots: another seated player can buy you a shot: +SHOT_LEVEL_BOOST (3)
+ *   levels at once. Anti-cheat rules, so a shot can never be used to knock
+ *   someone out of a pot:
+ *   - only for a player who is NOT live in the current hand (folded, sitting
+ *     out, or the table is between hands), never someone still holding cards
+ *     (all-in included);
+ *   - a shot is capped at SHOT_LEVEL_CAP (9): shots can never pass anyone out,
+ *     only a player's own beers can. (Safer than timing the pass-out around the
+ *     next deal: there is no window where a shot lands and a hand starts.)
+ *   - each buyer may buy one shot every SHOT_COOLDOWN_HANDS (5) hands;
+ *   - each target may receive one shot every SHOT_RECEIVE_COOLDOWN_HANDS (3)
+ *     hands, so a table can't gang up on one player.
  */
 import type { Card, Rank, Suit } from './poker/types'
 
@@ -22,6 +34,14 @@ export const WAKE_UP_LEVEL = 6
 export const DRINK_COOLDOWN_MS = 3_000
 export const WATER_KICK_IN_MS = 3_000
 export const WEAR_OFF_EVERY_HANDS = 3
+/** A bought shot hits harder than a beer. */
+export const SHOT_LEVEL_BOOST = 3
+/** Each player may buy one shot for someone every this many hands. */
+export const SHOT_COOLDOWN_HANDS = 5
+/** Each player may be bought one shot every this many hands. */
+export const SHOT_RECEIVE_COOLDOWN_HANDS = 3
+/** Shots never take anyone past this level: they can't cause a pass-out. */
+export const SHOT_LEVEL_CAP = PASS_OUT_LEVEL - 1
 /** How long a passed-out player "slumps" before their hand is folded. */
 export const PASS_OUT_FOLD_DELAY_MS = 900
 
@@ -44,6 +64,12 @@ export interface PlayerDrinkState {
   passedOut: boolean
   /** Waters ordered that have not kicked in yet. */
   sobering: number
+  /** Shots other players bought them this session. */
+  shots: number
+  /** First hand number at which this player may buy someone a shot (0 = any time). */
+  shotReadyAtHand: number
+  /** First hand number at which this player may be bought another shot (0 = any time). */
+  shotReceivableAtHand: number
 }
 
 export const EMPTY_DRINK_STATE: Readonly<PlayerDrinkState> = Object.freeze({
@@ -53,6 +79,9 @@ export const EMPTY_DRINK_STATE: Readonly<PlayerDrinkState> = Object.freeze({
   lastDrink: null,
   passedOut: false,
   sobering: 0,
+  shots: 0,
+  shotReadyAtHand: 0,
+  shotReceivableAtHand: 0,
 })
 
 export function createEmptyDrinkState(): PlayerDrinkState {
@@ -92,6 +121,9 @@ export function normalizeDrinkState(raw: unknown): PlayerDrinkState {
     lastDrink,
     passedOut: candidate.passedOut === true,
     sobering: nonNegativeInt(candidate.sobering),
+    shots: nonNegativeInt(candidate.shots),
+    shotReadyAtHand: nonNegativeInt(candidate.shotReadyAtHand),
+    shotReceivableAtHand: nonNegativeInt(candidate.shotReceivableAtHand),
   }
 }
 
@@ -116,6 +148,12 @@ export interface DrinkLedgerEntry {
   pendingWaters: PendingWater[]
   /** Last hand number the player sleeps through; they wake when a later hand starts. */
   passedOutThroughHand: number | null
+  /** Shots bought for this player. */
+  shots: number
+  /** Hand number when this player last bought someone a shot. */
+  lastShotBoughtHand: number | null
+  /** Hand number when this player was last bought a shot. */
+  lastShotReceivedHand: number | null
 }
 
 export function createDrinkLedgerEntry(): DrinkLedgerEntry {
@@ -129,6 +167,9 @@ export function createDrinkLedgerEntry(): DrinkLedgerEntry {
     handsTowardSober: 0,
     pendingWaters: [],
     passedOutThroughHand: null,
+    shots: 0,
+    lastShotBoughtHand: null,
+    lastShotReceivedHand: null,
   }
 }
 
@@ -144,6 +185,11 @@ export function toPublicDrinkState(entry: DrinkLedgerEntry | undefined): PlayerD
     lastDrink: entry.lastDrink ? { ...entry.lastDrink } : null,
     passedOut: entry.passedOut,
     sobering: entry.pendingWaters.length,
+    shots: entry.shots,
+    shotReadyAtHand: entry.lastShotBoughtHand === null ? 0 : entry.lastShotBoughtHand + SHOT_COOLDOWN_HANDS,
+    shotReceivableAtHand: entry.lastShotReceivedHand === null
+      ? 0
+      : entry.lastShotReceivedHand + SHOT_RECEIVE_COOLDOWN_HANDS,
   }
 }
 
@@ -182,18 +228,159 @@ export function orderDrink(entry: DrinkLedgerEntry, context: DrinkOrderContext):
   }
 
   entry.beers += 1
-  entry.level = clampLevel(entry.level + 1)
-  if (entry.level >= PASS_OUT_LEVEL) {
-    entry.passedOut = true
-    entry.passedOutThroughHand = context.isDealtIntoLiveHand
-      ? context.handNumber
-      : context.handNumber + 1
-    entry.pendingWaters = []
-    entry.handsTowardSober = 0
-    return { ok: true, passedOut: true }
+  return { ok: true, passedOut: raiseLevel(entry, 1, context) }
+}
+
+/** Adds drunk levels; returns true when that knocked the player out. */
+function raiseLevel(
+  entry: DrinkLedgerEntry,
+  amount: number,
+  context: Pick<DrinkOrderContext, 'handNumber' | 'isDealtIntoLiveHand'>
+): boolean {
+  entry.level = clampLevel(entry.level + amount)
+  if (entry.level < PASS_OUT_LEVEL) {
+    return false
   }
 
-  return { ok: true, passedOut: false }
+  entry.passedOut = true
+  entry.passedOutThroughHand = context.isDealtIntoLiveHand
+    ? context.handNumber
+    : context.handNumber + 1
+  entry.pendingWaters = []
+  entry.handsTowardSober = 0
+  return true
+}
+
+/** Hands until `buyer` may buy another shot (0 = ready now). */
+export function getShotHandsRemaining(
+  buyer: Pick<DrinkLedgerEntry, 'lastShotBoughtHand'> | undefined,
+  handNumber: number
+): number {
+  if (!buyer || buyer.lastShotBoughtHand === null) {
+    return 0
+  }
+  return Math.max(0, buyer.lastShotBoughtHand + SHOT_COOLDOWN_HANDS - handNumber)
+}
+
+/** Hands until `target` may be bought another shot (0 = ready now). */
+export function getShotReceiveHandsRemaining(
+  target: Pick<DrinkLedgerEntry, 'lastShotReceivedHand'> | undefined,
+  handNumber: number
+): number {
+  if (!target || target.lastShotReceivedHand === null) {
+    return 0
+  }
+  return Math.max(0, target.lastShotReceivedHand + SHOT_RECEIVE_COOLDOWN_HANDS - handNumber)
+}
+
+export function formatShotCooldown(handsRemaining: number): string {
+  return `Next shot in ${handsRemaining} hand${handsRemaining === 1 ? '' : 's'}`
+}
+
+export const SHOT_LIVE_TARGET_REASON = "You can only buy shots for players who've folded"
+
+/**
+ * True while a player still has a stake in the current hand: the hand is
+ * live and they hold cards they have not folded (all-in counts as live).
+ */
+export function isLiveInHand(target: {
+  phase: 'waiting' | 'in_hand' | 'between_hands'
+  status: string
+  holdsCards: boolean
+}): boolean {
+  return target.phase === 'in_hand' && target.holdsCards && target.status !== 'folded'
+}
+
+export interface ShotContext {
+  handNumber: number
+  /** The target is still live in the current hand (see isLiveInHand). */
+  targetIsLive: boolean
+}
+
+export type ShotResult =
+  | { ok: true; levelAdded: number }
+  | { ok: false; reason: string }
+
+/**
+ * Why `buyer` can't buy `target` a shot right now, or null when they can.
+ * Seat, self-targeting and fun-mode checks belong to the caller.
+ */
+export function getShotBlockReason(
+  buyer: DrinkLedgerEntry | undefined,
+  target: DrinkLedgerEntry | undefined,
+  context: ShotContext,
+  targetName = 'They'
+): string | null {
+  if (context.targetIsLive) {
+    return SHOT_LIVE_TARGET_REASON
+  }
+  const remaining = getShotHandsRemaining(buyer, context.handNumber)
+  if (remaining > 0) {
+    return `${formatShotCooldown(remaining)}.`
+  }
+  if (target?.passedOut) {
+    return `${targetName} already passed out. Let them sleep.`
+  }
+  const receiving = getShotReceiveHandsRemaining(target, context.handNumber)
+  if (receiving > 0) {
+    return `${targetName} just had a shot. Try again in ${receiving} hand${receiving === 1 ? '' : 's'}.`
+  }
+  if ((target?.level ?? 0) >= SHOT_LEVEL_CAP) {
+    return `${targetName} is wrecked enough. Shots can't knock anyone out.`
+  }
+  return null
+}
+
+/**
+ * `buyer` buys `target` a shot. Mutates both entries when accepted. The shot
+ * adds up to SHOT_LEVEL_BOOST levels but never past SHOT_LEVEL_CAP, so it can
+ * never pass anyone out.
+ */
+export function buyShot(
+  buyer: DrinkLedgerEntry,
+  target: DrinkLedgerEntry,
+  context: ShotContext,
+  targetName?: string
+): ShotResult {
+  const blocked = getShotBlockReason(buyer, target, context, targetName)
+  if (blocked) {
+    return { ok: false, reason: blocked }
+  }
+
+  const before = target.level
+  buyer.lastShotBoughtHand = context.handNumber
+  target.lastShotReceivedHand = context.handNumber
+  target.shots += 1
+  target.level = Math.min(SHOT_LEVEL_CAP, clampLevel(target.level + SHOT_LEVEL_BOOST))
+  return { ok: true, levelAdded: target.level - before }
+}
+
+/**
+ * Client-side mirror of getShotBlockReason from the public state, so the
+ * button can say why it is disabled. The server stays authoritative.
+ */
+export function getShotBlockReasonFromState(
+  buyer: Pick<PlayerDrinkState, 'shotReadyAtHand'> | undefined,
+  target: Pick<PlayerDrinkState, 'shotReceivableAtHand' | 'passedOut' | 'level'> | undefined,
+  context: ShotContext,
+  targetName = 'They'
+): string | null {
+  // A "ready at hand N" of 0 means no cooldown; otherwise N = last + window.
+  const lastHand = (readyAt: number | undefined, window: number) => (readyAt ? readyAt - window : null)
+  return getShotBlockReason(
+    {
+      ...createDrinkLedgerEntry(),
+      lastShotBoughtHand: lastHand(buyer?.shotReadyAtHand, SHOT_COOLDOWN_HANDS),
+    },
+    {
+      ...createDrinkLedgerEntry(),
+      level: target?.level ?? 0,
+      passedOut: target?.passedOut ?? false,
+      lastShotReceivedHand: lastHand(target?.shotReceivableAtHand, SHOT_RECEIVE_COOLDOWN_HANDS),
+    },
+    context,
+    targetName
+  )
 }
 
 /** Applies a pending water. Returns true when it existed (and was consumed). */

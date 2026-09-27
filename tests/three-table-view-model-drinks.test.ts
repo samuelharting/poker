@@ -74,12 +74,12 @@ describe('3D view model drinks', () => {
       makePlayer({
         id: 'drunk',
         seatIndex: 2,
-        drinks: { level: 7, beers: 8, waters: 1, lastDrink, passedOut: false, sobering: 1 },
+        drinks: { level: 7, beers: 8, waters: 1, lastDrink, passedOut: false, sobering: 1, shots: 0, shotReadyAtHand: 0, shotReceivableAtHand: 0 },
       }),
       makePlayer({
         id: 'asleep',
         seatIndex: 4,
-        drinks: { level: 10, beers: 10, waters: 0, lastDrink: null, passedOut: true, sobering: 0 },
+        drinks: { level: 10, beers: 10, waters: 0, lastDrink: null, passedOut: true, sobering: 0, shots: 0, shotReadyAtHand: 0, shotReceivableAtHand: 0 },
       }),
     ]), 'hero')
 
@@ -97,6 +97,9 @@ describe('3D view model drinks', () => {
       lastDrink: { kind: 'beer', id: '', at: 1 },
       passedOut: false,
       sobering: 0,
+      shots: 0,
+      shotReadyAtHand: 0,
+      shotReceivableAtHand: 0,
     })).toEqual({ level: 10, beers: 0, lastDrink: null, passedOut: false })
   })
 })

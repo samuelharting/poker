@@ -41,7 +41,11 @@ import {
 import {
   applyHandCompleted as applyDrinkHandCompleted,
   applyWaterKickIn,
+  buyShot,
   createDrinkLedgerEntry,
+  getShotBlockReason,
+  getShotHandsRemaining,
+  isLiveInHand,
   orderDrink,
   PASS_OUT_FOLD_DELAY_MS,
   toPublicDrinkState,
@@ -51,6 +55,7 @@ import {
   type DrinkKind,
   type DrinkLedgerEntry,
 } from '../lib/drinks'
+import { CHIP_FLICK_COOLDOWN_MS, type PrankEvent, type PrankKind } from '../lib/pranks'
 import { MAX_CHAT_LENGTH, parseC2S } from '../shared/protocol'
 
 interface TableSettings {
@@ -181,6 +186,10 @@ const PEEK_RATE_WINDOW_MS = 2_000
 const PEEK_RATE_MAX_CHANGES = 8
 const CHAT_BUBBLE_DURATION = 9000
 const EMOTE_DURATION = 6000
+/** A pot this many big blinds or bigger counts as "big" for a bot's victory shot. */
+const BOT_SHOT_BIG_POT_BLINDS = 15
+const BOT_SHOT_CHANCE = 0.5
+const BOT_SHOT_DELAY_MS = 2_200
 const MAX_CHAT_HISTORY = 18
 export const AUTO_START_DELAY = DEFAULT_SETTINGS.autoStartDelay
 export const HOST_DISCONNECT_GRACE_MS = 20_000
@@ -231,6 +240,11 @@ export default class PokerRoom implements PartyServer {
   private botDrinkTimers = new Set<ReturnType<typeof setTimeout>>()
   /** Injectable so tests can make bot drinking deterministic. */
   botDrinkRandom: () => number = Math.random
+  /** Last chip flick per sender (cosmetic prank rate limit). */
+  private lastChipFlickAt = new Map<string, number>()
+  private botShotTimers = new Set<ReturnType<typeof setTimeout>>()
+  /** Injectable so tests can make bots buying shots deterministic. */
+  botShotRandom: () => number = Math.random
   private passedOutFoldPending = false
   /** Who is privately looking at their hole cards, keyed to the hand they peeked in. */
   private peekingByPlayer = new Map<string, { handNumber: number; timer: ReturnType<typeof setTimeout> }>()
@@ -360,6 +374,12 @@ export default class PokerRoom implements PartyServer {
           break
         case 'order_drink':
           this.handleOrderDrink(sender, msg.kind)
+          break
+        case 'buy_shot':
+          this.handleBuyShot(sender, msg.targetId)
+          break
+        case 'flick_chip':
+          this.handleFlickChip(sender, msg.targetId)
           break
         case 'companion_mute':
           this.handleCompanionMute(sender)
@@ -1012,6 +1032,9 @@ export default class PokerRoom implements PartyServer {
     for (const timer of Array.from(this.drinkWaterTimers.values())) clearTimeout(timer)
     this.drinkWaterTimers.clear()
     this.drinkLedger = {}
+    for (const timer of this.botShotTimers) clearTimeout(timer)
+    this.botShotTimers.clear()
+    this.lastChipFlickAt.clear()
     this.data.ladyLuck = createLadyLuckTracker()
   }
 
@@ -1557,14 +1580,163 @@ export default class PokerRoom implements PartyServer {
     }
 
     if (result.passedOut) {
-      this.clearWaterTimers(playerId)
-      this.broadcastDrinkEvent(playerId, 'passed_out')
-      if (state.phase === 'in_hand' && state.actingPlayerId === playerId) {
-        this.syncActionTimer(true)
-      }
+      this.handlePassedOut(playerId)
     }
 
     return { ok: true }
+  }
+
+  /** Shared by beers and shots: announce it, and fold them if it is their turn. */
+  private handlePassedOut(playerId: string) {
+    const state = this.data.gameState
+    this.clearWaterTimers(playerId)
+    this.broadcastDrinkEvent(playerId, 'passed_out')
+    if (state.phase === 'in_hand' && state.actingPlayerId === playerId) {
+      this.syncActionTimer(true)
+    }
+  }
+
+  /**
+   * Common checks for a prank aimed at another seated player. Returns the
+   * sender's player id, or null after telling the sender why not.
+   */
+  private validatePrank(conn: Connection, targetId: string, noun: string): string | null {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    if (!playerId) {
+      this.sendActionFailed(conn, `Join the room before ${noun}`)
+      return null
+    }
+    if (!this.getPlayer(playerId)) {
+      this.sendActionFailed(conn, `Take a seat before ${noun}`)
+      return null
+    }
+    if (!this.isFunModeEnabled()) {
+      this.sendActionFailed(conn, 'Fun mode is off at this table')
+      return null
+    }
+    if (targetId === playerId) {
+      this.sendActionFailed(conn, 'Nice try. Pick someone else.')
+      return null
+    }
+    if (!this.getPlayer(targetId)) {
+      this.sendActionFailed(conn, 'That player is not at the table')
+      return null
+    }
+    return playerId
+  }
+
+  private handleBuyShot(conn: Connection, targetId: string) {
+    const playerId = this.validatePrank(conn, targetId, 'buying a shot')
+    if (!playerId) return
+    const result = this.buyShotFor(playerId, targetId)
+    if (!result.ok) {
+      this.sendActionFailed(conn, result.reason)
+      return
+    }
+    this.sendActionResult(conn)
+    this.broadcastState()
+  }
+
+  private buyShotFor(buyerId: string, targetId: string): { ok: true } | { ok: false; reason: string } {
+    const target = this.getPlayer(targetId)
+    if (!target || !this.getPlayer(buyerId) || buyerId === targetId) {
+      return { ok: false, reason: 'That player is not at the table' }
+    }
+    const buyerEntry = this.drinkLedger[buyerId] ??= createDrinkLedgerEntry()
+    const targetEntry = this.drinkLedger[targetId] ??= createDrinkLedgerEntry()
+    // Anti-cheat rules live in buyShot: never a live player, never a pass-out,
+    // buyer and target cooldowns. Bots come through here too.
+    const result = buyShot(buyerEntry, targetEntry, this.getShotContext(target), target.nickname)
+    if (!result.ok) {
+      return result
+    }
+
+    this.broadcastPrankEvent('shot', buyerId, targetId, {
+      level: targetEntry.level,
+      levelAdded: result.levelAdded,
+      passedOut: false,
+    })
+    return { ok: true }
+  }
+
+  private getShotContext(target: InternalPlayer) {
+    const state = this.data.gameState
+    return {
+      handNumber: state.handNumber,
+      targetIsLive: isLiveInHand({
+        phase: state.phase,
+        status: target.status,
+        holdsCards: target.holeCards.length > 0,
+      }),
+    }
+  }
+
+  private handleFlickChip(conn: Connection, targetId: string) {
+    const playerId = this.validatePrank(conn, targetId, 'flicking chips')
+    if (!playerId) return
+    const now = Date.now()
+    const lastAt = this.lastChipFlickAt.get(playerId)
+    if (lastAt !== undefined && now - lastAt < CHIP_FLICK_COOLDOWN_MS) {
+      const seconds = Math.ceil((CHIP_FLICK_COOLDOWN_MS - (now - lastAt)) / 1000)
+      this.sendActionFailed(conn, `Reloading. Next chip in ${seconds}s.`)
+      return
+    }
+    this.lastChipFlickAt.set(playerId, now)
+    // Purely cosmetic: no chips move between stacks.
+    this.broadcastPrankEvent('chip_flick', playerId, targetId)
+    this.sendActionResult(conn)
+  }
+
+  private broadcastPrankEvent(
+    kind: PrankKind,
+    fromId: string,
+    targetId: string,
+    extra: Pick<PrankEvent, 'level' | 'levelAdded' | 'passedOut'> = {}
+  ) {
+    const nameOf = (id: string) => this.getPlayer(id)?.nickname ?? this.data.playerNicknames[id] ?? 'Player'
+    const event: PrankEvent = {
+      id: generateId(12),
+      kind,
+      fromId,
+      fromNickname: nameOf(fromId),
+      targetId,
+      targetNickname: nameOf(targetId),
+      at: Date.now(),
+      ...extra,
+    }
+    for (const conn of Array.from(this.room.getConnections())) {
+      this.sendMessage(conn, { type: 'prank_event', event })
+    }
+  }
+
+  /**
+   * After a bot drags in a big pot it sometimes buys a random human a shot,
+   * under the same one-shot-per-five-hands rule as everyone else.
+   */
+  private maybeScheduleBotShot(winnerAmounts: ReadonlyMap<string, number>) {
+    if (!this.isFunModeEnabled()) return
+    const bigPot = Math.max(1, this.data.tableSettings.bigBlind) * BOT_SHOT_BIG_POT_BLINDS
+    const handNumber = this.data.gameState.handNumber
+    for (const [botId, amount] of winnerAmounts) {
+      if (amount < bigPot || !this.isBotPlayer(botId)) continue
+      if (getShotHandsRemaining(this.drinkLedger[botId], handNumber) > 0) continue
+      if (this.botShotRandom() > BOT_SHOT_CHANCE) continue
+      const humans = this.data.gameState.players.filter(player =>
+        !this.isBotPlayer(player.id) &&
+        getShotBlockReason(this.drinkLedger[botId], this.drinkLedger[player.id], this.getShotContext(player)) === null
+      )
+      if (humans.length === 0) return
+      const target = humans[Math.min(humans.length - 1, Math.floor(this.botShotRandom() * humans.length))]!
+      const timer = setTimeout(() => {
+        this.botShotTimers.delete(timer)
+        if (!this.isFunModeEnabled()) return
+        // Re-validated when it lands: if the next hand dealt the target in, no shot.
+        if (this.buyShotFor(botId, target.id).ok) this.broadcastState()
+      }, BOT_SHOT_DELAY_MS)
+      this.botShotTimers.add(timer)
+      // One round per pot is plenty.
+      return
+    }
   }
 
   /**
@@ -2545,6 +2717,7 @@ export default class PokerRoom implements PartyServer {
         stats.totalWon += wonAmount
       }
     }
+    this.maybeScheduleBotShot(winnerAmounts)
 
     this.data.gameState.winners = this.data.gameState.winners.map(winner => {
       const profile = this.data.playerProfiles[winner.playerId]
