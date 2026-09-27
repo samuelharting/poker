@@ -2803,8 +2803,8 @@
   top: 62%;
 }
 
-/* Short screens (landscape phones): seats hug the four corners and the top edge */
-@container arena (max-height: 440px) {
+/* Wide arenas (landscape phones/tablets): seats hug the four corners and the top edge */
+@container arena (orientation: landscape) {
   /* A container query cannot restyle the arena itself, so size its layers. */
   .mobile-arena > .mobile-seat-grid,
   .mobile-arena > .mobile-board-zone {
