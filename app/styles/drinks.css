@@ -479,13 +479,15 @@
   animation: drunk-phase var(--drunk-pulse, 7s) ease-in-out infinite;
 }
 
-/* Pulsing blur + double vision on the table itself (never on the action tray). */
-:root[data-drunk-tier] :is(.desktop-3d-stage, .mobile-poker-field > :not(.mobile-hero-lane), .table-wrapper) {
+/* Pulsing blur + double vision on the table itself (never on the action tray).
+   Not on .table-wrapper: a filter there turns it into the containing block of
+   the fixed-position hero hand and nameplate, which then slide onto the felt. */
+:root[data-drunk-tier] :is(.desktop-3d-stage, .mobile-poker-field > :not(.mobile-hero-lane)) {
   filter: blur(calc(var(--drunk-blur, 0px) * var(--drunk-phase)));
 }
 
 /* Wasted: colours start to swim too */
-:root[data-drunk-tier='wasted'] :is(.desktop-3d-stage, .mobile-poker-field > :not(.mobile-hero-lane), .table-wrapper) {
+:root[data-drunk-tier='wasted'] :is(.desktop-3d-stage, .mobile-poker-field > :not(.mobile-hero-lane)) {
   filter:
     blur(calc(var(--drunk-blur, 0px) * var(--drunk-phase)))
     saturate(calc(1 + var(--drunk-phase) * 0.35))
@@ -496,6 +498,11 @@
   text-shadow:
     calc(var(--drunk-ghost, 0px) * var(--drunk-phase)) calc(var(--drunk-ghost, 0px) * var(--drunk-phase) * 0.35) 0
     color-mix(in srgb, currentColor 42%, transparent);
+}
+
+/* The decision itself stays sharp: no ghosting on the action tray. */
+:root[data-drunk-tier] .table-scene :is(.betting-tray, .mobile-betting-panel) {
+  text-shadow: none;
 }
 
 :root[data-drunk-tier] .table-scene :is(.community-cards, .own-card-row, .mobile-edge-seat-cards) .card-container {

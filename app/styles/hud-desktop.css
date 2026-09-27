@@ -613,9 +613,411 @@
   }
 }
 
-@media (min-width: 1024px) and (max-width: 1365px) {
+/* Only the narrowest desktop windows drop the drink words; the buttons keep
+   their title/aria-label names there. */
+@media (min-width: 1024px) and (max-width: 1279px) {
   .room-shell .drink-buttons .drink-button-label,
   .room-shell .drink-meter-label {
     display: none;
   }
 }
+
+/* ==========================================================================
+   Desktop critic round 1: tray, raise box, shortcuts, hero hand, timers.
+   ========================================================================== */
+
+@media (min-width: 1024px) {
+  /* Raise box keeps the raw text; the hint below shows the legal floor. */
+  .table-scene[data-desktop-three='true'] .raise-input-wrap {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    display: grid;
+    grid-template-rows: 1fr auto;
+    gap: 3px;
+    align-self: stretch;
+    min-width: 0;
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-input-wrap .raise-input {
+    grid-column: auto;
+    grid-row: auto;
+    min-height: 46px;
+    font-size: 19px;
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-input::-webkit-inner-spin-button,
+  .table-scene[data-desktop-three='true'] .raise-input::-webkit-outer-spin-button {
+    margin: 0;
+    appearance: none;
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-input-hint {
+    color: var(--c-text-3);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-input-wrap.is-below-min .raise-input,
+  .table-scene[data-desktop-three='true'] .raise-input-wrap.is-above-max .raise-input {
+    border-color: var(--c-ember-500);
+    color: var(--c-ember-300);
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-input-wrap.is-below-min .raise-input-hint,
+  .table-scene[data-desktop-three='true'] .raise-input-wrap.is-above-max .raise-input-hint {
+    color: var(--c-ember-300);
+  }
+
+  /* Tiny keyboard hints in the corner of each action. */
+  .table-scene[data-desktop-three='true'] .btn-action-key {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    min-width: 13px;
+    height: 13px;
+    padding: 0 2px;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    font-family: var(--font-ui);
+    font-size: 8px;
+    font-weight: 800;
+    line-height: 11px;
+    text-align: center;
+    opacity: 0.55;
+    pointer-events: none;
+  }
+
+  /* Folding when checking is free: quiet, with the reason spelled out. */
+  .table-scene[data-desktop-three='true'] .btn-action.btn-fold.is-check-free {
+    border-color: var(--line);
+    background: transparent;
+    color: var(--c-text-3);
+  }
+
+  .table-scene[data-desktop-three='true'] .btn-action.btn-fold.is-check-free .btn-action-main {
+    font-size: 12px;
+  }
+
+  .table-scene[data-desktop-three='true'] .btn-action.btn-fold.is-check-free .btn-action-sub {
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  /* Reconnecting: the decision stays visible but nothing can be pressed. */
+  .table-scene[data-desktop-three='true'] .betting-tray-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray-reconnecting {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border: 1px solid rgba(255, 176, 92, 0.5);
+    border-radius: var(--r-pill);
+    background: rgba(255, 122, 61, 0.14);
+    color: var(--c-ember-300);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray-reconnecting-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: timer-panic 0.6s ease-in-out infinite alternate;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray.is-reconnecting .btn-action,
+  .table-scene[data-desktop-three='true'] .betting-tray.is-reconnecting .btn-quick,
+  .table-scene[data-desktop-three='true'] .betting-tray.is-reconnecting .raise-slider,
+  .table-scene[data-desktop-three='true'] .betting-tray.is-reconnecting .raise-input {
+    filter: grayscale(0.8);
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  /* Hero hand: the strength label and the Act now pill sit to the left of the
+     cards, so neither covers the pot chips above nor a card. */
+  .table-scene[data-desktop-three='true'] .own-hand-area .own-hand-strength,
+  .table-scene[data-desktop-three='true'] .own-hand-area .own-hand-turn-chip {
+    position: absolute;
+    right: calc(100% + 10px);
+    left: auto;
+    transform: none;
+  }
+
+  .table-scene[data-desktop-three='true'] .own-hand-area .own-hand-strength {
+    top: 22%;
+    bottom: auto;
+  }
+
+  .table-scene[data-desktop-three='true'] .own-hand-area .own-hand-turn-chip {
+    top: 50%;
+    bottom: auto;
+  }
+
+  .table-scene[data-desktop-three='true'] .own-hand-area.has-strength .own-hand-turn-chip {
+    top: calc(22% + 38px);
+    bottom: auto;
+  }
+
+  /* Your own chat bubble and incoming reactions: up and to the left of the
+     cards (never on them), with the sender named. */
+  .table-scene[data-desktop-three='true'] .own-hand-area .own-hand-social {
+    left: auto;
+    right: calc(100% + 10px);
+    bottom: calc(100% - 18px);
+    align-items: flex-end;
+    transform: none;
+  }
+
+  .table-scene[data-desktop-three='true'] .own-hand-social .player-emote-badge {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    width: auto;
+    min-width: 52px;
+    height: 52px;
+    padding: 0 12px 0 10px;
+    border-radius: 999px;
+    font-size: 30px;
+    animation: hero-emote-fly-in 520ms var(--ease-pop) both;
+  }
+
+  .table-scene[data-desktop-three='true'] .own-hand-social .player-emote-from {
+    color: var(--c-text-1);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  @keyframes hero-emote-fly-in {
+    from {
+      opacity: 0;
+      transform: translate(-80px, -40px) scale(0.6) rotate(-12deg);
+    }
+    70% {
+      opacity: 1;
+      transform: translate(4px, 2px) scale(1.08) rotate(2deg);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* The acting opponent's clock drains along the bottom of their plate. */
+  .table-scene[data-acting-timer='live'] .desktop-3d-stage .cinematic-seat.is-acting:not(.is-local-player) .cinematic-seat-panel,
+  .table-scene[data-acting-timer='low'] .desktop-3d-stage .cinematic-seat.is-acting:not(.is-local-player) .cinematic-seat-panel {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .table-scene[data-acting-timer='live'] .desktop-3d-stage .cinematic-seat.is-acting:not(.is-local-player) .cinematic-seat-panel::after,
+  .table-scene[data-acting-timer='low'] .desktop-3d-stage .cinematic-seat.is-acting:not(.is-local-player) .cinematic-seat-panel::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--c-sky-400), var(--c-felt-300));
+    box-shadow: 0 0 8px rgba(127, 208, 255, 0.7);
+    transform: scaleX(var(--acting-timer-pct, 1));
+    transform-origin: left center;
+    transition: transform 120ms linear;
+    pointer-events: none;
+  }
+
+  .table-scene[data-acting-timer='low'] .desktop-3d-stage .cinematic-seat.is-acting:not(.is-local-player) .cinematic-seat-panel::after {
+    background: linear-gradient(90deg, var(--c-ember-500), var(--c-ruby-500));
+    box-shadow: 0 0 8px rgba(255, 122, 61, 0.8);
+  }
+}
+
+/* Narrow desktop (1024-1180): a slimmer tray with a 2x2 action grid so it
+   clears the hero's cards and every label fits. */
+@media (min-width: 1024px) and (max-width: 1180px) {
+  .table-scene[data-desktop-three='true'] .betting-tray {
+    width: 312px;
+    padding: 10px;
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-slider-row {
+    grid-template-columns: 1fr 72px;
+    margin: 8px 0;
+    padding: 10px;
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-quick-btns {
+    grid-template-columns: repeat(auto-fit, minmax(38px, 1fr));
+    gap: 4px;
+  }
+
+  .table-scene[data-desktop-three='true'] .btn-quick {
+    font-size: 10px;
+  }
+
+  .table-scene[data-desktop-three='true'] .bet-action-row,
+  .table-scene[data-desktop-three='true'] .bet-action-row[data-count='3'],
+  .table-scene[data-desktop-three='true'] .bet-action-row[data-count='4'],
+  .table-scene[data-desktop-three='true'] .bet-action-row[data-count='5'] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .table-scene[data-desktop-three='true'] .bet-action-row[data-count='2'] {
+    grid-template-columns: 0.8fr 1.4fr;
+  }
+
+  .table-scene[data-desktop-three='true'] .btn-action {
+    height: 46px;
+    min-height: 46px;
+  }
+}
+
+/* Lady Luck's "Shut up" rides on top of the hero's own drink dock (the
+   personal HUD), instead of floating alone above the chat toggle. */
+@media (min-width: 1024px) {
+  .table-scene[data-desktop-three='true'] > .lady-luck-mute.is-desktop {
+    left: 184px;
+    bottom: 74px;
+    padding: 6px 12px;
+    border-color: rgba(242, 199, 102, 0.55);
+    background: var(--surface-glass-strong);
+    font-size: 11px;
+    backdrop-filter: blur(12px);
+  }
+
+  .table-scene[data-desktop-three='true'] > .lady-luck-mute.is-desktop::after {
+    content: '';
+    position: absolute;
+    left: 22px;
+    top: 100%;
+    width: 1px;
+    height: 8px;
+    background: rgba(242, 199, 102, 0.55);
+  }
+}
+
+/* A targeted reaction flies in beside the victim's plate and names who sent it. */
+@media (min-width: 1024px) {
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-reaction[data-targeted='true'] {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    width: auto;
+    height: 50px;
+    padding: 0 12px 0 10px;
+    font-size: 30px;
+    animation: seat-emote-fly-in 560ms var(--ease-pop) both;
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-reaction-from {
+    color: var(--c-text-1);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  @keyframes seat-emote-fly-in {
+    from {
+      opacity: 0;
+      transform: translate(0, 60px) scale(0.5) rotate(-14deg);
+    }
+    70% {
+      opacity: 1;
+      transform: translate(0, -4px) scale(1.1) rotate(3deg);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+/* Rabbit hunt: the unplayed streets are named, clearly marked as not played. */
+.table-rabbit-tag {
+  position: fixed;
+  z-index: 40;
+  left: calc(50% + 200px);
+  top: 47%;
+  translate: 0 -50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.32);
+  border-radius: var(--r-pill, 999px);
+  background: rgba(8, 12, 12, 0.72);
+  color: var(--c-text-2, #d8d2c4);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  animation: rabbit-tag-in 360ms var(--ease-out, ease-out) both;
+}
+
+.table-rabbit-tag-cards {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.table-rabbit-tag {
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 10px;
+  border-radius: 14px;
+}
+
+.table-rabbit-card {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 46px;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
+  background: #f4f0e6;
+  color: #1b1b1b;
+  font-family: var(--font-display);
+  line-height: 1;
+  opacity: 0.62;
+  filter: saturate(0.6);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+}
+
+.table-rabbit-card b {
+  font-size: 15px;
+}
+
+.table-rabbit-card i {
+  font-style: normal;
+  font-size: 14px;
+}
+
+.table-rabbit-card.is-hearts,
+.table-rabbit-card.is-diamonds {
+  color: #b3152a;
+}
+
+@keyframes rabbit-tag-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.table-scene[data-layout='2d'] .table-rabbit-tag {
+  display: none;
+}
+
