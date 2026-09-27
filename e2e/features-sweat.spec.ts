@@ -54,6 +54,7 @@ for (const viewport of ['desktop', 'mobile'] as ViewportName[]) {
 
       // Ask -> pending badge -> consent prompt only for the target -> allow -> shown.
       await askAllow.click()
+      if (await waitForTurn([allow], 1_500).catch(() => null)) await checkOrCall(allow)
       await expect(visible(folder.page.getByRole('button', { name: `${allow.name}: Waiting` })).first()).toBeDisabled()
       const prompt = allow.page.getByRole('alertdialog', { name: `${folder.name} wants to see your cards` })
       await expect(prompt).toBeVisible()
@@ -72,6 +73,8 @@ for (const viewport of ['desktop', 'mobile'] as ViewportName[]) {
 
       // Ask -> deny -> hidden.
       await askDeny.click()
+      // The consent prompt waits until its target has acted, so let them act first.
+      if (await waitForTurn([deny], 1_500).catch(() => null)) await checkOrCall(deny)
       const denyPrompt = deny.page.getByRole('alertdialog', { name: `${folder.name} wants to see your cards` })
       await expect(denyPrompt).toBeVisible()
       await denyPrompt.getByRole('button', { name: 'Keep hidden' }).click()
