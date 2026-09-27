@@ -2519,6 +2519,7 @@ export function PokerTable({
       className="table-scene"
       data-phase={state.phase}
       data-hero-seat={shouldShowOwnHand ? 'true' : 'false'}
+      data-crowded-reveal={state.players.filter(player => player.id !== yourId && (player.holeCards?.length ?? 0) > 0).length >= 3 ? 'true' : 'false'}
       data-player-count={state.players.length}
       data-show-cards={canAdjustShownCards && !settingsOpen ? 'true' : 'false'}
       data-suit-colors={suitColorMode}
