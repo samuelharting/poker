@@ -1676,85 +1676,13 @@ input:focus-visible {
   }
 }
 
-/* Large check/fold pre-action bubble in the bottom-right on mobile and 3D. */
+/* Pre-action chips dock in the bottom-right (where the action tray appears) on 3D. */
 .check-fold-pre-action-dock {
   position: fixed;
   right: calc(20px + env(safe-area-inset-right));
   bottom: calc(20px + env(safe-area-inset-bottom));
   z-index: 226;
   pointer-events: none;
-}
-
-.own-hand-pre-action-button {
-  min-width: 176px;
-  min-height: 64px;
-  padding: 10px 20px;
-  border: 1px solid rgba(242, 222, 161, 0.5);
-  border-radius: 22px;
-  background: linear-gradient(180deg, rgba(24, 32, 30, 0.97), rgba(7, 13, 12, 0.98));
-  color: #f5f0e5;
-  box-shadow:
-    0 8px 20px rgba(0, 0, 0, 0.52),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font: inherit;
-  cursor: pointer;
-  pointer-events: auto;
-  touch-action: manipulation;
-  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
-}
-
-.own-hand-pre-action-button:hover {
-  border-color: rgba(242, 222, 161, 0.82);
-  transform: translateY(-1px);
-}
-
-.own-hand-pre-action-button:focus-visible {
-  outline: 2px solid #f2dea1;
-  outline-offset: 3px;
-}
-
-.own-hand-pre-action-button.is-queued {
-  border-color: rgba(103, 209, 118, 0.82);
-  background: linear-gradient(180deg, rgba(34, 88, 53, 0.98), rgba(14, 43, 28, 0.98));
-  box-shadow:
-    0 8px 20px rgba(0, 0, 0, 0.52),
-    0 0 0 2px rgba(103, 209, 118, 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-}
-
-.own-hand-pre-action-copy {
-  display: grid;
-  gap: 4px;
-  text-align: center;
-  line-height: 1.05;
-}
-
-.own-hand-pre-action-copy small {
-  color: rgba(245, 240, 229, 0.58);
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-}
-
-.own-hand-pre-action-copy strong {
-  font-size: 16px;
-  font-weight: 950;
-  letter-spacing: 0.025em;
-  text-transform: uppercase;
-}
-
-.own-hand-pre-action-button.is-queued .own-hand-pre-action-copy small {
-  color: #a9eab0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .own-hand-pre-action-button {
-    transition: none;
-  }
 }
 
 /* Blind role clarity ----------------------------------------------------- */

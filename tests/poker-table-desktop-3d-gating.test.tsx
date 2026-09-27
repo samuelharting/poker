@@ -813,8 +813,8 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).toContain('$960')
     expect(markup).not.toContain('class="seat-position seat-0 hero-seat-position"')
     expect(markup).toContain('check-fold-pre-action-dock')
-    expect(markup).toContain('own-hand-pre-action-button')
-    expect(markup).not.toContain('own-hand-pre-action-mark')
+    expect(markup).toContain('pre-action-chip')
+    expect(markup).not.toContain('own-hand-pre-action-button')
   })
 
   it('does not expose two-hand streak companion eligibility to the desktop 3D stage', () => {
@@ -1254,9 +1254,9 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).not.toContain('player-action-badge')
     expect(markup).not.toContain('chip-stack')
     expect(markup).toContain('check-fold-pre-action-dock')
-    expect(markup).toContain('own-hand-pre-action-button')
-    expect(markup).toContain('Queue check if possible, otherwise fold')
-    expect(markup).not.toContain('own-hand-pre-action-mark')
+    expect(markup).toContain('pre-action-chip')
+    expect(markup).toContain('aria-label="Pre-action: ')
+    expect(markup).not.toContain('own-hand-pre-action-button')
   })
 
   it('renders the compact 2D action tray: Fold / Call / Raise, sizing behind Raise', () => {

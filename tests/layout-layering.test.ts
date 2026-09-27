@@ -371,19 +371,20 @@ describe('room UI layering', () => {
     ])
   })
 
-  it('uses one large bottom-right bubble for the check/fold pre-action', () => {
+  it('docks the pre-action chips bottom-right, where the action tray appears', () => {
     expectRule('.check-fold-pre-action-dock', [
       'position: fixed;',
       'right: calc(20px + env(safe-area-inset-right));',
       'bottom: calc(20px + env(safe-area-inset-bottom));',
     ], polishCss)
-    expectRule('.own-hand-pre-action-button', [
-      'min-width: 176px;',
-      'min-height: 64px;',
+    expectRule('.pre-action-bar', [
       'pointer-events: auto;',
-    ], polishCss)
-    expect(pokerTableSource).toContain('<div className="check-fold-pre-action-dock">')
-    expect(pokerTableSource).not.toContain('own-hand-pre-action-mark')
+    ], panelsCss)
+    expectRule('.pre-action-chip', [
+      'min-height: 44px;',
+    ], panelsCss)
+    expect(pokerTableSource).toContain('<div className="check-fold-pre-action-dock"')
+    expect(pokerTableSource).not.toContain('own-hand-pre-action-button')
   })
 
   it('cleans up desktop 3D room overlays', () => {

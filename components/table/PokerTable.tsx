@@ -27,6 +27,20 @@ import { getShowdownRevealMode, isTrueShowdown } from '@/lib/poker/showdown'
 import { TWO_D_LAYOUT_QUERY, useMediaQuery } from '@/lib/layoutMode'
 import type { PokerSoundCueKind } from '@/lib/poker/soundscape'
 import {
+  createPreAction,
+  describeAutoAction,
+  getBlindTip,
+  getPreActionOptions,
+  getTurnPrompt,
+  isPreActionOptionActive,
+  reconcilePreAction,
+  resolvePreAction,
+  type PreActionKind,
+  type QueuedPreAction,
+  type TurnPromptInput,
+} from '@/lib/poker/turnGuidance'
+import { PRE_ACTION_SHORTCUT_KEYS, PreActionBar } from './PreActionBar'
+import {
   AVATAR_CELEBRATION_OPTIONS,
   AVATAR_GLASSES_OPTIONS,
   AVATAR_HAT_OPTIONS,
@@ -294,6 +308,8 @@ const SUIT_GLYPHS: Record<Card['suit'], string> = {
 }
 
 /** Desktop tray keyboard shortcuts, shown as tiny key hints on the buttons. */
+const BLIND_TIP_STORAGE_KEY = 'poker:blind-tip-seen'
+
 const ACTION_SHORTCUT_KEYS: Partial<Record<PokerAction, string>> = {
   fold: 'F',
   check: 'C',
@@ -1548,9 +1564,13 @@ export function PokerTable({
   const isTrayReconnecting = !isConnected && !isMobileViewport && turnActions.length > 0
   const trayActions = legalActions.length > 0 ? legalActions : isTrayReconnecting ? turnActions : legalActions
   const hasActionTray = isInHand && isMyTurn && Boolean(me) && trayActions.length > 0
-  const [queuedCheckFoldHand, setQueuedCheckFoldHand] = useState<number | null>(null)
-  const isCheckFoldQueued = queuedCheckFoldHand === state.handNumber
-  const canQueueCheckFold = Boolean(
+  // Pre-actions: queued while someone else decides, sent as a normal action
+  // only from a snapshot where it really is your turn (the server still
+  // validates it). A queue lives for one hand and one street.
+  const [queuedPreAction, setQueuedPreAction] = useState<QueuedPreAction | null>(null)
+  const [preActionNote, setPreActionNote] = useState<{ id: number; text: string; tone: 'done' | 'cancelled' } | null>(null)
+  const preActionToCall = Math.max(0, toCall)
+  const canQueuePreAction = Boolean(
     isInHand &&
     state.actingPlayerId &&
     !isMyTurn &&
@@ -1559,38 +1579,68 @@ export function PokerTable({
     isConnected &&
     !settingsOpen
   )
-  const showCheckFoldPreAction = canQueueCheckFold && (
+  const showPreActionBar = canQueuePreAction && (
     isMobileViewport || Boolean(threeTableView)
   )
+  const meStack = me?.stack ?? 0
+  const preActionOptions = useMemo(
+    () => showPreActionBar ? getPreActionOptions({ toCall: preActionToCall, stack: meStack }) : [],
+    [meStack, preActionToCall, showPreActionBar]
+  )
+
+  const togglePreAction = useCallback((kind: PreActionKind) => {
+    setQueuedPreAction(current => (
+      isPreActionOptionActive(current, kind)
+        ? null
+        : createPreAction(kind, { handNumber: state.handNumber, round: state.round, toCall: preActionToCall })
+    ))
+  }, [preActionToCall, state.handNumber, state.round])
 
   useEffect(() => {
-    if (queuedCheckFoldHand === null) {
+    if (!preActionNote) {
+      return
+    }
+    const timeout = window.setTimeout(() => {
+      setPreActionNote(current => (current?.id === preActionNote.id ? null : current))
+    }, preActionNote.tone === 'cancelled' ? 4200 : 2400)
+    return () => window.clearTimeout(timeout)
+  }, [preActionNote])
+
+  useEffect(() => {
+    if (!queuedPreAction) {
       return
     }
 
-    const queueIsStillValid =
-      queuedCheckFoldHand === state.handNumber &&
-      isInHand &&
-      me?.status === 'active' &&
-      isConnected &&
-      !settingsOpen
-
-    if (!queueIsStillValid) {
-      setQueuedCheckFoldHand(null)
+    const check = reconcilePreAction(queuedPreAction, {
+      handNumber: state.handNumber,
+      round: state.round,
+      toCall: preActionToCall,
+      isLive: isInHand && me?.status === 'active' && isConnected && !settingsOpen,
+    })
+    if (!check.keep) {
+      setQueuedPreAction(null)
+      if (check.note) {
+        setPreActionNote({ id: Date.now(), text: check.note, tone: 'cancelled' })
+      }
       return
     }
 
-    if (!isMyTurn) {
+    if (!isMyTurn || legalActions.length === 0) {
       return
     }
 
-    const action = resolveCheckFoldPreAction(legalActions)
+    const action = resolvePreAction(queuedPreAction, {
+      handNumber: state.handNumber,
+      round: state.round,
+      toCall: preActionToCall,
+      legalActions,
+    })
+    setQueuedPreAction(null)
     if (!action) {
       return
     }
-
-    setQueuedCheckFoldHand(null)
     onAction(action)
+    setPreActionNote({ id: Date.now(), text: describeAutoAction(action, preActionToCall), tone: 'done' })
   }, [
     isConnected,
     isInHand,
@@ -1598,10 +1648,86 @@ export function PokerTable({
     legalActions,
     me?.status,
     onAction,
-    queuedCheckFoldHand,
+    preActionToCall,
+    queuedPreAction,
     settingsOpen,
     state.handNumber,
+    state.round,
   ])
+
+  // What you face when the action reaches you, spelled out.
+  const turnPromptInput = useMemo<TurnPromptInput | null>(() => (
+    me && isMyTurn
+      ? {
+        round: state.round,
+        toCall: Math.max(0, toCall),
+        stack: me.stack,
+        myBet: me.bet,
+        currentBet: state.currentBet,
+        isSB: me.isSB,
+        isBB: me.isBB,
+        smallBlind: state.smallBlind,
+        bigBlind: state.bigBlind,
+        hasActedThisRound: me.hasActedThisRound,
+      }
+      : null
+  ), [isMyTurn, me, state.bigBlind, state.currentBet, state.round, state.smallBlind, toCall])
+  const turnPrompt = useMemo(
+    () => turnPromptInput ? getTurnPrompt(turnPromptInput) : null,
+    [turnPromptInput]
+  )
+  const heroTurnKey = isMyTurn && isInHand
+    ? `${state.handNumber}:${state.round ?? 'none'}:${state.actionSequence ?? 0}`
+    : null
+
+  // One-time beginner tip for a blind's first decision.
+  const [blindTipDismissed, setBlindTipDismissed] = useState(true)
+  useEffect(() => {
+    try {
+      setBlindTipDismissed(window.localStorage.getItem(BLIND_TIP_STORAGE_KEY) === '1')
+    } catch {
+      setBlindTipDismissed(false)
+    }
+  }, [])
+  const dismissBlindTip = useCallback(() => {
+    setBlindTipDismissed(true)
+    try {
+      window.localStorage.setItem(BLIND_TIP_STORAGE_KEY, '1')
+    } catch {
+      // Storage is optional; the tip just stays hidden for this session.
+    }
+  }, [])
+  const blindTip = !blindTipDismissed && turnPromptInput && !queuedPreAction
+    ? getBlindTip(turnPromptInput)
+    : null
+  // Seen once is enough: when the decision it explained is over, retire it.
+  const blindTipShownRef = useRef(false)
+  useEffect(() => {
+    if (blindTip) {
+      blindTipShownRef.current = true
+    } else if (blindTipShownRef.current && !isMyTurn) {
+      blindTipShownRef.current = false
+      dismissBlindTip()
+    }
+  }, [blindTip, dismissBlindTip, isMyTurn])
+
+  // A short buzz on phones when the action reaches you (the chime is played
+  // by the room soundscape and follows the mute setting).
+  useEffect(() => {
+    if (!heroTurnKey || !isMobileViewport || queuedPreAction) {
+      return
+    }
+    if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') {
+      return
+    }
+    try {
+      navigator.vibrate([35, 60, 35])
+    } catch {
+      // Some browsers refuse without a recent user gesture.
+    }
+    // Only a new decision should buzz, not a queue change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [heroTurnKey, isMobileViewport])
 
   const maxRaise = me ? me.stack + me.bet : 0
   const effectiveMin = Math.min(state.minRaise, maxRaise)
@@ -1989,25 +2115,71 @@ export function PokerTable({
   const activeMobileQuickBet = mobileQuickBets.find(quickBet => (
     clampRaiseAmount(quickBet.amount) === raiseAmount
   ))?.key
-  const checkFoldPreActionControl = showCheckFoldPreAction ? (
-    <button
-      type="button"
-      className={`own-hand-pre-action-button ${isCheckFoldQueued ? 'is-queued' : ''}`}
-      aria-label={isCheckFoldQueued
-        ? 'Cancel queued check or fold'
-        : 'Queue check if possible, otherwise fold'}
-      aria-pressed={isCheckFoldQueued}
-      title="Checks if checking is free; otherwise folds when action reaches you."
-      onClick={() => setQueuedCheckFoldHand(current => (
-        current === state.handNumber ? null : state.handNumber
-      ))}
+  // While the tray is up the note rides inside it instead.
+  const preActionNoteElement = preActionNote ? (
+    <div
+      key={preActionNote.id}
+      className={`pre-action-note is-${preActionNote.tone}`}
+      role="status"
+      aria-live="polite"
     >
-      <span className="own-hand-pre-action-copy">
-        <small>{isCheckFoldQueued ? 'Tap to cancel' : 'Pre-action'}</small>
-        <strong>Check / Fold</strong>
-      </span>
-    </button>
+      {preActionNote.text}
+    </div>
   ) : null
+  const preActionDock = showPreActionBar || (preActionNote && !hasActionTray) ? (
+    <div className="check-fold-pre-action-dock" data-has-bar={showPreActionBar ? 'true' : 'false'}>
+      {preActionNote && !hasActionTray && (
+        <div
+          key={preActionNote.id}
+          className={`pre-action-note is-${preActionNote.tone}`}
+          role="status"
+          aria-live="polite"
+        >
+          {preActionNote.text}
+        </div>
+      )}
+      {showPreActionBar && preActionOptions.length > 0 && (
+        <PreActionBar
+          options={preActionOptions}
+          queued={queuedPreAction}
+          onToggle={togglePreAction}
+          showShortcuts={!isMobileViewport}
+        />
+      )}
+    </div>
+  ) : null
+
+  // Desktop: 1 / 2 / 3 toggle the pre-action chips while someone else acts.
+  useEffect(() => {
+    if (!showPreActionBar || isMobileViewport || preActionOptions.length === 0) {
+      return
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.repeat) {
+        return
+      }
+      const target = event.target instanceof HTMLElement ? event.target : null
+      if (target && (
+        target.isContentEditable ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.tagName === 'INPUT'
+      )) {
+        return
+      }
+      const index = (PRE_ACTION_SHORTCUT_KEYS as readonly string[]).indexOf(event.key)
+      const option = index >= 0 ? preActionOptions[index] : undefined
+      if (!option) {
+        return
+      }
+      event.preventDefault()
+      togglePreAction(option.kind)
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isMobileViewport, preActionOptions, showPreActionBar, togglePreAction])
 
   const tableWaitingCopy = !isConnected
     ? 'Restoring the room snapshot and reconnecting your seat.'
@@ -2023,17 +2195,11 @@ export function PokerTable({
       ? 'Waiting for players'
       : 'Ready for the next hand'
   const desktopWaitingBannerCopy = tableWaitingCopy
-  const bettingTrayHeader = isMyTurn
-    ? toCall > 0
-      ? `Call ${formatAmount(toCall)}`
-      : 'Check or raise'
-    : toCall > 0
-      ? `To call ${formatAmount(toCall)}`
-      : 'Action live'
+  const bettingTrayHeader = turnPrompt?.headline ?? (
+    toCall > 0 ? `To call ${formatAmount(toCall)}` : 'Action live'
+  )
   const turnFocusDetail = isMyTurn
-    ? toCall > 0
-      ? `Call ${formatAmount(toCall)} to continue`
-      : 'Check or raise'
+    ? turnPrompt?.headline ?? 'Your decision'
     : actingPlayer
       ? `${turnTimer.secondsLeft}s left`
       : 'Hand live'
@@ -2593,11 +2759,7 @@ export function PokerTable({
         )}
       </div>
 
-      {checkFoldPreActionControl && (
-        <div className="check-fold-pre-action-dock">
-          {checkFoldPreActionControl}
-        </div>
-      )}
+      {preActionDock}
 
       {activeAllInAnnouncement && !isMobileViewport ? (
         <AllInAnnouncement
@@ -2668,19 +2830,47 @@ export function PokerTable({
       )}
 
       {hasActionTray && me && (
+        <div
+          key={heroTurnKey ?? 'turn'}
+          className={`turn-edge-glow ${turnTimer.secondsLeft <= 5 ? 'is-low' : ''}`}
+          aria-hidden="true"
+        />
+      )}
+
+      {hasActionTray && me && (
         isMobileViewport ? (
           <div
             className="mobile-betting-panel"
             data-raise={raiseSizingOpen && canMobileRaise ? 'open' : 'closed'}
+            data-blind-tip={blindTip ? 'true' : 'false'}
             style={{ ['--turn-pct' as string]: Math.round(turnTimer.percent * 10) / 10 } as CSSProperties}
           >
-            <div
-              className={`mobile-tray-timer ${turnTimer.secondsLeft <= 5 ? 'is-low' : ''}`}
-              role="timer"
-              aria-label={`${turnTimer.secondsLeft} seconds to act`}
-            >
-              <span className="mobile-tray-timer-fill" aria-hidden="true" />
-              <span className="mobile-tray-timer-label">{turnTimer.secondsLeft}s</span>
+            {preActionNoteElement}
+            {blindTip && (
+              <div className="blind-tip" role="note">
+                <p>{blindTip}</p>
+                <button type="button" className="blind-tip-dismiss" onClick={dismissBlindTip}>
+                  Got it
+                </button>
+              </div>
+            )}
+
+            <div className="turn-prompt mobile-turn-prompt" role="status" aria-live="assertive">
+              <div className="turn-prompt-copy">
+                <span className="turn-prompt-kicker">{turnPrompt?.kicker ?? 'Your turn'}</span>
+                <strong className="turn-prompt-headline">{bettingTrayHeader}</strong>
+                {turnPrompt?.context && (
+                  <span className="turn-prompt-context">{turnPrompt.context}</span>
+                )}
+              </div>
+              <div
+                className={`mobile-tray-timer ${turnTimer.secondsLeft <= 5 ? 'is-low' : ''}`}
+                role="timer"
+                aria-label={`${turnTimer.secondsLeft} seconds to act`}
+              >
+                <span className="mobile-tray-timer-fill" aria-hidden="true" />
+                <span className="mobile-tray-timer-label">{turnTimer.secondsLeft}s</span>
+              </div>
             </div>
 
             {raiseSizingOpen && canMobileRaise && (
@@ -2747,16 +2937,17 @@ export function PokerTable({
             <div className="mobile-main-actions" data-count={canMobileRaise ? 3 : 2}>
               <button
                 type="button"
-                className="mobile-main-action mobile-action-fold"
+                className={`mobile-main-action mobile-action-fold ${mobileCheckCallAction?.key === 'check' ? 'is-check-free' : ''}`}
                 data-action="fold"
                 onClick={mobileFoldAction?.onClick}
                 disabled={!mobileFoldAction}
               >
                 <span>Fold</span>
+                {mobileCheckCallAction?.key === 'check' && <small>Check is free</small>}
               </button>
               <button
                 type="button"
-                className="mobile-main-action mobile-action-call"
+                className="mobile-main-action mobile-action-call is-primary"
                 data-action={mobileCheckCallAction?.key ?? 'check-call'}
                 onClick={mobileCheckCallAction?.onClick}
                 disabled={!mobileCheckCallAction}
@@ -2794,10 +2985,25 @@ export function PokerTable({
             data-can-raise={showDesktopRaiseSizing ? 'true' : 'false'}
             aria-busy={isTrayReconnecting}
           >
-            <div className="betting-tray-header">
-              <span className="betting-tray-kicker">
-                {bettingTrayHeader}
-              </span>
+            {preActionNoteElement}
+            {blindTip && (
+              <div className="blind-tip" role="note">
+                <p>{blindTip}</p>
+                <button type="button" className="blind-tip-dismiss" onClick={dismissBlindTip}>
+                  Got it
+                </button>
+              </div>
+            )}
+            <div className="betting-tray-header turn-prompt" role="status" aria-live="assertive">
+              <div className="turn-prompt-copy">
+                <span className="turn-prompt-kicker">{turnPrompt?.kicker ?? 'Your turn'}</span>
+                <strong className="betting-tray-kicker turn-prompt-headline">
+                  {bettingTrayHeader}
+                </strong>
+                {turnPrompt?.context && (
+                  <span className="turn-prompt-context">{turnPrompt.context}</span>
+                )}
+              </div>
               {isTrayReconnecting && (
                 <span className="betting-tray-reconnecting" role="status" aria-live="polite">
                   <span className="betting-tray-reconnecting-dot" aria-hidden="true" />
@@ -2808,8 +3014,8 @@ export function PokerTable({
 
             <div className="timer-bar-shell">
               <div className="timer-bar-header">
-                <span>Fold timer</span>
-                <span>{turnTimer.secondsLeft}s left</span>
+                <span>Time to act</span>
+                <span className={turnTimer.secondsLeft <= 5 ? 'is-low' : undefined}>{turnTimer.secondsLeft}s left</span>
               </div>
               <div className="timer-bar">
                 <div
@@ -2911,7 +3117,7 @@ export function PokerTable({
                   <button
                     key={actionButton.key}
                     type="button"
-                    className={`btn-action ${actionButton.className} ${isFreeCheckFold ? 'is-check-free' : ''}`}
+                    className={`btn-action ${actionButton.className} ${isFreeCheckFold ? 'is-check-free' : ''} ${actionButton.key === turnPrompt?.primary ? 'is-primary' : ''}`}
                     data-action={actionButton.key}
                     disabled={isTrayReconnecting}
                     aria-keyshortcuts={shortcut}
