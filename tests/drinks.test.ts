@@ -197,31 +197,14 @@ describe('sober tax', () => {
     expect(hungover.soberHands).toBe(0)
   })
 
-  it('starts after one sober hand at 1 SB and grows +0.5 SB per hand', () => {
-    const tax = (soberHands: number, stack = 10_000) => computeSoberTax({ soberHands, stack, ...blinds })
-    expect(tax(0)).toBe(0)
-    expect(tax(1)).toBe(10)
-    expect(tax(2)).toBe(15)
-    expect(tax(3)).toBe(20)
-    expect(tax(4)).toBe(25)
-    expect(tax(5)).toBe(30)
-  })
-
-  it('caps at 3 big blinds and 10% of the stack, and never puts anyone all-in', () => {
-    const tax = (soberHands: number, stack: number) => computeSoberTax({ soberHands, stack, ...blinds })
-    expect(tax(40, 100_000)).toBe(60)
-    expect(tax(40, 300)).toBe(30)
-    expect(tax(1, 50)).toBe(5)
-    // Rounds to nothing: skipped.
-    expect(tax(1, 9)).toBe(0)
-    expect(computeSoberTax({ soberHands: 1, stack: 1, smallBlind: 10, bigBlind: 20 })).toBe(0)
-  })
-
-  it('projects the next tax for the warning', () => {
-    const drinks = { ...createEmptyDrinkState(), level: 0.5, soberHands: 0 }
-    expect(projectNextSoberTax(drinks, { ...blinds, stack: 1000, dealtIn: true })).toBe(10)
-    expect(projectNextSoberTax(drinks, { ...blinds, stack: 1000, dealtIn: false })).toBe(0)
-    expect(projectNextSoberTax({ ...drinks, level: 3 }, { ...blinds, stack: 1000, dealtIn: true })).toBe(0)
+  // Owner: being sober must never cost chips. The tax is switched off.
+  it('never charges a sober tax while sober penalties are off', () => {
+    expect(BUZZ.soberPenaltiesEnabled).toBe(false)
+    for (const soberHands of [0, 1, 2, 5, 40]) {
+      expect(computeSoberTax({ soberHands, stack: 10_000, ...blinds })).toBe(0)
+    }
+    const drinks = { ...createEmptyDrinkState(), level: 0, soberHands: 9 }
+    expect(projectNextSoberTax(drinks, { ...blinds, stack: 1000, dealtIn: true })).toBe(0)
   })
 })
 
@@ -378,24 +361,25 @@ describe('drunk vision profile', () => {
     })
   })
 
-  it('starts misreading cards and blurring at level 3', () => {
-    expect(getDrunkEffectProfile(2).hallucinationChance).toBe(0)
-    expect(getDrunkEffectProfile(2).blurPx).toBe(0)
-    const tipsy = getDrunkEffectProfile(3)
-    expect(tipsy.tier).toBe('tipsy')
-    expect(tipsy.hallucinationChance).toBeGreaterThan(0)
-    expect(tipsy.blurPx).toBeGreaterThan(0)
+  it('keeps normal vision below buzz 6, then blurs and misreads from 7', () => {
+    for (const level of [0, 1, 2, 3, 4, 5, 5.5]) {
+      expect(getDrunkEffectProfile(level)).toMatchObject({ tier: 'sober', blurPx: 0, ghostPx: 0, swayDeg: 0, hallucinationChance: 0 })
+    }
+    expect(getDrunkEffectProfile(6).blurPx).toBe(0)
+    const drunk = getDrunkEffectProfile(7)
+    expect(drunk.hallucinationChance).toBeGreaterThan(0)
+    expect(drunk.blurPx).toBeGreaterThan(0)
   })
 
-  it('gets strictly worse as the level rises and adds hiccups from level 6', () => {
-    const levels = [3, 4, 5, 6, 7, 8, 9].map(level => getDrunkEffectProfile(level))
+  it('gets strictly worse from 7 to 9 and adds hiccups from level 8', () => {
+    const levels = [7, 8, 9].map(level => getDrunkEffectProfile(level))
     for (let index = 1; index < levels.length; index += 1) {
       expect(levels[index]!.blurPx).toBeGreaterThan(levels[index - 1]!.blurPx)
       expect(levels[index]!.ghostPx).toBeGreaterThan(levels[index - 1]!.ghostPx)
       expect(levels[index]!.pulseSeconds).toBeLessThanOrEqual(levels[index - 1]!.pulseSeconds)
     }
-    expect(getDrunkEffectProfile(5).hiccups).toBe(false)
-    expect(getDrunkEffectProfile(6)).toMatchObject({ hiccups: true, wobblyButtons: true })
+    expect(getDrunkEffectProfile(7).hiccups).toBe(false)
+    expect(getDrunkEffectProfile(8)).toMatchObject({ hiccups: true, wobblyButtons: true })
     expect(getDrunkEffectProfile(9).hallucinationChance).toBeLessThanOrEqual(0.8)
     expect(getDrunkEffectProfile(10, true).tier).toBe('out')
   })

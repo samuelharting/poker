@@ -8,7 +8,7 @@ import type {
   PlayerAvatarJacketStyle,
 } from '@/lib/profile'
 import type { SocialSnapshot } from '@/shared/protocol'
-import { isSober, normalizeDrinkState } from '@/lib/drinks'
+import { BUZZ, isSober, normalizeDrinkState } from '@/lib/drinks'
 
 import { REALISTIC_AVATAR_MODEL_KEYS, type RealisticAvatarModelKey } from './avatarModelCatalog'
 
@@ -129,7 +129,7 @@ export function toThreePlayerDrinks(
 
   const drinks = normalizeDrinkState(raw)
   const designatedDriver = Boolean(
-    economy.drinkCapable && economy.funMode !== false && isSober(drinks.level) && !drinks.passedOut && !drinks.hungover
+    BUZZ.soberPenaltiesEnabled && economy.drinkCapable && economy.funMode !== false && isSober(drinks.level) && !drinks.passedOut && !drinks.hungover
   )
   return {
     level: drinks.level,

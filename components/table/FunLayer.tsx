@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { isSober, normalizeDrinkState, projectNextSoberTax } from '@/lib/drinks'
+import { BUZZ, isSober, normalizeDrinkState, projectNextSoberTax } from '@/lib/drinks'
 import {
   describeMushroomEvent,
   MUSHROOM_AUTO_SPIKE_MS,
@@ -95,7 +95,7 @@ export function FunLayer({ tableState, yourId, privateMushroom, mushroomEvents, 
     const root = document.documentElement
     setFlag(root, 'funBlackout', myDrinks.passedOut && funOn ? 'on' : null)
     setFlag(root, 'funHangover', myDrinks.hungover && !myDrinks.passedOut && funOn ? 'on' : null)
-    setFlag(root, 'funSober', funOn && capable && me && isSober(myDrinks.level) && !myDrinks.passedOut && !myDrinks.hungover && !tripping ? 'on' : null)
+    setFlag(root, 'funSober', BUZZ.soberPenaltiesEnabled && funOn && capable && me && isSober(myDrinks.level) && !myDrinks.passedOut && !myDrinks.hungover && !tripping ? 'on' : null)
     setFlag(root, 'funTrip', tripping ? 'on' : draining ? 'ending' : null)
     setFlag(root, 'funMyTurn', isMyTurn ? 'on' : null)
   }, [capable, draining, funOn, isMyTurn, me, myDrinks.hungover, myDrinks.level, myDrinks.passedOut, tripping])

@@ -45,8 +45,15 @@ export type DrinkKind = 'beer' | 'water'
 /** Every tunable number of the buzz economy in one place. */
 export const BUZZ = {
   max: 10,
-  /** Everyone sits down with a buzz in the sweet spot: about 6 hands before the first beer is due. */
-  startLevel: 4,
+  /** Everyone sits down sober and clear-eyed; drinking is optional fun. */
+  startLevel: 0,
+  /**
+   * Drinking is a side game, not part of the poker: being sober never costs
+   * chips (no sober tax, no DD tag or nagging). Flip on to bring the tax back.
+   */
+  soberPenaltiesEnabled: false,
+  /** Your own vision stays normal below this buzz; effects build from here up. */
+  visionStartLevel: 6,
   blackoutLevel: 10,
   sweetSpotMin: 3,
   sweetSpotMax: 6,
@@ -677,6 +684,7 @@ export interface SoberTaxInput {
  * 3 BB and at 10% of their stack, whole chips only, and never their last chip.
  */
 export function computeSoberTax({ soberHands, smallBlind, bigBlind, stack }: SoberTaxInput): number {
+  if (!BUZZ.soberPenaltiesEnabled) return 0
   if (soberHands < BUZZ.soberTaxAfterHands || stack <= 0 || smallBlind <= 0) return 0
   const taxedHand = soberHands - BUZZ.soberTaxAfterHands
   const smallBlinds = BUZZ.soberTaxStartSmallBlinds + BUZZ.soberTaxStepSmallBlinds * taxedHand
@@ -833,9 +841,17 @@ export function getDrunkTier(level: number, passedOut = false): DrunkTier {
 
 export function getDrunkEffectProfile(rawLevel: number, passedOut = false): DrunkEffectProfile {
   const level = clampLevel(rawLevel)
+  // Normal play looks normal: no screen effects until you're properly drunk.
+  if (!passedOut && level < BUZZ.visionStartLevel) {
+    return {
+      tier: 'sober', level, blurPx: 0, ghostPx: 0, swayDeg: 0, swayPx: 0, pulseSeconds: 0,
+      tint: 0, hallucinationChance: 0, hiccups: false, wobblyButtons: false,
+    }
+  }
   const tier = getDrunkTier(level, passedOut)
-  const blurry = level >= 3
-  const steps = Math.max(0, level - 3)
+  // 6 is a gentle buzz on screen; blur, sway and misreads build from 7 to 9.
+  const blurry = level >= BUZZ.visionStartLevel + 1
+  const steps = Math.max(0, level - BUZZ.visionStartLevel)
 
   return {
     tier,
@@ -847,8 +863,8 @@ export function getDrunkEffectProfile(rawLevel: number, passedOut = false): Drun
     pulseSeconds: level > 0 ? round(Math.max(3.4, 9.5 - level * 0.65)) : 0,
     tint: round(Math.min(1, level / DRUNK_LEVEL_MAX)),
     hallucinationChance: blurry ? round(Math.min(0.8, 0.32 + steps * 0.08)) : 0,
-    hiccups: level >= 6,
-    wobblyButtons: level >= 6,
+    hiccups: level >= 8,
+    wobblyButtons: level >= 8,
   }
 }
 

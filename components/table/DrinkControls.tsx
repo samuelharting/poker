@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, type CSSProperties } from 'react'
-import { BUZZ, CHASER_WINDOW_MS, DRINK_COOLDOWN_MS, DRUNK_LEVEL_MAX, isInSweetSpot, isSober, type DrunkTier } from '@/lib/drinks'
+import { CHASER_WINDOW_MS, DRINK_COOLDOWN_MS, DRUNK_LEVEL_MAX, getDrunkTier, type DrunkTier } from '@/lib/drinks'
 import { useChaserSecondsLeft, useDrinks } from './DrinkContext'
 
 const CHASER_WINDOW_SECONDS = CHASER_WINDOW_MS / 1000
@@ -55,24 +55,12 @@ export function DrinkControls({
     return null
   }
 
-  const { myDrinks, profile, canOrder, order, lastOrderAt } = drinks
+  const { myDrinks, canOrder, order, lastOrderAt } = drinks
   const disabled = !canOrder || isCooling
   const beerUsed = myDrinks.beerReadyAtHand > handNumber
-  const sober = isSober(myDrinks.level) && !myDrinks.passedOut && !myDrinks.hungover
-  const sweet = isInSweetSpot(myDrinks.level) && !myDrinks.passedOut
-  const statusIcon = myDrinks.passedOut
-    ? '💤'
-    : myDrinks.hungover
-      ? '🤕'
-      : sober
-        ? '😐'
-        : sweet
-          ? '😄'
-          : myDrinks.level > BUZZ.sweetSpotMax
-            ? '🥴'
-            : '🙂'
-  const afterWater = Math.max(0, myDrinks.level - myDrinks.waterNextHand)
-  const tierLabel = TIER_LABELS[profile.tier]
+  // The meter shows your real buzz; screen effects (profile) only start at 6.
+  const buzzTier = getDrunkTier(myDrinks.level, myDrinks.passedOut)
+  const tierLabel = TIER_LABELS[buzzTier]
   const style = {
     '--drink-cooldown': `${DRINK_COOLDOWN_MS}ms`,
     '--drink-level': myDrinks.level,
@@ -91,7 +79,7 @@ export function DrinkControls({
   return (
     <div
       className={`drink-controls is-${variant} ${isCooling ? 'is-cooling' : ''}`}
-      data-tier={profile.tier}
+      data-tier={buzzTier}
       role="group"
       aria-label={`Drinks. You are ${tierLabel.toLowerCase()}, level ${myDrinks.level} of ${DRUNK_LEVEL_MAX}.`}
       style={style}
@@ -99,10 +87,9 @@ export function DrinkControls({
       <div className="drink-buttons">
         <button
           type="button"
-          className={`drink-button is-beer ${sober && !beerUsed ? 'is-nudge' : ''} ${beerUsed ? 'is-used' : ''}`}
+          className={`drink-button is-beer ${beerUsed ? 'is-used' : ''}`}
           onClick={() => order('beer')}
           disabled={disabled || beerUsed}
-          data-sober-nudge={sober && !beerUsed ? 'true' : undefined}
           aria-label={beerTitle}
           title={beerTitle}
         >
@@ -145,29 +132,18 @@ export function DrinkControls({
         )}
       </div>
 
-      {/* The buzz meter: pictures only. The band marks the sweet spot. */}
-      <div
-        className="buzz-meter"
-        data-zone={myDrinks.passedOut ? 'out' : sober ? 'sober' : sweet ? 'sweet' : myDrinks.level > BUZZ.sweetSpotMax ? 'high' : 'low'}
-        role="meter"
-        aria-label={`Buzz ${Math.round(myDrinks.level)} of ${DRUNK_LEVEL_MAX}. Sweet spot ${BUZZ.sweetSpotMin} to ${BUZZ.sweetSpotMax}.`}
-        aria-valuemin={0}
-        aria-valuemax={DRUNK_LEVEL_MAX}
-        aria-valuenow={Math.round(myDrinks.level)}
-        style={{
-          '--buzz': Math.min(1, myDrinks.level / DRUNK_LEVEL_MAX),
-          '--buzz-after-water': Math.min(1, afterWater / DRUNK_LEVEL_MAX),
-          '--sweet-from': BUZZ.sweetSpotMin / DRUNK_LEVEL_MAX,
-          '--sweet-to': BUZZ.sweetSpotMax / DRUNK_LEVEL_MAX,
-        } as CSSProperties}
-      >
-        <span className="buzz-meter-icon" aria-hidden="true">{statusIcon}</span>
-        <span className="buzz-meter-track" aria-hidden="true">
-          <span className="buzz-meter-sweet" />
-          <span className="buzz-meter-fill" />
-          {myDrinks.waterNextHand > 0 && <span className="buzz-meter-water" title="Water lands next hand">💧</span>}
+      {/* The classic dot meter: one pip per buzz level. */}
+      <div className="drink-meter" aria-hidden="true">
+        <span className="drink-meter-label">{tierLabel}</span>
+        <span className="drink-meter-pips">
+          {Array.from({ length: DRUNK_LEVEL_MAX }, (_, index) => (
+            <i
+              key={index}
+              className={index + 1 <= myDrinks.level ? 'is-full' : index < myDrinks.level ? 'is-half' : ''}
+            />
+          ))}
         </span>
-        <b className="buzz-meter-value" aria-hidden="true">{Math.round(myDrinks.level)}</b>
+        {myDrinks.waterNextHand > 0 && <span className="drink-meter-water" title="Water lands next hand">💧</span>}
       </div>
 
     </div>

@@ -963,3 +963,14 @@
   from { opacity: 1; }
   to { opacity: 0; }
 }
+
+/* Classic dot meter: half pips and a pending-water marker */
+.drink-meter-pips i.is-half {
+  background: linear-gradient(90deg, var(--c-brass-400) 50%, transparent 50%);
+}
+
+.drink-meter-water {
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.85;
+}

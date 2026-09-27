@@ -328,44 +328,23 @@ describe('PokerRoom sober tax', () => {
     return table.players.reduce((sum, player) => sum + player.stack + (table.phase === 'in_hand' ? player.totalInPot : 0), 0)
   }
 
-  it('taxes a drink-capable player after one sober hand, escalating, visible to everyone, chips conserved', () => {
+  it('never taxes a sober player: being sober costs no chips', () => {
     vi.useFakeTimers()
-    const { server, join } = createTable()
+    const { join } = createTable()
     const alice = join('alice', 'Alice', 0)
     const bob = join('bob', 'Bob', 1)
     alice.send({ type: 'set_drink_capable', capable: true })
-    // Bob keeps a buzz on.
-    setLevel(server, bob, 4)
+    bob.send({ type: 'set_drink_capable', capable: true })
 
-    alice.send({ type: 'start_game' })
-    expect(seatState(bob, alice.playerId)?.drinks?.soberTax).toBe(0)
-    foldHandOut(alice, bob)
-    expect(seatState(bob, alice.playerId)?.drinks?.soberHands).toBe(1)
-
-    const before = tableChips(bob)
-    alice.send({ type: 'start_game' })
-    expect(state(bob).handNumber).toBe(2)
-    const aliceSeat = seatState(bob, alice.playerId)!
-    expect(aliceSeat.drinks?.soberTax).toBe(10)
-    expect(aliceSeat.totalInPot).toBe(10 + (aliceSeat.isSB ? 10 : aliceSeat.isBB ? 20 : 0))
-    expect(state(bob).recentActions.some(line => line.includes('sober tax $10'))).toBe(true)
-    expect(tableChips(bob)).toBe(before)
-    // Bob has a buzz: never taxed.
-    expect(seatState(bob, bob.playerId)?.drinks?.soberTax).toBe(0)
-    foldHandOut(alice, bob)
-    expect(state(bob).handHistory?.[0]?.soberTax).toEqual([{ playerId: alice.playerId, nickname: 'Alice', amount: 10 }])
-
-    alice.send({ type: 'start_game' })
-    expect(seatState(bob, alice.playerId)?.drinks?.soberTax).toBe(15)
-    foldHandOut(alice, bob)
-
-    // A beer (back above 1) stops it from the next hand.
-    setLevel(server, alice, 1)
-    alice.send({ type: 'order_drink', kind: 'beer' })
-    expect(seatState(bob, alice.playerId)?.drinks?.soberHands).toBe(0)
-    alice.send({ type: 'start_game' })
-    expect(seatState(bob, alice.playerId)?.drinks?.soberTax).toBe(0)
-    expect(tableChips(bob)).toBe(2000)
+    for (let hand = 1; hand <= 4; hand += 1) {
+      alice.send({ type: 'start_game' })
+      const aliceSeat = seatState(bob, alice.playerId)!
+      expect(aliceSeat.drinks?.soberTax ?? 0).toBe(0)
+      expect(aliceSeat.totalInPot).toBe(aliceSeat.isSB ? 10 : aliceSeat.isBB ? 20 : 0)
+      expect(state(bob).recentActions.some(line => line.includes('sober tax'))).toBe(false)
+      foldHandOut(alice, bob)
+      expect(tableChips(bob)).toBe(2000)
+    }
     void stackOf
   })
 
@@ -403,13 +382,10 @@ describe('PokerRoom sober tax', () => {
 })
 
 describe('PokerRoom seated buzz', () => {
-  it('seats new players in the sweet spot so nobody is taxed on their first hands', async () => {
+  it('seats new players sober and clear-eyed', async () => {
     const { BUZZ, createSeatedDrinkLedgerEntry } = await import('@/lib/drinks')
-    expect(BUZZ.startLevel).toBeGreaterThanOrEqual(BUZZ.sweetSpotMin)
-    expect(BUZZ.startLevel).toBeLessThanOrEqual(BUZZ.sweetSpotMax)
-    expect(createSeatedDrinkLedgerEntry().level).toBe(BUZZ.startLevel)
-    // Hands of sobering before a player first reaches the sober line.
-    const graceHands = (BUZZ.startLevel - BUZZ.soberLevel) / BUZZ.soberingPerHand
-    expect(graceHands).toBeGreaterThanOrEqual(5)
+    expect(BUZZ.startLevel).toBe(0)
+    expect(createSeatedDrinkLedgerEntry().level).toBe(0)
+    expect(BUZZ.soberPenaltiesEnabled).toBe(false)
   })
 })

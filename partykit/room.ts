@@ -2337,6 +2337,7 @@ export default class PokerRoom implements PartyServer {
    * toward their stake in the pot, and never puts them all-in).
    */
   private postSoberTaxes() {
+    if (!BUZZ.soberPenaltiesEnabled) return
     const state = this.data.gameState
     if (state.phase !== 'in_hand') return
     let changed = false
