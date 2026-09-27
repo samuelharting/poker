@@ -204,6 +204,13 @@ export interface TableState {
   actionSequence?: number
   showdownAt?: number
   runItTwice?: RunItTwiceState
+  /** Betting is closed and the board is being dealt street by street (all-in runout). */
+  allInRunout?: AllInRunoutState
+  /**
+   * Broadcast-style win odds for the live hands this viewer may see: everyone
+   * once action is closed at an all-in, spectators on every street.
+   */
+  handOdds?: HandOddsSnapshot
   cardRevealRequests?: CardRevealRequest[]
   recentActions: string[]
   lobbyPlayers: LobbyPlayer[]
@@ -270,7 +277,38 @@ export interface InternalGameState {
   actionSequence?: number
   showdownAt?: number
   runItTwice?: RunItTwiceState
+  /**
+   * The room deals an all-in runout one street at a time (TV style) instead of
+   * all at once. Off by default so engine callers keep the instant runout.
+   */
+  pacedRunout?: boolean
+  allInRunout?: AllInRunoutState
   recentActions: string[]
   winners?: HandWinner[]
   bounty?: BountyMetadata
+}
+
+export interface AllInRunoutState {
+  /** Server ms timestamp when the next street (or the showdown) is dealt. */
+  nextStreetAt: number
+}
+
+export type HandOddsMode = 'all_in' | 'spectator'
+
+export interface HandOddsPlayer {
+  playerId: string
+  /** Chance to win the whole hand outright (ties excluded), 0-100. */
+  winPercent: number
+  /** Chance to split the best hand, 0-100. */
+  tiePercent: number
+}
+
+export interface HandOddsSnapshot {
+  mode: HandOddsMode
+  handNumber: number
+  /** Board cards the odds were computed for (0, 3, 4 or 5). */
+  boardCount: number
+  /** True when the figures come from enumerating every runout. */
+  exact: boolean
+  players: HandOddsPlayer[]
 }

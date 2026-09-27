@@ -446,6 +446,7 @@ export function startHand(state: InternalGameState): InternalGameState {
   s.bounty = undefined
   s.showdownAt = undefined
   s.runItTwice = undefined
+  s.allInRunout = undefined
   s.handNumber += 1
 
   // Reset all players
@@ -784,7 +785,85 @@ export function foldLeavingPlayer(
  * Deals community cards and resets bets.
  */
 export function advanceRound(state: InternalGameState): InternalGameState {
+  return advanceRoundStep(state, false)
+}
+
+/** How long each beat of a paced all-in runout holds before the next card. */
+export const ALL_IN_RUNOUT_TABLED_MS = 1_900
+/** After a run-it-twice vote the hands have already been on their backs a while. */
+export const ALL_IN_RUNOUT_AFTER_VOTE_MS = 900
+export const ALL_IN_RUNOUT_FLOP_MS = 2_300
+export const ALL_IN_RUNOUT_TURN_MS = 2_300
+export const ALL_IN_RUNOUT_RIVER_MS = 1_700
+
+function getAllInRunoutHoldMs(round: BettingRound | null, justTabled: boolean, afterVote = false): number {
+  if (justTabled) return afterVote ? ALL_IN_RUNOUT_AFTER_VOTE_MS : ALL_IN_RUNOUT_TABLED_MS
+  if (round === 'flop') return ALL_IN_RUNOUT_FLOP_MS
+  if (round === 'turn') return ALL_IN_RUNOUT_TURN_MS
+  return ALL_IN_RUNOUT_RIVER_MS
+}
+
+function pauseForAllInRunout(s: InternalGameState, justTabled: boolean): InternalGameState {
+  s.allInRunout = {
+    nextStreetAt: Date.now() + getAllInRunoutHoldMs(s.round, justTabled, Boolean(s.runItTwice)),
+  }
+  s.actingPlayerId = null
+  s.actingPlayerIndex = -1
+  s.actionTimerStart = null
+  return s
+}
+
+type ClosableState = {
+  phase: InternalGameState['phase']
+  actingPlayerId: string | null
+  currentBet: number
+  runItTwice?: InternalGameState['runItTwice']
+  players: ReadonlyArray<Pick<InternalPlayer, 'status' | 'stack' | 'bet'> & { holeCards?: unknown[]; hasCards?: boolean }>
+}
+
+/**
+ * True once no more betting can happen this hand: at least two players are
+ * still live, nobody holds the action, and at most one live player could
+ * still bet (everyone else is all-in) with that player's bet already matched.
+ * From here the board only runs out, so the hands are tabled.
+ */
+export function isBettingClosed(state: ClosableState): boolean {
+  if (state.phase !== 'in_hand' || state.actingPlayerId) {
+    return false
+  }
+  if (state.runItTwice && state.runItTwice.status === 'accepted') {
+    return false
+  }
+  const live = state.players.filter(player => (
+    (player.status === 'active' || player.status === 'all_in') &&
+    (player.hasCards ?? (player.holeCards?.length ?? 0) > 0)
+  ))
+  if (live.length < 2) {
+    return false
+  }
+  const actionable = live.filter(player => player.status === 'active' && player.stack > 0)
+  if (actionable.length > 1) {
+    return false
+  }
+  return actionable.every(player => player.bet >= state.currentBet)
+}
+
+/**
+ * Deal the next street of a paced all-in runout (or resolve the showdown
+ * after the river). Returns the state unchanged when no runout is pending.
+ */
+export function advanceAllInRunout(state: InternalGameState): InternalGameState {
+  if (state.phase !== 'in_hand' || !state.allInRunout) {
+    return state
+  }
   const s = cloneState(state)
+  s.allInRunout = undefined
+  return advanceRoundStep(s, true)
+}
+
+function advanceRoundStep(state: InternalGameState, continuingRunout: boolean): InternalGameState {
+  const s = cloneState(state)
+  s.allInRunout = undefined
 
   // Collect bets into pots
   s.pots = buildSidePots(s.players)
@@ -807,6 +886,7 @@ export function advanceRound(state: InternalGameState): InternalGameState {
   // Pause a true heads-up all-in before dealing another street. The room owns
   // the vote and will only resume with two boards after both players consent.
   if (
+    !continuingRunout &&
     !s.runItTwice &&
     s.communityCards.length < 5 &&
     playersInHand.length === 2 &&
@@ -826,6 +906,18 @@ export function advanceRound(state: InternalGameState): InternalGameState {
     s.actionTimerStart = null
     addAction(s, 'Run it twice offered to both players')
     return s
+  }
+
+  // Betting just closed with a board still to come: table the hands and hold
+  // a beat before the next card so the table can see who is ahead.
+  if (
+    s.pacedRunout &&
+    !continuingRunout &&
+    s.round !== 'river' &&
+    actionable <= 1 &&
+    playersInHand.length >= 2
+  ) {
+    return pauseForAllInRunout(s, true)
   }
 
   switch (s.round) {
@@ -860,6 +952,9 @@ export function advanceRound(state: InternalGameState): InternalGameState {
 
   // If all remaining players are all-in, run out the board
   if (actionable <= 1 && playersInHand.length >= 2) {
+    if (s.pacedRunout) {
+      return pauseForAllInRunout(s, false)
+    }
     return advanceRound(s)
   }
 
@@ -916,6 +1011,7 @@ function awardLastPlayer(
   applyHandPayouts(s, winnerTotals, winnerDescriptions, winnerCards)
   addAction(s, `${winner.nickname} wins $${s.totalPot}`)
   applyRabbitHuntRunout(s)
+  s.allInRunout = undefined
   s.phase = 'between_hands'
   s.round = null
   s.actingPlayerId = null
@@ -1040,6 +1136,7 @@ function resolveRunItTwiceBoards(state: InternalGameState): InternalGameState {
     boards: resolvedBoards,
   }
   s.round = 'showdown'
+  s.allInRunout = undefined
   s.actingPlayerId = null
   s.actingPlayerIndex = -1
   s.actionTimerStart = null
@@ -1231,6 +1328,7 @@ export function prepareNextHand(state: InternalGameState): InternalGameState {
   s.winners = undefined
   s.showdownAt = undefined
   s.runItTwice = undefined
+  s.allInRunout = undefined
   s.actingPlayerId = null
   s.actingPlayerIndex = -1
 
@@ -1293,12 +1391,21 @@ export function toTableState(
     )
   )
 
+  // Standard all-in etiquette: once betting is closed every live hand is
+  // tabled for the whole table (players and spectators alike).
+  const isTabledRunout = isBettingClosed(state)
+  const isTabledHand = (player: InternalPlayer): boolean => (
+    isTabledRunout &&
+    player.holeCards.length === 2 &&
+    (player.status === 'active' || player.status === 'all_in')
+  )
+
   const revealCards = (player: InternalPlayer): Card[] | undefined => {
     if (player.holeCards.length === 0) {
       return undefined
     }
 
-    if (isShowdownParticipant(player)) {
+    if (isShowdownParticipant(player) || isTabledHand(player)) {
       return player.holeCards
     }
 
@@ -1331,7 +1438,8 @@ export function toTableState(
     }
 
     if (
-      isShowdownParticipant(player)
+      isShowdownParticipant(player) ||
+      isTabledHand(player)
     ) {
       return 'both'
     }
@@ -1403,6 +1511,7 @@ export function toTableState(
     actionSequence: state.actionSequence ?? 0,
     showdownAt: state.showdownAt,
     runItTwice: state.runItTwice,
+    ...(state.phase === 'in_hand' && state.allInRunout ? { allInRunout: state.allInRunout } : {}),
     recentActions: state.recentActions,
     lobbyPlayers: [],
     winners: publicWinners,

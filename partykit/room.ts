@@ -15,8 +15,10 @@ import type { CardRevealRequest, HandHistoryEntry, InternalGameState, InternalPl
 import { buildHandHistoryEntry, upsertHandHistory } from '../lib/poker/handHistory'
 import { normalizePlayerUsername, type PlayerAvatarCustomization } from '../lib/profile'
 import {
+  advanceAllInRunout,
   createInitialGameState,
   foldLeavingPlayer,
+  isBettingClosed,
   processAction,
   resolveRunItTwiceDecision,
   runRabbitHunt,
@@ -312,6 +314,13 @@ export default class PokerRoom implements PartyServer {
   private botActionPlayerId: string | null = null
   private runItTwiceTimeout: ReturnType<typeof setTimeout> | null = null
   private runItTwiceDeadline: number | null = null
+  private allInRunoutTimeout: ReturnType<typeof setTimeout> | null = null
+  private allInRunoutDeadline: number | null = null
+  /**
+   * Deal all-in runouts street by street (TV style) so everyone watches the
+   * odds move. Tests that want the old instant runout can switch it off.
+   */
+  allInRunoutPacing = true
   private hostTransferTimeout: ReturnType<typeof setTimeout> | null = null
   private revealSettleTimeout: ReturnType<typeof setTimeout> | null = null
   private disconnectedHostId: string | null = null
@@ -557,6 +566,17 @@ export default class PokerRoom implements PartyServer {
       }
 
       this.expireRunItTwiceVote()
+      return
+    }
+
+    if (gameState.phase === 'in_hand' && gameState.allInRunout) {
+      const remainingMs = gameState.allInRunout.nextStreetAt - Date.now()
+      if (remainingMs > 25) {
+        void this.room.storage.setAlarm(gameState.allInRunout.nextStreetAt)
+        return
+      }
+
+      this.dealNextAllInStreet()
       return
     }
 
@@ -925,7 +945,7 @@ export default class PokerRoom implements PartyServer {
     try {
       this.clearAutoStart()
       this.data.cardRevealRequests = {}
-      this.data.gameState = startHand(this.data.gameState)
+      this.data.gameState = startHand({ ...this.data.gameState, pacedRunout: this.allInRunoutPacing })
       this.recordDealtIn()
       this.recordHandsPlayedForCurrentHand()
       this.wakeRestedDrinkers()
@@ -3348,9 +3368,20 @@ export default class PokerRoom implements PartyServer {
     const isSpectatorViewer = Boolean(
       playerId && (this.data.spectatorIds[playerId] || this.data.pendingSpectators[playerId])
     )
-    const spectatorCanSeeLiveHands = (
-      isSpectatorViewer && this.data.gameState.phase === 'in_hand'
+    // A spectator is never live in this hand; the extra check is a guard so a
+    // half-moved player can never see opponents' cards while holding their own.
+    const viewerSeat = playerId ? this.getPlayer(playerId) : undefined
+    const viewerIsLiveInHand = Boolean(
+      viewerSeat &&
+      viewerSeat.holeCards.length > 0 &&
+      (viewerSeat.status === 'active' || viewerSeat.status === 'all_in')
     )
+    const spectatorCanSeeLiveHands = (
+      isSpectatorViewer &&
+      !viewerIsLiveInHand &&
+      this.data.gameState.phase === 'in_hand'
+    )
+    const bettingClosed = isBettingClosed(this.data.gameState)
     const isCardRevealWindow = this.data.gameState.phase === 'in_hand' || (
       this.data.gameState.phase === 'between_hands' && Boolean(this.data.gameState.winners?.length)
     )
@@ -3365,8 +3396,12 @@ export default class PokerRoom implements PartyServer {
       : currentCardRevealRequests
           .filter(request => request.requesterId === playerId && request.status === 'approved')
           .map(request => request.targetId)
+    // Broadcast odds: everyone once the all-in is tabled, spectators always.
+    // The odds are cached per (board, hands, pots), so every viewer of the
+    // same street shares one computation.
     const publicState = withVisibleHandOdds(
-      toTableState(this.data.gameState, playerId, { permittedHoleCardPlayerIds })
+      toTableState(this.data.gameState, playerId, { permittedHoleCardPlayerIds }),
+      { oddsMode: bettingClosed ? 'all_in' : spectatorCanSeeLiveHands ? 'spectator' : undefined }
     )
     const winners = publicState.winners?.map(winner => ({
       ...winner,
@@ -3819,6 +3854,7 @@ export default class PokerRoom implements PartyServer {
   private broadcastState() {
     this.finalizeState()
     this.syncRunItTwiceVote()
+    this.syncAllInRunout()
     this.deliverQueuedShots()
     this.syncPendingBlackouts()
     this.syncTrips()
@@ -4026,6 +4062,55 @@ export default class PokerRoom implements PartyServer {
     }
   }
 
+  /** Keep one timer armed for the next street of a paced all-in runout. */
+  private syncAllInRunout() {
+    const state = this.data.gameState
+    const runout = state.phase === 'in_hand' ? state.allInRunout : undefined
+    if (!runout) {
+      this.clearAllInRunoutTimeout()
+      return
+    }
+
+    if (this.allInRunoutTimeout && this.allInRunoutDeadline === runout.nextStreetAt) {
+      return
+    }
+
+    this.clearAllInRunoutTimeout()
+    this.allInRunoutDeadline = runout.nextStreetAt
+    void this.room.storage.setAlarm(runout.nextStreetAt)
+    this.allInRunoutTimeout = setTimeout(() => {
+      this.allInRunoutTimeout = null
+      this.allInRunoutDeadline = null
+      this.dealNextAllInStreet()
+    }, Math.max(0, runout.nextStreetAt - Date.now()))
+  }
+
+  private dealNextAllInStreet() {
+    const state = this.data.gameState
+    if (state.phase !== 'in_hand' || !state.allInRunout) {
+      return
+    }
+
+    try {
+      this.data.gameState = advanceAllInRunout(state)
+      this.recordCompletedHandStats()
+      this.finalizeState()
+      this.syncActionTimer()
+      this.broadcastState()
+    } catch {
+      this.finalizeState()
+    }
+  }
+
+  private clearAllInRunoutTimeout() {
+    if (this.allInRunoutTimeout) {
+      clearTimeout(this.allInRunoutTimeout)
+    }
+
+    this.allInRunoutTimeout = null
+    this.allInRunoutDeadline = null
+  }
+
   private clearRunItTwiceVoteTimeout() {
     if (this.runItTwiceTimeout) {
       clearTimeout(this.runItTwiceTimeout)
@@ -4148,7 +4233,7 @@ export default class PokerRoom implements PartyServer {
           return
         }
         this.data.cardRevealRequests = {}
-        this.data.gameState = startHand(this.data.gameState)
+        this.data.gameState = startHand({ ...this.data.gameState, pacedRunout: this.allInRunoutPacing })
         this.recordDealtIn()
         this.recordHandsPlayedForCurrentHand()
         this.wakeRestedDrinkers()

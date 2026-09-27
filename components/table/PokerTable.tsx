@@ -28,6 +28,8 @@ import { SearchableEmojiPicker } from '@/components/ui/SearchableEmojiPicker'
 import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
 import { evaluateHand } from '@/lib/poker/evaluator'
 import { getShowdownRevealMode, isTrueShowdown } from '@/lib/poker/showdown'
+import { getHandOddsView, type SeatOddsView } from '@/lib/poker/handOddsView'
+import { HandOddsPanel, OddsPill } from '@/components/table/HandOdds'
 import { TWO_D_LAYOUT_QUERY, useMediaQuery } from '@/lib/layoutMode'
 import type { PokerSoundCueKind } from '@/lib/poker/soundscape'
 import {
@@ -558,6 +560,7 @@ function MobileEdgeSeat({
   winningCards = [],
   cardRevealControl,
   onNameClick,
+  odds,
 }: {
   player: OpponentSeat
   visualSeat: number
@@ -570,6 +573,7 @@ function MobileEdgeSeat({
   winningCards?: Card[]
   cardRevealControl?: React.ReactNode
   onNameClick?: (playerId: string) => void
+  odds?: SeatOddsView
 }) {
   const isFolded = player.status === 'folded'
   const isDisconnected = player.status === 'disconnected' || !player.isConnected
@@ -636,6 +640,7 @@ function MobileEdgeSeat({
           data-player-target-trigger="seat"
         />
       )}
+      {odds && <OddsPill odds={odds} playerName={player.nickname} className="mobile-seat-odds" />}
       <div className="mobile-seat-puck">
         {isActing && <span className="mobile-seat-ring" aria-hidden="true" />}
         <div className="mobile-seat-avatar" aria-hidden="true">
@@ -726,12 +731,14 @@ function MobileHeroSeat({
   isActing,
   isWinner,
   status,
+  odds,
 }: {
   player: SeatPlayer
   displayStack: number
   isActing: boolean
   isWinner: boolean
   status: string
+  odds?: SeatOddsView
 }) {
   const blindRole = player.isBB ? 'big' : player.isSB ? 'small' : null
 
@@ -740,6 +747,7 @@ function MobileHeroSeat({
       className={`mobile-hero-seat ${isActing ? 'is-acting' : ''} ${isWinner ? 'is-winner' : ''}`}
       data-tone={getSeatTone(player)}
     >
+      {odds && <OddsPill odds={odds} playerName="You" className="mobile-seat-odds mobile-hero-odds" />}
       <div className="mobile-hero-avatar" aria-hidden="true">
         {getSeatInitials(player.nickname)}
       </div>
@@ -1234,8 +1242,32 @@ export function PokerTable({
       .filter(request => request.requesterId === yourId && request.status === 'approved')
       .map(request => request.targetId)
   ), [state.cardRevealRequests, yourId])
+  // Betting closed at an all-in: the server tables every live hand for the
+  // whole table, so nothing is hidden client side.
+  const isTabledRunout = state.phase === 'in_hand' && (
+    state.handOdds?.mode === 'all_in' || Boolean(state.allInRunout)
+  )
+  const handOddsView = useMemo(() => getHandOddsView(state), [state])
+  const playerNamesById = useMemo(
+    () => new Map(state.players.map(player => [player.id, player.nickname])),
+    [state.players]
+  )
+  // Hands that were tabled during this hand's runout stay face up through the
+  // showdown instead of flipping back over for the reveal.
+  const tabledHandsRef = useRef<{ handNumber: number; ids: Set<string> }>({ handNumber: -1, ids: new Set() })
+  if (tabledHandsRef.current.handNumber !== state.handNumber) {
+    tabledHandsRef.current = { handNumber: state.handNumber, ids: new Set() }
+  }
+  if (isTabledRunout) {
+    for (const player of state.players) {
+      if ((player.holeCards?.length ?? 0) === 2 && player.showCards === 'both') {
+        tabledHandsRef.current.ids.add(player.id)
+      }
+    }
+  }
+  const tabledHandIds = tabledHandsRef.current.ids
   const privacyProtectedPlayers = useMemo(() => {
-    if (state.phase !== 'in_hand' || isSpectatorViewer) {
+    if (state.phase !== 'in_hand' || isSpectatorViewer || isTabledRunout) {
       return state.players
     }
 
@@ -1248,7 +1280,7 @@ export function PokerTable({
         ? { ...player, holeCards: undefined, showCards: 'none' as const }
         : player
     })
-  }, [isSpectatorViewer, liveCardRevealTargetIds, state.phase, state.players, yourId])
+  }, [isSpectatorViewer, isTabledRunout, liveCardRevealTargetIds, state.phase, state.players, yourId])
   const showWinnerHighlights = !showdownPresentation.isShowdown || showdownPresentation.winningHandHighlighted
   const showWinnerPayout = !showdownPresentation.isShowdown || showdownPresentation.payoutStarted
   const showWinnerResults = !showdownPresentation.isShowdown || showdownPresentation.resultsVisible
@@ -1265,7 +1297,7 @@ export function PokerTable({
     return privacyProtectedPlayers.map(player => {
       // Keep the local player's already-known hand in place. Every other live
       // hand flips at its existing seat according to the shared timeline.
-      if (player.id === yourId) {
+      if (player.id === yourId || tabledHandIds.has(player.id)) {
         return player
       }
 
@@ -1274,7 +1306,7 @@ export function PokerTable({
         ? player
         : { ...player, showCards: revealMode }
     })
-  }, [privacyProtectedPlayers, showdownPresentation, yourId])
+  }, [privacyProtectedPlayers, showdownPresentation, tabledHandIds, yourId])
   const showdownPresentedState = useMemo(
     () => showdownPresentedPlayers === state.players && presentedCompanion === state.companion
       ? state
@@ -1346,7 +1378,7 @@ export function PokerTable({
   const isSpectator = isSpectatorViewer
   const isCompletedHandReveal = state.phase === 'between_hands' && Boolean(state.winners?.length)
   const isFoldedViewer = me?.status === 'folded' && (isInHand || isCompletedHandReveal)
-  const canShowRevealedCards = isSpectator || hasCompletedHandWinner
+  const canShowRevealedCards = isSpectator || hasCompletedHandWinner || isTabledRunout
   const canAdjustShownCards = Boolean(me?.holeCards?.length) && hasCompletedHandWinner
   const cardRevealRequests = state.cardRevealRequests ?? []
   const pendingIncomingCardRequest = cardRevealRequests.find(request => (
@@ -2436,6 +2468,11 @@ export function PokerTable({
         />
       ) : null}
       {!isMobileViewport && showdownCinematic}
+      {!isMobileViewport && handOddsView && !settingsOpen ? (
+        <div className="hand-odds-dock">
+          <HandOddsPanel view={handOddsView} names={playerNamesById} yourId={yourId} />
+        </div>
+      ) : null}
       <CompanionMuteButton companion={presentedCompanion} yourId={yourId} hidden={isMobileViewport} />
       {!isMobileViewport && <BountyToast bounty={presentedBounty} players={state.players} />}
       {/* Both layouts: the desktop 3D room stays mounted through a socket drop. */}
@@ -2526,6 +2563,7 @@ export function PokerTable({
                         />
                       ) : null}
                       onNameClick={handleSelectEmoteTarget}
+                      odds={handOddsView?.byPlayer.get(player.id)}
                     />
                     <CompanionBadge companion={presentedCompanion} playerId={player.id} />
                     {(seatSocial.message || seatSocial.emote) && (
@@ -2612,6 +2650,7 @@ export function PokerTable({
                   isActing={isMyTurn}
                   isWinner={betweenHands && showWinnerHighlights && myWinnerAmount > 0}
                   status={mobileHeroStatus}
+                  odds={handOddsView?.byPlayer.get(visibleOwnPlayer.id)}
                 />
                 <CompanionBadge companion={presentedCompanion} playerId={visibleOwnPlayer.id} placement="hero" canMute />
 
@@ -2624,7 +2663,7 @@ export function PokerTable({
                   handDescription={hasVisibleRabbitRunout ? null : ownHandDescription}
                   showCardsMode={ownShowCardsMode}
                   revealChoiceActive={canAdjustShownCards && !heroWentToShowdown}
-                  concealed={isInHand}
+                  concealed={isInHand && !isTabledRunout}
                   onPeekChange={onPeekCards}
                   onSoundCue={onSoundCue}
                   socialMessage={heroSocial.message}
@@ -2827,7 +2866,7 @@ export function PokerTable({
                 handDescription={ownHandDescription}
                 showCardsMode={ownShowCardsMode}
                 revealChoiceActive={canAdjustShownCards}
-                concealed={isInHand}
+                concealed={isInHand && !isTabledRunout}
                 onPeekChange={onPeekCards}
                 onSoundCue={onSoundCue}
                 socialMessage={heroSocial.message}
@@ -2854,7 +2893,7 @@ export function PokerTable({
         {!isMobileViewport && me && !isSpectator && (
           <div className="hero-inline-status">
             <span className="table-chip table-chip-soft">{formatAmount(getDisplayStack(me))}</span>
-            {typeof me.equityPercent === 'number' && (
+            {typeof me.equityPercent === 'number' && !handOddsView && (
               <span className="table-chip table-chip-soft">
                 Eq {formatEquityPercent(me.equityPercent)}
               </span>

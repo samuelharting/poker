@@ -9,6 +9,7 @@ import type {
 } from '@/lib/profile'
 import type { SocialSnapshot } from '@/shared/protocol'
 import { BUZZ, isSober, normalizeDrinkState } from '@/lib/drinks'
+import { getHandOddsView, type SeatOddsView } from '@/lib/poker/handOddsView'
 
 import { REALISTIC_AVATAR_MODEL_KEYS, type RealisticAvatarModelKey } from './avatarModelCatalog'
 
@@ -90,6 +91,8 @@ export interface ThreePlayerView {
   shotsWaiting: number
   /** Privately looking at their hole cards right now (drives the 3D peek animation). */
   isPeeking: boolean
+  /** Broadcast win odds (tabled all-in, or any street for spectators). */
+  odds?: SeatOddsView
 }
 
 /** Per-player drink state for avatar animations (drinking, swaying, passed out). */
@@ -349,6 +352,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
   const winnersByPlayerId = new Map(
     (state.winners ?? []).map(winner => [winner.playerId, winner])
   )
+  const oddsView = getHandOddsView(state)
   const visualSeatByRelative = spreadVisualSeats(
     state.players.map(player => getVisualSeat(player.seatIndex, heroSeatIndex))
   )
@@ -410,6 +414,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
 
         shotsWaiting: normalizeDrinkState(player.drinks).shotsWaiting,
         isPeeking: Boolean(player.isPeeking) && player.hasCards && !isOutOfHand,
+        ...(oddsView?.byPlayer.get(player.id) ? { odds: oddsView.byPlayer.get(player.id) } : {}),
       }
     })
     .sort((a, b) => a.visualSeat - b.visualSeat)

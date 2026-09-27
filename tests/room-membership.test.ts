@@ -311,6 +311,7 @@ describe('kicking players', () => {
   })
 
   it('settles a run-it-twice vote with one board when a voter is kicked', () => {
+    vi.useFakeTimers()
     const table = setupTable(['Ann', 'Ben', 'Cat'])
     const internals = internalsOf(table)
     const [ann, ben, cat] = table.players
@@ -327,6 +328,9 @@ describe('kicking players', () => {
 
     send(table.server, ann!.connection, { type: 'remove_player', targetId: ben!.playerId })
     expect(internals.data.gameState.runItTwice?.status).not.toBe('voting')
+    // One board is then dealt street by street.
+    expect(internals.data.gameState.allInRunout).toBeDefined()
+    vi.advanceTimersByTime(10_000)
     expect(internals.data.gameState.phase).toBe('between_hands')
     expect(allChips(internals)).toBe(chipsBefore)
   })

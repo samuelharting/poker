@@ -1,0 +1,255 @@
+/*
+ * Broadcast odds (all-in runouts for everyone, every street for spectators):
+ * a "72%" pill on each live nameplate / seat chip, and a TV lower-third panel
+ * listing every live hand. Numbers count between streets; bars glide.
+ */
+
+.odds-pill {
+  --odds-pct: 0%;
+  --odds-fill: rgba(236, 231, 219, 0.28);
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 20px;
+  padding: 0 7px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: rgba(8, 10, 14, 0.78);
+  color: var(--c-text-1);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  animation: odds-pill-in var(--dur-slow, 320ms) var(--ease-pop, ease-out) both;
+}
+
+.odds-pill-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--odds-pct);
+  background: var(--odds-fill);
+  transition: background-color var(--dur-base, 200ms) var(--ease-out, ease-out);
+}
+
+.odds-pill-value {
+  position: relative;
+}
+
+.odds-pill.is-leader {
+  --odds-fill: linear-gradient(90deg, rgba(212, 175, 55, 0.55), rgba(240, 210, 120, 0.75));
+  border-color: var(--line-brass);
+  box-shadow: 0 0 12px rgba(212, 175, 55, 0.35);
+}
+
+.odds-pill.is-dead {
+  color: var(--c-text-3);
+  opacity: 0.75;
+}
+
+@keyframes odds-pill-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.9); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Desktop 3D nameplate: the pill rides at the end of the name line, and the
+   plate widens a little so the name is not squeezed out by it. */
+.desktop-3d-stage .cinematic-seat .cinematic-odds-pill {
+  margin-left: auto;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-seat-panel:has(.cinematic-odds-pill) {
+  max-width: 236px;
+}
+
+/* 2D seat chips: a small badge pinned above the chip, clear of the cards. */
+.mobile-seat-odds {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  z-index: 4;
+  min-width: 38px;
+  height: 17px;
+  padding: 0 5px;
+  font-size: 10px;
+  transform: translateX(-50%);
+}
+
+.mobile-hero-seat:has(.mobile-hero-odds) {
+  position: relative;
+}
+
+/* Lower-third panel ------------------------------------------------------- */
+
+.hand-odds-panel {
+  --odds-accent: var(--c-ruby-500);
+  display: grid;
+  gap: 6px;
+  width: min(300px, calc(100vw - 32px));
+  padding: 9px 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 55%),
+    var(--surface-glass-strong);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(10px) saturate(1.2);
+  color: var(--c-text-1);
+  font-family: var(--font-ui);
+  pointer-events: none;
+  animation: hand-odds-in 420ms var(--ease-out, ease-out) both;
+}
+
+.hand-odds-panel.is-spectator {
+  --odds-accent: var(--c-sky-400);
+}
+
+.hand-odds-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: var(--tracking-caps, 0.12em);
+  text-transform: uppercase;
+}
+
+.hand-odds-head strong {
+  font-weight: 700;
+}
+
+.hand-odds-live {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--odds-accent);
+  box-shadow: 0 0 8px var(--odds-accent);
+  animation: hand-odds-live 1.6s ease-in-out infinite;
+}
+
+.hand-odds-street {
+  margin-left: auto;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--c-text-2);
+  animation: hand-odds-street 520ms var(--ease-pop, ease-out) both;
+}
+
+.hand-odds-rows {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hand-odds-row {
+  --odds-pct: 0%;
+  display: grid;
+  grid-template-columns: minmax(0, 88px) minmax(40px, 1fr) 42px;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-12, 12px);
+}
+
+.hand-odds-panel:has(.hand-odds-tie) .hand-odds-row {
+  grid-template-columns: minmax(0, 80px) minmax(36px, 1fr) 40px 48px;
+}
+
+.hand-odds-name {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hand-odds-name em {
+  color: var(--c-text-3);
+  font-style: normal;
+  font-weight: 500;
+}
+
+.hand-odds-bar {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.hand-odds-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--odds-pct);
+  border-radius: inherit;
+  background: rgba(236, 231, 219, 0.45);
+}
+
+.hand-odds-row.is-leader .hand-odds-bar > span {
+  background: linear-gradient(90deg, var(--c-brass-500, #b8902f), var(--c-brass-200, #f0d78a));
+  box-shadow: 0 0 10px rgba(212, 175, 55, 0.45);
+}
+
+.hand-odds-value {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: right;
+}
+
+.hand-odds-row.is-leader .hand-odds-value {
+  color: var(--c-brass-200, #f0d78a);
+}
+
+.hand-odds-row.is-dead {
+  color: var(--c-text-3);
+}
+
+.hand-odds-tie {
+  color: var(--c-text-3);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+@keyframes hand-odds-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes hand-odds-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@keyframes hand-odds-street {
+  from { opacity: 0; transform: scale(0.85); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Where the panel sits: under the top HUD on desktop, off the board and tray. */
+.hand-odds-dock {
+  position: absolute;
+  top: 76px;
+  left: 16px;
+  z-index: 6;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .odds-pill,
+  .hand-odds-panel,
+  .hand-odds-street,
+  .hand-odds-live {
+    animation: none;
+  }
+}

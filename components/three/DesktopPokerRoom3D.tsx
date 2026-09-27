@@ -152,6 +152,7 @@ import {
 import { getAvatarHeadTurn } from './turnFocus'
 import { FunFx, type FunPoseInput } from './funFx'
 import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
+import { OddsPill } from '@/components/table/HandOdds'
 
 type Vec3 = [number, number, number]
 type WebGLStatus = 'loading' | 'ready' | 'error'
@@ -3805,6 +3806,9 @@ export function DesktopPokerRoom3D({
                 <span className="cinematic-seat-panel">
                 <span className="cinematic-seat-topline">
                   <strong>{player.nickname}</strong>
+                  {player.odds && (
+                    <OddsPill odds={player.odds} playerName={player.nickname} className="cinematic-odds-pill" />
+                  )}
                   {player.shotsWaiting > 0 && (
                     // A shot is lined up for them, poured once they're out of the hand.
                     <em className="cinematic-shot-waiting" aria-label="Shot waiting" title="Shot waiting">

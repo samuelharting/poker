@@ -72,8 +72,9 @@ for (const viewport of ['desktop', 'mobile'] as ViewportName[]) {
           await expect(prompt).toBeVisible()
           await expect(tableScene(player.page)).toHaveAttribute('data-run-it-twice', 'voting')
         }
-        // Cards stay hidden while the vote is open.
-        expect(host.tap.player(guest.tap.yourId)?.holeCards).toBeUndefined()
+        // Action is closed, so both hands are tabled (with the odds) while the vote is open.
+        await waitForSnapshot(host, (_, tap) => tap.player(guest.tap.yourId)?.holeCards?.length === 2, 'hands tabled for the vote')
+        expect(host.tap.snapshot.handOdds?.mode).toBe('all_in')
 
         if (choice === 'twice') {
           const firstPrompt = shover.page.getByRole('dialog', { name: 'Run it twice?' })
