@@ -85,13 +85,12 @@ for (const viewport of ['desktop', 'mobile'] as ViewportName[]) {
         // Heads-up: the button posts the small blind and acts first preflop.
         await waitForSnapshot(first, (_, tap) => tap.me()?.isDealer === true && tap.me()?.isSB === true, 'button is the small blind')
 
-        // Pre-action queue toggles for the waiting player.
-        const queue = visible(second.page.getByRole('button', { name: 'Queue check if possible, otherwise fold' })).first()
+        // Pre-action chips toggle for the waiting player (tap again cancels).
+        const queue = visible(second.page.locator('[data-pre-action="check_fold"]')).first()
         await expect(queue).toBeVisible()
         await queue.click()
-        const cancel = visible(second.page.getByRole('button', { name: 'Cancel queued check or fold' })).first()
-        await expect(cancel).toHaveAttribute('aria-pressed', 'true')
-        await cancel.click()
+        await expect(queue).toHaveAttribute('aria-pressed', 'true')
+        await queue.click()
         await expect(queue).toHaveAttribute('aria-pressed', 'false')
 
         // Preflop: first raises to $100 with their viewport's sizing control.
@@ -116,13 +115,14 @@ for (const viewport of ['desktop', 'mobile'] as ViewportName[]) {
         const flopFirst = await waitForTurn(players)
         const flopSecond = flopFirst === host ? guest : host
         expect(flopFirst).toBe(second)
-        const queueAgain = visible(flopSecond.page.getByRole('button', { name: 'Queue check if possible, otherwise fold' })).first()
+        const queueAgain = visible(flopSecond.page.locator('[data-pre-action="check_fold"]')).first()
         await queueAgain.click()
-        await expect(visible(flopSecond.page.getByRole('button', { name: 'Cancel queued check or fold' })).first()).toBeVisible()
+        await expect(queueAgain).toHaveAttribute('aria-pressed', 'true')
         await actionButton(flopFirst.page, 'check').click()
         await waitForSnapshot(flopSecond, (state, tap) => (
           state.round === 'turn' && state.communityCards.length === 4 && tap.me()?.lastAction === 'Checked'
         ), 'queued check fired on its own and advanced to the turn')
+        await expect(visible(flopSecond.page.getByText('Auto-checked')).first()).toBeVisible()
 
         // Turn: check, then a half-pot bet via quick bet, then fold.
         const turnFirst = await waitForTurn(players)
