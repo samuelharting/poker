@@ -106,7 +106,7 @@ test('heads-up all-in: every seat and the rail watch TV odds street by street, e
       expect(player.tap.snapshot.players.every((seat: { holeCards?: unknown[] }) => seat.holeCards?.length === 2)).toBe(true)
     }
     await expect(host.page.locator('.hand-odds-panel[data-hand-odds="all_in"]')).toBeVisible()
-    await expect(guest.page.locator('.mobile-seat-odds')).toHaveCount(1)
+    await expect(guest.page.locator('.mobile-edge-seat .mobile-seat-odds')).toHaveCount(1)
     await expect(guest.page.locator('.mobile-hero-odds')).toHaveCount(1)
     await snap(host.page, 'odds-all-in-tabled-desktop')
     await snap(guest.page, 'odds-all-in-tabled-mobile')
