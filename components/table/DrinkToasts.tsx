@@ -26,8 +26,12 @@ export function DrinkToasts() {
         return false
       }
       seenRef.current.add(event.id)
-      // Everyone hears about beers, waters and pass-outs; only you care that your water kicked in.
-      return event.kind !== 'water_kicked_in' || event.playerId === yourId
+      // Owner rule: drinking is shown with pictures (the 3D drink, the meter,
+      // seat icons), never as text. No "cracked a beer" / "passed out" /
+      // "water kicked in" toasts.
+      void event
+      return false
+
     })
     if (fresh.length === 0) {
       return

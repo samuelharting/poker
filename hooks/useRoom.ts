@@ -12,6 +12,9 @@ import {
   type C2SMessage,
   type DrinkEvent,
   type DrinkKind,
+  type DevFunAction,
+  type MushroomEvent,
+  type PrivateMushroomState,
   type PlayerSocialState,
   type PrankEvent,
   type SessionEndedReason,
@@ -140,6 +143,11 @@ export interface RoomState {
   prankEvents: PrankEvent[]
   buyShot: (targetId: string) => void
   flickChip: (targetId: string) => void
+  /** The pill (internally "mushroom"): public reveals and this player's private news, oldest first. */
+  mushroomEvents: MushroomEvent[]
+  /** What only this player knows about the pill (holding it / who they spiked). */
+  privateMushroom: PrivateMushroomState | null
+  spikeWater: (targetId: string) => void
   /** Set once the server ends this tab's session; the socket is closed and stays closed. */
   sessionEnded: SessionEnded | null
   /** Table-wide notices (e.g. a new host), newest last. */
@@ -167,6 +175,8 @@ export function useRoom(
   const [connectionIssue, setConnectionIssue] = useState<string | null>(null)
   const [drinkEvents, setDrinkEvents] = useState<DrinkEvent[]>([])
   const [prankEvents, setPrankEvents] = useState<PrankEvent[]>([])
+  const [mushroomEvents, setMushroomEvents] = useState<MushroomEvent[]>([])
+  const [privateMushroom, setPrivateMushroom] = useState<PrivateMushroomState | null>(null)
   const [sessionEnded, setSessionEnded] = useState<SessionEnded | null>(null)
   const [notices, setNotices] = useState<RoomNotice[]>([])
   const sessionEndedRef = useRef(false)
@@ -202,6 +212,21 @@ export function useRoom(
     sendMessage({ type: 'flick_chip', targetId })
   }, [sendMessage])
 
+  const spikeWater = useCallback((targetId: string) => {
+    sendMessage({ type: 'spike_water', targetId })
+  }, [sendMessage])
+
+  // Development builds only: `window.__pokerDev.fun('trip')` etc. for effect
+  // captures (the server also ignores these unless it is a local dev server).
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development') return
+    const dev = { fun: (action: DevFunAction, targetId?: string) => sendMessage({ type: 'dev_fun', action, targetId }) }
+    ;(window as unknown as { __pokerDev?: typeof dev }).__pokerDev = dev
+    return () => {
+      delete (window as unknown as { __pokerDev?: typeof dev }).__pokerDev
+    }
+  }, [sendMessage])
+
   // Lady Luck's "shut up" button dispatches a window event (see lib/ladyLuckLines).
   useEffect(() => {
     const onMute = () => sendMessage({ type: 'companion_mute' })
@@ -222,6 +247,8 @@ export function useRoom(
     setTableState(null)
     setSocialState({ active: [], chatLog: [] })
     setDrinkEvents([])
+    setMushroomEvents([])
+    setPrivateMushroom(null)
     setYourId('')
     setIsHost(false)
     setIsConnected(false)
@@ -353,6 +380,19 @@ export function useRoom(
               setIsHost(msg.isHost)
               reconnectTokenRef.current = msg.reconnectToken
               storeReconnectToken(roomCode, msg.reconnectToken)
+              setPrivateMushroom(previous => {
+                const next = msg.mushroom ?? null
+                return JSON.stringify(previous) === JSON.stringify(next) ? previous : next
+              })
+              break
+            }
+
+            case 'mushroom_event': {
+              const event = msg.event
+              setMushroomEvents(previous => [
+                ...previous.filter(entry => entry.id !== event.id),
+                event,
+              ].slice(-MAX_DRINK_EVENTS))
               break
             }
 
@@ -481,7 +521,11 @@ export function useRoom(
     prankEvents,
     buyShot,
     flickChip,
+    mushroomEvents,
+    privateMushroom,
+    spikeWater,
     sessionEnded,
+
     notices,
     dismissNotice,
   }

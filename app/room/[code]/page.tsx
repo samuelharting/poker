@@ -34,6 +34,7 @@ import { DrinkProvider } from '@/components/table/DrinkContext'
 import { DrinkControls } from '@/components/table/DrinkControls'
 import { DrinkToasts } from '@/components/table/DrinkToasts'
 import { DrunkVisionLayer } from '@/components/table/DrunkVisionLayer'
+import { FunLayer } from '@/components/table/FunLayer'
 import { MembershipLayer } from '@/components/ui/MembershipLayer'
 
 const ignoreFeedback = () => {}
@@ -171,7 +172,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     setIsRejoining(Boolean(loadStoredReconnectToken(roomCode)))
   }, [roomCode])
 
-  const { tableState, socialState, yourId, isHost, sendAction, seatMe, sendMessage, isConnected, connectionIssue, drinkEvents, orderDrink, prankEvents, buyShot, flickChip, sessionEnded, notices, dismissNotice } = useRoom(
+  const { tableState, socialState, yourId, isHost, sendAction, seatMe, sendMessage, isConnected, connectionIssue, drinkEvents, orderDrink, prankEvents, buyShot, flickChip, mushroomEvents, privateMushroom, spikeWater, sessionEnded, notices, dismissNotice } = useRoom(
     roomCode,
     currentProfile
   )
@@ -452,7 +453,16 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
       {tableState && !isTwoDLayout && (
         <>
           <DrunkVisionLayer />
-          <DrinkControls variant="desktop" />
+          <FunLayer
+            tableState={tableState}
+            yourId={yourId}
+            privateMushroom={privateMushroom}
+            mushroomEvents={mushroomEvents}
+            onSpike={spikeWater}
+            soundMuted={soundPreferences.muted}
+          />
+
+          <DrinkControls variant="desktop" handNumber={tableState.handNumber} />
           <DrinkToasts />
         </>
       )}

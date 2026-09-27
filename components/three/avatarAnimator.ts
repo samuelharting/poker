@@ -125,6 +125,14 @@ export interface AvatarAnimatorInput {
   bonkElapsed?: number | null
   /** They are flicking a chip at another seat: seconds elapsed and the target (seat space). */
   chipFlick?: { elapsed: number; target: Vec3 } | null
+  /** Seconds since they blacked out (the head-bonk beat); null when not blacked out. */
+  blackoutElapsed?: number | null
+  /** Seconds since they came to from a blackout (dazed wobble); null when not dazed. */
+  dazedElapsed?: number | null
+  /** Hungover: rubs their temples now and then, winces, moves carefully. */
+  hungover?: boolean
+  /** On the pill trip: stares at their hands in wonder, swaying. */
+  tripping?: boolean
 }
 
 interface Spring {
@@ -169,6 +177,8 @@ const CHANNEL_COUNT = BONE_CHANNELS + 3 + 3 + 2 + 3 + 3 + 1 + 1 + 1 + 1
 /** Wind-up, thrust + jab, a readable ~1.4s hold, and a relaxed return. */
 export const FLIP_OFF_SECONDS = 3.2
 const DRINK_SECONDS = 2.6
+/** How long the dazed head-circling lasts after coming to from a blackout. */
+export const DAZED_SECONDS = 2.6
 /** Winners rake the pot toward themselves before celebrating. */
 const WINNER_RAKE_SECONDS = 1.0
 const PEEK_DURATION = 2.1
@@ -1154,6 +1164,64 @@ export function computeAvatarTargetPose(
     add(bones.Head, 0.14 * rub, 0.06 * Math.sin(b * 5) * rub * motion, -0.08 * rub)
   }
 
+  // 19. Blackout bonk: the passed-out slump above lands fast, the head bounces
+  // off the rail once like a cartoon, then rests. (Owns nothing new: it only
+  // adds the bounce to the slump.)
+  if (input.passedOut && input.blackoutElapsed !== null && input.blackoutElapsed !== undefined) {
+    const b = input.blackoutElapsed
+    const bounce = pulse(b, 0.34, 0.07, 0.32) * motion
+    const settle = pulse(b, 0.72, 0.06, 0.2) * motion
+    bones.Chest[0] -= 0.34 * bounce + 0.08 * settle
+    bones.Head[0] -= 0.3 * bounce + 0.06 * settle
+    pose.bodyPosition[1] += 0.06 * bounce + 0.015 * settle
+  }
+
+  // 20. Coming to: sits back up dazed, the head circling slowly before it steadies.
+  if (!input.passedOut && input.dazedElapsed !== null && input.dazedElapsed !== undefined && input.dazedElapsed >= 0) {
+    const d = input.dazedElapsed
+    const w = envelope(d, DAZED_SECONDS, 0.25, 0.9) * motion
+    const circle = d * 5.2
+    add(bones.Head, 0.1 * w + 0.12 * Math.sin(circle) * w, 0.16 * Math.cos(circle) * w, 0.18 * Math.sin(circle) * w)
+    add(bones.Neck, 0.04 * w, 0, 0.06 * Math.sin(circle - 0.6) * w)
+    add(bones.Torso, 0, 0, 0.08 * Math.sin(circle * 0.5) * w)
+    pose.bodyPosition[1] -= 0.04 * w
+  }
+
+  // 21. Hungover: moves carefully, and every few seconds a hand comes up to
+  // rub a temple with a wince.
+  if (input.hungover && !input.passedOut) {
+    const period = 7.5 + seed * 2
+    const since = positiveModulo(time + seed * 17, period)
+    const rub = envelope(since, 3.2, 0.5, 0.7) * motion
+    const circle = since * 7
+    const temple: Vec3 = offset(anchors.chin, 0.11 + Math.cos(circle) * 0.015 * motion, 0.16 + Math.sin(circle) * 0.015 * motion, 0.02)
+    blendTo(pose.handR, temple, rub)
+    pose.fingerCurlR = pose.fingerCurlR * (1 - rub) + 0.25 * rub
+    add(bones.Head, 0.12 * rub, -0.08 * rub, -0.1 * rub)
+    add(bones.Chest, 0.05, 0, 0)
+    add(bones.ShoulderR, 0, 0, 0.06 * rub)
+  }
+
+  // 22. Tripping: hands up in front of the face, turning slowly, head tilting
+  // in wonder, the whole body swaying in slow circles.
+  if (input.tripping && !input.passedOut) {
+    const t = time * 0.9 + seed * 5
+    const wonder = motion > 0 ? 0.75 + 0.25 * Math.sin(time * 0.37 + seed) : 0.8
+    const turn = Math.sin(t) * motion
+    blendTo(pose.handR, offset(anchors.chin, 0.12 + 0.04 * turn, 0.02 + 0.03 * Math.cos(t * 1.3) * motion, -0.24), wonder)
+    blendTo(pose.handL, offset(anchors.chin, -0.12 + 0.04 * turn, -0.02 + 0.03 * Math.sin(t * 1.1) * motion, -0.22), wonder)
+    add(bones.WristR, 0, 0.6 * turn, 0.4 * Math.cos(t) * motion, wonder)
+    add(bones.WristL, 0, -0.6 * turn, -0.4 * Math.cos(t) * motion, wonder)
+    pose.fingerCurlR = pose.fingerCurlR * (1 - wonder) + 0.05 * wonder
+    pose.fingerCurlL = pose.fingerCurlL * (1 - wonder) + 0.05 * wonder
+    const swayX = Math.sin(time * 0.7 + seed * 3) * motion
+    const swayZ = Math.cos(time * 0.55 + seed * 2) * motion
+    add(bones.Head, 0.06 + 0.08 * Math.sin(time * 0.5) * motion, 0.14 * turn, 0.22 * swayX)
+    add(bones.Torso, 0.04 * swayZ, 0.05 * swayX, 0.12 * swayX)
+    add(bones.Chest, -0.04, 0, 0.06 * swayZ)
+    pose.bodyPosition[0] += 0.03 * swayX
+  }
+
   // Keep faces visible: clamp the stacked downward pitch of neck + head, and
   // keep the body close to the chair no matter what stacks up.
   // Leaning in, people keep their eyes up: counter a deep chest lean at the head.
@@ -1240,7 +1308,10 @@ export function updateAvatarAnimator(
   const prankActive = Boolean(input.chipFlick) ||
     (input.shotElapsed !== null && input.shotElapsed !== undefined) ||
     (input.bonkElapsed !== null && input.bonkElapsed !== undefined)
-  const omega = input.cueActive ? 18 : input.flipOff || prankActive ? 14 : input.winner ? 12 : input.passedOut ? 5 : 9
+  // The blackout lands fast (a bonk, not a slow sink).
+  const bonking = input.passedOut && input.blackoutElapsed !== null && input.blackoutElapsed !== undefined && input.blackoutElapsed < 1.1
+  const omega = input.cueActive || bonking ? 18 : input.flipOff || prankActive ? 14 : input.winner ? 12 : input.passedOut ? 5 : 9
+
   const dt = Math.min(0.1, Math.max(0.0001, input.delta))
   const steps = Math.max(1, Math.ceil(dt / (1 / 120)))
   const h = dt / steps

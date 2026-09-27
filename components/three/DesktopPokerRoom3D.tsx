@@ -149,6 +149,7 @@ import {
   type TableVisualSeat,
 } from './tableWagerLayout'
 import { getAvatarHeadTurn } from './turnFocus'
+import { FunFx, type FunPoseInput } from './funFx'
 import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
 
 type Vec3 = [number, number, number]
@@ -247,6 +248,8 @@ interface SeatRuntime {
   appearanceKey: string
   avatarProfile: ThreePlayerView['avatarProfile']
   wagerIntensity: number
+  /** Blackout bonk / dazed / hangover / trip pose inputs (set each frame by FunFx). */
+  funPose?: FunPoseInput
 }
 
 interface WagerRuntime {
@@ -2314,6 +2317,7 @@ function animateSeat(
     cheersRaise: prank?.cheersRaise ?? 0,
     bonkElapsed: prank?.bonkElapsed ?? null,
     chipFlick: prank?.chipFlick ?? null,
+    ...seat.funPose,
   })
   seat.lastPose = pose
 
@@ -3005,6 +3009,18 @@ function createSceneRuntime(
     dispose: () => {},
   } satisfies SceneRuntime
 
+  // Blackout bonks, hangovers and the pill trip (see funFx.ts).
+  const funFx = new FunFx({
+    scene,
+    camera,
+    postFx,
+    feltMaterial,
+    lights: [lights.key, lights.fill, lights.rimLeft, lights.rimRight, lights.bounce, lights.front],
+    chipMaterials: runtime.chipInstancer.meshes.flatMap(mesh => (Array.isArray(mesh.material) ? mesh.material : [mesh.material])),
+    companionGroup: companion?.group ?? null,
+  })
+  let lastTripFx = ''
+
   let viewportWidth = 1
   let viewportHeight = 1
   /** Adaptive render quality from the frame budget (see FrameBudget). */
@@ -3068,6 +3084,8 @@ function createSceneRuntime(
     }
 
     const actingSeat = viewRef.current.actingVisualSeat
+    funFx.reducedMotion = reducedMotion
+    funFx.update(viewRef.current, runtime.seats, time)
     const { heat, sourceId } = getTableHeat(runtime, time)
     let winnerSeat: SeatRuntime | null = null
     for (const seat of runtime.seats.values()) {
@@ -3078,6 +3096,7 @@ function createSceneRuntime(
       )
       if (seat.winner && seat.root.visible && !winnerSeat) winnerSeat = seat
     }
+    funFx.afterSeats(viewRef.current, runtime.seats, time, delta)
     animateWagers(runtime, time, reducedMotion)
     animatePot(runtime, time, reducedMotion, host)
     animateBoardRuntime(runtime.board, time, reducedMotion)
@@ -3188,6 +3207,7 @@ function createSceneRuntime(
         camera.rotateZ(kick.roll)
       }
     }
+    if (!runtime.debugCamera) funFx.applyCamera(camera, time)
     camera.updateMatrixWorld()
 
     updateLadyLuck(runtime, viewRef.current, host, time, delta, reducedMotion, viewportWidth, viewportHeight)
@@ -3198,7 +3218,14 @@ function createSceneRuntime(
     }
     runtime.board.slots.forEach(slot => cullHiddenCardSide(slot.card, camera.position))
 
+    // Pill trip: shader pass when post FX runs, a CSS hue fallback otherwise.
+    const tripFx = funFx.heroTripLevel > 0 ? (runtime.postFx && quality < 2 ? 'post' : 'css') : 'off'
+    if (tripFx !== lastTripFx) {
+      lastTripFx = tripFx
+      host.dataset.tripFx = tripFx
+    }
     if (runtime.postFx && quality < 2) {
+      funFx.beforeRender(time, viewportWidth, viewportHeight)
       runtime.postFx.bloom.strength = 0.22 + (winnerSeat ? 0.1 : 0) + allInImpact.strength * 0.1
       runtime.postFx.composer.render(delta)
     } else {
@@ -3247,6 +3274,7 @@ function createSceneRuntime(
       seat.holeCards.forEach(disposeCardMesh)
     }
     runtime.board.slots.forEach(slot => disposeCardMesh(slot.card))
+    funFx.dispose()
     if (runtime.companion) disposeCompanion(runtime.companion)
     disposeFirstPersonDrink(runtime.firstPersonDrink)
     disposePrankRuntime(runtime.pranks)
@@ -3433,6 +3461,12 @@ export function DesktopPokerRoom3D({
         className="desktop-3d-canvas"
         aria-label="Animated 3D poker room"
       />
+      {/* Blackout eyelids, hangover edges and trip washes: above the canvas, below every HUD layer. */}
+      <div className="fun-vision-3d" aria-hidden="true">
+        <span className="fun-lid is-top" />
+        <span className="fun-lid is-bottom" />
+      </div>
+
       <div className="lady-luck-bubble-3d" data-visible="false" aria-live="polite" />
       {/* Counts the pot down while its chips fly to the winner (driven by animatePot). */}
       <div className="payout-pot-readout" data-visible="false" aria-hidden="true">
@@ -3519,12 +3553,24 @@ export function DesktopPokerRoom3D({
                     <em className="cinematic-shot-waiting" aria-label="Shot waiting" title="Shot waiting">🥃</em>
                   )}
                   {player.drinks?.passedOut ? (
-                    <em className="cinematic-drink-badge is-passed-out" aria-label="Passed out">💤</em>
-                  ) : (player.drinks?.level ?? 0) > 0 ? (
-                    <em className="cinematic-drink-badge" aria-label={`${player.drinks.level} drinks deep`}>
-                      🍺{player.drinks.level}
+                    <em className="cinematic-drink-badge is-passed-out" aria-label="Blacked out">💤</em>
+                  ) : player.drinks?.tripping ? (
+                    <em className="cinematic-drink-badge is-tripping" aria-label="Tripping">💊</em>
+                  ) : player.drinks?.hungover ? (
+                    <em className="cinematic-drink-badge is-hungover" aria-label="Hungover">🤕</em>
+                  ) : player.drinks?.designatedDriver ? (
+                    <em className="cinematic-drink-badge is-dd" aria-label="Sober: designated driver" title="Designated driver">🚗 DD</em>
+                  ) : Math.round(player.drinks?.level ?? 0) > 0 ? (
+                    <em className="cinematic-drink-badge" aria-label={`Buzz ${Math.round(player.drinks.level)}`}>
+                      🍺{Math.round(player.drinks.level)}
                     </em>
                   ) : null}
+                  {(player.drinks?.soberTax ?? 0) > 0 && (
+                    <em className="cinematic-sober-tax" aria-label={`Sober tax $${player.drinks.soberTax}`} title="Sober tax">
+                      💸 −${player.drinks.soberTax?.toLocaleString()}
+                    </em>
+                  )}
+
                   {player.blindRole && (
                     <em className={`cinematic-blind-role is-${player.blindRole}`}>
                       <b>{player.blindRole === 'big' ? 'BB' : 'SB'}</b>

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, type CSSProperties } from 'react'
-import { CHASER_WINDOW_MS, DRINK_COOLDOWN_MS, DRUNK_LEVEL_MAX, type DrunkTier } from '@/lib/drinks'
+import { BUZZ, CHASER_WINDOW_MS, DRINK_COOLDOWN_MS, DRUNK_LEVEL_MAX, isInSweetSpot, isSober, type DrunkTier } from '@/lib/drinks'
 import { useChaserSecondsLeft, useDrinks } from './DrinkContext'
 
 const CHASER_WINDOW_SECONDS = CHASER_WINDOW_MS / 1000
@@ -39,7 +39,14 @@ function useCooldownActive(lastOrderAt: number | null): boolean {
  * Beer / water buttons. `desktop` floats beside the Table talk button;
  * `mobile` sits in the hero lane next to your cards.
  */
-export function DrinkControls({ variant }: { variant: 'desktop' | 'mobile' }) {
+export function DrinkControls({
+  variant,
+  handNumber = 0,
+}: {
+  variant: 'desktop' | 'mobile'
+  /** Current hand number: one beer per hand. */
+  handNumber?: number
+}) {
   const drinks = useDrinks()
   const isCooling = useCooldownActive(drinks?.lastOrderAt ?? null)
   const chaserSeconds = useChaserSecondsLeft()
@@ -50,6 +57,21 @@ export function DrinkControls({ variant }: { variant: 'desktop' | 'mobile' }) {
 
   const { myDrinks, profile, canOrder, order, lastOrderAt } = drinks
   const disabled = !canOrder || isCooling
+  const beerUsed = myDrinks.beerReadyAtHand > handNumber
+  const sober = isSober(myDrinks.level) && !myDrinks.passedOut && !myDrinks.hungover
+  const sweet = isInSweetSpot(myDrinks.level) && !myDrinks.passedOut
+  const statusIcon = myDrinks.passedOut
+    ? '💤'
+    : myDrinks.hungover
+      ? '🤕'
+      : sober
+        ? '😐'
+        : sweet
+          ? '😄'
+          : myDrinks.level > BUZZ.sweetSpotMax
+            ? '🥴'
+            : '🙂'
+  const afterWater = Math.max(0, myDrinks.level - myDrinks.waterNextHand)
   const tierLabel = TIER_LABELS[profile.tier]
   const style = {
     '--drink-cooldown': `${DRINK_COOLDOWN_MS}ms`,
@@ -57,12 +79,14 @@ export function DrinkControls({ variant }: { variant: 'desktop' | 'mobile' }) {
   } as CSSProperties
   const beerTitle = myDrinks.passedOut
     ? 'You are passed out'
-    : `Crack a beer (${myDrinks.beers} so far)`
+    : beerUsed
+      ? 'One beer per hand'
+      : `Crack a beer (${myDrinks.beers} so far)`
   const waterTitle = myDrinks.passedOut
     ? 'You are passed out'
     : chaserSeconds > 0
       ? `Chaser: a water now takes 2 off at once (${chaserSeconds}s)`
-      : 'Drink a water. Sobers you up one level.'
+      : 'Slow water: takes 2 off when the next hand starts.'
 
   return (
     <div
@@ -75,17 +99,21 @@ export function DrinkControls({ variant }: { variant: 'desktop' | 'mobile' }) {
       <div className="drink-buttons">
         <button
           type="button"
-          className="drink-button is-beer"
+          className={`drink-button is-beer ${sober && !beerUsed ? 'is-nudge' : ''} ${beerUsed ? 'is-used' : ''}`}
           onClick={() => order('beer')}
-          disabled={disabled}
+          disabled={disabled || beerUsed}
+          data-sober-nudge={sober && !beerUsed ? 'true' : undefined}
           aria-label={beerTitle}
           title={beerTitle}
         >
           <span className="drink-button-glyph" aria-hidden="true">🍺</span>
           <span className="drink-button-label">Beer</span>
-          {myDrinks.beers > 0 && (
+          {beerUsed ? (
+            <em className="drink-button-count is-per-hand" aria-hidden="true">1/hand</em>
+          ) : myDrinks.beers > 0 ? (
             <em className="drink-button-count" aria-hidden="true">{myDrinks.beers}</em>
-          )}
+          ) : null}
+
         </button>
         <button
           type="button"
@@ -117,14 +145,31 @@ export function DrinkControls({ variant }: { variant: 'desktop' | 'mobile' }) {
         )}
       </div>
 
-      <div className="drink-meter" aria-hidden="true">
-        <span className="drink-meter-label">{myDrinks.passedOut ? '💤 ' : ''}{tierLabel}</span>
-        <span className="drink-meter-pips">
-          {Array.from({ length: DRUNK_LEVEL_MAX }, (_, index) => (
-            <i key={index} className={index < myDrinks.level ? 'is-full' : ''} />
-          ))}
+      {/* The buzz meter: pictures only. The band marks the sweet spot. */}
+      <div
+        className="buzz-meter"
+        data-zone={myDrinks.passedOut ? 'out' : sober ? 'sober' : sweet ? 'sweet' : myDrinks.level > BUZZ.sweetSpotMax ? 'high' : 'low'}
+        role="meter"
+        aria-label={`Buzz ${Math.round(myDrinks.level)} of ${DRUNK_LEVEL_MAX}. Sweet spot ${BUZZ.sweetSpotMin} to ${BUZZ.sweetSpotMax}.`}
+        aria-valuemin={0}
+        aria-valuemax={DRUNK_LEVEL_MAX}
+        aria-valuenow={Math.round(myDrinks.level)}
+        style={{
+          '--buzz': Math.min(1, myDrinks.level / DRUNK_LEVEL_MAX),
+          '--buzz-after-water': Math.min(1, afterWater / DRUNK_LEVEL_MAX),
+          '--sweet-from': BUZZ.sweetSpotMin / DRUNK_LEVEL_MAX,
+          '--sweet-to': BUZZ.sweetSpotMax / DRUNK_LEVEL_MAX,
+        } as CSSProperties}
+      >
+        <span className="buzz-meter-icon" aria-hidden="true">{statusIcon}</span>
+        <span className="buzz-meter-track" aria-hidden="true">
+          <span className="buzz-meter-sweet" />
+          <span className="buzz-meter-fill" />
+          {myDrinks.waterNextHand > 0 && <span className="buzz-meter-water" title="Water lands next hand">💧</span>}
         </span>
+        <b className="buzz-meter-value" aria-hidden="true">{Math.round(myDrinks.level)}</b>
       </div>
+
     </div>
   )
 }

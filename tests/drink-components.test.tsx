@@ -54,29 +54,42 @@ describe('drink components', () => {
     expect(renderToStaticMarkup(<DrunkVisionLayer />)).toBe('')
   })
 
-  it('offers beer and water to a seated player and shows their level', () => {
+  it('offers beer and water to a seated player and shows their buzz on a meter (no words)', () => {
     const html = renderWithDrinks(<DrinkControls variant="desktop" />, drinks({ level: 4, beers: 4 }))
     expect(html).toContain('Crack a beer (4 so far)')
-    expect(html).toContain('Drink a water')
-    expect(html).toContain('Tipsy')
+    expect(html).toContain('Slow water')
     expect(html).toContain('data-tier="tipsy"')
-    expect(html.match(/class="is-full"/g)).toHaveLength(4)
+    expect(html).toContain('class="buzz-meter"')
+    expect(html).toContain('data-zone="sweet"')
+    expect(html).toContain('aria-valuenow="4"')
+    expect(html).not.toContain('Tipsy</span>')
     expect(html).not.toContain('disabled')
+  })
+
+  it('allows one beer per hand and nudges a sober player toward one', () => {
+    const used = renderWithDrinks(<DrinkControls variant="desktop" handNumber={3} />, drinks({ level: 2, beers: 1, beerReadyAtHand: 4 }))
+    expect(used).toContain('1/hand')
+    expect(used).toContain('One beer per hand')
+    const sober = renderWithDrinks(<DrinkControls variant="desktop" handNumber={3} />, drinks({ level: 0.5 }))
+    expect(sober).toContain('data-sober-nudge="true"')
+    expect(sober).toContain('data-zone="sober"')
   })
 
   it('hides the controls from players who are not seated', () => {
     expect(renderWithDrinks(<DrinkControls variant="desktop" />, undefined, false)).toBe('')
   })
 
-  it('disables drinking while passed out and shows the pass-out screen', () => {
+  it('disables drinking while blacked out, with no text anywhere', () => {
     const passedOut = drinks({ level: 10, beers: 10, passedOut: true })
     const controls = renderWithDrinks(<DrinkControls variant="mobile" />, passedOut)
-    expect(controls).toContain('Out cold')
+    expect(controls).toContain('💤')
     expect(controls.match(/disabled=""/g)).toHaveLength(2)
 
     const vision = renderWithDrinks(<DrunkVisionLayer />, passedOut)
-    expect(vision).toContain('You passed out')
+    expect(vision).not.toContain('passed out')
+    expect(vision).not.toContain('hic!')
   })
+
 
   it('does not count waters on the water button', () => {
     const html = renderWithDrinks(<DrinkControls variant="desktop" />, drinks({ level: 3, beers: 3, waters: 1, sobering: 1 }))

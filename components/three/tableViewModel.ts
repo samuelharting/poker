@@ -8,7 +8,8 @@ import type {
   PlayerAvatarJacketStyle,
 } from '@/lib/profile'
 import type { SocialSnapshot } from '@/shared/protocol'
-import { normalizeDrinkState } from '@/lib/drinks'
+import { isSober, normalizeDrinkState } from '@/lib/drinks'
+
 import { REALISTIC_AVATAR_MODEL_KEYS, type RealisticAvatarModelKey } from './avatarModelCatalog'
 
 export type ThreeActionCue = 'ready' | 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'all_in'
@@ -100,6 +101,14 @@ export interface ThreePlayerDrinks {
   /** `id` changes on every new drink so the renderer can trigger the animation once. */
   lastDrink: { kind: 'beer' | 'water'; id: string; at: number } | null
   passedOut: boolean
+  /** Came to from a blackout recently (holding their head, sunglasses). */
+  hungover?: boolean
+  /** On the pill trip (only once it has kicked in). */
+  tripping?: boolean
+  /** Sober tax they posted this hand (0 / absent = none). */
+  soberTax?: number
+  /** Sober (buzz <= 1) at a fun-mode table on a drink-capable client: the 🚗 DD tag. */
+  designatedDriver?: boolean
 }
 
 export const DEFAULT_THREE_PLAYER_DRINKS: Readonly<ThreePlayerDrinks> = Object.freeze({
@@ -109,17 +118,28 @@ export const DEFAULT_THREE_PLAYER_DRINKS: Readonly<ThreePlayerDrinks> = Object.f
   passedOut: false,
 })
 
-export function toThreePlayerDrinks(raw: SeatPlayer['drinks'] | undefined): ThreePlayerDrinks {
+export function toThreePlayerDrinks(
+  raw: SeatPlayer['drinks'] | undefined,
+  trip?: SeatPlayer['trip'],
+  economy: { drinkCapable?: boolean; funMode?: boolean } = {}
+): ThreePlayerDrinks {
   if (!raw) {
-    return { ...DEFAULT_THREE_PLAYER_DRINKS }
+    return trip ? { ...DEFAULT_THREE_PLAYER_DRINKS, tripping: true } : { ...DEFAULT_THREE_PLAYER_DRINKS }
   }
 
   const drinks = normalizeDrinkState(raw)
+  const designatedDriver = Boolean(
+    economy.drinkCapable && economy.funMode !== false && isSober(drinks.level) && !drinks.passedOut && !drinks.hungover
+  )
   return {
     level: drinks.level,
     beers: drinks.beers,
     lastDrink: drinks.lastDrink,
     passedOut: drinks.passedOut,
+    ...(drinks.hungover ? { hungover: true } : {}),
+    ...(trip ? { tripping: true } : {}),
+    ...(drinks.soberTax > 0 ? { soberTax: drinks.soberTax } : {}),
+    ...(designatedDriver ? { designatedDriver: true } : {}),
   }
 }
 
@@ -383,8 +403,12 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
           : state.phase === 'in_hand' && !player.hasActedThisRound
             ? undefined
             : player.lastAction,
+        drinks: toThreePlayerDrinks(player.drinks, player.trip, {
+          drinkCapable: player.drinkCapable,
+          funMode: state.funModeEnabled,
+        }),
+
         shotsWaiting: normalizeDrinkState(player.drinks).shotsWaiting,
-        drinks: toThreePlayerDrinks(player.drinks),
         isPeeking: Boolean(player.isPeeking) && player.hasCards && !isOutOfHand,
       }
     })
