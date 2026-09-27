@@ -355,6 +355,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           onSetSoundVolume={volume => updateSoundPreferences({ volume })}
           onUpdateAvatar={handleUpdateAvatar}
           onSoundCue={playSoundCue}
+          onPeekCards={peeking => sendMessage({ type: 'peek_cards', peeking })}
           onCloseSettings={() => setSettingsOpen(false)}
           onCopyRoom={handleCopyRoom}
           onShareRoom={handleShareRoom}

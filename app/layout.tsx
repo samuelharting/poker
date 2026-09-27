@@ -11,6 +11,7 @@ import './styles/table-2d.css'
 import './styles/drinks.css'
 import './styles/companion.css'
 import './styles/cards.css'
+import './styles/card-peek.css'
 
 const jakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],

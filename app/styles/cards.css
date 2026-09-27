@@ -5,6 +5,7 @@
  */
 
 .card-container .card .card-back,
+.own-card-cover-back,
 .card .card-back {
   border: 0;
   background:

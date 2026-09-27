@@ -78,6 +78,8 @@ export type C2SMessage =
   | { type: 'table_emote'; emote: string; targetId?: string }
   | { type: 'order_drink'; kind: DrinkKind }
   | { type: 'companion_mute' }
+  /** The sender is privately looking at (squeezing) their own hole cards. */
+  | { type: 'peek_cards'; peeking: boolean }
 
 // Server -> Client messages
 export type S2CMessage =
@@ -316,6 +318,9 @@ export function parseC2S(raw: string): C2SMessage | null {
 
       case 'companion_mute':
         return { type }
+
+      case 'peek_cards':
+        return typeof parsed.peeking === 'boolean' ? { type, peeking: parsed.peeking } : null
 
       default:
         return null

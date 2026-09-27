@@ -86,6 +86,8 @@ export interface SeatPlayer {
   equityPercent?: number
   /** Public drink state (beers, drunk level, pass-out). Absent means sober. */
   drinks?: PlayerDrinkState
+  /** True while the player is privately looking at their own hole cards. Never carries card values. */
+  isPeeking?: boolean
 }
 
 export interface Pot {

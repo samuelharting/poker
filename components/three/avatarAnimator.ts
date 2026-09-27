@@ -103,6 +103,8 @@ export interface AvatarAnimatorInput {
   boardRevealAge?: number
   /** Someone else just won the pot (table reacts). */
   otherWinner?: boolean
+  /** The player is really looking at their hole cards right now (server-driven peek). */
+  peeking?: boolean
 }
 
 interface Spring {
@@ -119,6 +121,11 @@ export interface AvatarAnimatorState {
   glancePitch: number
   nextPeekAt: number
   peekStartedAt: number
+  /** Server-driven peek: when it started / ended, and how far in it was when released. */
+  livePeekSince: number
+  livePeekEndedAt: number
+  livePeekReleaseReach: number
+  livePeekReleaseLift: number
   winnerSince: number
   loserSince: number
   foldedSince: number
@@ -164,6 +171,10 @@ export function createAvatarAnimatorState(seedSource: string): AvatarAnimatorSta
     glancePitch: 0,
     nextPeekAt: 2 + random() * 6,
     peekStartedAt: Number.NEGATIVE_INFINITY,
+    livePeekSince: Number.NEGATIVE_INFINITY,
+    livePeekEndedAt: Number.NEGATIVE_INFINITY,
+    livePeekReleaseReach: 0,
+    livePeekReleaseLift: 0,
     winnerSince: Number.NEGATIVE_INFINITY,
     loserSince: Number.NEGATIVE_INFINITY,
     foldedSince: Number.NEGATIVE_INFINITY,
@@ -243,6 +254,39 @@ function positiveModulo(value: number, divisor: number) {
 }
 
 /** Builds the unsmoothed target pose for this frame. */
+/**
+ * Server-driven peek envelope. Reaching comes first, then the cards lift;
+ * on release the cards go down first, then the hands return to the rail.
+ */
+function getLivePeekWeights(state: AvatarAnimatorState, input: AvatarAnimatorInput): { reach: number; lift: number } {
+  const { time } = input
+  const able = Boolean(input.peeking) && input.hasCards && !input.folded && !input.passedOut && !input.winner && !input.loser
+  if (able && !Number.isFinite(state.livePeekSince)) {
+    state.livePeekSince = time
+    state.livePeekEndedAt = Number.NEGATIVE_INFINITY
+  }
+  if (able) {
+    const since = time - state.livePeekSince
+    return {
+      reach: smoothStep(since / 0.38),
+      lift: smoothStep((since - 0.3) / 0.32),
+    }
+  }
+  if (Number.isFinite(state.livePeekSince)) {
+    const since = time - state.livePeekSince
+    state.livePeekReleaseReach = smoothStep(since / 0.38)
+    state.livePeekReleaseLift = smoothStep((since - 0.3) / 0.32)
+    state.livePeekSince = Number.NEGATIVE_INFINITY
+    state.livePeekEndedAt = time
+  }
+  if (!Number.isFinite(state.livePeekEndedAt) || !input.hasCards) return { reach: 0, lift: 0 }
+  const after = time - state.livePeekEndedAt
+  const lift = state.livePeekReleaseLift * (1 - smoothStep(after / 0.24))
+  const reach = state.livePeekReleaseReach * (1 - smoothStep((after - 0.12) / 0.42))
+  if (reach <= 0.001) state.livePeekEndedAt = Number.NEGATIVE_INFINITY
+  return { reach, lift }
+}
+
 export function computeAvatarTargetPose(
   state: AvatarAnimatorState,
   input: AvatarAnimatorInput
@@ -406,6 +450,32 @@ export function computeAvatarTargetPose(
       }
     }
     pose.bodyPosition[2] -= 0.05 * think
+  }
+
+  // 6b. Really peeking (the player clicked their cards, or a bot glancing):
+  // lean in, cup both hands round the near edge of the two cards, lift it,
+  // and duck the head to look — then set the cards down and sit back.
+  const livePeek = getLivePeekWeights(state, input)
+  if (livePeek.reach > 0.001) {
+    const reach = livePeek.reach * Math.max(motion, 0.6)
+    const lift = livePeek.lift * Math.max(motion, 0.6)
+    const wiggle = Math.sin(time * 5.3 + seed * 9) * 0.012 * lift * motion
+    state.nextPeekAt = Math.max(state.nextPeekAt, time + 4)
+    add(bones.Torso, 0.06, 0, 0, reach)
+    add(bones.Chest, 0.2, 0, 0, reach)
+    // Face the cards: yaw back to centre, pitch down to look.
+    bones.Neck[1] -= bones.Neck[1] * reach
+    bones.Head[1] -= bones.Head[1] * reach
+    bones.Neck[0] += (0.2 - bones.Neck[0]) * reach
+    bones.Head[0] += (0.5 + 0.06 * lift - bones.Head[0]) * reach
+    add(bones.Head, 0, 0, 0.05 * Math.sin(time * 0.9 + seed), lift)
+    blendTo(pose.handR, offset(anchors.cards, 0.09, 0.03 + 0.085 * lift + wiggle, 0.13 - 0.035 * lift), reach)
+    blendTo(pose.handL, offset(anchors.cards, -0.09, 0.03 + 0.085 * lift - wiggle, 0.13 - 0.035 * lift), reach)
+    add(bones.WristR, -0.35 * lift, 0, 0.2, reach)
+    add(bones.WristL, -0.35 * lift, 0, -0.2, reach)
+    pose.fingerCurlR = pose.fingerCurlR + (0.62 - pose.fingerCurlR) * reach
+    pose.fingerCurlL = pose.fingerCurlL + (0.62 - pose.fingerCurlL) * reach
+    pose.cardLift = Math.max(pose.cardLift, lift)
   }
 
   // 7. The action itself, choreographed against real table spots: reach to

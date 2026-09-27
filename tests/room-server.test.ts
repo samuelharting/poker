@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import type { Connection, Room } from 'partykit/server'
-import PokerRoom, { AUTO_FOLD_DELAY, AUTO_START_DELAY, BOT_ACTION_DELAY, HOST_DISCONNECT_GRACE_MS } from '@/partykit/room'
+import PokerRoom, { AUTO_FOLD_DELAY, AUTO_START_DELAY, BOT_ACTION_DELAY, HOST_DISCONNECT_GRACE_MS, PEEK_MAX_DURATION_MS } from '@/partykit/room'
 import { getShowdownMinimumDurationMs } from '@/lib/poker/showdown'
 import type { C2SMessage, S2CMessage } from '@/shared/protocol'
 import type { PlayerAvatarCustomization } from '@/lib/profile'
@@ -2305,5 +2305,102 @@ describe('PokerRoom fun mode', () => {
 
     send(server, guest.connection, { type: 'update_table_settings', funModeEnabled: false })
     expect(lastMessage(host.connection, 'room_snapshot')?.state.funModeEnabled).toBe(true)
+  })
+})
+
+describe('PokerRoom peeking at hole cards', () => {
+  function startHeadsUp(prefix: string) {
+    const { room, server } = createHarness()
+    const host = joinPlayer(server, room, `${prefix}-host`, 'Alice')
+    seatPlayer(server, host.connection, 0)
+    const guest = joinPlayer(server, room, `${prefix}-guest`, 'Bob')
+    seatPlayer(server, guest.connection, 1)
+    send(server, host.connection, { type: 'start_game' })
+    return { room, server, host, guest }
+  }
+
+  const seatOf = (connection: Connection, playerId: string) =>
+    lastMessage(connection, 'room_snapshot')?.state.players.find(player => player.id === playerId)
+
+  it('shows everyone that a player is peeking without leaking the cards', () => {
+    vi.useFakeTimers()
+    const { server, host, guest } = startHeadsUp('peek')
+    expect(seatOf(guest.connection, host.playerId)?.isPeeking).toBeUndefined()
+
+    send(server, host.connection, { type: 'peek_cards', peeking: true })
+    const seenByGuest = seatOf(guest.connection, host.playerId)
+    expect(seenByGuest?.isPeeking).toBe(true)
+    expect(seenByGuest?.holeCards).toBeUndefined()
+    expect(seatOf(host.connection, host.playerId)?.isPeeking).toBe(true)
+
+    send(server, host.connection, { type: 'peek_cards', peeking: false })
+    expect(seatOf(guest.connection, host.playerId)?.isPeeking).toBeUndefined()
+  })
+
+  it('ignores peeks outside a live hand and from spectators', () => {
+    const { room, server } = createHarness()
+    const host = joinPlayer(server, room, 'idle-host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+    const watcher = joinPlayer(server, room, 'idle-watcher', 'Cara')
+
+    send(server, host.connection, { type: 'peek_cards', peeking: true })
+    send(server, watcher.connection, { type: 'peek_cards', peeking: true })
+    const players = lastMessage(host.connection, 'room_snapshot')?.state.players ?? []
+    expect(players.some(player => player.isPeeking)).toBe(false)
+  })
+
+  it('clears the peek when the hand ends or the peeker folds', () => {
+    vi.useFakeTimers()
+    const { server, host, guest } = startHeadsUp('peek-end')
+    send(server, host.connection, { type: 'peek_cards', peeking: true })
+    send(server, guest.connection, { type: 'peek_cards', peeking: true })
+    const acting = lastMessage(host.connection, 'room_snapshot')?.state.actingPlayerId
+    const actingConn = acting === host.playerId ? host.connection : guest.connection
+    send(server, actingConn, { type: 'player_action', action: 'fold' })
+
+    const players = lastMessage(host.connection, 'room_snapshot')?.state.players ?? []
+    expect(players.some(player => player.isPeeking)).toBe(false)
+  })
+
+  it('drops a peek the client never lowers', () => {
+    vi.useFakeTimers()
+    const { server, host, guest } = startHeadsUp('peek-stuck')
+    send(server, host.connection, { type: 'peek_cards', peeking: true })
+    expect(seatOf(guest.connection, host.playerId)?.isPeeking).toBe(true)
+    vi.advanceTimersByTime(PEEK_MAX_DURATION_MS + 50)
+    expect(seatOf(guest.connection, host.playerId)?.isPeeking).toBeUndefined()
+  })
+
+  it('rate-limits peek spam but always honours putting the cards down', () => {
+    vi.useFakeTimers()
+    const { server, host, guest } = startHeadsUp('peek-spam')
+    const guestMessages = (guest.connection as unknown as MockConnection).messages
+    const before = guestMessages.length
+    for (let index = 0; index < 20; index += 1) {
+      send(server, host.connection, { type: 'peek_cards', peeking: index % 2 === 0 })
+    }
+    const snapshotsSent = guestMessages.slice(before).filter(message => message.type === 'room_snapshot').length
+    expect(snapshotsSent).toBeLessThanOrEqual(8)
+
+    send(server, host.connection, { type: 'peek_cards', peeking: true })
+    expect(seatOf(guest.connection, host.playerId)?.isPeeking).toBeUndefined()
+    vi.advanceTimersByTime(2100)
+    send(server, host.connection, { type: 'peek_cards', peeking: true })
+    expect(seatOf(guest.connection, host.playerId)?.isPeeking).toBe(true)
+  })
+
+  it('bots glance at their cards shortly after the deal', () => {
+    vi.useFakeTimers()
+    const { room, server } = createHarness()
+    server.botPeekRandom = () => 0
+    const host = joinPlayer(server, room, 'peek-bots', 'Alice')
+    seatPlayer(server, host.connection, 0)
+    send(server, host.connection, { type: 'add_bots', count: 2 })
+    send(server, host.connection, { type: 'start_game' })
+
+    vi.advanceTimersByTime(600)
+    const bots = lastMessage(host.connection, 'room_snapshot')?.state.players.filter(player => player.isBot) ?? []
+    expect(bots.filter(bot => bot.status !== 'folded').every(bot => bot.isPeeking)).toBe(true)
+    expect(bots.every(bot => bot.holeCards === undefined)).toBe(true)
   })
 })

@@ -135,6 +135,10 @@ const DEFAULT_SETTINGS: TableSettings = {
 
 export const AUTO_FOLD_DELAY = DEFAULT_SETTINGS.actionTimerDuration
 export const BOT_ACTION_DELAY = 1200
+/** A peek the client never lowers (tab closed mid-hold) is dropped after this. */
+export const PEEK_MAX_DURATION_MS = 12_000
+const PEEK_RATE_WINDOW_MS = 2_000
+const PEEK_RATE_MAX_CHANGES = 8
 const CHAT_BUBBLE_DURATION = 9000
 const EMOTE_DURATION = 6000
 const MAX_CHAT_HISTORY = 18
@@ -184,6 +188,12 @@ export default class PokerRoom implements PartyServer {
   private drinkWaterTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private drinkWearOffHand = 0
   private passedOutFoldPending = false
+  /** Who is privately looking at their hole cards, keyed to the hand they peeked in. */
+  private peekingByPlayer = new Map<string, { handNumber: number; timer: ReturnType<typeof setTimeout> }>()
+  private peekRateByPlayer = new Map<string, number[]>()
+  private botPeekTimers = new Set<ReturnType<typeof setTimeout>>()
+  /** Injectable so tests can make bot peeking deterministic. */
+  botPeekRandom: () => number = Math.random
 
   constructor(readonly room: Room) {
     const roomCode = room.id.toUpperCase()
@@ -308,6 +318,9 @@ export default class PokerRoom implements PartyServer {
           break
         case 'companion_mute':
           this.handleCompanionMute(sender)
+          break
+        case 'peek_cards':
+          this.handlePeekCards(sender, msg.peeking)
           break
         default:
           this.sendError(sender, 'Unknown message type')
@@ -611,6 +624,7 @@ export default class PokerRoom implements PartyServer {
       this.data.gameState = startHand(this.data.gameState)
       this.recordHandsPlayedForCurrentHand()
       this.wakeRestedDrinkers()
+      this.scheduleBotPeeks()
       this.syncActionTimer(true)
       this.sendActionResult(conn, this.data.gameState.handNumber > 1 ? 'Dealing next hand.' : 'Dealing the first hand.')
       this.broadcastState()
@@ -1881,7 +1895,92 @@ export default class PokerRoom implements PartyServer {
       venmoUsername: this.data.playerProfiles[player.id]?.venmoUsername,
       stats: this.getPublicStats(player.id),
       drinks: toPublicDrinkState(this.drinkLedger[player.id]),
+      ...(this.isPlayerPeeking(player.id) ? { isPeeking: true } : {}),
     }
+  }
+
+  /** Only a live hand's dealt-in, not-folded player can be seen peeking. */
+  private canPeek(playerId: string): boolean {
+    const state = this.data.gameState
+    const player = this.getPlayer(playerId)
+    return Boolean(
+      state.phase === 'in_hand' &&
+      player &&
+      player.holeCards.length === 2 &&
+      (player.status === 'active' || player.status === 'all_in')
+    )
+  }
+
+  private isPlayerPeeking(playerId: string): boolean {
+    const peek = this.peekingByPlayer.get(playerId)
+    return Boolean(peek && peek.handNumber === this.data.gameState.handNumber && this.canPeek(playerId))
+  }
+
+  private handlePeekCards(conn: Connection, peeking: boolean) {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    if (!playerId || !this.getPlayer(playerId)) {
+      return
+    }
+
+    const now = Date.now()
+    const recent = (this.peekRateByPlayer.get(playerId) ?? []).filter(at => now - at < PEEK_RATE_WINDOW_MS)
+    if (recent.length >= PEEK_RATE_MAX_CHANGES) {
+      this.peekRateByPlayer.set(playerId, recent)
+      // Over the limit: still honour "stop peeking" so nobody gets stuck looking.
+      if (peeking || !this.peekingByPlayer.has(playerId)) {
+        return
+      }
+    }
+    recent.push(now)
+    this.peekRateByPlayer.set(playerId, recent)
+
+    if (this.setPeeking(playerId, peeking)) {
+      this.broadcastState()
+    }
+  }
+
+  /** Returns true when the public peek state changed. */
+  private setPeeking(playerId: string, peeking: boolean, durationMs = PEEK_MAX_DURATION_MS): boolean {
+    const wasPeeking = this.isPlayerPeeking(playerId)
+    const existing = this.peekingByPlayer.get(playerId)
+    if (existing) {
+      clearTimeout(existing.timer)
+      this.peekingByPlayer.delete(playerId)
+    }
+
+    if (!peeking || !this.canPeek(playerId)) {
+      return wasPeeking
+    }
+
+    const handNumber = this.data.gameState.handNumber
+    const timer = setTimeout(() => {
+      const current = this.peekingByPlayer.get(playerId)
+      if (current?.timer !== timer) return
+      this.peekingByPlayer.delete(playerId)
+      if (current.handNumber === this.data.gameState.handNumber && this.canPeek(playerId)) this.broadcastState()
+    }, durationMs)
+    this.peekingByPlayer.set(playerId, { handNumber, timer })
+    return !wasPeeking
+  }
+
+  /** Bots glance at their cards right after the deal so the 3D peek animation shows up at bot tables. */
+  private scheduleBotPeeks() {
+    for (const timer of this.botPeekTimers) clearTimeout(timer)
+    this.botPeekTimers.clear()
+    for (const player of this.data.gameState.players) {
+      if (!this.isBotPlayer(player.id) || this.botPeekRandom() > 0.75) continue
+      this.scheduleBotPeek(player.id, 500 + this.botPeekRandom() * 2600, 1300 + this.botPeekRandom() * 1100)
+    }
+  }
+
+  private scheduleBotPeek(playerId: string, delayMs: number, durationMs: number) {
+    const handNumber = this.data.gameState.handNumber
+    const timer = setTimeout(() => {
+      this.botPeekTimers.delete(timer)
+      if (this.data.gameState.handNumber !== handNumber) return
+      if (this.setPeeking(playerId, true, durationMs)) this.broadcastState()
+    }, delayMs)
+    this.botPeekTimers.add(timer)
   }
 
   private ensureStats(statsKey: string): TrackedPlayerStats {
@@ -2228,6 +2327,10 @@ export default class PokerRoom implements PartyServer {
     this.clearBotAction()
     this.botActionPlayerId = playerId
     this.data.gameState.actionTimerStart = Date.now()
+    // Now and then a bot re-checks its cards while "thinking".
+    if (this.botPeekRandom() < 0.3 && !this.isPlayerPeeking(playerId)) {
+      this.scheduleBotPeek(playerId, 80, BOT_ACTION_DELAY - 250)
+    }
 
     this.botActionTimeout = setTimeout(() => {
       this.botActionTimeout = null
@@ -2444,6 +2547,7 @@ export default class PokerRoom implements PartyServer {
         this.data.gameState = startHand(this.data.gameState)
         this.recordHandsPlayedForCurrentHand()
         this.wakeRestedDrinkers()
+        this.scheduleBotPeeks()
         this.clearAutoFold()
         this.syncActionTimer(true)
         this.broadcastState()

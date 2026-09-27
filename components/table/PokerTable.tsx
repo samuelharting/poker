@@ -107,6 +107,8 @@ interface PokerTableProps {
   onSetSoundVolume?: (volume: number) => void
   onUpdateAvatar?: (avatar: PlayerAvatarCustomization) => void
   onSoundCue?: (cue: PokerSoundCueKind) => void
+  /** You started/stopped privately peeking at your hole cards. */
+  onPeekCards?: (peeking: boolean) => void
   onCloseSettings: () => void
   onCopyRoom: () => void
   onShareRoom: () => void
@@ -1040,6 +1042,7 @@ export function PokerTable({
   onSetSoundVolume = () => {},
   onUpdateAvatar = () => {},
   onSoundCue = () => {},
+  onPeekCards,
   onCloseSettings,
   onCopyRoom,
   onShareRoom,
@@ -1928,6 +1931,9 @@ export function PokerTable({
                   handDescription={ownHandDescription}
                   showCardsMode={ownShowCardsMode}
                   revealChoiceActive={canAdjustShownCards}
+                  concealed={isInHand}
+                  onPeekChange={onPeekCards}
+                  onSoundCue={onSoundCue}
                   socialMessage={heroSocial.message}
                   socialMessageExpiresAt={heroSocial.messageExpiresAt}
                   socialEmote={heroSocial.emote}
@@ -2106,6 +2112,9 @@ export function PokerTable({
                 handDescription={ownHandDescription}
                 showCardsMode={ownShowCardsMode}
                 revealChoiceActive={canAdjustShownCards}
+                concealed={isInHand}
+                onPeekChange={onPeekCards}
+                onSoundCue={onSoundCue}
                 socialMessage={heroSocial.message}
                 socialMessageExpiresAt={heroSocial.messageExpiresAt}
                 socialEmote={heroSocial.emote}

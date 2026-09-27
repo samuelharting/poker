@@ -83,6 +83,8 @@ export interface ThreePlayerView {
   /** Nameplate chip: only this street's action (or All-in), so old streets don't linger. */
   statusAction?: string
   drinks: ThreePlayerDrinks
+  /** Privately looking at their hole cards right now (drives the 3D peek animation). */
+  isPeeking: boolean
 }
 
 /** Per-player drink state for avatar animations (drinking, swaying, passed out). */
@@ -373,6 +375,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
             ? undefined
             : player.lastAction,
         drinks: toThreePlayerDrinks(player.drinks),
+        isPeeking: Boolean(player.isPeeking) && player.hasCards && !isOutOfHand,
       }
     })
     .sort((a, b) => a.visualSeat - b.visualSeat)

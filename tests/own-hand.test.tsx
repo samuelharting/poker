@@ -84,3 +84,40 @@ describe('OwnHand strength badge', () => {
     expect(markup).toContain('Maverick →')
   })
 })
+
+describe('OwnHand peeking (live hand)', () => {
+  const cards = [
+    { rank: '8' as const, suit: 'clubs' as const },
+    { rank: '8' as const, suit: 'hearts' as const },
+  ]
+
+  it('deals your cards face-down under the card back and hides the strength until you peek', () => {
+    const markup = renderToStaticMarkup(
+      <OwnHand cards={cards} isActing handDescription="Pair of Eights" concealed />
+    )
+
+    expect(markup).toContain('own-card-row is-concealed')
+    expect(markup).toContain('own-card-cover-back')
+    expect(markup).toContain('data-peek="idle"')
+    expect(markup).toContain('role="button"')
+    expect(markup).not.toContain('Pair of Eights')
+    expect(markup).not.toContain('has-strength')
+    expect(markup).toContain('own-card-peek-face" aria-hidden="true"')
+  })
+
+  it('shows the tap-to-peek hint until the first peek of the session', () => {
+    const markup = renderToStaticMarkup(<OwnHand cards={cards} isActing={false} concealed />)
+    expect(markup).toContain('Tap to peek')
+  })
+
+  it('reveals the cards and strength as before once the hand is over', () => {
+    const markup = renderToStaticMarkup(
+      <OwnHand cards={cards} isActing={false} handDescription="Pair of Eights" revealChoiceActive />
+    )
+
+    expect(markup).not.toContain('own-card-cover')
+    expect(markup).not.toContain('Tap to peek')
+    expect(markup).toContain('Pair of Eights')
+    expect(markup).toContain('8 of clubs')
+  })
+})

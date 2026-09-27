@@ -36,6 +36,9 @@ export type PokerSoundTimelineCueKind =
   | 'showdown_card'
   | 'showdown_winner'
   | 'pot_payout'
+  /** Local-only: you squeeze your hole cards up to peek, then set them back down. */
+  | 'card_peek'
+  | 'card_settle'
 
 export type PokerSoundCueKind = PokerSoundEventKind | PokerSoundTimelineCueKind
 

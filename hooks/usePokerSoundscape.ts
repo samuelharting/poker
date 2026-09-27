@@ -290,6 +290,15 @@ class ProceduralPokerAudio {
       case 'pot_payout':
         this.chipCluster(now, 11, 0.072)
         break
+      case 'card_peek':
+        // A soft felt drag as the corner lifts, then the faint snap of the card bending.
+        this.cardSlide(now, 0.03, 900, 1900, 0.2)
+        this.tone(now + 0.11, 2100, 1500, 0.035, 0.008, 'sine')
+        break
+      case 'card_settle':
+        this.cardSlide(now, 0.028, 1700, 700, 0.15)
+        this.tone(now + 0.12, 150, 90, 0.07, 0.03, 'triangle')
+        break
     }
   }
 
@@ -401,24 +410,24 @@ class ProceduralPokerAudio {
     return buffer
   }
 
-  private cardSlide(start: number, level: number): void {
+  private cardSlide(start: number, level: number, fromHz = 1500, toHz = 620, duration = 0.18): void {
     if (!this.context || !this.masterGain || !this.noiseBuffer) return
     const source = this.context.createBufferSource()
     source.buffer = this.noiseBuffer
     const filter = this.context.createBiquadFilter()
     filter.type = 'bandpass'
-    filter.frequency.setValueAtTime(1500, start)
-    filter.frequency.exponentialRampToValueAtTime(620, start + 0.17)
+    filter.frequency.setValueAtTime(fromHz, start)
+    filter.frequency.exponentialRampToValueAtTime(toHz, start + duration - 0.01)
     filter.Q.value = 0.72
     const gain = this.context.createGain()
     gain.gain.setValueAtTime(0.0001, start)
     gain.gain.exponentialRampToValueAtTime(level, start + 0.018)
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.18)
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration)
     source.connect(filter)
     filter.connect(gain)
     gain.connect(this.masterGain)
-    source.start(start, 0, 0.19)
-    source.stop(start + 0.2)
+    source.start(start, 0, duration + 0.01)
+    source.stop(start + duration + 0.02)
     source.onended = () => {
       source.disconnect()
       filter.disconnect()

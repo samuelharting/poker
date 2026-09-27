@@ -161,3 +161,12 @@ describe('targeted table chat protocol', () => {
     }))).toBeNull()
   })
 })
+
+describe('peek_cards protocol', () => {
+  it('accepts a boolean peeking flag and nothing else', () => {
+    expect(parseC2S(JSON.stringify({ type: 'peek_cards', peeking: true }))).toEqual({ type: 'peek_cards', peeking: true })
+    expect(parseC2S(JSON.stringify({ type: 'peek_cards', peeking: false, cards: ['As'] }))).toEqual({ type: 'peek_cards', peeking: false })
+    expect(parseC2S(JSON.stringify({ type: 'peek_cards', peeking: 'yes' }))).toBeNull()
+    expect(parseC2S(JSON.stringify({ type: 'peek_cards' }))).toBeNull()
+  })
+})
