@@ -77,6 +77,7 @@ import {
   animateBoardRuntime,
   createBoardRuntime,
   createCardMesh,
+  cullHiddenCardSide,
   disposeCardMesh,
   setCardFace,
   syncBoardRuntime,
@@ -336,6 +337,7 @@ function createSeededRandom(seed: number) {
 }
 
 function getStatusLabel(player: ThreePlayerView): string {
+  if (player.awayLabel) return player.awayLabel
   if (player.isOutOfHand) return 'Folded'
   if (player.isActing) return 'Acting'
   return player.statusAction ?? ''
@@ -666,7 +668,7 @@ function createRoom(scene: THREE.Scene) {
     toneMapped: false,
   })
   neonMaterial.userData.baseEmissive = 0.95
-  const neon = addMesh(scene, new THREE.PlaneGeometry(4.4, 1.1), neonMaterial, [0, 3.58, -9.3])
+  const neon = addMesh(scene, new THREE.PlaneGeometry(4.4, 1.1), neonMaterial, [0, 5.35, -9.3])
   neon.name = 'neon-sign'
   neon.castShadow = false
   neon.receiveShadow = false
@@ -1399,6 +1401,28 @@ function getSharedChipMaterials() {
 
 interface ChipInstancer {
   meshes: THREE.InstancedMesh[]
+  /** Soft contact shadows under every chip column resting on the felt (one draw). */
+  contact: THREE.InstancedMesh
+}
+
+let contactShadowTexture: THREE.CanvasTexture | null = null
+
+function getContactShadowTexture() {
+  if (contactShadowTexture) return contactShadowTexture
+  const canvas = document.createElement('canvas')
+  canvas.width = 64
+  canvas.height = 64
+  const context = canvas.getContext('2d')
+  if (context) {
+    const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 32)
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.62)')
+    gradient.addColorStop(0.45, 'rgba(0, 0, 0, 0.42)')
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)')
+    context.fillStyle = gradient
+    context.fillRect(0, 0, 64, 64)
+  }
+  contactShadowTexture = new THREE.CanvasTexture(canvas)
+  return contactShadowTexture
 }
 
 const CHIP_INSTANCE_CAPACITY = 520
@@ -1417,8 +1441,24 @@ function createChipInstancer(scene: THREE.Scene): ChipInstancer {
     scene.add(mesh)
     return mesh
   })
-  return { meshes }
+  const contactGeometry = new THREE.PlaneGeometry(CHIP_RADIUS * 3.1, CHIP_RADIUS * 3.1)
+  contactGeometry.rotateX(-Math.PI / 2)
+  const contact = new THREE.InstancedMesh(contactGeometry, new THREE.MeshBasicMaterial({
+    map: getContactShadowTexture(),
+    transparent: true,
+    depthWrite: false,
+    toneMapped: false,
+  }), CHIP_INSTANCE_CAPACITY)
+  contact.name = 'chip-contact-shadows'
+  contact.frustumCulled = false
+  contact.renderOrder = 1
+  contact.count = 0
+  scene.add(contact)
+  return { meshes, contact }
 }
+
+const contactMatrix = new THREE.Matrix4()
+const contactPosition = new THREE.Vector3()
 
 function isChipShown(chip: THREE.Object3D, scene: THREE.Scene) {
   let node: THREE.Object3D | null = chip
@@ -1437,6 +1477,7 @@ function updateChipInstances(instancer: ChipInstancer, scene: THREE.Scene) {
   const counts = chipInstanceCounts
   counts.length = instancer.meshes.length
   counts.fill(0)
+  let contactCount = 0
   for (const chip of chipProxies) {
     if (!chip.parent) {
       chipProxies.delete(chip)
@@ -1449,7 +1490,22 @@ function updateChipInstances(instancer: ChipInstancer, scene: THREE.Scene) {
     chip.updateWorldMatrix(true, false)
     mesh.setMatrixAt(counts[denomination]!, chip.matrixWorld)
     counts[denomination]! += 1
+    // The bottom chip of each column grounds it with a soft blob on the felt
+    // (fades out as the chip lifts off during a toss).
+    if (chip.userData.level === 0 && contactCount < CHIP_INSTANCE_CAPACITY) {
+      contactPosition.setFromMatrixPosition(chip.matrixWorld)
+      const lift = contactPosition.y - FELT_TOP_Y - CHIP_HEIGHT / 2
+      if (lift < 0.35) {
+        const scale = 1 + Math.max(0, lift) * 1.6
+        contactMatrix.makeScale(scale, 1, scale)
+        contactMatrix.setPosition(contactPosition.x, FELT_TOP_Y + 0.0025, contactPosition.z)
+        instancer.contact.setMatrixAt(contactCount, contactMatrix)
+        contactCount += 1
+      }
+    }
   }
+  instancer.contact.count = contactCount
+  instancer.contact.instanceMatrix.needsUpdate = true
   instancer.meshes.forEach((mesh, index) => {
     mesh.count = counts[index]!
     mesh.instanceMatrix.needsUpdate = true
@@ -1496,6 +1552,7 @@ function createChipSet(maxChips: number, layout: 'mound' | 'stack' = 'mound') {
     chip.rotation.y = random() * Math.PI * 2
     chip.userData.baseYaw = chip.rotation.y
     chip.userData.denomination = styleIndex
+    chip.userData.level = level
     chip.name = `casino-chip-${index}`
     chip.visible = false
     // Proxy only: the instancer draws it, so hide it from the camera and shadows.
@@ -2878,6 +2935,7 @@ function createSceneRuntime(
 
   let lastTime = (performance.now() - runtime.startTime) / 1000
   let lastShadowAt = Number.NEGATIVE_INFINITY
+  let renderedFrames = 0
   const targetCamera = new THREE.Vector3()
   const targetLook = new THREE.Vector3()
   const winnerFocus = new THREE.Vector3()
@@ -3006,6 +3064,10 @@ function createSceneRuntime(
     updateLadyLuck(runtime, viewRef.current, host, time, delta, reducedMotion, viewportWidth, viewportHeight)
     projectSeatOverlays(runtime, host, viewportWidth, viewportHeight)
     updateChipInstances(runtime.chipInstancer, scene)
+    for (const seat of runtime.seats.values()) {
+      if (seat.root.visible && seat.cards.visible) seat.holeCards.forEach(card => cullHiddenCardSide(card, camera.position))
+    }
+    runtime.board.slots.forEach(slot => cullHiddenCardSide(slot.card, camera.position))
 
     if (runtime.postFx && quality < 2) {
       runtime.postFx.bloom.strength = 0.22 + (winnerSeat ? 0.1 : 0) + allInImpact.strength * 0.1
@@ -3013,6 +3075,8 @@ function createSceneRuntime(
     } else {
       renderer.render(scene, camera)
     }
+    renderedFrames += 1
+    if (renderedFrames === 4) host.dataset.sceneReady = 'true'
   }
 
   runtime.pause = () => {
