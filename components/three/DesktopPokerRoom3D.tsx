@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useRef, useState, type MutableRefObject } from 'react'
 import * as THREE from 'three'
@@ -32,12 +32,13 @@ import {
   ANIMATED_BONES,
   createAvatarAnimatorState,
   FLIP_OFF_SECONDS,
+  getFlipOffHand,
   updateAvatarAnimator,
   type AvatarAnchors,
   type AvatarAnimatorState,
   type AvatarPose,
 } from './avatarAnimator'
-import { getArmChain, solveArmIK } from './avatarIK'
+import { getArmChain, getArmOvershoot, orientBoneFrame, solveArmIK } from './avatarIK'
 import { applyBlink, getBlinkAmount, stylizeAvatar, type StylizedAvatar } from './avatarStyle'
 import { createAvatarFace, disposeAvatarFace, updateAvatarFace, type AvatarFaceRig, type FaceMood } from './avatarFace'
 import { createDrinkProp, disposeDrinkProp, DRINK_DURATION, type DrinkProp } from './drinkProps'
@@ -293,10 +294,10 @@ interface SceneRuntime {
 }
 
 const SUIT_SYMBOLS: Record<ThreeCardView['suit'], string> = {
-  clubs: '♣',
-  diamonds: '♦',
-  hearts: '♥',
-  spades: '♠',
+  clubs: 'â™£',
+  diamonds: 'â™¦',
+  hearts: 'â™¥',
+  spades: 'â™ ',
 }
 
 const AVATAR_RETRY_BASE_MS = 3_000
@@ -744,7 +745,7 @@ function createRoom(scene: THREE.Scene) {
   createBackBar(scene, brassMaterial)
   for (const x of [-4.6, 4.6]) createWallSconce(scene, x, brassMaterial)
   for (const x of [-9.4, 9.4]) createWallSconce(scene, x, brassMaterial)
-  createPoster(scene, -7, 'ALL IN', 'NO GUTS · NO GLORY', 'hearts', brassMaterial)
+  createPoster(scene, -7, 'ALL IN', 'NO GUTS Â· NO GLORY', 'hearts', brassMaterial)
   createPoster(scene, 7, 'ROYAL', 'FLUSH OR BUST', 'spades', brassMaterial)
   createPendantLamp(scene, -2.6, -0.4, brassMaterial)
   createPendantLamp(scene, 2.6, -0.4, brassMaterial)
@@ -820,7 +821,9 @@ function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
   seat.chair.position.z = seat.seatShiftZ
 
   // Forearms rest on the padded rail; hole cards sit on the felt just inside it.
-  const railRest = at(RAIL_WIDTH * 0.86, RAIL_PEAK_Y + 0.02)
+  // The wrist target sits a forearm's thickness above the padding so arms lie
+  // on the rail instead of sinking into it.
+  const railRest = at(RAIL_WIDTH * 0.86, RAIL_PEAK_Y + 0.07)
   seat.anchors.railR = [HAND_SPREAD / scale, railRest[1], railRest[2]]
   seat.anchors.railL = [-HAND_SPREAD / scale, railRest[1], railRest[2]]
   const cardSpot = at(-0.42, FELT_TOP_Y + 0.012)
@@ -1457,7 +1460,7 @@ function getChipGeometry() {
 
 /**
  * Chips are animated as lightweight proxy meshes on a hidden layer, and drawn
- * each frame by one InstancedMesh per denomination (≈10 draw calls for every
+ * each frame by one InstancedMesh per denomination (â‰ˆ10 draw calls for every
  * chip on the table instead of one draw per chip).
  */
 const CHIP_PROXY_LAYER = 3
@@ -1941,24 +1944,102 @@ function animatePot(runtime: SceneRuntime, time: number, reducedMotion: boolean)
 const ikTarget = new THREE.Vector3()
 const ikPole = new THREE.Vector3()
 
-/** Reaches each hand to its animator target with two-bone arm IK. */
-function solveSeatArms(seat: SeatRuntime, pose: AvatarPose) {
+const flipUp = new THREE.Vector3()
+const flipSide = new THREE.Vector3()
+const flipToward = new THREE.Vector3()
+const flipWrist = new THREE.Vector3()
+const WORLD_UP = new THREE.Vector3(0, 1, 0)
+
+/**
+ * Reaches each hand to its animator target with two-bone arm IK. Targets past
+ * a comfortable (soft-elbow) reach lean the chest in rather than locking the
+ * arm straight; during a flick-off the right hand is turned knuckles-out with
+ * the fingers up.
+ */
+function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | null = null) {
   const bones = seat.avatar?.bones
   if (!bones) return
   const sides = [
     { side: 'R', hand: pose.handR, shoulder: seat.anchors.shoulderR, out: 1 },
     { side: 'L', hand: pose.handL, shoulder: seat.anchors.shoulderL, out: -1 },
   ] as const
+  // Lean in for far reaches (pushing chips, shoving all-in) before solving.
+  let overshoot = 0
+  for (const { side, hand } of sides) {
+    const chain = getArmChain(bones.get(`UpperArm${side}`), bones.get(`LowerArm${side}`), bones.get(`Wrist${side}`))
+    if (!chain) continue
+    ikTarget.set(hand[0], hand[1], hand[2])
+    seat.root.localToWorld(ikTarget)
+    overshoot = Math.max(overshoot, getArmOvershoot(chain, ikTarget))
+  }
+  if (overshoot > 0.001) {
+    const lean = Math.min(0.32, (overshoot / Math.max(0.2, seat.root.scale.x)) * 0.9)
+    applyAvatarBoneOffset(seat, bones.get('Chest'), lean * 0.7, 0, 0)
+    applyAvatarBoneOffset(seat, bones.get('Torso'), lean * 0.3, 0, 0)
+    seat.avatar?.model.updateMatrixWorld(true)
+  }
+  const splay = THREE.MathUtils.clamp(pose.elbowOut, 0, 1)
   for (const { side, hand, shoulder, out } of sides) {
     const chain = getArmChain(bones.get(`UpperArm${side}`), bones.get(`LowerArm${side}`), bones.get(`Wrist${side}`))
     if (!chain) continue
     ikTarget.set(hand[0], hand[1], hand[2])
     seat.root.localToWorld(ikTarget)
-    // Elbows swing out to the side and down/back, like arms resting on a rail.
-    ikPole.set(shoulder[0] + out * 0.7, shoulder[1] - 0.7, shoulder[2] + 0.45)
+    // Elbows swing out to the side and down/back, like arms resting on a rail;
+    // folded on the rail (passed out) they splay out level with the hands.
+    ikPole.set(
+      shoulder[0] + out * (0.7 + 0.5 * splay),
+      shoulder[1] - 0.7 * (1 - splay) - 0.12 * splay,
+      shoulder[2] + 0.45 * (1 - splay) + 0.05 * splay
+    )
     seat.root.localToWorld(ikPole)
     solveArmIK(chain, ikTarget, ikPole)
+
+    if (flipTarget && side === getFlipOffHand(flipTarget) && pose.middleFinger > 0.01) {
+      const middle = bones.get(`Middle1${side}`)
+      const index = bones.get(`Index1${side}`)
+      const pinky = bones.get(`Pinky1${side}`)
+      if (middle && index && pinky) {
+        chain.hand.getWorldPosition(flipWrist)
+        flipToward.set(flipTarget[0], flipTarget[1], flipTarget[2])
+        seat.root.localToWorld(flipToward)
+        flipToward.sub(flipWrist).setY(0)
+        if (flipToward.lengthSq() > 1e-6) {
+          flipToward.normalize()
+          // Fingers up (tipped a touch toward the target), back of the hand to
+          // them: index-to-pinky runs to the sender's left (right, for the left hand).
+          flipUp.copy(WORLD_UP).addScaledVector(flipToward, 0.28).normalize()
+          flipSide.crossVectors(WORLD_UP, flipToward).normalize().multiplyScalar(side === 'R' ? 1 : -1)
+          orientBoneFrame(chain.hand, middle, index, pinky, flipUp, flipSide, pose.middleFinger)
+        }
+      }
+    }
   }
+}
+
+const FINGER_NAMES = ['Index', 'Middle', 'Ring', 'Pinky'] as const
+/** Radians per joint (knuckle â†’ tip) at a full fist. */
+const FINGER_FIST_CURL = [1.25, 1.45, 0.9] as const
+/** A relaxed hand is never flat: a little natural bend at every joint. */
+const FINGER_REST_CURL = [0.1, 0.16, 0.1] as const
+/** Outer fingers curl a bit more than the index for a natural cascade. */
+const FINGER_CASCADE: Record<(typeof FINGER_NAMES)[number], number> = { Index: -0.06, Middle: 0, Ring: 0.06, Pinky: 0.12 }
+
+/** Curls one hand: 0 = relaxed open, 1 = fist; `middleUp` extends only the middle finger. */
+function curlHand(seat: SeatRuntime, bones: ReadonlyMap<string, THREE.Bone>, side: 'R' | 'L', curl: number, middleUp = 0) {
+  const fist = Math.max(curl, middleUp)
+  for (const finger of FINGER_NAMES) {
+    const extended = finger === 'Middle' ? middleUp : 0
+    const amount = THREE.MathUtils.clamp(fist + FINGER_CASCADE[finger] * (1 - fist), 0, 1)
+    for (let joint = 0; joint < 3; joint += 1) {
+      const bend = (FINGER_REST_CURL[joint] + amount * FINGER_FIST_CURL[joint]) * (1 - extended) - 0.05 * extended
+      applyAvatarBoneOffset(seat, bones.get(`${finger}${joint + 1}${side}`), bend, 0, 0)
+    }
+  }
+  // Thumb folds across the curled fingers (tucked for the flick-off).
+  const mirror = side === 'R' ? 1 : -1
+  applyAvatarBoneOffset(seat, bones.get(`Thumb1${side}`), fist * 0.3 + 0.3 * middleUp, -mirror * (fist * 0.28 + 0.35 * middleUp), 0)
+  applyAvatarBoneOffset(seat, bones.get(`Thumb2${side}`), 0.1 + fist * 0.45 + 0.3 * middleUp, 0, 0)
+  applyAvatarBoneOffset(seat, bones.get(`Thumb3${side}`), 0.08 + fist * 0.35, 0, 0)
 }
 
 const flipTargetWorld = new THREE.Vector3()
@@ -1973,9 +2054,16 @@ function getFlipOffInput(seat: SeatRuntime, time: number, seats: ReadonlyMap<str
     return null
   }
   const target = seats.get(gesture.targetId)
-  if (target) target.root.getWorldPosition(flipTargetWorld)
-  else flipTargetWorld.set(0, 0, 4.4)
-  flipTargetWorld.y += 1.4
+  // Aim at the target's face (their head bone when it is loaded).
+  const targetHead = target?.avatar?.bones.get('Head')
+  if (targetHead) {
+    targetHead.getWorldPosition(flipTargetWorld)
+    flipTargetWorld.y += 0.12
+  } else {
+    if (target) target.root.getWorldPosition(flipTargetWorld)
+    else flipTargetWorld.set(0, 0, 4.4)
+    flipTargetWorld.y += 1.4
+  }
   const local = seat.root.worldToLocal(flipTargetWorld.clone())
   return { elapsed, target: [local.x, local.y, local.z] as Vec3 }
 }
@@ -2043,7 +2131,8 @@ function placeDrinkProp(seat: SeatRuntime, pose: AvatarPose, time: number) {
   prop.group.position.y -= 0.14 * scale * (1 - pose.drinkLift * 0.6)
   prop.group.rotation.set(0, seat.root.rotation.y, 0)
   prop.group.rotateX(pose.drinkLift * 1.35)
-  prop.group.scale.setScalar(scale * 1.35 * popScale)
+  // Hand-sized, not head-sized.
+  prop.group.scale.setScalar(scale * 0.95 * popScale)
 }
 
 /** Rosy cheeks creep in as the beers go down. */
@@ -2057,8 +2146,6 @@ function flushCheeks(seat: SeatRuntime) {
 
 const DRUNK_FLUSH = new THREE.Color('#ff6b6b')
 
-const FINGER_BONES_R = ['Index1R', 'Middle1R', 'Ring1R', 'Pinky1R', 'Index2R', 'Middle2R', 'Ring2R', 'Pinky2R', 'Index3R', 'Middle3R', 'Ring3R', 'Pinky3R'] as const
-const FINGER_BONES_L = ['Index1L', 'Middle1L', 'Ring1L', 'Pinky1L', 'Index2L', 'Middle2L', 'Ring2L', 'Pinky2L'] as const
 
 function animateSeat(
   seat: SeatRuntime,
@@ -2092,6 +2179,8 @@ function animateSeat(
     actionPoseOptions
   )
   const headTurn = getAvatarHeadTurn(seat.visualSeat, actingVisualSeat)
+  // A passed-out player can't flick anyone off (the emote itself still sends).
+  const flipOff = seat.passedOut ? null : getFlipOffInput(seat, time, runtimeSeats)
   const pose = updateAvatarAnimator(seat.animator, {
     time,
     delta,
@@ -2116,7 +2205,7 @@ function animateSeat(
     drinkElapsed: time - seat.drinkStartedAt < DRINK_DURATION ? time - seat.drinkStartedAt : null,
     drunkLevel: seat.drunkLevel,
     passedOut: seat.passedOut,
-    flipOff: getFlipOffInput(seat, time, runtimeSeats),
+    flipOff,
     boardRevealAge,
     otherWinner: anyWinner && !seat.winner,
   })
@@ -2169,7 +2258,7 @@ function animateSeat(
     }
     seat.avatar.model.updateMatrixWorld(true)
     if (!seat.anchorsFromRig) measureRigAnchors(seat)
-    solveSeatArms(seat, pose)
+    solveSeatArms(seat, pose, flipOff?.target ?? null)
     const blink = seat.passedOut ? 1 : reducedMotion ? 0 : getBlinkAmount(time, seat.animator.seed)
     placeDrinkProp(seat, pose, time)
     flushCheeks(seat)
@@ -2196,20 +2285,9 @@ function animateSeat(
     } else if (seat.avatarStyle) {
       applyBlink(seat.avatarStyle, blink)
     }
-    for (const name of FINGER_BONES_R) {
-      // During a flick-off the middle finger straightens while the rest curl.
-      // During a flick-off the middle finger straightens while the rest close into a fist.
-      const isMiddle = name.startsWith('Middle')
-      const curl = isMiddle
-        ? pose.fingerCurlR * 0.55 * (1 - pose.middleFinger) - 0.12 * pose.middleFinger
-        : pose.fingerCurlR * (0.55 + 0.95 * pose.middleFinger)
-      applyAvatarBoneOffset(seat, bones.get(name), curl, 0, 0)
-    }
-    for (const name of FINGER_BONES_L) {
-      applyAvatarBoneOffset(seat, bones.get(name), pose.fingerCurlL * 0.55, 0, 0)
-    }
-    applyAvatarBoneOffset(seat, bones.get('Thumb1R'), pose.fingerCurlR * (0.2 + 0.5 * pose.middleFinger), -pose.fingerCurlR * (0.16 + 0.4 * pose.middleFinger), 0)
-    applyAvatarBoneOffset(seat, bones.get('Thumb1L'), pose.fingerCurlL * 0.2, pose.fingerCurlL * 0.16, 0)
+    const flipHand = flipOff ? getFlipOffHand(flipOff.target) : 'R'
+    curlHand(seat, bones, 'R', pose.fingerCurlR, flipHand === 'R' ? pose.middleFinger : 0)
+    curlHand(seat, bones, 'L', pose.fingerCurlL, flipHand === 'L' ? pose.middleFinger : 0)
 
     if (process.env.NODE_ENV !== 'production') {
       // Development-only live pose tuning: window.__avatarTweak = { Bone: [x, y, z] }.
@@ -2522,8 +2600,8 @@ function animateEffects(runtime: SceneRuntime, time: number, delta: number, redu
 }
 
 /**
- * Compiles every shader in the scene up front — including hidden things like
- * confetti, the all-in shockwave, winner halos and Lady Luck — so the first
+ * Compiles every shader in the scene up front â€” including hidden things like
+ * confetti, the all-in shockwave, winner halos and Lady Luck â€” so the first
  * showdown doesn't stall for seconds compiling programs mid-animation.
  */
 function precompileScene(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
@@ -3079,7 +3157,7 @@ export function DesktopPokerRoom3D({
       <div className="lady-luck-bubble-3d" data-visible="false" aria-live="polite" />
 
       {webGLStatus === 'loading' && (
-        <div className="three-webgl-status" role="status">Warming up the 3D table…</div>
+        <div className="three-webgl-status" role="status">Warming up the 3D tableâ€¦</div>
       )}
       {webGLStatus === 'error' && (
         <div className="three-webgl-status is-error" role="alert">
@@ -3144,10 +3222,10 @@ export function DesktopPokerRoom3D({
                 <span className="cinematic-seat-topline">
                   <strong>{player.nickname}</strong>
                   {player.drinks?.passedOut ? (
-                    <em className="cinematic-drink-badge is-passed-out" aria-label="Passed out">💤</em>
+                    <em className="cinematic-drink-badge is-passed-out" aria-label="Passed out">ðŸ’¤</em>
                   ) : (player.drinks?.level ?? 0) > 0 ? (
                     <em className="cinematic-drink-badge" aria-label={`${player.drinks.level} drinks deep`}>
-                      🍺{player.drinks.level}
+                      ðŸº{player.drinks.level}
                     </em>
                   ) : null}
                   {player.blindRole && (

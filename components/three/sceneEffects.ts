@@ -49,7 +49,8 @@ export function createLightCone(scene: THREE.Scene, apex: THREE.Vector3, baseY: 
         float along = clamp(-vHeight / height, 0.0, 1.0);
         float facing = abs(dot(vNormal, vView));
         float edge = smoothstep(0.0, 0.65, facing);
-        float fade = smoothstep(0.0, 0.25, along) * (1.0 - smoothstep(0.85, 1.0, along));
+        // Fades out well above the felt so the cone never washes the board cards.
+        float fade = smoothstep(0.0, 0.25, along) * (1.0 - smoothstep(0.45, 0.9, along));
         gl_FragColor = vec4(color * intensity * edge * fade, 1.0);
       }
     `,
@@ -64,7 +65,7 @@ export function createLightCone(scene: THREE.Scene, apex: THREE.Vector3, baseY: 
 }
 
 export function animateLightCone(cone: LightCone, time: number, reducedMotion: boolean, boost: number) {
-  cone.material.uniforms.intensity!.value = 0.05 + boost * 0.07 + (reducedMotion ? 0 : Math.sin(time * 0.7) * 0.006)
+  cone.material.uniforms.intensity!.value = 0.032 + boost * 0.018 + (reducedMotion ? 0 : Math.sin(time * 0.7) * 0.004)
 }
 
 export function disposeLightCone(cone: LightCone) {
