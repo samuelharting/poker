@@ -105,9 +105,16 @@ describe('OwnHand peeking (live hand)', () => {
     expect(markup).toContain('own-card-peek-face" aria-hidden="true"')
   })
 
-  it('shows the tap-to-peek hint until the first peek of the session', () => {
+  it('shows the short look hint until the first peek of the session', () => {
     const markup = renderToStaticMarkup(<OwnHand cards={cards} isActing={false} concealed />)
-    expect(markup).toContain('Tap to peek')
+    expect(markup).toContain('Hold or tap to look')
+    expect(markup).toContain('Hold Space or click to look')
+    expect(markup).not.toContain('Tap to peek')
+  })
+
+  it('tags the card row with a swappable reveal style (quick spin by default)', () => {
+    expect(renderToStaticMarkup(<OwnHand cards={cards} isActing={false} concealed />)).toContain('data-peek-style="spin"')
+    expect(renderToStaticMarkup(<OwnHand cards={cards} isActing={false} concealed peekStyle="wipe" />)).toContain('data-peek-style="wipe"')
   })
 
   it('reveals the cards and strength as before once the hand is over', () => {
@@ -116,7 +123,7 @@ describe('OwnHand peeking (live hand)', () => {
     )
 
     expect(markup).not.toContain('own-card-cover')
-    expect(markup).not.toContain('Tap to peek')
+    expect(markup).not.toContain('to look')
     expect(markup).toContain('Pair of Eights')
     expect(markup).toContain('8 of clubs')
   })

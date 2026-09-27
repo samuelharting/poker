@@ -39,6 +39,8 @@ export class RoomTap {
   results: string[] = []
   pageErrors: string[] = []
   snapshots = 0
+  /** Every player id any snapshot has shown peeking (brief peeks are easy to miss by polling). */
+  everPeeking = new Set<string>()
 
   /** Forget everything received so far (e.g. before a reload) so waits only see fresh data. */
   reset() {
@@ -66,6 +68,9 @@ export class RoomTap {
           case 'room_snapshot':
             this.snapshot = message.state
             this.snapshots += 1
+            for (const player of message.state?.players ?? []) {
+              if (player?.isPeeking) this.everPeeking.add(player.id)
+            }
             break
           case 'social_snapshot':
             this.social = message.social

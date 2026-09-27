@@ -4,9 +4,10 @@ import type { Card } from '@/lib/poker/types'
 import type { ShowCardsMode } from '@/lib/poker/types'
 import type { PokerSoundCueKind } from '@/lib/poker/soundscape'
 import clsx from 'clsx'
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { PlayingCard } from '@/components/ui/PlayingCard'
 import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
+import { usePeekStyle, type PeekStyle } from '@/lib/peekStyle'
 
 interface OwnHandProps {
   cards: Card[]
@@ -18,8 +19,8 @@ interface OwnHandProps {
   showCardsMode?: ShowCardsMode
   revealChoiceActive?: boolean
   /**
-   * Live hand: your cards lie face-down and you squeeze them up to peek
-   * (click/tap toggles, press-and-hold peeks while held, Space/P on a keyboard).
+   * Live hand: your cards are shown face-up for a few seconds when dealt, then
+   * lie face-down; a quick click/tap/Space peeks briefly, holding keeps them up.
    */
   concealed?: boolean
   /** Fired when your peek starts/stops so the table can see you looking. */
@@ -33,12 +34,19 @@ interface OwnHandProps {
   /** Sender of a targeted emote, shown as "Name →". */
   socialEmoteFrom?: string
   showCardsControl?: React.ReactNode
+  /**
+   * Which reveal animation the cards use (card-peek.css). Defaults to the
+   * player's saved preference from Settings.
+   */
+  peekStyle?: PeekStyle
 }
 
 /** Holding longer than this turns a quick squeeze into a full look that lasts while held. */
 export const PEEK_HOLD_THRESHOLD_MS = 240
 /** A quick click/tap/Space tap squeezes the cards up this long, then they settle on their own. */
 export const QUICK_PEEK_MS = 900
+/** Freshly dealt cards stay face-up this long before flipping down on their own. */
+export const DEAL_REVEAL_MS = 3000
 const PEEKED_ONCE_STORAGE_KEY = 'poker-night:peeked-once'
 let peekedThisSession = false
 
@@ -85,7 +93,9 @@ function buzz(touch: boolean, ms: number) {
   }
 }
 
-export type PeekMode = 'idle' | 'quick' | 'held'
+export type PeekMode = 'idle' | 'deal' | 'quick' | 'held'
+
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 interface PeekPress {
   at: number
@@ -93,6 +103,7 @@ interface PeekPress {
 }
 
 /**
+ * Dealt: the cards flip face-up for DEAL_REVEAL_MS, then down on their own.
  * Quick click / tap / Space tap: the cards squeeze up briefly, then settle by
  * themselves. Press and hold (mouse, touch or Space): they lift all the way and
  * stay up for as long as you hold, settling when you let go.
@@ -128,8 +139,6 @@ function useCardPeek(
       callbacksRef.current.onPeekChange?.(true)
       callbacksRef.current.onSoundCue?.('card_peek')
       buzz(touch, 10)
-      rememberPeeked()
-      setPeekedOnce(true)
     } else if (next === 'idle') {
       callbacksRef.current.onPeekChange?.(false)
       callbacksRef.current.onSoundCue?.('card_settle')
@@ -139,26 +148,59 @@ function useCardPeek(
     }
   }, [])
 
-  // A new hand, or the hand ending, puts the cards back down (the server clears the peek itself).
-  useEffect(() => {
+  // A new hand deals the cards face-up for a moment (the table sees you look),
+  // then they flip down. The hand ending puts them down (the server clears the
+  // peek itself). Layout effect: no face-down frame before the reveal.
+  const revealedHandRef = useRef<string | null>(null)
+  const revealStartedAtRef = useRef(0)
+  useIsomorphicLayoutEffect(() => {
     clearTimers()
     pressRef.current = null
-    if (modeRef.current !== 'idle') {
-      modeRef.current = 'idle'
-      setModeState('idle')
+    if (!enabled || !handKey) {
+      revealedHandRef.current = null
+      if (modeRef.current !== 'idle') {
+        modeRef.current = 'idle'
+        setModeState('idle')
+      }
+      return
     }
-  }, [clearTimers, enabled, handKey])
+    if (revealedHandRef.current !== handKey) {
+      revealedHandRef.current = handKey
+      revealStartedAtRef.current = Date.now()
+      if (modeRef.current === 'idle') setMode('deal')
+    }
+    // Re-run for the same hand (e.g. React re-mounting effects): keep the
+    // reveal going for whatever is left of it.
+    if (modeRef.current === 'deal') {
+      const left = Math.max(0, DEAL_REVEAL_MS - (Date.now() - revealStartedAtRef.current))
+      settleTimerRef.current = setTimeout(() => {
+        settleTimerRef.current = null
+        if (!pressRef.current && modeRef.current === 'deal') setMode('idle')
+      }, left)
+    }
+  }, [clearTimers, enabled, handKey, setMode])
 
   // Leaving mid-peek: tell the table you stopped looking.
-  useEffect(() => () => {
-    clearTimers()
-    if (modeRef.current !== 'idle') callbacksRef.current.onPeekChange?.(false)
+  // Deferred a tick: React re-mounting effects (StrictMode) must not cancel
+  // the deal-time look it immediately resumes.
+  const mountedRef = useRef(false)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      clearTimers()
+      setTimeout(() => {
+        if (!mountedRef.current && modeRef.current !== 'idle') callbacksRef.current.onPeekChange?.(false)
+      }, 0)
+    }
   }, [clearTimers])
 
   const press = useCallback((touch: boolean) => {
     if (!enabled || pressRef.current) return
     clearTimers()
     pressRef.current = { at: Date.now(), touch }
+    rememberPeeked()
+    setPeekedOnce(true)
     if (modeRef.current === 'idle') setMode('quick', touch)
     holdTimerRef.current = setTimeout(() => {
       holdTimerRef.current = null
@@ -253,7 +295,10 @@ export function OwnHand({
   socialEmoteTargeted = false,
   socialEmoteFrom,
   showCardsControl = null,
+  peekStyle: peekStyleProp,
 }: OwnHandProps) {
+  const [savedPeekStyle] = usePeekStyle()
+  const peekStyle = peekStyleProp ?? savedPeekStyle
   const canPeek = concealed && cards.length > 0
   const handKey = cards.map(card => `${card.rank}${card.suit}`).join('-')
   const { mode: peekMode, peekedOnce, pointerHandlers } = useCardPeek(canPeek, handKey, onPeekChange, onSoundCue)
@@ -333,15 +378,17 @@ export function OwnHand({
           isFolded && 'is-folded',
           canPeek && 'is-concealed',
           peeking && 'is-peeking',
-          peekMode === 'held' && 'is-peek-held'
+          peekMode === 'held' && 'is-peek-held',
+          peekMode === 'deal' && 'is-peek-open'
         )}
         {...(canPeek
           ? {
               role: 'button',
               tabIndex: 0,
               'aria-pressed': peeking,
-              'aria-label': 'Peek at your cards (hold to keep looking)',
+              'aria-label': 'Look at your cards (hold to keep looking)',
               'data-peek': peekMode,
+              'data-peek-style': peekStyle,
             }
           : {})}
         {...pointerHandlers}
@@ -389,8 +436,8 @@ export function OwnHand({
         )}
         {canPeek && !peekedOnce && (
           <span className="own-hand-peek-hint" aria-hidden="true">
-            <span className="own-hand-peek-hint-touch">Tap to peek · hold to look</span>
-            <span className="own-hand-peek-hint-mouse">Click or Space to peek · hold to look</span>
+            <span className="own-hand-peek-hint-touch">Hold or tap to look</span>
+            <span className="own-hand-peek-hint-mouse">Hold Space or click to look</span>
           </span>
         )}
       </div>

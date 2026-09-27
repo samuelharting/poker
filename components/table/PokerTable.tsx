@@ -44,6 +44,7 @@ import {
   type TurnPromptInput,
 } from '@/lib/poker/turnGuidance'
 import { PRE_ACTION_SHORTCUT_KEYS, PreActionBar } from './PreActionBar'
+import { PeekStylePicker } from './PeekStylePicker'
 import {
   AVATAR_CELEBRATION_OPTIONS,
   AVATAR_GLASSES_OPTIONS,
@@ -4239,6 +4240,7 @@ export function SettingsModal({
                   </button>
                 </div>
               </div>
+              <PeekStylePicker />
               <div className="settings-rule-row settings-audio-controls">
                 <div>
                   <div className="settings-rule-name">Soundscape</div>
