@@ -652,6 +652,18 @@
   line-height: 1;
 }
 
+/* Blind chips: dark pill + white text reads on any plate; the ring tells SB from BB. */
+.desktop-3d-stage .cinematic-seat .cinematic-blind-role.is-small,
+.desktop-3d-stage .cinematic-seat .cinematic-blind-role.is-big {
+  background: rgba(8, 10, 14, 0.78);
+  color: #fff;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.55) inset;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-blind-role.is-big {
+  box-shadow: 0 0 0 1.5px var(--c-ruby-400, #ff6b7d) inset;
+}
+
 .desktop-3d-stage .cinematic-seat .card-reveal-seat-button,
 .desktop-3d-stage .cinematic-seat .cinematic-card-reveal-control {
   top: -12px;

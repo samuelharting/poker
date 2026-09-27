@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 import { useEffect, useRef, useState, type MutableRefObject } from 'react'
 import * as THREE from 'three'
@@ -170,6 +170,8 @@ interface SeatRuntime {
   holeCards: CardMesh[]
   cardLocalZ: number
   animator: AvatarAnimatorState
+  /** Server says this player is looking at their hole cards right now. */
+  peeking: boolean
   chair: THREE.Group
   /** The player's own chip stack in front of them. */
   stack: ReturnType<typeof createChipSet>
@@ -294,10 +296,10 @@ interface SceneRuntime {
 }
 
 const SUIT_SYMBOLS: Record<ThreeCardView['suit'], string> = {
-  clubs: 'â™£',
-  diamonds: 'â™¦',
-  hearts: 'â™¥',
-  spades: 'â™ ',
+  clubs: '♣',
+  diamonds: '♦',
+  hearts: '♥',
+  spades: '♠',
 }
 
 const AVATAR_RETRY_BASE_MS = 3_000
@@ -745,7 +747,7 @@ function createRoom(scene: THREE.Scene) {
   createBackBar(scene, brassMaterial)
   for (const x of [-4.6, 4.6]) createWallSconce(scene, x, brassMaterial)
   for (const x of [-9.4, 9.4]) createWallSconce(scene, x, brassMaterial)
-  createPoster(scene, -7, 'ALL IN', 'NO GUTS Â· NO GLORY', 'hearts', brassMaterial)
+  createPoster(scene, -7, 'ALL IN', 'NO GUTS · NO GLORY', 'hearts', brassMaterial)
   createPoster(scene, 7, 'ROYAL', 'FLUSH OR BUST', 'spades', brassMaterial)
   createPendantLamp(scene, -2.6, -0.4, brassMaterial)
   createPendantLamp(scene, 2.6, -0.4, brassMaterial)
@@ -1051,6 +1053,7 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     cardMeshes,
     holeCards,
     cardLocalZ: -1.02,
+    peeking: false,
     animator: createAvatarAnimatorState(player.id),
     chair: chairGroup,
     stack: personalStack,
@@ -1241,7 +1244,7 @@ async function requestRiggedAvatar(
     }
 
     detachRiggedAvatar(seat)
-    const style = stylizeAvatar(avatar.model, avatar.materials)
+    const style = stylizeAvatar(avatar.model, avatar.materials, { skinColor: seat.avatarProfile.skinColor, seed: playerId })
     seat.avatar = { ...avatar, materials: style.materials }
     seat.avatarStyle = style
     seat.face = createAvatarFace(avatar.model, avatar.bones.get('Head'), style.materials, style.skinColor, seat.avatarProfile.glasses)
@@ -1349,6 +1352,7 @@ function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number) {
 
   if (!seat.hadCards && player.hasCards) seat.dealStartedAt = now
   seat.hadCards = player.hasCards
+  seat.peeking = Boolean(player.isPeeking)
   seat.cards.visible = player.hasCards && (
     !player.isOutOfHand || seat.keepFoldedCardsVisible
   )
@@ -1460,7 +1464,7 @@ function getChipGeometry() {
 
 /**
  * Chips are animated as lightweight proxy meshes on a hidden layer, and drawn
- * each frame by one InstancedMesh per denomination (â‰ˆ10 draw calls for every
+ * each frame by one InstancedMesh per denomination (≈10 draw calls for every
  * chip on the table instead of one draw per chip).
  */
 const CHIP_PROXY_LAYER = 3
@@ -1995,9 +1999,9 @@ function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | n
     solveArmIK(chain, ikTarget, ikPole)
 
     if (flipTarget && side === getFlipOffHand(flipTarget) && pose.middleFinger > 0.01) {
-      const middle = bones.get(`Middle1${side}`)
-      const index = bones.get(`Index1${side}`)
-      const pinky = bones.get(`Pinky1${side}`)
+      const middle = bones.get(`Middle2${side}`)
+      const index = bones.get(`Index2${side}`)
+      const pinky = bones.get(`Pinky2${side}`)
       if (middle && index && pinky) {
         chain.hand.getWorldPosition(flipWrist)
         flipToward.set(flipTarget[0], flipTarget[1], flipTarget[2])
@@ -2017,7 +2021,7 @@ function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | n
 }
 
 const FINGER_NAMES = ['Index', 'Middle', 'Ring', 'Pinky'] as const
-/** Radians per joint (knuckle â†’ tip) at a full fist. */
+/** Radians per joint (knuckle → tip) at a full fist. */
 const FINGER_FIST_CURL = [1.25, 1.45, 0.9] as const
 /** A relaxed hand is never flat: a little natural bend at every joint. */
 const FINGER_REST_CURL = [0.1, 0.16, 0.1] as const
@@ -2190,6 +2194,7 @@ function animateSeat(
     winner: seat.winner,
     loser: seat.loser,
     hasCards: seat.hadCards && seat.cards.visible,
+    peeking: seat.peeking,
     cue: playback.cue,
     cueElapsedMs: playback.elapsedMs,
     cueActive: playback.isActive,
@@ -2339,14 +2344,16 @@ function animateSeat(
     )
     const restY = Number(seat.cards.userData.restY ?? 0)
     const peekLift = pose.cardLift
-    // Cards fly in from the dealer (table centre) and slide into place.
+    // Cards fly in from the dealer (table centre) and slide into place. A peek
+    // tilts the near edge up (hinged on the far edge) so only the owner sees the faces.
+    const peekTilt = peekLift * 0.78
     seat.cards.position.set(
       tablePose.cards.position[0],
-      restY + tablePose.cards.position[1] + peekLift * 0.05,
-      seat.cardLocalZ + tablePose.cards.position[2] * 0.6
+      restY + tablePose.cards.position[1] + Math.sin(peekTilt) * 0.13 + peekLift * 0.015,
+      seat.cardLocalZ + tablePose.cards.position[2] * 0.6 + (1 - Math.cos(peekTilt)) * 0.13
     )
     seat.cards.rotation.set(
-      tablePose.cards.rotation[0] - peekLift * 0.5,
+      tablePose.cards.rotation[0] - peekTilt,
       tablePose.cards.rotation[1],
       tablePose.cards.rotation[2]
     )
@@ -2600,8 +2607,8 @@ function animateEffects(runtime: SceneRuntime, time: number, delta: number, redu
 }
 
 /**
- * Compiles every shader in the scene up front â€” including hidden things like
- * confetti, the all-in shockwave, winner halos and Lady Luck â€” so the first
+ * Compiles every shader in the scene up front — including hidden things like
+ * confetti, the all-in shockwave, winner halos and Lady Luck — so the first
  * showdown doesn't stall for seconds compiling programs mid-animation.
  */
 function precompileScene(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
@@ -3157,7 +3164,7 @@ export function DesktopPokerRoom3D({
       <div className="lady-luck-bubble-3d" data-visible="false" aria-live="polite" />
 
       {webGLStatus === 'loading' && (
-        <div className="three-webgl-status" role="status">Warming up the 3D tableâ€¦</div>
+        <div className="three-webgl-status" role="status">Warming up the 3D table…</div>
       )}
       {webGLStatus === 'error' && (
         <div className="three-webgl-status is-error" role="alert">
@@ -3194,7 +3201,16 @@ export function DesktopPokerRoom3D({
                     </span>
                   )}
                   {reaction && (
-                    <span className="cinematic-seat-reaction" aria-hidden="true">
+                    <span
+                      className="cinematic-seat-reaction"
+                      data-targeted={reaction.targeted ? 'true' : 'false'}
+                      aria-hidden="true"
+                    >
+                      {reaction.targeted && (
+                        <span className="cinematic-seat-reaction-from">
+                          {view.players.find(sender => sender.id === reaction.senderId)?.nickname ?? 'Someone'} →
+                        </span>
+                      )}
                       <EmojiGlyph emoji={reaction.emote} />
                     </span>
                   )}
@@ -3222,10 +3238,10 @@ export function DesktopPokerRoom3D({
                 <span className="cinematic-seat-topline">
                   <strong>{player.nickname}</strong>
                   {player.drinks?.passedOut ? (
-                    <em className="cinematic-drink-badge is-passed-out" aria-label="Passed out">ðŸ’¤</em>
+                    <em className="cinematic-drink-badge is-passed-out" aria-label="Passed out">💤</em>
                   ) : (player.drinks?.level ?? 0) > 0 ? (
                     <em className="cinematic-drink-badge" aria-label={`${player.drinks.level} drinks deep`}>
-                      ðŸº{player.drinks.level}
+                      🍺{player.drinks.level}
                     </em>
                   ) : null}
                   {player.blindRole && (
