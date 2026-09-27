@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { BUZZ, isSober, normalizeDrinkState, projectNextSoberTax } from '@/lib/drinks'
+import { useShotLaggedDrinks } from './useShotLag'
 import {
   describeMushroomEvent,
   MUSHROOM_AUTO_SPIKE_MS,
@@ -81,7 +82,9 @@ interface FunLayerProps {
 export function FunLayer({ tableState, yourId, privateMushroom, mushroomEvents, onSpike, soundMuted }: FunLayerProps) {
   const drinks = useDrinks()
   const me = tableState.players.find(player => player.id === yourId)
-  const myDrinks = useMemo(() => normalizeDrinkState(me?.drinks), [me?.drinks])
+  const serverDrinks = useMemo(() => normalizeDrinkState(me?.drinks), [me?.drinks])
+  // A shot blackout starts once the glass is down, not when it's poured.
+  const myDrinks = useShotLaggedDrinks(serverDrinks)
   const funOn = tableState.funModeEnabled !== false
   const capable = me?.drinkCapable === true
   const isMyTurn = tableState.phase === 'in_hand' && tableState.actingPlayerId === yourId

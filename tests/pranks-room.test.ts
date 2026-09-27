@@ -161,7 +161,8 @@ describe('shot rules (pure)', () => {
     expect(deliverShot(target, { handNumber: 2, targetIsLive: true, now: 1 })).toEqual({ ok: false })
     expect(target.level).toBe(0)
     deliverShot(target, { handNumber: 2, targetIsLive: false, now: 1 })
-    expect(canDeliverShot(target, { handNumber: 4, targetIsLive: false })).toBe(false)
+    // Same hand: no second delivered shot for this target.
+    expect(canDeliverShot(target, { handNumber: 2, targetIsLive: false })).toBe(false)
     expect(canDeliverShot(target, { handNumber: 2 + SHOT_RECEIVE_COOLDOWN_HANDS, targetIsLive: false })).toBe(true)
     target.passedOut = true
     expect(canDeliverShot(target, { handNumber: 9, targetIsLive: false })).toBe(false)
@@ -170,7 +171,7 @@ describe('shot rules (pure)', () => {
   it('mirrors the purchase block reasons from public state for the button', () => {
     const buyer = createDrinkLedgerEntry()
     recordShotBought(buyer, 2)
-    expect(getShotBlockReasonFromState(toPublicDrinkState(buyer), undefined, 4)).toBe('Next shot in 3 hands.')
+    expect(getShotBlockReasonFromState(toPublicDrinkState(buyer), undefined, 2)).toBe('Next shot in 1 hand.')
     expect(getShotBlockReasonFromState(toPublicDrinkState(buyer), undefined, 7)).toBeNull()
     expect(getShotBlockReasonFromState(undefined, { passedOut: true }, 1, 'Alex')).toBe('Alex already blacked out. Let them sleep.')
     expect(getShotBlockReasonFromState(undefined, undefined, 0)).toBeNull()
@@ -305,7 +306,7 @@ describe('PokerRoom buy_shot', () => {
     expect(drinksOf(sam, target.playerId)).toMatchObject({ passedOut: false })
   })
 
-  it('limits each buyer to one shot every five hands', () => {
+  it('limits each buyer to one shot per hand', () => {
     vi.useFakeTimers()
     const { join } = createTable()
     const sam = join('sam', 'Sam', 0)
@@ -314,12 +315,8 @@ describe('PokerRoom buy_shot', () => {
 
     sam.send({ type: 'buy_shot', targetId: alex.playerId })
     sam.send({ type: 'buy_shot', targetId: cy.playerId })
-    expect(lastFailure(sam)).toBe('Next shot in 5 hands.')
-    expect(drinksOf(sam, cy.playerId)).toMatchObject({ shots: 0, shotsWaiting: 0 })
-
-    playToHand(sam, [sam, alex, cy], SHOT_COOLDOWN_HANDS - 1)
-    sam.send({ type: 'buy_shot', targetId: cy.playerId })
     expect(lastFailure(sam)).toBe('Next shot in 1 hand.')
+    expect(drinksOf(sam, cy.playerId)).toMatchObject({ shots: 0, shotsWaiting: 0 })
 
     playToHand(sam, [sam, alex, cy], SHOT_COOLDOWN_HANDS)
     sam.send({ type: 'buy_shot', targetId: cy.playerId })

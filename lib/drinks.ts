@@ -100,9 +100,9 @@ export const WATER_LANDS_MS = 5_000
 /** A bought shot hits harder than a beer. */
 export const SHOT_LEVEL_BOOST = 3
 /** Each player may buy one shot for someone every this many hands. */
-export const SHOT_COOLDOWN_HANDS = 5
+export const SHOT_COOLDOWN_HANDS = 1
 /** Each player may be bought one shot every this many hands. */
-export const SHOT_RECEIVE_COOLDOWN_HANDS = 3
+export const SHOT_RECEIVE_COOLDOWN_HANDS = 1
 /** After a shot, a water within this window is a chaser. */
 export const CHASER_WINDOW_MS = 20_000
 /** Levels a chaser water takes off, instantly. */
@@ -477,7 +477,7 @@ export interface ShotDeliveryContext {
   now: number
 }
 
-/** A queued shot can land only outside a live hand, on someone awake, once per 3 hands. */
+/** A queued shot lands on someone awake who isn't mid-decision, once per SHOT_RECEIVE_COOLDOWN_HANDS. */
 export function canDeliverShot(
   target: DrinkLedgerEntry | undefined,
   context: Pick<ShotDeliveryContext, 'handNumber' | 'targetIsLive'>

@@ -11,6 +11,7 @@ import {
   type PlayerDrinkState,
 } from '@/lib/drinks'
 import type { SeatPlayer } from '@/lib/poker/types'
+import { useShotLaggedDrinks } from './useShotLag'
 
 export interface DrinkContextValue {
   yourId: string
@@ -55,10 +56,12 @@ export function DrinkProvider({
   const [lastOrderAt, setLastOrderAt] = useState<number | null>(null)
   const me = players.find(player => player.id === yourId)
   const drinksKey = me?.drinks ? JSON.stringify(me.drinks) : ''
-  const myDrinks = useMemo(
+  const serverDrinks = useMemo(
     () => normalizeDrinkState(drinksKey ? JSON.parse(drinksKey) : null),
     [drinksKey]
   )
+  // A shot's buzz lands when the glass is actually down, not when it's poured.
+  const myDrinks = useShotLaggedDrinks(serverDrinks)
   const profile = useMemo(
     () => getDrunkEffectProfile(myDrinks.level, myDrinks.passedOut),
     [myDrinks.level, myDrinks.passedOut]
