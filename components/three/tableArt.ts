@@ -6,7 +6,15 @@ import {
   TABLE_WAGER_SEMI_AXIS_X,
   TABLE_WAGER_SEMI_AXIS_Z,
 } from './tableWagerLayout'
-import { getFeltTexture, getLeatherBumpTexture, type FeltLayout } from './sceneTextures'
+import {
+  getFeltTexture,
+  getFeltWeaveTexture,
+  getLeatherBumpTexture,
+  getRailLeatherTexture,
+  getTuftedLeatherTexture,
+  getWalnutTexture,
+  type FeltLayout,
+} from './sceneTextures'
 
 /** Top of the felt surface. Chips, wagers and board cards rest on this plane. */
 export const FELT_TOP_Y = 0.4
@@ -156,8 +164,14 @@ export function createStylizedTable(): TableArt {
 
   const feltTexture = getFeltTexture(FELT_LAYOUT)
   feltTexture.flipY = true
+  // Cloth weave as a finely repeated bump: reads as baize under the key light
+  // without touching the printed layout's colours.
+  const feltWeave = getFeltWeaveTexture()
+  feltWeave.repeat.set(150, 96)
   const feltMaterial = new THREE.MeshStandardMaterial({
     map: feltTexture,
+    bumpMap: feltWeave,
+    bumpScale: 0.35,
     roughness: 0.94,
     metalness: 0,
     envMapIntensity: 0.35,
@@ -169,13 +183,15 @@ export function createStylizedTable(): TableArt {
 
   const leatherBump = getLeatherBumpTexture()
   leatherBump.repeat.set(1, 1)
+  // Oxblood leather with panel seams and saddle stitching painted into the wrap.
   const railMaterial = new THREE.MeshStandardMaterial({
-    color: '#3a1f19',
-    roughness: 0.46,
+    color: '#ffffff',
+    map: getRailLeatherTexture(),
+    roughness: 0.4,
     metalness: 0.02,
     bumpMap: leatherBump,
-    bumpScale: 0.6,
-    envMapIntensity: 0.9,
+    bumpScale: 0.5,
+    envMapIntensity: 1.05,
   })
   const rail = new THREE.Mesh(sweepAroundEllipse(railCushionProfile()), railMaterial)
   rail.name = 'padded-leather-rail'
@@ -203,10 +219,11 @@ export function createStylizedTable(): TableArt {
   group.add(inlay)
 
   const woodMaterial = new THREE.MeshStandardMaterial({
-    color: '#5c351f',
-    roughness: 0.5,
+    color: '#ffffff',
+    map: getWalnutTexture(),
+    roughness: 0.34,
     metalness: 0.05,
-    envMapIntensity: 0.7,
+    envMapIntensity: 0.9,
   })
   const apron = new THREE.Mesh(
     // A deep wooden skirt: hides the players' legs and grounds the table.
@@ -222,6 +239,14 @@ export function createStylizedTable(): TableArt {
     woodMaterial
   )
   apron.name = 'wood-apron'
+  // Map V to real height (one texture tile per 1.6 units, like U) so the
+  // walnut grain isn't stretched down the tall skirt.
+  const apronPositions = apron.geometry.getAttribute('position')
+  const apronUvs = apron.geometry.getAttribute('uv')
+  for (let index = 0; index < apronUvs.count; index += 1) {
+    apronUvs.setY(index, (FELT_TOP_Y - apronPositions.getY(index)) / 1.6)
+  }
+  apronUvs.needsUpdate = true
   apron.castShadow = true
   apron.receiveShadow = true
   group.add(apron)
@@ -262,101 +287,228 @@ export function createStylizedTable(): TableArt {
   return { group, feltMaterial, brassMaterial }
 }
 
-/** Wooden club chair with a curved padded back, sized to the seat root. */
+
+/** House leather the per-player chair colours are pulled toward, so the set matches. */
+const HOUSE_LEATHER = new THREE.Color('#5a1e22')
+const CHAIR_WOOD = new THREE.Color('#3a2217')
+
+/**
+ * Padded tub-chair shell: a rounded pillow cross-section swept around the back
+ * of the seat. Tall in the middle, sweeping down into low arms at the sides.
+ * UVs are in world units (arc length, height) so the tufting tile stays square.
+ */
+function createTubShell() {
+  const radiusX = 0.66
+  const radiusZ = 0.56
+  const centerZ = 0.16
+  const thickness = 0.2
+  const baseY = -0.12
+  const backTop = 1.5
+  const armTop = 0.36
+  const maxAngle = THREE.MathUtils.degToRad(118)
+  const segments = 40
+  const capSteps = 8
+  // Profile loop in (radial offset, height fraction of the pillow top).
+  const profile: Array<{ r: number; top: boolean; angle: number }> = []
+  profile.push({ r: -thickness / 2, top: false, angle: 0 })
+  for (let step = 0; step <= capSteps; step += 1) {
+    const a = Math.PI - (step / capSteps) * Math.PI
+    profile.push({ r: Math.cos(a) * (thickness / 2), top: true, angle: a })
+  }
+  profile.push({ r: thickness / 2, top: false, angle: 0 })
+  const columns = profile.length
+
+  const positions: number[] = []
+  const uvs: number[] = []
+  const indices: number[] = []
+  const rows = segments + 1
+  for (let segment = 0; segment <= segments; segment += 1) {
+    const t = segment / segments
+    const theta = (t * 2 - 1) * maxAngle
+    const across = Math.abs(theta) / maxAngle
+    const height = armTop + (backTop - armTop) * (1 - THREE.MathUtils.smoothstep(across, 0.22, 0.62))
+    // Roll the top of the back outward a touch for a lounge silhouette.
+    const lean = 0.1 * (1 - THREE.MathUtils.smoothstep(across, 0.2, 0.6))
+    const sin = Math.sin(theta)
+    const cos = Math.cos(theta)
+    const normal = new THREE.Vector2(sin / radiusX, cos / radiusZ).normalize()
+    for (const point of profile) {
+      const y = point.top ? height - thickness / 2 + Math.sin(point.angle) * (thickness / 2) : baseY
+      const lift = point.top ? lean * (y / backTop) : 0
+      const x = sin * radiusX + normal.x * (point.r + lift)
+      const z = centerZ + cos * radiusZ + normal.y * (point.r + lift)
+      positions.push(x, y, z)
+      uvs.push(theta * 0.62, y)
+    }
+  }
+  for (let segment = 0; segment < segments; segment += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const next = (column + 1) % columns
+      const a = segment * columns + column
+      const b = (segment + 1) * columns + column
+      const c = (segment + 1) * columns + next
+      const d = segment * columns + next
+      indices.push(a, d, b, b, d, c)
+    }
+  }
+  // Rounded arm ends: fan each end ring into its centroid.
+  for (const [ring, flip] of [[0, true], [rows - 1, false]] as const) {
+    const centroid = new THREE.Vector3()
+    for (let column = 0; column < columns; column += 1) {
+      const index = (ring * columns + column) * 3
+      centroid.x += positions[index]!
+      centroid.y += positions[index + 1]!
+      centroid.z += positions[index + 2]!
+    }
+    centroid.divideScalar(columns)
+    const center = positions.length / 3
+    positions.push(centroid.x, centroid.y, centroid.z)
+    uvs.push(0, 0)
+    for (let column = 0; column < columns; column += 1) {
+      const a = ring * columns + column
+      const b = ring * columns + ((column + 1) % columns)
+      if (flip) indices.push(center, b, a)
+      else indices.push(center, a, b)
+    }
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  geometry.setIndex(indices)
+  geometry.computeVertexNormals()
+  return geometry
+}
+
+function paint(geometry: THREE.BufferGeometry, color: THREE.Color) {
+  const count = geometry.getAttribute('position').count
+  const colors = new Float32Array(count * 3)
+  for (let index = 0; index < count; index += 1) {
+    colors[index * 3] = color.r
+    colors[index * 3 + 1] = color.g
+    colors[index * 3 + 2] = color.b
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+  return geometry
+}
+
+function prepare(geometry: THREE.BufferGeometry, matrix: THREE.Matrix4, keepColor = false) {
+  const transformed = geometry.index ? geometry.toNonIndexed() : geometry
+  transformed.applyMatrix4(matrix)
+  for (const name of Object.keys(transformed.attributes)) {
+    if (name !== 'position' && name !== 'normal' && name !== 'uv' && !(keepColor && name === 'color')) {
+      transformed.deleteAttribute(name)
+    }
+  }
+  if (!transformed.getAttribute('uv')) {
+    transformed.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(transformed.getAttribute('position').count * 2), 2))
+  }
+  return transformed
+}
+
+const composeMatrix = (
+  position: readonly [number, number, number],
+  rotation: readonly [number, number, number] = [0, 0, 0],
+  scale: readonly [number, number, number] = [1, 1, 1]
+) => new THREE.Matrix4().compose(
+  new THREE.Vector3(...position),
+  new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)),
+  new THREE.Vector3(...scale)
+)
+
+/**
+ * Button-tufted leather tub chair on four slim walnut legs with a brass foot
+ * ring (the table is a high-top, so the seat sits well above the carpet).
+ * Everything merges into one mesh with two material groups: upholstery, and a
+ * vertex-coloured wood/brass frame.
+ */
 export function createStylizedChair(
   upholstery: THREE.ColorRepresentation,
   trim: THREE.ColorRepresentation
 ) {
   const group = new THREE.Group()
   group.name = 'club-chair'
+
+  const leather = new THREE.Color(upholstery).lerp(HOUSE_LEATHER, 0.45)
+  const tuftColor = getTuftedLeatherTexture()
+  tuftColor.repeat.set(3.4, 3.4)
+  const tuftBump = getTuftedLeatherTexture(true)
+  tuftBump.repeat.set(3.4, 3.4)
   const upholsteryMaterial = new THREE.MeshStandardMaterial({
-    color: upholstery,
-    roughness: 0.62,
-    metalness: 0.02,
-    envMapIntensity: 0.7,
+    color: leather,
+    map: tuftColor,
+    bumpMap: tuftBump,
+    bumpScale: 1.4,
+    roughness: 0.42,
+    metalness: 0.04,
+    envMapIntensity: 1.1,
   })
-  const woodMaterial = new THREE.MeshStandardMaterial({
-    color: trim,
-    roughness: 0.38,
-    metalness: 0.35,
-    envMapIntensity: 1,
+  const frameMaterial = new THREE.MeshStandardMaterial({
+    color: '#ffffff',
+    vertexColors: true,
+    roughness: 0.34,
+    metalness: 0.45,
+    envMapIntensity: 1.1,
   })
 
-  const backShape = new THREE.Shape()
-  backShape.moveTo(-0.7, 0)
-  backShape.lineTo(0.7, 0)
-  backShape.quadraticCurveTo(0.76, 0.9, 0.52, 1.46)
-  backShape.quadraticCurveTo(0, 1.72, -0.52, 1.46)
-  backShape.quadraticCurveTo(-0.76, 0.9, -0.7, 0)
-  const back = new THREE.Mesh(
-    new THREE.ExtrudeGeometry(backShape, {
-      depth: 0.16,
-      bevelEnabled: true,
-      bevelThickness: 0.08,
-      bevelSize: 0.08,
-      bevelSegments: 4,
-      curveSegments: 18,
-    }),
-    upholsteryMaterial
-  )
-  back.position.set(0, -0.02, 0.5)
-  back.rotation.x = -0.12
-  back.castShadow = true
-  back.receiveShadow = true
-  group.add(back)
+  const brass = new THREE.Color(trim)
+  const upholsteryParts: THREE.BufferGeometry[] = []
+  const frameParts: THREE.BufferGeometry[] = []
 
-  const seat = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.66, 0.62, 0.2, 32),
-    upholsteryMaterial
-  )
-  seat.scale.z = 0.72
-  seat.position.set(0, -0.06, 0.18)
-  seat.castShadow = true
-  seat.receiveShadow = true
-  group.add(seat)
+  upholsteryParts.push(prepare(createTubShell(), new THREE.Matrix4()))
 
-  const skirt = new THREE.Mesh(new THREE.TorusGeometry(0.64, 0.045, 10, 40), woodMaterial)
-  skirt.rotation.x = Math.PI / 2
-  skirt.scale.y = 0.72
-  skirt.position.set(0, -0.16, 0.18)
-  group.add(skirt)
+  // Plump seat cushion with a rolled front edge.
+  const cushion = new THREE.LatheGeometry([
+    new THREE.Vector2(0, -0.1),
+    new THREE.Vector2(0.5, -0.1),
+    new THREE.Vector2(0.6, -0.07),
+    new THREE.Vector2(0.64, 0),
+    new THREE.Vector2(0.61, 0.07),
+    new THREE.Vector2(0.52, 0.1),
+    new THREE.Vector2(0, 0.12),
+  ], 36)
+  upholsteryParts.push(prepare(cushion, composeMatrix([0, -0.06, 0.12], [0, 0, 0], [1, 1, 0.82])))
 
-  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 0.7, 16), woodMaterial)
-  stem.position.set(0, -0.52, 0.2)
-  stem.castShadow = true
-  group.add(stem)
+  // Walnut seat rail under the cushion.
+  const apron = paint(new THREE.CylinderGeometry(0.6, 0.56, 0.12, 36, 1, true), CHAIR_WOOD)
+  frameParts.push(prepare(apron, composeMatrix([0, -0.2, 0.12], [0, 0, 0], [1, 1, 0.82]), true))
+  const piping = paint(new THREE.TorusGeometry(0.61, 0.018, 6, 48), brass)
+  frameParts.push(prepare(piping, composeMatrix([0, -0.145, 0.12], [Math.PI / 2, 0, 0], [1, 0.82, 1]), true))
 
-  const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.46, 0.06, 28), woodMaterial)
-  foot.position.set(0, -0.86, 0.2)
-  foot.receiveShadow = true
-  group.add(foot)
+  // Four slim, slightly splayed legs down to the carpet (floor is ~2 below the seat root).
+  const floorY = -2.02
+  const legTopY = -0.24
+  const legLength = legTopY - floorY
+  for (const [x, z] of [[-0.42, -0.2], [0.42, -0.2], [-0.4, 0.46], [0.4, 0.46]] as const) {
+    const splayX = Math.sign(x) * 0.06
+    const splayZ = (z > 0.1 ? 1 : -1) * 0.05
+    const leg = paint(new THREE.CylinderGeometry(0.038, 0.026, legLength, 10), CHAIR_WOOD)
+    const tilt: [number, number, number] = [-splayZ / legLength, 0, splayX / legLength]
+    frameParts.push(prepare(leg, composeMatrix([x + splayX / 2, (legTopY + floorY) / 2, z + splayZ / 2], tilt), true))
+    const ferrule = paint(new THREE.CylinderGeometry(0.03, 0.03, 0.08, 10), brass)
+    frameParts.push(prepare(ferrule, composeMatrix([x + splayX, floorY + 0.04, z + splayZ]), true))
+  }
+  // Brass foot ring where the players rest their feet.
+  const footRing = paint(new THREE.TorusGeometry(0.5, 0.022, 8, 48), brass)
+  frameParts.push(prepare(footRing, composeMatrix([0, -1.25, 0.13], [Math.PI / 2, 0, 0], [1.04, 0.86, 1]), true))
 
-  // Merge the parts into one mesh with two material groups (2 draws instead of 5).
-  const byMaterial = new Map<THREE.Material, THREE.BufferGeometry[]>()
-  group.updateMatrixWorld(true)
-  for (const child of [...group.children]) {
-    const mesh = child as THREE.Mesh
-    if (!mesh.isMesh) continue
-    const geometry = mesh.geometry.clone().applyMatrix4(mesh.matrix)
-    const nonIndexed = geometry.index ? geometry.toNonIndexed() : geometry
-    for (const name of Object.keys(nonIndexed.attributes)) {
-      if (name !== 'position' && name !== 'normal' && name !== 'uv') nonIndexed.deleteAttribute(name)
+  const upholsteryGeometry = mergeGeometries(upholsteryParts, false)
+  const frameGeometry = mergeGeometries(frameParts, false)
+  upholsteryParts.forEach(part => part.dispose())
+  frameParts.forEach(part => part.dispose())
+  if (upholsteryGeometry && frameGeometry) {
+    // Multi-material merge needs matching attributes; upholstery ignores colour.
+    paint(upholsteryGeometry, new THREE.Color('#ffffff'))
+    const merged = mergeGeometries([upholsteryGeometry, frameGeometry], true)
+    upholsteryGeometry.dispose()
+    frameGeometry.dispose()
+    if (merged) {
+      const chairMesh = new THREE.Mesh(merged, [upholsteryMaterial, frameMaterial])
+      chairMesh.castShadow = true
+      chairMesh.receiveShadow = true
+      chairMesh.name = 'club-chair-mesh'
+      group.add(chairMesh)
     }
-    const list = byMaterial.get(mesh.material as THREE.Material) ?? []
-    list.push(nonIndexed)
-    byMaterial.set(mesh.material as THREE.Material, list)
-    mesh.geometry.dispose()
-    group.remove(mesh)
-  }
-  const materials = [...byMaterial.keys()]
-  const merged = mergeGeometries(materials.map(material => mergeGeometries(byMaterial.get(material)!, false)!), true)
-  if (merged) {
-    const chairMesh = new THREE.Mesh(merged, materials)
-    chairMesh.castShadow = true
-    chairMesh.receiveShadow = true
-    chairMesh.name = 'club-chair-mesh'
-    group.add(chairMesh)
   }
 
-  return { group, materials: [upholsteryMaterial, woodMaterial] }
+  return { group, materials: [upholsteryMaterial, frameMaterial] }
 }

@@ -89,6 +89,7 @@ import {
   createStageLights,
   FrameBudget,
   type PostFx,
+  type RenderQuality,
   type StageLights,
 } from './sceneLighting'
 import {
@@ -98,6 +99,13 @@ import {
   getChipFaceTexture,
   CHIP_DENOMINATIONS,
 } from './sceneTextures'
+import {
+  createDecoCarpetTexture,
+  createLoungeBackBar,
+  createLoungeDecor,
+  createLoungeWallTexture,
+  createWainscotTexture,
+} from './roomArt'
 import {
   createStylizedChair,
   createStylizedTable,
@@ -436,60 +444,11 @@ function createCanvasTexture(
 }
 
 function createCarpetTexture() {
-  return createCanvasTexture(512, 512, context => {
-    context.fillStyle = '#10262a'
-    context.fillRect(0, 0, 512, 512)
-    const random = createSeededRandom(0x3344524f)
-    context.globalAlpha = 0.18
-    for (let index = 0; index < 5000; index += 1) {
-      context.fillStyle = random() > 0.5 ? '#1f4448' : '#081416'
-      context.fillRect(random() * 512, random() * 512, 2, 2)
-    }
-    context.globalAlpha = 1
-    context.strokeStyle = 'rgba(217, 164, 65, 0.32)'
-    context.lineWidth = 4
-    for (const [x, y] of [[0, 0], [256, 256], [512, 0], [0, 512], [512, 512]] as const) {
-      context.beginPath()
-      context.moveTo(x, y - 110)
-      context.lineTo(x + 110, y)
-      context.lineTo(x, y + 110)
-      context.lineTo(x - 110, y)
-      context.closePath()
-      context.stroke()
-    }
-    context.fillStyle = 'rgba(226, 80, 92, 0.28)'
-    for (const [x, y] of [[256, 256], [0, 0], [512, 0], [0, 512], [512, 512]] as const) {
-      context.beginPath()
-      context.arc(x, y, 12, 0, Math.PI * 2)
-      context.fill()
-    }
-  }, [7, 7])
+  return createDecoCarpetTexture()
 }
 
 function createWallPanelTexture() {
-  return createCanvasTexture(512, 512, context => {
-    const gradient = context.createLinearGradient(0, 0, 0, 512)
-    gradient.addColorStop(0, '#0c2a2a')
-    gradient.addColorStop(1, '#123634')
-    context.fillStyle = gradient
-    context.fillRect(0, 0, 512, 512)
-    context.strokeStyle = 'rgba(242, 199, 102, 0.22)'
-    context.lineWidth = 3
-    for (let x = 32; x < 512; x += 64) {
-      context.beginPath()
-      context.moveTo(x, 0)
-      context.lineTo(x, 512)
-      context.stroke()
-    }
-    context.strokeStyle = 'rgba(0, 0, 0, 0.25)'
-    context.lineWidth = 10
-    for (let x = 0; x < 512; x += 64) {
-      context.beginPath()
-      context.moveTo(x, 0)
-      context.lineTo(x, 512)
-      context.stroke()
-    }
-  }, [10, 1])
+  return createLoungeWallTexture()
 }
 
 function createNeonSignTexture(text: string) {
@@ -507,11 +466,9 @@ function createNeonSignTexture(text: string) {
     context.lineWidth = 7
     context.strokeText(text, 512, 132)
     context.shadowBlur = 0
-    context.fillStyle = '#ffc9a3'
+    // Coral core (not white) so bloom keeps the letterforms legible.
+    context.fillStyle = '#ffb58f'
     context.fillText(text, 512, 132)
-    context.strokeStyle = 'rgba(255, 244, 230, 0.85)'
-    context.lineWidth = 1.5
-    context.strokeText(text, 512, 132)
   })
 }
 
@@ -573,73 +530,7 @@ function createPoster(
 }
 
 function createBackBar(scene: THREE.Scene, brassMaterial: THREE.MeshStandardMaterial) {
-  const bar = new THREE.Group()
-  bar.name = 'emerald-back-bar'
-  bar.position.set(0, 1.5, -9.2)
-  scene.add(bar)
-
-  const woodMaterial = createStandardMaterial('#4a2a1a', { roughness: 0.46, metalness: 0.08 })
-  addMesh(bar, new THREE.BoxGeometry(6.2, 3.1, 0.3), woodMaterial).castShadow = false
-
-  const backLight = new THREE.MeshStandardMaterial({
-    color: '#0b2622',
-    emissive: '#12574a',
-    emissiveIntensity: 0.35,
-    roughness: 0.4,
-  })
-  addMesh(bar, new THREE.BoxGeometry(5.6, 2.5, 0.05), backLight, [0, 0.05, 0.17])
-
-  for (const y of [-0.62, 0.22, 1.0]) {
-    addMesh(bar, new THREE.BoxGeometry(5.5, 0.07, 0.42), brassMaterial, [0, y, 0.38])
-  }
-
-  // Muted amber, green and smoky glass so the bar reads as a bar, not a toy shelf.
-  const bottleColors = ['#8a4a1c', '#3e5b2a', '#b07a2e', '#2f4a44', '#6b2a2a', '#c9a45a', '#4b3a22']
-  const random = createSeededRandom(0x0b0771e5)
-  // Every bottle is merged into one mesh (vertex-coloured) so the whole shelf is a single draw.
-  const bottleGeometries: THREE.BufferGeometry[] = []
-  const tint = new THREE.Color()
-  for (const [rowIndex, shelfY] of [-0.62, 0.22].entries()) {
-    for (let index = 0; index < 11; index += 1) {
-      const x = -2.4 + index * 0.48 + (random() - 0.5) * 0.1
-      const height = 0.3 + random() * 0.34
-      const shoulder = 0.45 + random() * 0.3
-      const width = 0.07 + random() * 0.06
-      const geometry = new THREE.LatheGeometry([
-        new THREE.Vector2(0, 0),
-        new THREE.Vector2(width, 0),
-        new THREE.Vector2(width * 1.08, height * shoulder),
-        new THREE.Vector2(width * 0.42, height * (shoulder + 0.16)),
-        new THREE.Vector2(width * 0.36, height),
-        new THREE.Vector2(0, height),
-      ], 12)
-      geometry.translate(x, shelfY + 0.035, 0.5)
-      tint.set(bottleColors[(index + rowIndex * 3) % bottleColors.length]!)
-      const colors = new Float32Array(geometry.getAttribute('position').count * 3)
-      for (let vertex = 0; vertex < colors.length; vertex += 3) {
-        colors[vertex] = tint.r
-        colors[vertex + 1] = tint.g
-        colors[vertex + 2] = tint.b
-      }
-      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-      bottleGeometries.push(geometry)
-    }
-  }
-  const mergedBottles = mergeGeometries(bottleGeometries, false)
-  bottleGeometries.forEach(geometry => geometry.dispose())
-  if (mergedBottles) {
-    const bottles = addMesh(bar, mergedBottles, new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      emissive: '#2a1a0a',
-      emissiveIntensity: 0.25,
-      roughness: 0.08,
-      metalness: 0.15,
-      transparent: true,
-      opacity: 0.9,
-    }))
-    bottles.name = 'back-bar-bottles'
-    bottles.castShadow = false
-  }
+  createLoungeBackBar(scene, brassMaterial)
 }
 
 function createWallSconce(scene: THREE.Scene, x: number, brassMaterial: THREE.MeshStandardMaterial) {
@@ -739,8 +630,14 @@ function createRoom(scene: THREE.Scene) {
     sideWall.castShadow = false
   }
 
-  const wainscotMaterial = createStandardMaterial('#3b2216', { roughness: 0.5, metalness: 0.06 })
-  addMesh(scene, new THREE.BoxGeometry(32, 1.9, 0.3), wainscotMaterial, [0, -1.05, -9.4]).castShadow = false
+  // Raised-panel walnut wainscot up to a brass chair rail (painted panels, one box).
+  const wainscotMaterial = new THREE.MeshStandardMaterial({
+    map: createWainscotTexture(14),
+    roughness: 0.46,
+    metalness: 0.05,
+    envMapIntensity: 0.5,
+  })
+  addMesh(scene, new THREE.BoxGeometry(32, 2.9, 0.3), wainscotMaterial, [0, -0.55, -9.4]).castShadow = false
 
   const brassMaterial = new THREE.MeshStandardMaterial({
     color: '#e0b25a',
@@ -748,7 +645,7 @@ function createRoom(scene: THREE.Scene) {
     metalness: 1,
     envMapIntensity: 1.2,
   })
-  addMesh(scene, new THREE.BoxGeometry(32, 0.08, 0.34), brassMaterial, [0, -0.08, -9.3])
+  addMesh(scene, new THREE.BoxGeometry(32, 0.08, 0.34), brassMaterial, [0, 0.92, -9.3])
 
   createBackBar(scene, brassMaterial)
   for (const x of [-4.6, 4.6]) createWallSconce(scene, x, brassMaterial)
@@ -757,6 +654,7 @@ function createRoom(scene: THREE.Scene) {
   createPoster(scene, 7, 'ROYAL', 'FLUSH OR BUST', 'spades', brassMaterial)
   createPendantLamp(scene, -2.6, -0.4, brassMaterial)
   createPendantLamp(scene, 2.6, -0.4, brassMaterial)
+  createLoungeDecor(scene, brassMaterial)
 
   const neonMaterial = new THREE.MeshStandardMaterial({
     map: createNeonSignTexture('POKER NIGHT'),
@@ -1275,6 +1173,8 @@ async function requestRiggedAvatar(
     applySeatFoldVisualState(seat)
     startAvatarIdle(seat)
     precompileScene(runtime.renderer, runtime.scene, runtime.camera)
+    // The load + compile is a one-off stall; keep it out of the frame budget.
+    runtime.frameBudget.settle((performance.now() - runtime.startTime) / 1000)
     updateAvatarDiagnostics(runtime)
   } catch (error) {
     if (runtime.disposed || seat.avatarGeneration !== generation) return
@@ -1531,8 +1431,12 @@ function isChipShown(chip: THREE.Object3D, scene: THREE.Scene) {
 }
 
 /** Copies every visible chip proxy into its denomination's instanced mesh. */
+const chipInstanceCounts: number[] = []
+
 function updateChipInstances(instancer: ChipInstancer, scene: THREE.Scene) {
-  const counts = instancer.meshes.map(() => 0)
+  const counts = chipInstanceCounts
+  counts.length = instancer.meshes.length
+  counts.fill(0)
   for (const chip of chipProxies) {
     if (!chip.parent) {
       chipProxies.delete(chip)
@@ -2721,6 +2625,26 @@ function animateEffects(runtime: SceneRuntime, time: number, delta: number, redu
  * confetti, the all-in shockwave, winner halos and Lady Luck — so the first
  * showdown doesn't stall for seconds compiling programs mid-animation.
  */
+/** Meshes under this many vertices never earn a place in the shadow pass. */
+const SHADOW_CASTER_MIN_VERTICES = 300
+
+/**
+ * Shadow-pass budget: the key light's shadow only needs to carry players,
+ * chips and the table rail onto the felt. Room props, chairs, pucks and small
+ * accessory parts are switched off (each caster is another draw every
+ * shadow refresh). Skinned avatar parts are pruned in stylizeAvatar.
+ */
+function pruneShadowCasters(root: THREE.Object3D) {
+  root.traverse(object => {
+    const mesh = object as THREE.Mesh
+    if (!mesh.isMesh || !mesh.castShadow || (mesh as THREE.SkinnedMesh).isSkinnedMesh) return
+    const vertices = mesh.geometry?.getAttribute('position')?.count ?? 0
+    if (vertices < SHADOW_CASTER_MIN_VERTICES || /chair|puck|ring|halo|sconce|poster|lamp/i.test(`${mesh.name} ${mesh.parent?.name ?? ''}`)) {
+      mesh.castShadow = false
+    }
+  })
+}
+
 function precompileScene(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
   const hidden: THREE.Object3D[] = []
   scene.traverse(object => {
@@ -2826,8 +2750,9 @@ function createSceneRuntime(
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 1.0
   renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap
-  // Shadows refresh every other frame (see animate) to halve their cost.
+  // r184 folds PCFSoft into PCF (hardware-filtered, soft via shadow.radius).
+  renderer.shadowMap.type = THREE.PCFShadowMap
+  // Shadows refresh on a fixed clock (see animate), not every frame.
   renderer.shadowMap.autoUpdate = false
   renderer.shadowMap.needsUpdate = true
 
@@ -2845,6 +2770,10 @@ function createSceneRuntime(
   const environment = applyEnvironmentLighting(renderer, scene)
   const lights = createStageLights(scene)
   const { neonMaterials } = createRoom(scene)
+  // Only the table (rail onto felt) keeps casting among the static set.
+  scene.children.forEach(child => {
+    child.traverse(object => { if ((object as THREE.Mesh).isMesh) object.castShadow = false })
+  })
   const table = createStylizedTable()
   scene.add(table.group)
   const feltMaterial = table.feltMaterial
@@ -2891,7 +2820,7 @@ function createSceneRuntime(
     board,
     lights,
     postFx,
-    frameBudget: new FrameBudget(),
+    frameBudget: new FrameBudget(0),
     neonMaterials,
     overlayElements: new Map<string, HTMLElement>(),
     companion,
@@ -2915,6 +2844,8 @@ function createSceneRuntime(
 
   let viewportWidth = 1
   let viewportHeight = 1
+  /** Adaptive render quality from the frame budget (see FrameBudget). */
+  let quality: RenderQuality = 0
   const resize = () => {
     const width = Math.max(1, host.clientWidth)
     const height = Math.max(1, host.clientHeight)
@@ -2922,10 +2853,13 @@ function createSceneRuntime(
     viewportHeight = height
     const renderArea = width * height
     const pixelRatioCap = renderArea > 2_200_000 ? 1.15 : renderArea > 1_300_000 ? 1.35 : 1.5
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, pixelRatioCap)
+    const pixelRatio = Math.max(0.75, Math.min(window.devicePixelRatio || 1, pixelRatioCap) * (quality >= 1 ? 0.85 : 1))
     renderer.setPixelRatio(pixelRatio)
     renderer.setSize(width, height, false)
     runtime.postFx?.setSize(width, height, pixelRatio)
+    runtime.postFx?.setReducedBloom(quality >= 1)
+    host.dataset.postFx = !runtime.postFx || quality >= 2 ? 'off' : quality === 1 ? 'reduced' : 'on'
+    runtime.frameBudget.settle((performance.now() - runtime.startTime) / 1000, 1.5)
     camera.aspect = width / height
     // Narrow windows widen the lens so the far seats stay in view.
     camera.fov = camera.aspect < 1.28
@@ -2943,8 +2877,7 @@ function createSceneRuntime(
   resize()
 
   let lastTime = (performance.now() - runtime.startTime) / 1000
-  let frameIndex = 0
-  let postFxFadeStartedAt = -1
+  let lastShadowAt = Number.NEGATIVE_INFINITY
   const targetCamera = new THREE.Vector3()
   const targetLook = new THREE.Vector3()
   const winnerFocus = new THREE.Vector3()
@@ -2958,18 +2891,16 @@ function createSceneRuntime(
     lastTime = time
     const reducedMotion = runtime.reducedMotion
 
-    frameIndex += 1
-    if (frameIndex % 2 === 0) renderer.shadowMap.needsUpdate = true
-    if (runtime.postFx && postFxFadeStartedAt < 0 && runtime.frameBudget.push(delta)) {
-      // Sustained slow frames: fade the bloom out over a second, then drop post.
-      postFxFadeStartedAt = time
+    // Shadow casters move slowly (idle avatars, chips): a fixed 30Hz refresh
+    // (20Hz once quality steps down) keeps them smooth for far fewer passes.
+    if (time - lastShadowAt >= (quality === 0 ? 1 / 30 : 1 / 20) - 0.002) {
+      renderer.shadowMap.needsUpdate = true
+      lastShadowAt = time
     }
-    if (runtime.postFx && postFxFadeStartedAt >= 0 && time - postFxFadeStartedAt > 1) {
-      runtime.postFx.dispose()
-      runtime.postFx = null
-      host.dataset.postFx = 'off'
-      renderer.setPixelRatio(1)
-      renderer.setSize(viewportWidth, viewportHeight, false)
+    const nextQuality = runtime.frameBudget.push(delta, time)
+    if (nextQuality !== null && nextQuality !== quality) {
+      quality = nextQuality
+      resize()
     }
 
     const actingSeat = viewRef.current.actingVisualSeat
@@ -3076,9 +3007,8 @@ function createSceneRuntime(
     projectSeatOverlays(runtime, host, viewportWidth, viewportHeight)
     updateChipInstances(runtime.chipInstancer, scene)
 
-    if (runtime.postFx) {
-      const fade = postFxFadeStartedAt >= 0 ? Math.max(0, 1 - (time - postFxFadeStartedAt)) : 1
-      runtime.postFx.bloom.strength = (0.22 + (winnerSeat ? 0.12 : 0) + allInImpact.strength * 0.12) * fade
+    if (runtime.postFx && quality < 2) {
+      runtime.postFx.bloom.strength = 0.22 + (winnerSeat ? 0.1 : 0) + allInImpact.strength * 0.1
       runtime.postFx.composer.render(delta)
     } else {
       renderer.render(scene, camera)
@@ -3244,6 +3174,8 @@ export function DesktopPokerRoom3D({
       highlightedCards,
       (performance.now() - runtimeRef.current.startTime) / 1000
     )
+    // New seats, avatars and accessories arrive with every sync.
+    for (const seat of runtimeRef.current.seats.values()) pruneShadowCasters(seat.root)
   }, [view, highlightedCards])
 
   return (

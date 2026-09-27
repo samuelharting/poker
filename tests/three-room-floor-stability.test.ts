@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const sceneSource = readFileSync(join(process.cwd(), 'components', 'three', 'DesktopPokerRoom3D.tsx'), 'utf8')
+const roomArtSource = readFileSync(join(process.cwd(), 'components', 'three', 'roomArt.ts'), 'utf8')
 
 describe('desktop room rendering stability', () => {
   it('uses a bounded native WebGL renderer and disposes its resources', () => {
@@ -53,7 +54,7 @@ describe('desktop room rendering stability', () => {
   it('adds deterministic table detail, staggered props, and a readable winner celebration', () => {
     expect(sceneSource).toContain('createStylizedTable()')
     expect(sceneSource).toContain('createCarpetTexture()')
-    expect(sceneSource).toContain('createSeededRandom(0x3344524f)')
+    expect(roomArtSource).toContain('seededRandom(0x3344524f)')
     expect(sceneSource).toContain('seat.cardMeshes.forEach')
     expect(sceneSource).toContain('wager.chipMeshes.forEach')
     expect(sceneSource).toContain('animatePot(runtime, time, reducedMotion)')

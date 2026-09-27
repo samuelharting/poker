@@ -346,9 +346,9 @@ export function getFeltTexture(layout: FeltLayout) {
     const scaleY = height / (layout.semiZ * 2)
 
     const pool = context.createRadialGradient(width / 2, height * 0.46, height * 0.08, width / 2, height / 2, width * 0.56)
-    pool.addColorStop(0, '#1bb282')
-    pool.addColorStop(0.55, '#12916b')
-    pool.addColorStop(1, '#0a5a44')
+    pool.addColorStop(0, '#1caf80')
+    pool.addColorStop(0.55, '#128c66')
+    pool.addColorStop(1, '#0a5541')
     context.fillStyle = pool
     context.fillRect(0, 0, width, height)
 
@@ -365,6 +365,20 @@ export function getFeltTexture(layout: FeltLayout) {
       context.fillRect(x, y, 1 + random() * 3, 1)
     }
     context.globalAlpha = 1
+
+    // Printed pinstripe just inside the rail, like a casino layout's border.
+    context.save()
+    context.strokeStyle = 'rgba(255, 223, 150, 0.28)'
+    context.lineWidth = 3
+    context.beginPath()
+    context.ellipse(width / 2, height / 2, width / 2 - 34, height / 2 - 34, 0, 0, Math.PI * 2)
+    context.stroke()
+    context.strokeStyle = 'rgba(0, 30, 20, 0.35)'
+    context.lineWidth = 10
+    context.beginPath()
+    context.ellipse(width / 2, height / 2, width / 2 - 48, height / 2 - 48, 0, 0, Math.PI * 2)
+    context.stroke()
+    context.restore()
 
     context.save()
     context.strokeStyle = 'rgba(255, 223, 150, 0.55)'
@@ -392,12 +406,48 @@ export function getFeltTexture(layout: FeltLayout) {
 
     const font = getDisplayFontFamily()
     const crestY = toY(layout.boardZ) + cardH / 2 + height * 0.14
-    context.fillStyle = 'rgba(255, 236, 190, 0.2)'
     context.textAlign = 'center'
     context.textBaseline = 'middle'
+    // Printed house crest: a gold medallion ring with a spade and the game name
+    // on a gentle arc beneath. Faint, so chips and cards stay the brightest
+    // things on the felt.
+    const crestRadius = height * 0.05
+    const crestCenterY = crestY - height * 0.035
+    context.strokeStyle = 'rgba(255, 226, 160, 0.24)'
+    context.lineWidth = 5
+    context.beginPath()
+    context.arc(width / 2, crestCenterY, crestRadius, 0, Math.PI * 2)
+    context.stroke()
+    context.lineWidth = 2
+    context.beginPath()
+    context.arc(width / 2, crestCenterY, crestRadius * 0.8, 0, Math.PI * 2)
+    context.stroke()
+    drawSuit(context, 'spades', width / 2, crestCenterY + 2, crestRadius * 0.95, 'rgba(255, 226, 160, 0.24)')
+    for (const side of [-1, 1]) {
+      context.strokeStyle = 'rgba(255, 226, 160, 0.2)'
+      context.lineWidth = 3
+      context.beginPath()
+      context.moveTo(width / 2 + side * crestRadius * 1.35, crestCenterY)
+      context.lineTo(width / 2 + side * crestRadius * 4.2, crestCenterY)
+      context.stroke()
+      drawSuit(context, side < 0 ? 'hearts' : 'diamonds', width / 2 + side * crestRadius * 4.6, crestCenterY, crestRadius * 0.42, 'rgba(255, 226, 160, 0.2)')
+    }
+    context.fillStyle = 'rgba(255, 236, 190, 0.22)'
     // The room already says POKER NIGHT (neon + HUD); the felt just names the game.
-    context.font = `600 ${height * 0.03}px ${font}`
-    context.fillText('NO  LIMIT  HOLD’EM', width / 2, crestY)
+    context.font = `600 ${height * 0.026}px ${font}`
+    const label = 'NO  LIMIT  HOLD’EM'
+    const letters = [...label]
+    const arcRadius = width * 0.2
+    const arcCenterY = crestCenterY + crestRadius * 1.9 - arcRadius
+    const letterStep = (height * 0.026 * 0.78) / arcRadius
+    letters.forEach((letter, index) => {
+      const angle = Math.PI / 2 + ((letters.length - 1) / 2 - index) * letterStep
+      context.save()
+      context.translate(width / 2 + Math.cos(angle) * arcRadius, arcCenterY + Math.sin(angle) * arcRadius)
+      context.rotate(angle - Math.PI / 2)
+      context.fillText(letter, 0, 0)
+      context.restore()
+    })
 
     const crestTopY = toY(layout.boardZ) - cardH / 2 - height * 0.12
     for (const [index, suit] of (['spades', 'hearts', 'clubs', 'diamonds'] as const).entries()) {
@@ -437,6 +487,164 @@ export function getLeatherBumpTexture() {
       context.fill()
     }
   }, { repeat: true, colorSpace: THREE.NoColorSpace })
+}
+
+function seededRandom(seed: number) {
+  let state = seed >>> 0
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0
+    return state / 0x100000000
+  }
+}
+
+/** Fine tileable cloth weave, used as a bump map on the felt at a high repeat. */
+export function getFeltWeaveTexture() {
+  return cachedCanvasTexture('felt-weave', 64, 64, (context, width, height) => {
+    context.fillStyle = '#808080'
+    context.fillRect(0, 0, width, height)
+    // Over-under twill: alternating short horizontal and vertical threads.
+    for (let y = 0; y < height; y += 4) {
+      for (let x = 0; x < width; x += 4) {
+        const over = ((x + y) / 4) % 2 === 0
+        context.fillStyle = over ? '#9c9c9c' : '#6a6a6a'
+        context.fillRect(x, y, over ? 4 : 2, over ? 2 : 4)
+      }
+    }
+    const random = seededRandom(0xfe17)
+    context.globalAlpha = 0.35
+    for (let speck = 0; speck < 260; speck += 1) {
+      context.fillStyle = random() > 0.5 ? '#b0b0b0' : '#505050'
+      context.fillRect(random() * width, random() * height, 1, 1)
+    }
+    context.globalAlpha = 1
+  }, { repeat: true, colorSpace: THREE.NoColorSpace })
+}
+
+/**
+ * Padded leather rail wrap. U runs around the table (one tile per 1.6 world
+ * units), V runs across the cushion from the felt lip (0) to the underside (1).
+ * Painted: oxblood leather grain, a seam between padded panels, and two rows
+ * of cream saddle stitching.
+ */
+export function getRailLeatherTexture() {
+  return cachedCanvasTexture('rail-leather', 512, 256, (context, width, height) => {
+    const base = context.createLinearGradient(0, 0, 0, height)
+    base.addColorStop(0, '#2c1210')
+    base.addColorStop(0.18, '#4a1d1a')
+    base.addColorStop(0.5, '#5a2420')
+    base.addColorStop(0.82, '#431a17')
+    base.addColorStop(1, '#1e0c0a')
+    context.fillStyle = base
+    context.fillRect(0, 0, width, height)
+
+    const random = seededRandom(0x1ea7)
+    for (let blob = 0; blob < 1600; blob += 1) {
+      const light = random() > 0.5
+      context.fillStyle = light ? 'rgba(255, 210, 190, 0.05)' : 'rgba(0, 0, 0, 0.1)'
+      context.beginPath()
+      context.arc(random() * width, random() * height, 0.8 + random() * 2.4, 0, Math.PI * 2)
+      context.fill()
+    }
+
+    // Panel seam: a soft pinched crease where two padded panels meet.
+    const seam = context.createLinearGradient(0, 0, 18, 0)
+    seam.addColorStop(0, 'rgba(0,0,0,0.45)')
+    seam.addColorStop(1, 'rgba(0,0,0,0)')
+    context.fillStyle = seam
+    context.fillRect(0, 0, 18, height)
+    const seamEnd = context.createLinearGradient(width - 18, 0, width, 0)
+    seamEnd.addColorStop(0, 'rgba(0,0,0,0)')
+    seamEnd.addColorStop(1, 'rgba(0,0,0,0.45)')
+    context.fillStyle = seamEnd
+    context.fillRect(width - 18, 0, 18, height)
+
+    for (const v of [0.2, 0.74]) {
+      const y = v * height
+      context.fillStyle = 'rgba(0, 0, 0, 0.35)'
+      context.fillRect(0, y - 3, width, 1.5)
+      context.fillStyle = '#e8cf9c'
+      for (let x = 4; x < width; x += 14) context.fillRect(x, y - 1, 8, 2.5)
+    }
+  }, { repeat: true })
+}
+
+/** Walnut veneer for the table apron: horizontal grain with lacquer banding. */
+export function getWalnutTexture() {
+  return cachedCanvasTexture('walnut-apron', 512, 256, (context, width, height) => {
+    const base = context.createLinearGradient(0, 0, 0, height)
+    base.addColorStop(0, '#6b3d22')
+    base.addColorStop(0.5, '#56301b')
+    base.addColorStop(1, '#3c2114')
+    context.fillStyle = base
+    context.fillRect(0, 0, width, height)
+    const random = seededRandom(0x3a1ee7)
+    for (let line = 0; line < 140; line += 1) {
+      const y = random() * height
+      const amplitude = 0.5 + random() * 1.5
+      const phase = random() * Math.PI * 2
+      context.strokeStyle = random() > 0.5 ? 'rgba(30, 14, 6, 0.28)' : 'rgba(150, 90, 50, 0.16)'
+      context.lineWidth = 0.6 + random() * 1.6
+      context.beginPath()
+      for (let x = 0; x <= width; x += 16) {
+        const offset = Math.sin((x / width) * Math.PI * 4 + phase) * amplitude
+        if (x === 0) context.moveTo(x, y + offset)
+        else context.lineTo(x, y + offset)
+      }
+      context.stroke()
+    }
+    // Brass-coloured inlay lines near the top lip and the kick band.
+    for (const [v, color] of [[0.16, 'rgba(226, 186, 102, 0.7)'], [0.9, 'rgba(226, 186, 102, 0.55)']] as const) {
+      context.fillStyle = color
+      context.fillRect(0, v * height, width, 3)
+    }
+  }, { repeat: true })
+}
+
+/**
+ * Button-tufted (chesterfield) upholstery tile: diamond creases with a button
+ * at every crossing. Neutral grey so the per-chair colour tints it.
+ */
+export function getTuftedLeatherTexture(bump = false) {
+  return cachedCanvasTexture(bump ? 'tufted-bump' : 'tufted-color', 128, 128, (context, width, height) => {
+    // Pillow shading inside each diamond: bright centre, darker toward creases.
+    context.fillStyle = bump ? '#707070' : '#b8b8b8'
+    context.fillRect(0, 0, width, height)
+    const centres: Array<[number, number]> = [[width / 2, height / 2], [0, 0], [width, 0], [0, height], [width, height]]
+    const buttons: Array<[number, number]> = [[width / 2, 0], [0, height / 2], [width, height / 2], [width / 2, height]]
+    for (const [x, y] of centres) {
+      const pillow = context.createRadialGradient(x, y, 2, x, y, width * 0.52)
+      pillow.addColorStop(0, bump ? '#e8e8e8' : '#ffffff')
+      pillow.addColorStop(0.7, bump ? '#8a8a8a' : '#d6d6d6')
+      pillow.addColorStop(1, bump ? '#404040' : '#9a9a9a')
+      context.fillStyle = pillow
+      context.beginPath()
+      context.moveTo(x, y - height / 2)
+      context.lineTo(x + width / 2, y)
+      context.lineTo(x, y + height / 2)
+      context.lineTo(x - width / 2, y)
+      context.closePath()
+      context.fill()
+    }
+    context.strokeStyle = bump ? '#2a2a2a' : 'rgba(40, 40, 40, 0.55)'
+    context.lineWidth = 2
+    context.beginPath()
+    context.moveTo(width / 2, 0)
+    context.lineTo(width, height / 2)
+    context.lineTo(width / 2, height)
+    context.lineTo(0, height / 2)
+    context.closePath()
+    context.stroke()
+    for (const [x, y] of buttons) {
+      const button = context.createRadialGradient(x - 1, y - 1, 0.5, x, y, 6)
+      button.addColorStop(0, bump ? '#303030' : '#8a8a8a')
+      button.addColorStop(0.6, bump ? '#101010' : '#3c3c3c')
+      button.addColorStop(1, bump ? '#505050' : 'rgba(60,60,60,0)')
+      context.fillStyle = button
+      context.beginPath()
+      context.arc(x, y, 6, 0, Math.PI * 2)
+      context.fill()
+    }
+  }, { repeat: true, colorSpace: bump ? THREE.NoColorSpace : THREE.SRGBColorSpace })
 }
 
 /** Releases every cached texture (used when the scene is torn down). */
