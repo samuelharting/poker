@@ -95,6 +95,8 @@ export interface SeatPlayer {
    * the touch 2D layout can't drink, so they can't be bought shots. Bots: true.
    */
   drinkCapable?: boolean
+  /** On a mushroom trip (only once it has kicked in; a queued trip is secret). Visual only. */
+  trip?: { startedAt: number; endsAfterHand: number }
 }
 
 export interface Pot {
@@ -156,6 +158,8 @@ export interface HandHistoryEntry {
   winners: Array<{ playerId: string; nickname: string; amount: number; handDescription?: string }>
   /** Hands the whole table saw (showdown or chosen to show). */
   shown: Array<{ playerId: string; nickname: string; cards: Card[] }>
+  /** Sober tax posted into this pot at the deal (drinking game). */
+  soberTax?: Array<{ playerId: string; nickname: string; amount: number }>
 }
 
 export interface TableSettingsSnapshot {

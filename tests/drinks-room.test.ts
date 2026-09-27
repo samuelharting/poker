@@ -2,10 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Connection, Room } from 'partykit/server'
 import PokerRoom from '@/partykit/room'
 import {
+  BLACKOUT_MS,
+  createDrinkLedgerEntry,
   DRINK_COOLDOWN_MS,
-  PASS_OUT_FOLD_DELAY_MS,
+  ONE_BEER_PER_HAND_REASON,
   WAKE_UP_LEVEL,
   WATER_KICK_IN_MS,
+  type DrinkLedgerEntry,
 } from '@/lib/drinks'
 import type { C2SMessage, S2CMessage } from '@/shared/protocol'
 
@@ -90,12 +93,12 @@ function seatState(viewer: Seat, playerId: string) {
   return last(viewer.connection, 'room_snapshot')?.state.players.find(player => player.id === playerId)
 }
 
-function orderBeers(seat: Seat, count: number) {
-  for (let index = 0; index < count; index += 1) {
-    seat.send({ type: 'order_drink', kind: 'beer' })
-    vi.advanceTimersByTime(DRINK_COOLDOWN_MS)
-  }
+/** One beer per hand makes long drinking sessions slow to script: set the buzz directly. */
+function setLevel(server: PokerRoom, seat: Seat, level: number) {
+  const ledger = (server as unknown as { drinkLedger: Record<string, DrinkLedgerEntry> }).drinkLedger
+  ledger[seat.playerId] = { ...(ledger[seat.playerId] ?? createDrinkLedgerEntry()), level }
 }
+
 
 function state(viewer: Seat) {
   return last(viewer.connection, 'room_snapshot')!.state
@@ -114,7 +117,7 @@ afterEach(() => {
 })
 
 describe('PokerRoom drinks', () => {
-  it('broadcasts a beer to every player and exposes drink state on the seat', () => {
+  it('broadcasts a beer to every player, one beer per hand', () => {
     vi.useFakeTimers()
     const { join } = createTable()
     const alice = join('alice', 'Alice', 0)
@@ -125,7 +128,7 @@ describe('PokerRoom drinks', () => {
     alice.send({ type: 'order_drink', kind: 'beer' })
 
     const seen = seatState(bob, alice.playerId)?.drinks
-    expect(seen).toMatchObject({ level: 1, beers: 1, passedOut: false, lastDrink: { kind: 'beer' } })
+    expect(seen).toMatchObject({ level: 1, beers: 1, passedOut: false, lastDrink: { kind: 'beer' }, beerReadyAtHand: 1 })
     expect(drinkEvents(bob.connection).at(-1)).toMatchObject({
       kind: 'beer',
       playerId: alice.playerId,
@@ -135,6 +138,11 @@ describe('PokerRoom drinks', () => {
     })
 
     vi.advanceTimersByTime(DRINK_COOLDOWN_MS)
+    alice.send({ type: 'order_drink', kind: 'beer' })
+    expect(last(alice.connection, 'action_failed')?.message).toBe(ONE_BEER_PER_HAND_REASON)
+    expect(seatState(bob, alice.playerId)?.drinks?.level).toBe(1)
+
+    alice.send({ type: 'start_game' })
     alice.send({ type: 'order_drink', kind: 'beer' })
     const next = seatState(bob, alice.playerId)?.drinks
     expect(next?.level).toBe(2)
@@ -148,7 +156,7 @@ describe('PokerRoom drinks', () => {
     const bob = join('bob', 'Bob', 1)
 
     alice.send({ type: 'order_drink', kind: 'beer' })
-    alice.send({ type: 'order_drink', kind: 'beer' })
+    alice.send({ type: 'order_drink', kind: 'water' })
     expect(last(alice.connection, 'action_failed')?.message).toContain('3 seconds')
     expect(seatState(bob, alice.playerId)?.drinks?.level).toBe(1)
 
@@ -166,124 +174,131 @@ describe('PokerRoom drinks', () => {
     expect(last(connection, 'action_failed')?.message).toContain('Join the room')
   })
 
-  it('applies water after a delay rather than immediately', () => {
+  it('slow water lands at the start of the next hand (-2)', () => {
     vi.useFakeTimers()
-    const { join } = createTable()
+    const { server, join } = createTable()
     const alice = join('alice', 'Alice', 0)
     const bob = join('bob', 'Bob', 1)
+    setLevel(server, alice, 5)
 
-    orderBeers(alice, 3)
     alice.send({ type: 'order_drink', kind: 'water' })
-    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({ level: 3, sobering: 1, waters: 1 })
+    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({ level: 5, sobering: 1, waterNextHand: 2, waters: 1 })
     expect(drinkEvents(bob.connection).at(-1)?.kind).toBe('water')
 
-    vi.advanceTimersByTime(WATER_KICK_IN_MS - 10)
-    expect(seatState(bob, alice.playerId)?.drinks?.level).toBe(3)
+    vi.advanceTimersByTime(30_000)
+    expect(seatState(bob, alice.playerId)?.drinks?.level).toBe(5)
 
-    vi.advanceTimersByTime(20)
-    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({ level: 2, sobering: 0 })
-    expect(drinkEvents(bob.connection).at(-1)).toMatchObject({ kind: 'water_kicked_in', level: 2 })
+    alice.send({ type: 'start_game' })
+    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({ level: 3, sobering: 0, waterNextHand: 0 })
+    expect(drinkEvents(bob.connection).some(event => event.kind === 'water_kicked_in' && event.playerId === alice.playerId)).toBe(true)
   })
 
-  it('wears off one level every three completed hands', () => {
+  it('sobers everyone by half a level per completed hand', () => {
     vi.useFakeTimers()
-    const { join } = createTable()
+    const { server, join } = createTable()
     const alice = join('alice', 'Alice', 0)
     const bob = join('bob', 'Bob', 1)
+    setLevel(server, alice, 4)
 
-    orderBeers(alice, 2)
     for (let hand = 1; hand <= 3; hand += 1) {
       alice.send({ type: 'start_game' })
       expect(state(alice).handNumber).toBe(hand)
       foldHandOut(alice, bob)
-      expect(seatState(bob, alice.playerId)?.drinks?.level).toBe(hand < 3 ? 2 : 1)
+      expect(seatState(bob, alice.playerId)?.drinks?.level).toBe(4 - hand * 0.5)
     }
   })
 
-  it('passes out at 10, auto-folds through the normal fold path, and wakes next hand at level 6', () => {
+  it('blacks out at 10 without folding: the player keeps acting on their normal timer, then comes to mid-hand', () => {
     vi.useFakeTimers()
-    const { join } = createTable()
+    const { server, join } = createTable()
     const alice = join('alice', 'Alice', 0)
     const bob = join('bob', 'Bob', 1)
+    setLevel(server, alice, 9)
 
-    orderBeers(alice, 9)
     alice.send({ type: 'start_game' })
     expect(state(alice).phase).toBe('in_hand')
-    expect(state(alice).handNumber).toBe(1)
-
     alice.send({ type: 'order_drink', kind: 'beer' })
-    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({ level: 10, beers: 10, passedOut: true })
+    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({ level: 10, passedOut: true })
     expect(drinkEvents(bob.connection).map(event => event.kind).slice(-2)).toEqual(['beer', 'passed_out'])
 
-    // Let Bob act if it is his turn; the action then reaches Alice.
     if (state(bob).actingPlayerId === bob.playerId) {
       bob.send({ type: 'player_action', action: 'call' })
     }
     expect(state(bob).actingPlayerId).toBe(alice.playerId)
-    expect(state(bob).phase).toBe('in_hand')
+    const timerStart = state(bob).actionTimerStart
 
-    vi.advanceTimersByTime(PASS_OUT_FOLD_DELAY_MS + 10)
-    const afterFold = state(bob)
-    expect(afterFold.phase).toBe('between_hands')
-    expect(afterFold.players.find(player => player.id === alice.playerId)?.status).toBe('folded')
-    expect(afterFold.winners?.[0]?.playerId).toBe(bob.playerId)
-    // The fold was recorded by the ordinary fold bookkeeping.
-    expect(afterFold.players.find(player => player.id === alice.playerId)?.stats?.folds).toBe(1)
+    // Nothing folds or skips her: same clock, still to act.
+    vi.advanceTimersByTime(BLACKOUT_MS - 200)
+    const midBlackout = state(bob)
+    expect(midBlackout.phase).toBe('in_hand')
+    expect(midBlackout.actingPlayerId).toBe(alice.playerId)
+    expect(midBlackout.actionTimerStart).toBe(timerStart)
+    expect(midBlackout.players.find(player => player.id === alice.playerId)?.status).toBe('active')
+    expect(seatState(bob, alice.playerId)?.drinks?.passedOut).toBe(true)
 
-    // Passed-out players cannot keep drinking.
-    vi.advanceTimersByTime(DRINK_COOLDOWN_MS)
+    // She can act while blacked out.
+    alice.send({ type: 'player_action', action: 'check' })
+    expect(last(alice.connection, 'action_failed')).toBeUndefined()
+    expect(state(bob).players.find(player => player.id === alice.playerId)?.status).not.toBe('folded')
+
+    // Blacked-out players cannot keep drinking.
     alice.send({ type: 'order_drink', kind: 'water' })
     expect(last(alice.connection, 'action_failed')?.message).toContain('passed out')
 
-    alice.send({ type: 'start_game' })
-    expect(state(bob).handNumber).toBe(2)
-    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({
-      level: WAKE_UP_LEVEL,
-      passedOut: false,
-      beers: 10,
-    })
+    // She comes to on her own, mid-hand, at level 1 and hungover.
+    vi.advanceTimersByTime(400)
+    expect(state(bob).phase).toBe('in_hand')
+    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({ level: WAKE_UP_LEVEL, passedOut: false, hungover: true })
     expect(drinkEvents(bob.connection).at(-1)).toMatchObject({ kind: 'woke_up', level: WAKE_UP_LEVEL })
+    expect(state(bob).players.find(player => player.id === alice.playerId)?.stats?.folds ?? 0).toBe(0)
   })
 
-  it('folds immediately when the passed-out player is the one to act', () => {
+  it('never folds, skips or re-times a blacked-out player who is the one to act', () => {
     vi.useFakeTimers()
-    const { join } = createTable()
+    const { server, join } = createTable()
     const alice = join('alice', 'Alice', 0)
     const bob = join('bob', 'Bob', 1)
+    setLevel(server, alice, 9)
+    setLevel(server, bob, 9)
 
-    orderBeers(alice, 9)
-    orderBeers(bob, 9)
     alice.send({ type: 'start_game' })
     const actor = state(alice).actingPlayerId === alice.playerId ? alice : bob
     const other = actor === alice ? bob : alice
+    const timerStart = state(other).actionTimerStart
 
     actor.send({ type: 'order_drink', kind: 'beer' })
+    expect(seatState(other, actor.playerId)?.drinks?.passedOut).toBe(true)
+    vi.advanceTimersByTime(2_000)
+    expect(state(other).phase).toBe('in_hand')
     expect(state(other).actingPlayerId).toBe(actor.playerId)
-    vi.advanceTimersByTime(PASS_OUT_FOLD_DELAY_MS + 10)
-    expect(state(other).phase).toBe('between_hands')
-    expect(state(other).players.find(player => player.id === actor.playerId)?.status).toBe('folded')
+    expect(state(other).actionTimerStart).toBe(timerStart)
+    actor.send({ type: 'player_action', action: 'call' })
+    expect(state(other).actingPlayerId).toBe(other.playerId)
   })
 
-  it('sleeps through the whole next hand when passing out between hands', () => {
+  it('a blackout that starts between hands still deals them in, and the hangover lasts about a hand', () => {
     vi.useFakeTimers()
-    const { join } = createTable()
+    const { server, join } = createTable()
     const alice = join('alice', 'Alice', 0)
     const bob = join('bob', 'Bob', 1)
+    setLevel(server, bob, 9)
 
-    orderBeers(bob, 10)
+    bob.send({ type: 'order_drink', kind: 'beer' })
     expect(seatState(alice, bob.playerId)?.drinks?.passedOut).toBe(true)
 
     alice.send({ type: 'start_game' })
-    expect(seatState(alice, bob.playerId)?.drinks?.passedOut).toBe(true)
-    if (state(alice).actingPlayerId === alice.playerId) {
-      alice.send({ type: 'player_action', action: 'call' })
-    }
-    vi.advanceTimersByTime(PASS_OUT_FOLD_DELAY_MS + 10)
-    expect(state(alice).phase).toBe('between_hands')
-    expect(state(alice).players.find(player => player.id === bob.playerId)?.status).toBe('folded')
+    const bobSeat = state(alice).players.find(player => player.id === bob.playerId)
+    expect(bobSeat?.status).toBe('active')
+    expect(bobSeat?.hasCards).toBe(true)
+    vi.advanceTimersByTime(BLACKOUT_MS + 10)
+    expect(seatState(alice, bob.playerId)?.drinks).toMatchObject({ passedOut: false, level: WAKE_UP_LEVEL, hungover: true })
+    foldHandOut(alice, bob)
 
     alice.send({ type: 'start_game' })
-    expect(seatState(alice, bob.playerId)?.drinks).toMatchObject({ passedOut: false, level: WAKE_UP_LEVEL })
+    expect(seatState(alice, bob.playerId)?.drinks?.hungover).toBe(true)
+    foldHandOut(alice, bob)
+    alice.send({ type: 'start_game' })
+    expect(seatState(alice, bob.playerId)?.drinks?.hungover).toBe(false)
   })
 
   it('forgets drink state when a player leaves', () => {
@@ -297,5 +312,90 @@ describe('PokerRoom drinks', () => {
     vi.advanceTimersByTime(WATER_KICK_IN_MS + 10)
     expect(seatState(alice, bob.playerId)).toBeUndefined()
     expect(drinkEvents(alice.connection).some(event => event.kind === 'water_kicked_in')).toBe(false)
+  })
+})
+
+describe('PokerRoom sober tax', () => {
+  function stackOf(viewer: Seat, playerId: string) {
+    return seatState(viewer, playerId)?.stack ?? 0
+  }
+
+  function tableChips(viewer: Seat) {
+    const table = state(viewer)
+    // Between hands the pot has been paid out already; in a hand it sits in totalInPot.
+    return table.players.reduce((sum, player) => sum + player.stack + (table.phase === 'in_hand' ? player.totalInPot : 0), 0)
+  }
+
+  it('taxes a drink-capable player after one sober hand, escalating, visible to everyone, chips conserved', () => {
+    vi.useFakeTimers()
+    const { server, join } = createTable()
+    const alice = join('alice', 'Alice', 0)
+    const bob = join('bob', 'Bob', 1)
+    alice.send({ type: 'set_drink_capable', capable: true })
+    // Bob keeps a buzz on.
+    setLevel(server, bob, 4)
+
+    alice.send({ type: 'start_game' })
+    expect(seatState(bob, alice.playerId)?.drinks?.soberTax).toBe(0)
+    foldHandOut(alice, bob)
+    expect(seatState(bob, alice.playerId)?.drinks?.soberHands).toBe(1)
+
+    const before = tableChips(bob)
+    alice.send({ type: 'start_game' })
+    expect(state(bob).handNumber).toBe(2)
+    const aliceSeat = seatState(bob, alice.playerId)!
+    expect(aliceSeat.drinks?.soberTax).toBe(10)
+    expect(aliceSeat.totalInPot).toBe(10 + (aliceSeat.isSB ? 10 : aliceSeat.isBB ? 20 : 0))
+    expect(state(bob).recentActions.some(line => line.includes('sober tax $10'))).toBe(true)
+    expect(tableChips(bob)).toBe(before)
+    // Bob has a buzz: never taxed.
+    expect(seatState(bob, bob.playerId)?.drinks?.soberTax).toBe(0)
+    foldHandOut(alice, bob)
+    expect(state(bob).handHistory?.[0]?.soberTax).toEqual([{ playerId: alice.playerId, nickname: 'Alice', amount: 10 }])
+
+    alice.send({ type: 'start_game' })
+    expect(seatState(bob, alice.playerId)?.drinks?.soberTax).toBe(15)
+    foldHandOut(alice, bob)
+
+    // A beer (back above 1) stops it from the next hand.
+    setLevel(server, alice, 1)
+    alice.send({ type: 'order_drink', kind: 'beer' })
+    expect(seatState(bob, alice.playerId)?.drinks?.soberHands).toBe(0)
+    alice.send({ type: 'start_game' })
+    expect(seatState(bob, alice.playerId)?.drinks?.soberTax).toBe(0)
+    expect(tableChips(bob)).toBe(2000)
+    void stackOf
+  })
+
+  it('exempts phone players (not drink-capable) entirely', () => {
+    vi.useFakeTimers()
+    const { join } = createTable()
+    const alice = join('alice', 'Alice', 0)
+    const bob = join('bob', 'Bob', 1)
+    alice.send({ type: 'set_drink_capable', capable: false })
+    bob.send({ type: 'set_drink_capable', capable: false })
+
+    for (let hand = 1; hand <= 3; hand += 1) {
+      alice.send({ type: 'start_game' })
+      expect(seatState(bob, alice.playerId)?.drinks?.soberTax).toBe(0)
+      expect(seatState(bob, bob.playerId)?.drinks?.soberTax).toBe(0)
+      foldHandOut(alice, bob)
+    }
+    expect(seatState(bob, alice.playerId)?.drinks?.soberHands).toBe(0)
+  })
+
+  it('never taxes with fun mode off', () => {
+    vi.useFakeTimers()
+    const { join } = createTable()
+    const alice = join('alice', 'Alice', 0)
+    const bob = join('bob', 'Bob', 1)
+    alice.send({ type: 'set_drink_capable', capable: true })
+    alice.send({ type: 'update_table_settings', funModeEnabled: false })
+
+    for (let hand = 1; hand <= 3; hand += 1) {
+      alice.send({ type: 'start_game' })
+      expect(seatState(bob, alice.playerId)?.drinks?.soberTax ?? 0).toBe(0)
+      foldHandOut(alice, bob)
+    }
   })
 })

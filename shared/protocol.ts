@@ -9,9 +9,20 @@ import {
 } from '../lib/profile'
 import { DRINK_EVENT_KINDS, type DrinkEvent, type DrinkKind } from '../lib/drinks'
 import { isValidPrankEvent, type PrankEvent } from '../lib/pranks'
+import {
+  isValidMushroomEvent,
+  isValidPrivateMushroomState,
+  type MushroomEvent,
+  type PrivateMushroomState,
+} from '../lib/mushroom'
 
 export type { DrinkEvent, DrinkKind } from '../lib/drinks'
 export type { PrankEvent } from '../lib/pranks'
+export type { MushroomEvent, PrivateMushroomState } from '../lib/mushroom'
+
+/** Development-only table tricks for capturing effects (ignored by production servers). */
+export type DevFunAction = 'mushroom' | 'trip' | 'blackout' | 'hangover' | 'sober'
+export const DEV_FUN_ACTIONS: readonly DevFunAction[] = ['mushroom', 'trip', 'blackout', 'hangover', 'sober']
 
 export interface TableChatEntry {
   id: string
@@ -85,6 +96,10 @@ export type C2SMessage =
   | { type: 'flick_chip'; targetId: string }
   /** This client can (desktop 3D) or cannot (phone / 2D layout) order drinks. */
   | { type: 'set_drink_capable'; capable: boolean }
+  /** Secretly slip your mushroom into another seated player's next water. */
+  | { type: 'spike_water'; targetId: string }
+  /** Dev builds only (localhost server): force a fun effect on the sender or a target. */
+  | { type: 'dev_fun'; action: DevFunAction; targetId?: string }
   | { type: 'companion_mute' }
   /** The sender is privately looking at (squeezing) their own hole cards. */
   | { type: 'peek_cards'; peeking: boolean }
@@ -95,12 +110,21 @@ export type C2SMessage =
 export type S2CMessage =
   | { type: 'room_snapshot'; state: TableState }
   | { type: 'social_snapshot'; social: SocialSnapshot }
-  | { type: 'private_session'; yourId: string; reconnectToken: string; isHost: boolean }
+  | {
+    type: 'private_session'
+    yourId: string
+    reconnectToken: string
+    isHost: boolean
+    /** Only ever present for the mushroom's holder or spiker. */
+    mushroom?: PrivateMushroomState
+  }
   | { type: 'action_result'; success: true; message?: string }
   | { type: 'action_failed'; message: string }
   | { type: 'error'; message: string }
   | { type: 'drink_event'; event: DrinkEvent }
   | { type: 'prank_event'; event: PrankEvent }
+  /** Mushroom news: private (found / spiked / lost) or table-wide (trip started / ended). */
+  | { type: 'mushroom_event'; event: MushroomEvent }
   /** This connection no longer speaks for a player (kicked, opened elsewhere, name in use). */
   | { type: 'session_ended'; reason: SessionEndedReason; message: string }
   /** Table-wide heads-up, e.g. a new host. */
@@ -342,6 +366,19 @@ export function parseC2S(raw: string): C2SMessage | null {
       case 'set_drink_capable':
         return typeof parsed.capable === 'boolean' ? { type, capable: parsed.capable } : null
 
+      case 'spike_water': {
+        const targetId = typeof parsed.targetId === 'string' ? parsed.targetId.trim() : ''
+        return targetId && targetId.length <= 64 ? { type, targetId } : null
+      }
+
+      case 'dev_fun': {
+        const action = parsed.action
+        const targetId = typeof parsed.targetId === 'string' ? parsed.targetId.trim().slice(0, 64) : undefined
+        return typeof action === 'string' && (DEV_FUN_ACTIONS as readonly string[]).includes(action)
+          ? { type, action: action as DevFunAction, ...(targetId ? { targetId } : {}) }
+          : null
+      }
+
       case 'companion_mute':
         return { type }
 
@@ -381,7 +418,10 @@ export function parseS2C(raw: string): S2CMessage | null {
         const yourId = typeof parsed.yourId === 'string' ? parsed.yourId : ''
         const reconnectToken = typeof parsed.reconnectToken === 'string' ? parsed.reconnectToken : ''
         const isHost = typeof parsed.isHost === 'boolean' ? parsed.isHost : false
-        return yourId && reconnectToken ? { type, yourId, reconnectToken, isHost } : null
+        const mushroom = isValidPrivateMushroomState(parsed.mushroom) ? parsed.mushroom : undefined
+        return yourId && reconnectToken
+          ? { type, yourId, reconnectToken, isHost, ...(mushroom ? { mushroom } : {}) }
+          : null
       }
 
       case 'action_result': {
@@ -415,6 +455,18 @@ export function parseS2C(raw: string): S2CMessage | null {
               ...parsed.event,
               fromNickname: sanitizeText(parsed.event.fromNickname, 40),
               targetNickname: sanitizeText(parsed.event.targetNickname, 40),
+            },
+          }
+          : null
+
+      case 'mushroom_event':
+        return isValidMushroomEvent(parsed.event)
+          ? {
+            type,
+            event: {
+              ...parsed.event,
+              ...(parsed.event.spikerNickname !== undefined ? { spikerNickname: sanitizeText(parsed.event.spikerNickname, 40) } : {}),
+              ...(parsed.event.victimNickname !== undefined ? { victimNickname: sanitizeText(parsed.event.victimNickname, 40) } : {}),
             },
           }
           : null

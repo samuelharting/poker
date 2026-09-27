@@ -3,13 +3,27 @@
  * pass out. Everything in this module is pure so the PartyKit room, the
  * client hooks and the tests all share one source of truth.
  *
- * Timing rules (server authoritative):
- * - Beer: +1 drunk level immediately.
- * - Water: -1 drunk level WATER_KICK_IN_MS (3s) after ordering, once the sip finishes.
- * - Wear-off: every WEAR_OFF_EVERY_HANDS (3) completed hands, -1 level on its own.
- * - Pass-out: reaching PASS_OUT_LEVEL (10). The player's hand is folded through
- *   the normal fold path when action reaches them; they wake up at the start of
- *   the next hand they did not pass out in, at WAKE_UP_LEVEL (6).
+ * The buzz economy (numbers live in BUZZ so they are easy to tune):
+ * - Buzz is 0..10 and fractional internally (clients round it for display).
+ *   The SWEET SPOT is BUZZ.sweetSpotMin..BUZZ.sweetSpotMax (3..6).
+ * - Beer: +1 immediately, at most one per hand (ready again when the next hand
+ *   starts).
+ * - Water ("slow water"): -2, queued; it takes effect when the NEXT hand starts.
+ *   Unlimited apart from the 3s order cooldown. (A chaser is the exception, below.)
+ * - Natural sobering: -0.5 per completed hand.
+ * - Blackout: reaching PASS_OUT_LEVEL (10). Purely visual: the player is never
+ *   folded, skipped or sat out and keeps their normal action timer. After
+ *   BUZZ.blackoutMs (~4.5s) they come to on their own (even mid-hand) at
+ *   BUZZ.wakeLevel (1), HUNGOVER for the rest of that hand and the next full
+ *   hand (visual only again).
+ * - Too sober: a drink-capable player who finishes BUZZ.soberTaxAfterHands (1)
+ *   dealt-in hand at <= BUZZ.soberLevel (1) pays a SOBER TAX at every deal from
+ *   then on, straight into the pot like an ante: 1 SB, then 1.5 SB, 2 SB, ...
+ *   (+0.5 SB per consecutive sober hand), capped at 3 BB and at 10% of their
+ *   stack, never putting them all-in (see computeSoberTax). Getting back above
+ *   1 resets the counter and stops the tax from the next hand. Blacked-out or
+ *   hungover players, phone players (not drink-capable) and fun mode off are
+ *   exempt.
  * - Rate limit: one drink per DRINK_COOLDOWN_MS (3s) per player.
  * - Shots: any seated player can buy another seated player a shot, any time:
  *   +SHOT_LEVEL_BOOST (3) levels, uncapped (it can black them out). So a shot
@@ -28,12 +42,40 @@ import type { Card, Rank, Suit } from './poker/types'
 
 export type DrinkKind = 'beer' | 'water'
 
-export const DRUNK_LEVEL_MAX = 10
-export const PASS_OUT_LEVEL = 10
-export const WAKE_UP_LEVEL = 6
+/** Every tunable number of the buzz economy in one place. */
+export const BUZZ = {
+  max: 10,
+  blackoutLevel: 10,
+  sweetSpotMin: 3,
+  sweetSpotMax: 6,
+  beerLevels: 1,
+  /** Water (not a chaser) takes this off at the start of the next hand. */
+  waterLevels: 2,
+  soberingPerHand: 0.5,
+  wakeLevel: 1,
+  /** Blackout length on the server; the first-person beat below plays inside it. */
+  blackoutMs: 4_500,
+  /**
+   * Blackout look (client): eyelids sweep shut, the head bonks the table,
+   * a moment of black, then the eyes flutter open through a brief blur.
+   */
+  blackoutFx: { lidsCloseMs: 600, bonkMs: 450, blackMs: 1_500, flutterMs: 2_000, darkness: 0.96, blurPx: 7 },
+  /** At or below this you are "sober" (DD tag, sober tax). */
+  soberLevel: 1,
+  /** Sober dealt-in hands before the tax starts. */
+  soberTaxAfterHands: 1,
+  soberTaxStartSmallBlinds: 1,
+  soberTaxStepSmallBlinds: 0.5,
+  soberTaxCapBigBlinds: 3,
+  soberTaxMaxStackFraction: 0.1,
+} as const
+
+export const DRUNK_LEVEL_MAX = BUZZ.max
+export const PASS_OUT_LEVEL = BUZZ.blackoutLevel
+export const WAKE_UP_LEVEL = BUZZ.wakeLevel
 export const DRINK_COOLDOWN_MS = 3_000
+/** The sip animation; a chaser or a spiked glass lands once it finishes. */
 export const WATER_KICK_IN_MS = 3_000
-export const WEAR_OFF_EVERY_HANDS = 3
 /** A bought shot hits harder than a beer. */
 export const SHOT_LEVEL_BOOST = 3
 /** Each player may buy one shot for someone every this many hands. */
@@ -44,8 +86,8 @@ export const SHOT_RECEIVE_COOLDOWN_HANDS = 3
 export const CHASER_WINDOW_MS = 20_000
 /** Levels a chaser water takes off, instantly. */
 export const CHASER_LEVELS = 2
-/** How long a passed-out player "slumps" before their hand is folded. */
-export const PASS_OUT_FOLD_DELAY_MS = 900
+/** How long a blackout lasts before the player comes to on their own. */
+export const BLACKOUT_MS = BUZZ.blackoutMs
 
 export interface LastDrink {
   kind: DrinkKind
@@ -76,6 +118,16 @@ export interface PlayerDrinkState {
   chaserUntil: number
   /** Shots bought for this player that are waiting for them to leave the hand. */
   shotsWaiting: number
+  /** Levels of slow water that land when the next hand starts. */
+  waterNextHand: number
+  /** First hand number at which they may order another beer (0 = any time). */
+  beerReadyAtHand: number
+  /** Consecutive finished hands at <= BUZZ.soberLevel (drives the sober tax). */
+  soberHands: number
+  /** Sober tax they posted at this hand's deal (0 = none). */
+  soberTax: number
+  /** Came to from a blackout recently: the hangover effect. */
+  hungover: boolean
 }
 
 export const EMPTY_DRINK_STATE: Readonly<PlayerDrinkState> = Object.freeze({
@@ -90,14 +142,34 @@ export const EMPTY_DRINK_STATE: Readonly<PlayerDrinkState> = Object.freeze({
   shotReceivableAtHand: 0,
   chaserUntil: 0,
   shotsWaiting: 0,
+  waterNextHand: 0,
+  beerReadyAtHand: 0,
+  soberHands: 0,
+  soberTax: 0,
+  hungover: false,
 })
 
 export function createEmptyDrinkState(): PlayerDrinkState {
   return { ...EMPTY_DRINK_STATE }
 }
 
+/** Buzz is fractional (half steps); keep it tidy and in range. */
 function clampLevel(level: number): number {
-  return Math.max(0, Math.min(DRUNK_LEVEL_MAX, Math.floor(level)))
+  if (!Number.isFinite(level)) return 0
+  return Math.max(0, Math.min(DRUNK_LEVEL_MAX, Math.round(level * 100) / 100))
+}
+
+/** Whole-number buzz for display. */
+export function displayBuzz(level: number): number {
+  return Math.round(clampLevel(level))
+}
+
+export function isInSweetSpot(level: number): boolean {
+  return level >= BUZZ.sweetSpotMin && level <= BUZZ.sweetSpotMax
+}
+
+export function isSober(level: number): boolean {
+  return level <= BUZZ.soberLevel
 }
 
 function nonNegativeInt(value: unknown): number {
@@ -123,7 +195,7 @@ export function normalizeDrinkState(raw: unknown): PlayerDrinkState {
     : null
 
   return {
-    level: clampLevel(nonNegativeInt(candidate.level)),
+    level: typeof candidate.level === 'number' ? clampLevel(candidate.level) : 0,
     beers: nonNegativeInt(candidate.beers),
     waters: nonNegativeInt(candidate.waters),
     lastDrink,
@@ -134,6 +206,11 @@ export function normalizeDrinkState(raw: unknown): PlayerDrinkState {
     shotReceivableAtHand: nonNegativeInt(candidate.shotReceivableAtHand),
     chaserUntil: nonNegativeInt(candidate.chaserUntil),
     shotsWaiting: nonNegativeInt(candidate.shotsWaiting),
+    waterNextHand: typeof candidate.waterNextHand === 'number' ? clampLevel(candidate.waterNextHand) : 0,
+    beerReadyAtHand: nonNegativeInt(candidate.beerReadyAtHand),
+    soberHands: nonNegativeInt(candidate.soberHands),
+    soberTax: nonNegativeInt(candidate.soberTax),
+    hungover: candidate.hungover === true,
   }
 }
 
@@ -141,9 +218,10 @@ export function normalizeDrinkState(raw: unknown): PlayerDrinkState {
 // Server ledger
 // ---------------------------------------------------------------------------
 
+/** A slow water: lands when the next hand starts. */
 export interface PendingWater {
   id: string
-  dueAt: number
+  levels: number
 }
 
 /** Server-only bookkeeping on top of the public state. */
@@ -154,10 +232,17 @@ export interface DrinkLedgerEntry {
   lastDrink: LastDrink | null
   passedOut: boolean
   lastOrderAt: number | null
-  handsTowardSober: number
   pendingWaters: PendingWater[]
-  /** Last hand number the player sleeps through; they wake when a later hand starts. */
-  passedOutThroughHand: number | null
+  /** Server time the blackout started. */
+  passedOutAt: number | null
+  /** Hungover through this hand number (the hand they came to in, plus the next). */
+  hungoverThroughHand: number | null
+  /** Hand number of their last beer (one per hand). */
+  lastBeerHand: number | null
+  /** Consecutive finished dealt-in hands at <= BUZZ.soberLevel. */
+  soberHands: number
+  /** Sober tax posted at the current hand's deal, and which hand. */
+  soberTax: { hand: number; amount: number } | null
   /** Shots bought for this player. */
   shots: number
   /** Hand number when this player last bought someone a shot. */
@@ -176,9 +261,12 @@ export function createDrinkLedgerEntry(): DrinkLedgerEntry {
     lastDrink: null,
     passedOut: false,
     lastOrderAt: null,
-    handsTowardSober: 0,
     pendingWaters: [],
-    passedOutThroughHand: null,
+    passedOutAt: null,
+    hungoverThroughHand: null,
+    lastBeerHand: null,
+    soberHands: 0,
+    soberTax: null,
     shots: 0,
     lastShotBoughtHand: null,
     lastShotReceivedHand: null,
@@ -186,7 +274,7 @@ export function createDrinkLedgerEntry(): DrinkLedgerEntry {
   }
 }
 
-export function toPublicDrinkState(entry: DrinkLedgerEntry | undefined): PlayerDrinkState {
+export function toPublicDrinkState(entry: DrinkLedgerEntry | undefined, handNumber?: number): PlayerDrinkState {
   if (!entry) {
     return createEmptyDrinkState()
   }
@@ -206,6 +294,11 @@ export function toPublicDrinkState(entry: DrinkLedgerEntry | undefined): PlayerD
     chaserUntil: entry.chaserUntil ?? 0,
     // Filled in by the room from its delivery queue.
     shotsWaiting: 0,
+    waterNextHand: clampLevel(entry.pendingWaters.reduce((sum, water) => sum + water.levels, 0)),
+    beerReadyAtHand: entry.lastBeerHand === null ? 0 : entry.lastBeerHand + 1,
+    soberHands: entry.soberHands,
+    soberTax: entry.soberTax && (handNumber === undefined || entry.soberTax.hand === handNumber) ? entry.soberTax.amount : 0,
+    hungover: entry.hungoverThroughHand !== null,
   }
 }
 
@@ -223,6 +316,8 @@ export type DrinkOrderResult =
   | { ok: true; passedOut: boolean; water?: PendingWater; chaser?: boolean }
   | { ok: false; reason: string }
 
+export const ONE_BEER_PER_HAND_REASON = 'One beer per hand. The next round is on the next deal.'
+
 /** Mutates `entry` when the order is accepted. */
 export function orderDrink(entry: DrinkLedgerEntry, context: DrinkOrderContext): DrinkOrderResult {
   if (entry.passedOut) {
@@ -231,6 +326,10 @@ export function orderDrink(entry: DrinkLedgerEntry, context: DrinkOrderContext):
 
   if (entry.lastOrderAt !== null && context.now - entry.lastOrderAt < DRINK_COOLDOWN_MS) {
     return { ok: false, reason: 'Easy there. One drink every 3 seconds.' }
+  }
+
+  if (context.kind === 'beer' && entry.lastBeerHand !== null && entry.lastBeerHand >= context.handNumber) {
+    return { ok: false, reason: ONE_BEER_PER_HAND_REASON }
   }
 
   entry.lastOrderAt = context.now
@@ -246,34 +345,39 @@ export function orderDrink(entry: DrinkLedgerEntry, context: DrinkOrderContext):
       entry.level = clampLevel(entry.level - CHASER_LEVELS)
       return { ok: true, passedOut: false, chaser: true }
     }
-    const water: PendingWater = { id: context.drinkId, dueAt: context.now + WATER_KICK_IN_MS }
+    // Slow water: lands at the start of the next hand.
+    const water: PendingWater = { id: context.drinkId, levels: BUZZ.waterLevels }
     entry.pendingWaters.push(water)
     return { ok: true, passedOut: false, water }
   }
 
   entry.beers += 1
-  return { ok: true, passedOut: raiseLevel(entry, 1, context) }
+  entry.lastBeerHand = context.handNumber
+  return { ok: true, passedOut: raiseLevel(entry, BUZZ.beerLevels, context) }
 }
 
 /** Adds drunk levels; returns true when that knocked the player out. */
 function raiseLevel(
   entry: DrinkLedgerEntry,
   amount: number,
-  context: Pick<DrinkOrderContext, 'handNumber' | 'isDealtIntoLiveHand'>
+  context: Pick<DrinkOrderContext, 'handNumber' | 'isDealtIntoLiveHand' | 'now'>
 ): boolean {
   entry.level = clampLevel(entry.level + amount)
+  if (!isSober(entry.level)) {
+    // Back above 1: the sober-tax counter resets (no tax from the next hand).
+    entry.soberHands = 0
+  }
   if (entry.level < PASS_OUT_LEVEL) {
     return false
   }
 
   entry.passedOut = true
-  entry.passedOutThroughHand = context.isDealtIntoLiveHand
-    ? context.handNumber
-    : context.handNumber + 1
+  entry.passedOutAt = context.now
   entry.pendingWaters = []
-  entry.handsTowardSober = 0
+  entry.hungoverThroughHand = null
   return true
 }
+
 
 /** Hands until `buyer` may buy another shot (0 = ready now). */
 export function getShotHandsRemaining(
@@ -378,6 +482,7 @@ export function deliverShot(target: DrinkLedgerEntry, context: ShotDeliveryConte
   const passedOut = raiseLevel(target, SHOT_LEVEL_BOOST, {
     handNumber: context.handNumber,
     isDealtIntoLiveHand: false,
+    now: context.now,
   })
   const levelAdded = target.level - before
   if (!passedOut) {
@@ -417,17 +522,14 @@ export function forceBeers(entry: DrinkLedgerEntry, count: number, context: { dr
   if (entry.passedOut || count <= 0) return false
   entry.beers += count
   entry.lastDrink = { kind: 'beer', id: context.drinkId, at: context.now }
-  return raiseLevel(entry, count, { handNumber: context.handNumber, isDealtIntoLiveHand: false })
+  return raiseLevel(entry, BUZZ.beerLevels * count, { handNumber: context.handNumber, isDealtIntoLiveHand: false, now: context.now })
 }
-
-/** The big-win free water takes this much off, at once. */
-export const FREE_WATER_LEVELS = 2
 
 /** Big-win house rule: a free water that lands at once (-2), not the slow kind. */
 export function pourFreeWater(entry: DrinkLedgerEntry): number {
   if (entry.passedOut) return 0
   const before = entry.level
-  entry.level = clampLevel(entry.level - FREE_WATER_LEVELS)
+  entry.level = clampLevel(entry.level - BUZZ.waterLevels)
   return before - entry.level
 }
 
@@ -439,7 +541,7 @@ export function pourHouseShot(target: DrinkLedgerEntry, context: Omit<ShotDelive
   if (target.passedOut) return { ok: false }
   const before = target.level
   target.shots += 1
-  const passedOut = raiseLevel(target, SHOT_LEVEL_BOOST, { handNumber: context.handNumber, isDealtIntoLiveHand: false })
+  const passedOut = raiseLevel(target, SHOT_LEVEL_BOOST, { handNumber: context.handNumber, isDealtIntoLiveHand: false, now: context.now })
   if (!passedOut) {
     target.chaserUntil = context.now + CHASER_WINDOW_MS
   }
@@ -466,54 +568,157 @@ export function getShotBlockReasonFromState(
   )
 }
 
-/** Applies a pending water. Returns true when it existed (and was consumed). */
-export function applyWaterKickIn(entry: DrinkLedgerEntry, waterId: string): boolean {
-  const index = entry.pendingWaters.findIndex(water => water.id === waterId)
-  if (index < 0) {
-    return false
-  }
-
-  entry.pendingWaters.splice(index, 1)
-  if (!entry.passedOut) {
-    entry.level = clampLevel(entry.level - 1)
-  }
-  return true
+/**
+ * Call when a hand starts: queued slow waters land now. Returns the levels
+ * taken off (0 when nothing was queued).
+ */
+export function applyQueuedWaters(entry: DrinkLedgerEntry): number {
+  if (entry.pendingWaters.length === 0) return 0
+  const levels = entry.pendingWaters.reduce((sum, water) => sum + water.levels, 0)
+  entry.pendingWaters = []
+  if (entry.passedOut) return 0
+  const before = entry.level
+  entry.level = clampLevel(entry.level - levels)
+  return before - entry.level
 }
 
-/** Call once per completed hand. Returns true when the level dropped. */
-export function applyHandCompleted(entry: DrinkLedgerEntry): boolean {
-  if (entry.passedOut || entry.level <= 0) {
-    entry.handsTowardSober = 0
-    return false
-  }
-
-  entry.handsTowardSober += 1
-  if (entry.handsTowardSober < WEAR_OFF_EVERY_HANDS) {
-    return false
-  }
-
-  entry.handsTowardSober = 0
-  entry.level = clampLevel(entry.level - 1)
-  return true
+/** Throws away a queued water (a spiked glass does nothing else). */
+export function discardQueuedWater(entry: DrinkLedgerEntry, waterId: string): boolean {
+  const before = entry.pendingWaters.length
+  entry.pendingWaters = entry.pendingWaters.filter(water => water.id !== waterId)
+  return entry.pendingWaters.length !== before
 }
 
-/** Call when a new hand starts. Returns true when the player woke up. */
-export function wakeIfRested(entry: DrinkLedgerEntry, startedHandNumber: number): boolean {
+export interface HandCompletedContext {
+  /** They held cards in the hand that just finished. */
+  dealtIn: boolean
+  /** Their client can drink and fun mode is on (phone players are exempt). */
+  taxable: boolean
+}
+
+/**
+ * Call once per completed hand: -0.5 buzz, and the sober-tax counter moves
+ * (only for dealt-in, drink-capable players who are not blacked out or
+ * hungover). Returns true when the level dropped.
+ */
+export function applyHandCompleted(
+  entry: DrinkLedgerEntry,
+  context: HandCompletedContext = { dealtIn: false, taxable: false }
+): boolean {
+  if (entry.passedOut) {
+    return false
+  }
+  const before = entry.level
+  entry.level = clampLevel(entry.level - BUZZ.soberingPerHand)
+  if (!context.taxable) {
+    entry.soberHands = 0
+  } else if (context.dealtIn && entry.hungoverThroughHand === null) {
+    entry.soberHands = isSober(entry.level) ? entry.soberHands + 1 : 0
+  }
+  return entry.level < before
+}
+
+/**
+ * Call from the blackout timer and when a hand starts. Returns true when the
+ * player came to: BUZZ.blackoutMs after blacking out, even mid-hand. They wake
+ * at BUZZ.wakeLevel, hungover for the rest of `currentHandNumber` and the next
+ * full hand.
+ */
+export function wakeIfRested(entry: DrinkLedgerEntry, currentHandNumber: number, now = Date.now()): boolean {
   if (!entry.passedOut) {
     return false
   }
 
-  const through = entry.passedOutThroughHand ?? 0
-  if (startedHandNumber <= through) {
+  const elapsed = now - (entry.passedOutAt ?? Number.NEGATIVE_INFINITY)
+  if (elapsed < BLACKOUT_MS) {
     return false
   }
 
   entry.passedOut = false
-  entry.passedOutThroughHand = null
+  entry.passedOutAt = null
   entry.level = WAKE_UP_LEVEL
-  entry.handsTowardSober = 0
+  entry.soberHands = 0
+  entry.hungoverThroughHand = currentHandNumber + 1
   return true
 }
+
+/** Call when a hand starts. Returns true when their hangover wore off. */
+export function endHangoverIfOver(entry: DrinkLedgerEntry, startedHandNumber: number): boolean {
+  if (entry.hungoverThroughHand === null || startedHandNumber <= entry.hungoverThroughHand) {
+    return false
+  }
+  entry.hungoverThroughHand = null
+  return true
+}
+
+// ---------------------------------------------------------------------------
+// Sober tax
+// ---------------------------------------------------------------------------
+
+export interface SoberTaxInput {
+  /** Consecutive sober hands when the hand is dealt. */
+  soberHands: number
+  smallBlind: number
+  bigBlind: number
+  /** Their stack after posting any blind. */
+  stack: number
+}
+
+/**
+ * The tax for a hand dealt with `soberHands` sober hands behind them (0 = no
+ * tax). 1 SB on the first taxed hand, +0.5 SB for each one after, capped at
+ * 3 BB and at 10% of their stack, whole chips only, and never their last chip.
+ */
+export function computeSoberTax({ soberHands, smallBlind, bigBlind, stack }: SoberTaxInput): number {
+  if (soberHands < BUZZ.soberTaxAfterHands || stack <= 0 || smallBlind <= 0) return 0
+  const taxedHand = soberHands - BUZZ.soberTaxAfterHands
+  const smallBlinds = BUZZ.soberTaxStartSmallBlinds + BUZZ.soberTaxStepSmallBlinds * taxedHand
+  const raw = Math.round(smallBlind * smallBlinds)
+  const amount = Math.min(
+    raw,
+    Math.floor(bigBlind * BUZZ.soberTaxCapBigBlinds),
+    Math.floor(stack * BUZZ.soberTaxMaxStackFraction)
+  )
+  if (amount <= 0 || amount >= stack) return 0
+  return amount
+}
+
+/**
+ * What the sober tax will be at the next deal if nothing changes, from a
+ * player's public state (for the "Sober tax next hand: $X" warning). Counts
+ * the hand in progress as sober when they are sober right now.
+ */
+export function projectNextSoberTax(
+  drinks: Pick<PlayerDrinkState, 'level' | 'soberHands' | 'passedOut' | 'hungover'>,
+  table: { smallBlind: number; bigBlind: number; stack: number; dealtIn: boolean }
+): number {
+  if (drinks.passedOut || drinks.hungover || !isSober(drinks.level)) return 0
+  const soberHands = drinks.soberHands + (table.dealtIn ? 1 : 0)
+  return computeSoberTax({ soberHands, smallBlind: table.smallBlind, bigBlind: table.bigBlind, stack: table.stack })
+}
+
+/** How bots play the economy each hand: mostly in the sweet spot, sometimes slipping. */
+export const BOT_DRINKING = {
+  /** Under the sweet spot: usually a beer (skipping now and then lets the sober tax happen). */
+  lowBeerChance: 0.8,
+  /** In the sweet spot: enough beers to hold it against the -0.5/hand. */
+  sweetBeerChance: 0.45,
+  /** Over the sweet spot: usually a water... */
+  highWaterChance: 0.6,
+  /** ...but sometimes one more beer (so the table sees a blackout now and then). */
+  highBeerChance: 0.12,
+} as const
+
+/** A bot's drink for this hand, or null for none. */
+export function chooseBotDrink(level: number, random: () => number = Math.random): DrinkKind | null {
+  const roll = random()
+  if (level < BUZZ.sweetSpotMin) return roll < BOT_DRINKING.lowBeerChance ? 'beer' : null
+  if (level <= BUZZ.sweetSpotMax) return roll < BOT_DRINKING.sweetBeerChance ? 'beer' : null
+  if (roll < BOT_DRINKING.highWaterChance) return 'water'
+  return roll < BOT_DRINKING.highWaterChance + BOT_DRINKING.highBeerChance ? 'beer' : null
+}
+
+
 
 // ---------------------------------------------------------------------------
 // Events shared with clients
