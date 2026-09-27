@@ -31,7 +31,7 @@ const hostContext = await browser.newContext({
 })
 const host = await hostContext.newPage()
 host.on('pageerror', error => console.log('host pageerror:', error.message))
-await host.goto(appUrl, { waitUntil: 'networkidle' })
+await host.goto(appUrl, { waitUntil: 'load', timeout: 120000 })
 await host.getByLabel('Your nickname').fill('Host')
 await host.getByRole('button', { name: 'Create Table' }).click()
 await host.waitForURL(/\/room\//)
@@ -39,15 +39,27 @@ const roomUrl = host.url()
 
 const guestContext = await browser.newContext({ viewport: { width: 1280, height: 800 } })
 const guest = await guestContext.newPage()
-await guest.goto(roomUrl, { waitUntil: 'networkidle' })
+await guest.goto(roomUrl, { waitUntil: 'load', timeout: 120000 })
 await guest.getByLabel('Your nickname').fill('Drinker')
 await guest.getByRole('button', { name: 'Enter Room' }).click()
 await sleep(3000)
-await clickVisible(host, 'Fill seats')
+// Seat restoration can briefly disable Fill seats; retry until the bots sit.
+for (let attempt = 0; attempt < 40; attempt += 1) {
+  const seated = await host.evaluate(() => Number(document.querySelector('.desktop-3d-stage')?.dataset.riggedAvatarTargets ?? 0))
+  if (seated >= 6) break
+  await clickVisible(host, 'Fill seats')
+  await sleep(700)
+}
 await host.waitForFunction(() => Number(document.querySelector('.desktop-3d-stage')?.dataset.avatarModelsLoaded ?? 0) >= 6, null, { timeout: 60000 }).catch(() => {})
 await sleep(1500)
 await host.evaluate(() => { window.__recordStart = performance.now() })
-await clickVisible(host, /^Start game$/)
+// The table may be between hands (auto-deal off): either button starts play.
+for (let attempt = 0; attempt < 20; attempt += 1) {
+  const phase = await host.locator('.desktop-3d-stage').first().getAttribute('data-phase').catch(() => '')
+  if (phase === 'in_hand') break
+  await clickVisible(host, /^(Start game|Deal next hand)$/i)
+  await sleep(600)
+}
 
 const events = []
 const mark = label => events.push({ label, at: Date.now() })
