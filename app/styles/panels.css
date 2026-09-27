@@ -3426,6 +3426,23 @@
   }
 }
 
+/* Both layouts: fade and lift away (uses translate, so it composes with each
+   layout's own transform). Repeated class outranks the 2D entrance override. */
+.bounty-toast.bounty-toast.bounty-toast.is-leaving {
+  animation: bounty-leave 280ms var(--ease-out) both;
+}
+
+@keyframes bounty-leave {
+  from {
+    opacity: 1;
+    translate: 0 0;
+  }
+  to {
+    opacity: 0;
+    translate: 0 -8px;
+  }
+}
+
 /* ============================================================
    Last hands (table menu tab, both layouts)
    ============================================================ */

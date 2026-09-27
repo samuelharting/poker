@@ -229,6 +229,8 @@ function TripBoardStrip({ cards, suits }: { cards: Card[]; suits: Record<Card['s
  * the selected one. Held back while it's your turn so it never covers the
  * action, and the server keeps the same countdown so it can't be stalled.
  */
+const PILL_PROMPT_EXIT_MS = 240
+
 function PillPrompt({
   state,
   players,
@@ -283,12 +285,37 @@ function PillPrompt({
   }, [commit, deadline, isMyTurn, remainingMs])
 
   const visible = Boolean(holding) && !isMyTurn && targets.length > 0 && !sent
-  if (!visible) return null
+  // Ease out instead of vanishing in one frame (OK, countdown, your turn).
+  const [leaving, setLeaving] = useState(false)
+  const wasVisible = useRef(false)
+  const lastSelected = useRef<string | null>(null)
+  if (visible) lastSelected.current = selected
+  useEffect(() => {
+    if (visible) {
+      wasVisible.current = true
+      setLeaving(false)
+      return
+    }
+    if (!wasVisible.current) return
+    wasVisible.current = false
+    setLeaving(true)
+    const timer = window.setTimeout(() => setLeaving(false), PILL_PROMPT_EXIT_MS)
+    return () => window.clearTimeout(timer)
+  }, [visible])
+  if (!visible && !leaving) return null
+  const shownSelected = visible ? selected : lastSelected.current
   const fraction = Math.max(0, Math.min(1, remainingMs / MUSHROOM_AUTO_SPIKE_MS))
   const seconds = Math.ceil(remainingMs / 1000)
 
   return (
-    <section className="pill-prompt" role="dialog" aria-label="You found a pill" data-testid="pill-prompt">
+    <section
+      className={`pill-prompt ${visible ? '' : 'is-leaving'}`}
+      role="dialog"
+      aria-label="You found a pill"
+      aria-hidden={visible ? undefined : true}
+      data-testid={visible ? 'pill-prompt' : undefined}
+      inert={visible ? undefined : true}
+    >
       <button type="button" className="pill-prompt-close" onClick={commit} aria-label="Close (spikes the selected player)">
         ×
       </button>
@@ -300,8 +327,8 @@ function PillPrompt({
             key={target.id}
             type="button"
             role="radio"
-            aria-checked={selected === target.id}
-            className={`pill-target ${selected === target.id ? 'is-selected' : ''}`}
+            aria-checked={shownSelected === target.id}
+            className={`pill-target ${shownSelected === target.id ? 'is-selected' : ''}`}
             onClick={() => setPicked(target.id)}
             data-pill-target={target.id}
           >

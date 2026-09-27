@@ -2013,7 +2013,8 @@ function animatePot(runtime: SceneRuntime, time: number, reducedMotion: boolean,
       chip.rotation.set(eased * Math.PI * 2 * direction, Number(chip.userData.baseYaw ?? 0) + eased * 1.4, 0)
     })
     const remaining = elapsed >= POT_PAYOUT_SECONDS ? 0 : pot.payoutAmount * (1 - landed / Math.max(1, count))
-    updatePayoutReadout(host, pot.payoutAmount > 0 && elapsed < POT_PAYOUT_SECONDS + 0.35 ? remaining : null)
+    // Fades out on the last chip's landing (never parks on "$0").
+    updatePayoutReadout(host, pot.payoutAmount > 0 && remaining > 0 && elapsed < POT_PAYOUT_SECONDS + 0.35 ? remaining : null)
     if (elapsed >= POT_PAYOUT_SECONDS + 0.35) {
       // Done: remember who was paid so the lingering winner flag never replays it.
       pot.paidKey = pot.payoutKey

@@ -784,6 +784,8 @@ export class FunFx {
     if (!props.capsule) {
       const group = new THREE.Group()
       const glass = createDrinkProp('water')
+      // Drink props are created hidden (they normally wait for a hand to lift them).
+      glass.group.visible = true
       group.add(glass.group)
       const capsuleGeometry = new THREE.CapsuleGeometry(0.018, 0.035, 4, 10)
       this.geometries.push(capsuleGeometry)
@@ -814,6 +816,9 @@ export class FunFx {
       props.capsule = { group, glass, bubbles, startedAt: time }
     }
     const capsule = props.capsule
+    // The glass grows in on the felt and shrinks away at the end, never pops.
+    const grow = smooth(since / 0.22) * (1 - smooth((since - (CAPSULE_SECONDS - 0.3)) / 0.3))
+    capsule.group.scale.setScalar(1.4 * Math.max(0.001, grow))
     const pill = capsule.group.getObjectByName('pill')
     const drop = Math.min(1, since / 0.55)
     if (pill) {

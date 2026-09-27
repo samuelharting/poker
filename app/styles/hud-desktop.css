@@ -582,6 +582,13 @@
 
   .table-scene[data-desktop-three='true'] .btn-action {
     height: 54px;
+    padding: 0 4px;
+  }
+
+  /* Four across a 400px tray: "RAISE TO" / "ALL-IN" must fit without clipping */
+  .table-scene[data-desktop-three='true'] .btn-action-main {
+    font-size: 12.5px;
+    letter-spacing: 0.02em;
   }
 }
 

@@ -4,7 +4,7 @@
 // frame. Development builds only (uses the dev hooks).
 //
 // Usage: node scripts/record-anim.mjs <scenario> [outDir]
-//   scenarios: hand | pranks | fun | lady | peek
+//   scenarios: hand | pranks | fun | lady | peek | turn
 // Env: FFMPEG=<path to ffmpeg>, FPS (default 12), POKER_APP_URL.
 import { chromium } from '@playwright/test'
 import { sheet as cutSheet } from './anim-sheet.mjs'
@@ -250,6 +250,46 @@ const scenarios = {
       }
       await sleep(150)
     }
+  },
+  /** Your turn, all-in, showdown banners, pre-action chips and the reconnect chip (host view). */
+  async turn() {
+    const trayUp = () => host.page.locator('.betting-tray').first().isVisible().catch(() => false)
+    const until = async (check, ms, step = 100) => {
+      const deadline = Date.now() + ms
+      while (Date.now() < deadline) {
+        if (await check()) return true
+        await clickVisible(guest.page, /^(Check|Call)/)
+        await sleep(step)
+      }
+      return false
+    }
+    await startHand()
+    if (await until(trayUp, 60000)) {
+      mark('your-turn-tray', 3)
+      await sleep(1800)
+      mark('all-in', 6)
+      if (!await clickVisible(host.page, /^All-in/i)) console.log('no all-in button')
+      await sleep(1500)
+      await until(async () => await phase(host.page) === 'between_hands', 60000, 250)
+      mark('showdown-winner', 9)
+      await sleep(9000)
+    }
+    mark('next-deal', 3)
+    await startHand()
+    const chip = host.page.locator('.pre-action-chip').first()
+    if (await until(() => chip.isVisible().catch(() => false), 60000)) {
+      mark('preaction-select', 2.5)
+      await chip.click({ timeout: 1500 }).catch(() => {})
+      await sleep(400)
+      const note = host.page.locator('.pre-action-note').first()
+      if (await until(() => note.isVisible().catch(() => false), 60000)) mark('preaction-auto-exec', 3)
+      await sleep(3000)
+    }
+    mark('reconnect', 9)
+    await host.context.setOffline(true)
+    await sleep(4000)
+    await host.context.setOffline(false)
+    await sleep(5000)
   },
   async lady() {
     await startHand()

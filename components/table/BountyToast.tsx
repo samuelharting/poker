@@ -8,6 +8,8 @@ function formatAmount(amount: number): string {
 }
 
 const BOUNTY_TOAST_MS = 6000
+/** The last stretch plays the exit (fade + lift) instead of a one-frame cut. */
+const BOUNTY_TOAST_EXIT_MS = 280
 
 /** Builds the headline for a paid 7-2 bounty, or null when nothing was paid. */
 export function getBountyToastCopy(
@@ -39,19 +41,25 @@ export function BountyToast({
   const key = copy ? `${copy.title}|${bounty?.contributors.join(',')}` : ''
   const [shownKey, setShownKey] = useState('')
   const [visible, setVisible] = useState(false)
+  const [leaving, setLeaving] = useState(false)
 
   useEffect(() => {
     if (!key || key === shownKey) return
     setShownKey(key)
     setVisible(true)
+    setLeaving(false)
+    const exit = window.setTimeout(() => setLeaving(true), BOUNTY_TOAST_MS - BOUNTY_TOAST_EXIT_MS)
     const timer = window.setTimeout(() => setVisible(false), BOUNTY_TOAST_MS)
-    return () => window.clearTimeout(timer)
+    return () => {
+      window.clearTimeout(exit)
+      window.clearTimeout(timer)
+    }
   }, [key, shownKey])
 
   if (!copy || !visible) return null
 
   return (
-    <div className="bounty-toast" role="status" aria-live="assertive">
+    <div className={`bounty-toast ${leaving ? 'is-leaving' : ''}`} role="status" aria-live="assertive">
       <span className="bounty-toast-cards" aria-hidden="true">
         <b>7</b>
         <b>2</b>

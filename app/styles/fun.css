@@ -183,8 +183,16 @@
 
 /* --- The buzz meter ------------------------------------------------------- */
 
+/* Registered so the zone colour eases with the fill instead of snapping. */
+@property --buzz-hue {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #f2c766;
+}
+
 .buzz-meter {
   --buzz-hue: #f2c766;
+  transition: --buzz-hue 500ms ease;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -323,7 +331,8 @@
 @keyframes fun-coin-drain {
   0% { opacity: 0; transform: translate(0, 0) scale(0.6); }
   12% { opacity: 1; transform: translate(0, -10px) scale(1); }
-  100% { opacity: 0; transform: translate(0, -230px) scale(0.5); }
+  /* Into the middle, not across the felt to the far seats */
+  100% { opacity: 0; transform: translate(0, -120px) scale(0.5); }
 }
 
 @keyframes fun-chip-in {
@@ -363,6 +372,16 @@
   to { opacity: 1; transform: none; }
 }
 
+.pill-prompt.is-leaving {
+  pointer-events: none;
+  animation: fun-prompt-out 240ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+@keyframes fun-prompt-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateX(18px) scale(0.96); }
+}
+
 .pill-prompt-close {
   position: absolute;
   top: 8px;
@@ -393,6 +412,7 @@
 .pill-prompt-copy {
   margin: 8px 0 12px;
   font: 700 15px / 1.35 var(--font-ui);
+  text-wrap: balance;
 }
 
 .pill-prompt-targets {
