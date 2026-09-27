@@ -95,6 +95,8 @@ export interface CompanionRuntime {
 export const COMPANION_SEAT_OFFSET = { x: 0.92, y: 0, z: 0.36 } as const
 /** Where she stands for the shoulder rub: right behind the chair back. */
 export const COMPANION_BEHIND_OFFSET = { x: 0, y: 0, z: 0.5 } as const
+/** Where she steps in for the cheek kiss: right beside the chair, level with the player's head. */
+export const COMPANION_KISS_OFFSET = { x: 0.5, y: 0, z: -0.12 } as const
 /** Seated player's head / shoulders in seat-root space (matches the avatar default anchors). */
 export const COMPANION_PLAYER_HEAD = { x: 0, y: 1.52, z: -0.26 } as const
 export const COMPANION_PLAYER_SHOULDER = { x: 0.24, y: 1.2, z: -0.1 } as const
@@ -182,6 +184,9 @@ export interface CompanionPlacement {
   /** Spot right behind the chair (shoulder rub) and the yaw she uses there. */
   behind: THREE.Vector3 | null
   behindYaw: number
+  /** Spot beside the chair for the cheek kiss and the yaw she uses there (null: kiss in place). */
+  kiss: THREE.Vector3 | null
+  kissYaw: number
   /** Player's head in world space, when known. */
   head: THREE.Vector3 | null
   /** Snap to the target every frame instead of easing toward it. */
@@ -201,6 +206,7 @@ export function computeSeatCompanionPlacement(
   const shoulder = local(sx * side, sy, sz)
   const shoulders: [THREE.Vector3, THREE.Vector3] = [local(sx, sy, sz), local(-sx, sy, sz)]
   const behind = local(COMPANION_BEHIND_OFFSET.x, COMPANION_BEHIND_OFFSET.y, COMPANION_BEHIND_OFFSET.z)
+  const kiss = local(COMPANION_KISS_OFFSET.x * side, COMPANION_KISS_OFFSET.y, COMPANION_KISS_OFFSET.z)
   const cameraPosition = camera.getWorldPosition(new THREE.Vector3())
   const scale = seat.getWorldScale(new THREE.Vector3()).x
   return {
@@ -211,6 +217,8 @@ export function computeSeatCompanionPlacement(
     shoulders,
     behind,
     behindYaw: yawToward(behind, head),
+    kiss,
+    kissYaw: yawToward(kiss, head),
     head,
     screenLocked: false,
   }
@@ -303,6 +311,8 @@ export function computeHeroCompanionPlacement(
     shoulders: null,
     behind: null,
     behindYaw: yaw,
+    kiss: null,
+    kissYaw: yaw,
     head,
     screenLocked: false,
   }
@@ -1948,6 +1958,8 @@ interface CompanionAnimState {
   trayOnHeadTarget: number
   standBehind: number
   standBehindTarget: number
+  stepIn: number
+  stepInTarget: number
   cocktailInHand: boolean
   cocktailServedUntil: number
   serveSpot: THREE.Vector3 | null
@@ -2272,6 +2284,8 @@ export function createCompanion(scene: THREE.Scene): CompanionRuntime {
     trayOnHeadTarget: 0,
     standBehind: 0,
     standBehindTarget: 0,
+    stepIn: 0,
+    stepInTarget: 0,
     cocktailInHand: false,
     cocktailServedUntil: 0,
     serveSpot: null,
@@ -2379,6 +2393,7 @@ function beginEntrance(runtime: CompanionRuntime, state: NonNullable<CompanionSt
   anim.lastOwnerActionKey = null
   anim.lastAllInKey = null
   anim.standBehindTarget = 0
+  anim.stepInTarget = 0
   anim.trayOnHeadTarget = 0
   anim.cocktailInHand = false
   anim.cocktailServedUntil = 0
@@ -2543,6 +2558,7 @@ function buildTargets(runtime: CompanionRuntime, input: CompanionUpdateInput): P
   const side = anim.side
   anim.trayOnHeadTarget = 0
   anim.standBehindTarget = 0
+  anim.stepInTarget = 0
   anim.cocktailInHand = false
 
   // --- Idle: sassy contrapposto hip pop, sway, breathing, head bob, sly smile.
@@ -2825,13 +2841,28 @@ function applyGesture(
       break
     }
     case 'cheekKiss': {
-      const lean = keyframe(u, [[0, 0], [0.28, 1], [0.6, 1], [0.8, 0]])
-      blendBody(body, 'hipRz', 0.18 * ps, lean)
-      blendBody(body, 'torRz', 0.22 * ps, lean)
-      blendBody(body, 'torRx', 0.35, lean)
-      blendBody(body, 'torRy', 0.35 * ps, lean)
-      blendBody(body, 'headRz', 0.25 * ps, lean)
-      blendBody(body, 'headRx', 0.25, lean)
+      // Steps in beside the chair, bends to the player's cheek, then back out.
+      const stepsIn = Boolean(anim.placement?.kiss)
+      anim.stepInTarget = stepsIn && u > 0.02 && u < 0.7 ? 1 : 0
+      const lean = keyframe(u, [[0, 0], [0.1, 0], [0.3, 1], [0.6, 1], [0.78, 0]])
+      if (stepsIn) {
+        // Facing the head now: a forward bend brings her lips to his cheek.
+        blendBody(body, 'hipRx', 0.2, lean)
+        blendBody(body, 'torRx', 0.42, lean)
+        blendBody(body, 'torRy', 0.12 * ps, lean)
+        blendBody(body, 'headRz', 0.3 * ps, lean)
+        blendBody(body, 'headRx', 0.12, lean)
+        // Tray hoisted high and wide, clear of his head, waitress style.
+        setArm(into, 0.34, 0.9, -0.05, 1, 0, -0.6, 0, 0)
+        blendArm(arms[TRAY_ARM], into, keyframe(u, [[0.05, 0], [0.22, 1], [0.66, 1], [0.84, 0]]))
+      } else {
+        blendBody(body, 'hipRz', 0.18 * ps, lean)
+        blendBody(body, 'torRz', 0.22 * ps, lean)
+        blendBody(body, 'torRx', 0.35, lean)
+        blendBody(body, 'torRy', 0.35 * ps, lean)
+        blendBody(body, 'headRz', 0.25 * ps, lean)
+        blendBody(body, 'headRx', 0.25, lean)
+      }
       blendBody(body, 'kiss', 1, keyframe(u, [[0.2, 0], [0.35, 1], [0.6, 1], [0.7, 0]]))
       blendBody(body, 'smile', 1, keyframe(u, [[0.6, 0], [0.75, 1], [1, 1]]))
       blink[0] = Math.max(blink[0], lean * 0.95)
@@ -3117,6 +3148,14 @@ function updateRootTransform(runtime: CompanionRuntime, input: CompanionUpdateIn
   if (placement.behind && anim.standBehind > 1e-3) {
     base.lerp(placement.behind, anim.standBehind)
     yaw += angleDelta(yaw, placement.behindYaw) * anim.standBehind
+  }
+  // Step in beside the chair for the cheek kiss.
+  const stepTarget = placement.kiss ? anim.stepInTarget : 0
+  anim.stepIn += (stepTarget - anim.stepIn) * Math.min(1, dt * 5)
+  if (placement.kiss && anim.stepIn > 1e-3) {
+    const w = THREE.MathUtils.smoothstep(anim.stepIn, 0, 1)
+    base.lerp(placement.kiss, w)
+    yaw += angleDelta(yaw, placement.kissYaw) * w
   }
 
   let spin = 0
