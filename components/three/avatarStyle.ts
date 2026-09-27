@@ -53,6 +53,24 @@ export function applyAvatarToonLook(material: THREE.Material) {
   material.needsUpdate = true
 }
 
+/**
+ * A toon material in the avatar look for procedural accessories (hats, glasses
+ * frames, jackets) so they shade like the bodies they sit on instead of as
+ * glossy PBR plastic. Metals get a touch of emissive so gilt still glints
+ * without an environment map.
+ */
+export function createAvatarToonMaterial(
+  color: THREE.ColorRepresentation,
+  options: { metallic?: boolean } = {}
+) {
+  const toon = new THREE.MeshToonMaterial({ color, gradientMap: getToonRamp() })
+  if (options.metallic) {
+    toon.emissive.set(color).multiplyScalar(0.18)
+  }
+  applyAvatarToonLook(toon)
+  return toon
+}
+
 function toToonMaterial(source: THREE.Material) {
   const standard = source as THREE.MeshStandardMaterial
   const toon = new THREE.MeshToonMaterial({

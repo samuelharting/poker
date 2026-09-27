@@ -7,7 +7,7 @@ import type {
   PlayerAvatarJacketStyle,
   PlayerAvatarModelKey,
 } from '@/lib/profile'
-import { applyAvatarToonLook } from './avatarStyle'
+import { applyAvatarToonLook, createAvatarToonMaterial } from './avatarStyle'
 
 type CosmeticSelection = Pick<
   PlayerAvatarCustomization,
@@ -579,7 +579,12 @@ function applyRiggedHeadwearCompatibility(
 function standardMaterial(
   color: string,
   parameters: Omit<THREE.MeshStandardMaterialParameters, 'color'> = {}
-): THREE.MeshStandardMaterial {
+): THREE.MeshStandardMaterial | THREE.MeshToonMaterial {
+  // Opaque accessories share the avatars' toon look (hats, frames, lapels) so
+  // they don't read as glossy plastic on a cel-shaded body; glass stays PBR.
+  if (!parameters.transparent) {
+    return createAvatarToonMaterial(color, { metallic: (parameters.metalness ?? 0) >= 0.5 })
+  }
   return new THREE.MeshStandardMaterial({ color, ...parameters })
 }
 
