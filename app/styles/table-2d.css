@@ -233,9 +233,11 @@
 
 /* Seated with nothing docked (showdown, next deal, after a fold): keep the
    action tray's footprint, so the end of a hand doesn't drop the whole table
-   (board, seats, your cards) by a tray's height mid-reveal. Only on tall
-   phones: a short one (iPhone SE) needs that room for the shown hands. */
-@media (orientation: portrait) and (min-height: 760px) {
+   (board, seats, your cards) by a tray's height mid-reveal. Not on short
+   phones: an iPhone SE needs that room for the shown hands. (This was 760px,
+   which left out an iPhone 13-15 in Safari (~664px tall): the table dropped
+   ~120px at every hand's end and jumped back at the next deal.) */
+@media (orientation: portrait) and (min-height: 640px) {
   .table-scene[data-layout='2d'][data-hero-seat='true']:not([data-tray-open='true']):not(:has(> .mobile-between-hands-dock, > .rabbit-hunt-dock, > .check-fold-pre-action-dock)) .mobile-poker-field {
     padding-bottom: calc(max(8px, var(--mobile-tray-h, 0px)) + env(safe-area-inset-bottom));
   }
@@ -592,8 +594,9 @@
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
   mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
   pointer-events: none;
-  /* The clock ticks once a second; ease the ring between ticks. */
-  transition: --turn-pct 1s linear;
+  /* Steps once a second with the clock. A transition on --turn-pct would run on
+     the main thread every frame (measured: 6x more >100ms stalls on a
+     4x-throttled phone), so the ring just ticks. */
 }
 
 .is-low-time .mobile-seat-ring {
