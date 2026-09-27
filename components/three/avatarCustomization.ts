@@ -7,6 +7,7 @@ import type {
   PlayerAvatarJacketStyle,
   PlayerAvatarModelKey,
 } from '@/lib/profile'
+import { applyAvatarToonLook } from './avatarStyle'
 
 type CosmeticSelection = Pick<
   PlayerAvatarCustomization,
@@ -16,12 +17,12 @@ type CosmeticSelection = Pick<
 type RiggedCosmeticSelection = CosmeticSelection & Pick<PlayerAvatarCustomization, 'modelKey'>
 
 export const AVATAR_JACKET_COLOR_HEX: Record<PlayerAvatarJacketColor, string> = {
-  burgundy: '#6f2138',
-  midnight: '#17253d',
-  emerald: '#1c5746',
-  ivory: '#d8cfb8',
-  gold: '#a77a2e',
-  violet: '#52366f',
+  burgundy: '#8c2442',
+  midnight: '#243c66',
+  emerald: '#1f7358',
+  ivory: '#e4dac2',
+  gold: '#c8943a',
+  violet: '#6a45a0',
 }
 
 export interface AvatarAccessorySet {
@@ -522,11 +523,20 @@ function applyRiggedJacketMaterial(
     : clonedMaterials[0]!
 
   const selectedColor = style === 'tuxedo'
-    ? '#15191f'
+    ? '#222838'
     : style === 'leather'
-      ? new THREE.Color(AVATAR_JACKET_COLOR_HEX[colorKey]).multiplyScalar(0.58)
+      ? new THREE.Color(AVATAR_JACKET_COLOR_HEX[colorKey]).multiplyScalar(0.7)
       : AVATAR_JACKET_COLOR_HEX[colorKey]
   clonedMaterials.forEach(material => {
+    // Rigged bodies are already toon-shaded by stylizeAvatar; clones drop the
+    // shared look hook, so re-apply it along with the chosen colour.
+    if ((material as THREE.MeshToonMaterial).isMeshToonMaterial) {
+      const toon = material as THREE.MeshToonMaterial
+      toon.color.set(selectedColor)
+      if (style === 'leather') toon.color.offsetHSL(0, -0.05, 0.02)
+      applyAvatarToonLook(toon)
+      return
+    }
     if (!(material instanceof THREE.MeshStandardMaterial)) return
     material.color.set(selectedColor)
     material.roughness = style === 'leather' ? 0.3 : style === 'smoking' ? 0.52 : 0.62

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import {
+  AVATAR_JACKET_COLOR_HEX,
   createFallbackAvatarAccessories,
   createRiggedAvatarAccessories,
   disposeAvatarAccessorySet,
@@ -106,7 +107,7 @@ describe('3D avatar customization geometry', () => {
     expect(hardhat.visible).toBe(false)
     expect(body.material).toBe(sharedMaterial)
     expect(vest.material).not.toBe(vestMaterial)
-    expect((vest.material as THREE.MeshStandardMaterial).color.getHexString()).toBe('1c5746')
+    expect((vest.material as THREE.MeshStandardMaterial).color.getHexString()).toBe(AVATAR_JACKET_COLOR_HEX.emerald.slice(1))
 
     disposeAvatarAccessorySet(set)
 
