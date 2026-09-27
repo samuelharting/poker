@@ -38,36 +38,6 @@ function SettingsGlyph({ className }: { className?: string }) {
   )
 }
 
-function MenuGlyph({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M4 7h16" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-      <path d="M4 12h16" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-      <path d="M4 17h16" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function ChevronGlyph({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="m5 7.5 5 5 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
 function SoundGlyph({ muted, className }: { muted: boolean; className?: string }) {
   return (
     <svg
@@ -112,21 +82,12 @@ export function RoomHud({
     <div className="room-hud" data-phase={phase ?? 'waiting'}>
       <div className="room-hud-mobile-bar">
         <div className="room-hud-mobile-topline">
-          <button
-            type="button"
-            className={`room-hud-mobile-menu ${settingsOpen ? 'is-open' : ''}`}
-            aria-label={settingsOpen ? 'Close table menu' : 'Open table menu'}
-            onClick={onToggleSettings}
-          >
-            <span className="room-hud-mobile-menu-icon-wrap" aria-hidden="true">
-              <MenuGlyph className="room-hud-mobile-menu-icon" />
-            </span>
-          </button>
+          {/* The first slot holds the table chat button (rendered by PokerTable). */}
+          <span className="room-hud-mobile-chat-slot" aria-hidden="true" />
 
           <div className="room-hud-mobile-identity">
             <div className="room-hud-mobile-game-pill">
               <span>NL Hold&apos;em</span>
-              <ChevronGlyph className="room-hud-mobile-game-chevron" />
             </div>
             <div className="room-hud-mobile-stakes">
               {formatHudAmount(smallBlind)} / {formatHudAmount(bigBlind)}

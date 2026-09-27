@@ -1,7 +1,9 @@
 /*
  * Poker Night 2D layout: the single responsive layout for every width under
- * 1024px (phones, phone landscape and tablets). PokerTable renders it when
- * `(max-width: 1023px)` matches and marks the scene `data-layout='2d'`.
+ * 1024px and for touch-first devices of any width (phones, tablets, iPad in
+ * landscape). PokerTable renders it when TWO_D_LAYOUT_QUERY (lib/layoutMode.ts)
+ * matches and marks the scene `data-layout='2d'`; the media queries below use
+ * the same condition.
  *
  * Deliberately simple: no drawn table. A slim top bar, a tidy grid of seat
  * chips, the pot and board in the middle, and your hand with the action bar
@@ -23,7 +25,7 @@
    Shell and top bar
    ============================================================ */
 
-@media (max-width: 1023px) {
+@media (max-width: 1023px), (hover: none) and (pointer: coarse) {
   .room-shell {
     --hud-h: 56px;
     width: 100%;
@@ -39,10 +41,11 @@
     display: none;
   }
 
-  .room-hud {
+  .room-shell .room-hud {
     position: fixed;
     inset: 0 0 auto;
     display: block;
+    height: auto;
     padding:
       env(safe-area-inset-top)
       max(8px, env(safe-area-inset-right))
@@ -52,7 +55,7 @@
     pointer-events: none;
   }
 
-  .room-hud-main {
+  .room-shell .room-hud .room-hud-main {
     display: none;
   }
 
@@ -64,18 +67,22 @@
   .room-hud-mobile-topline {
     height: var(--hud-h);
     display: grid;
-    grid-template-columns: 44px 44px minmax(0, 1fr) 94px;
+    grid-template-columns: 94px minmax(0, 1fr) 94px;
     align-items: center;
     gap: var(--sp-2);
   }
 
-  /* Column two is kept free for the table-talk toggle (it lives in PokerTable) */
+  /* Column one is kept free for the table-talk toggle (it lives in PokerTable) */
+  .room-hud-mobile-chat-slot {
+    grid-column: 1;
+  }
+
   .room-hud-mobile-identity {
-    grid-column: 3;
+    grid-column: 2;
   }
 
   .room-hud-mobile-actions {
-    grid-column: 4;
+    grid-column: 3;
     justify-content: flex-end;
   }
 
@@ -92,7 +99,6 @@
     background: var(--surface-glass);
     color: var(--c-text-1);
     box-shadow: var(--shadow-1);
-    backdrop-filter: blur(12px);
     transition:
       transform var(--dur-fast) var(--ease-out),
       border-color var(--dur-base) var(--ease-out),
@@ -139,7 +145,7 @@
     justify-content: center;
     gap: 4px;
     max-width: 100%;
-    padding: 5px 10px 5px 14px;
+    padding: 5px 12px;
     border: 1px solid var(--line-brass);
     border-radius: 999px;
     background: linear-gradient(180deg, rgba(217, 164, 65, 0.16), rgba(217, 164, 65, 0.04));
@@ -187,7 +193,13 @@
   overflow: hidden;
 }
 
-[data-layout='2d'] > .table-stage {
+/* Also beats the >= 1024px desktop stage rules on touch tablets */
+.table-scene[data-layout='2d'] > .table-stage {
+  position: relative;
+  inset: auto;
+  height: auto;
+  max-width: none;
+  margin: 0;
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
@@ -265,6 +277,13 @@
   animation: seatArrive 320ms var(--ease-out) both;
 }
 
+/* Tablets: chips may grow so names and stacks breathe */
+@container field (min-width: 600px) {
+  .mobile-edge-seat-position {
+    max-width: 200px;
+  }
+}
+
 @keyframes seatArrive {
   0% {
     opacity: 0;
@@ -285,7 +304,8 @@
     'puck stack stack'
     'name name timer'
     'cards cards cards'
-    'status status status';
+    'status status status'
+    'reveal reveal reveal';
   align-content: start;
   align-items: center;
   column-gap: 6px;
@@ -299,6 +319,31 @@
     border-color var(--dur-base) var(--ease-out),
     box-shadow var(--dur-base) var(--ease-out),
     opacity var(--dur-slow) var(--ease-out);
+}
+
+/* The whole chip is one tap target for reactions (>= 44px tall) */
+.mobile-seat-hit {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-seat-hit:focus-visible {
+  outline: 2px solid var(--c-sky-400);
+  outline-offset: 2px;
+}
+
+.mobile-edge-seat:has(.mobile-seat-hit:active) {
+  transform: scale(0.97);
 }
 
 .mobile-seat-puck {
@@ -367,19 +412,18 @@
   transform: rotate(8deg);
 }
 
+/* Dealer button: a small chip beside the name, never over the avatar letter */
 .mobile-seat-dealer {
-  position: absolute;
-  left: -4px;
-  top: -4px;
-  width: 14px;
-  height: 14px;
-  display: grid;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: inline-grid;
   place-items: center;
+  border: 1px solid rgba(244, 239, 228, 0.55);
   border-radius: 50%;
-  background: var(--c-cream-50);
-  box-shadow: 0 0 0 1.5px var(--c-ink-800);
-  color: var(--c-ink-900);
-  font: 800 8px / 1 var(--font-display);
+  background: var(--c-ink-900);
+  color: var(--c-cream-50);
+  font: 800 11px / 1 var(--font-display);
 }
 
 .mobile-edge-seat-main {
@@ -388,29 +432,38 @@
 
 .mobile-edge-seat-name {
   grid-area: name;
-  display: block;
-  max-width: 100%;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  border: 0;
-  background: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
   color: var(--c-text-1);
   font: 600 var(--fs-11) / 1.25 var(--font-ui);
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
 }
 
+/* Edge seats: the dealer button hangs off the avatar's top-left edge, clear of the letter */
+.mobile-seat-puck .mobile-seat-dealer {
+  position: absolute;
+  z-index: 2;
+  left: -10px;
+  top: -9px;
+  box-shadow: 0 0 0 1.5px var(--c-ink-800);
+  pointer-events: none;
+}
+
+.mobile-edge-seat-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Stacks are never truncated: big numbers are shortened to $12.3K instead */
 .mobile-edge-seat-stack {
   grid-area: stack;
   min-width: 0;
-  overflow: hidden;
   color: var(--c-brass-200);
   font: 700 var(--fs-12) / 1.25 var(--font-ui);
   letter-spacing: -0.01em;
-  text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -428,7 +481,7 @@
   gap: 4px;
   min-height: 16px;
   color: var(--c-text-3);
-  font: 700 10px / 1 var(--font-ui);
+  font: 700 11px / 1 var(--font-ui);
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
@@ -466,14 +519,14 @@
 .mobile-blind-role {
   display: inline-grid;
   place-items: center;
-  min-width: 20px;
-  height: 14px;
-  padding: 0 4px;
+  min-width: 22px;
+  height: 16px;
+  padding: 0 5px;
   border-radius: 999px;
   background: var(--c-ink-600);
-  color: var(--c-text-2);
-  font: 800 9px / 1 var(--font-ui);
-  letter-spacing: 0.04em;
+  color: var(--c-cream-50);
+  font: 800 11px / 1 var(--font-ui);
+  letter-spacing: 0.02em;
 }
 
 /* Current bet: a small chip mark and the amount */
@@ -543,7 +596,7 @@
 .mobile-edge-seat-timer {
   grid-area: timer;
   color: var(--c-sky-400);
-  font: 700 10px / 1 var(--font-ui);
+  font: 700 11px / 1 var(--font-ui);
   font-variant-numeric: tabular-nums;
 }
 
@@ -611,9 +664,12 @@
   left: 50%;
   top: 50%;
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  max-width: 110%;
+  justify-content: center;
+  gap: 2px 4px;
+  width: max-content;
+  max-width: min(170px, 110%);
   padding: 3px 8px;
   border-radius: 10px;
   background: var(--c-cream-50);
@@ -626,28 +682,38 @@
   pointer-events: none;
 }
 
-.mobile-edge-social span {
+.mobile-social-message {
+  display: -webkit-box;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
+.mobile-social-from {
+  white-space: nowrap;
+  font-size: var(--fs-11);
+}
+
+/* Ask / Shown: its own row under the status line, never over the bet */
 .mobile-card-reveal-control {
-  position: absolute;
+  grid-area: reveal;
+  position: relative;
   z-index: 2;
-  right: 4px;
-  bottom: 3px;
+  margin-top: 2px;
 }
 
 .mobile-card-reveal-control .card-reveal-seat-button {
-  min-width: 44px;
-  min-height: 24px;
+  width: 100%;
+  min-height: 36px;
   padding: 0 8px;
   border: 1px solid var(--line-brass);
-  border-radius: 999px;
+  border-radius: var(--r-md);
   background: var(--c-ink-700);
-  color: var(--c-brass-200);
-  font-size: 10px;
+  color: var(--c-cream-50);
+  font-size: var(--fs-11);
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -661,8 +727,9 @@
    Middle: pot on one line, then the board, with room to breathe
    ============================================================ */
 
+/* Pot and board sit just above your hand; notices use the space above them */
 .mobile-board-zone {
-  --board-card-w: clamp(38px, min(12.6cqw, 34cqh), 64px);
+  --board-card-w: clamp(40px, min(17cqw, 28cqh), 84px);
   --board-gap: 6px;
   position: relative;
   flex: 1 1 auto;
@@ -670,9 +737,44 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   gap: 10px;
+  padding-bottom: 6px;
   container: board / size;
+}
+
+/* All-in and 7-2 bounty notices: over the empty felt, never over seats */
+.mobile-board-notices {
+  position: absolute;
+  z-index: 6;
+  top: 4px;
+  left: 0;
+  right: 0;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.mobile-board-notices:empty {
+  display: none;
+}
+
+/* Rabbit hunt: the streets that were never played */
+[data-layout='2d'] .mobile-board-zone .community-card-slot.is-unplayed {
+  opacity: 0.45;
+}
+
+[data-layout='2d'] .mobile-board-zone .community-card-slot.is-unplayed .card {
+  box-shadow: none;
+}
+
+.mobile-rabbit-label {
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+  font-weight: 800;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
 }
 
 .mobile-board-header,
@@ -982,7 +1084,7 @@
   display: grid;
   justify-items: center;
   color: var(--c-text-3);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
@@ -999,17 +1101,22 @@
   gap: 4px;
 }
 
+/* Two boards must fit the zone's height: size cards from it, not the width */
+[data-layout='2d'] .mobile-board-zone .run-it-twice-boards {
+  --rit-card-w: max(26px, min(calc(var(--board-card-w) * 0.8), calc(34cqh - 20px), 13cqw));
+}
+
 [data-layout='2d'] .mobile-board-zone .run-it-twice-card,
 [data-layout='2d'] .mobile-board-zone .run-it-twice-card .card-container {
-  width: calc(var(--board-card-w) * 0.8);
-  height: calc(var(--board-card-w) * 1.12);
+  width: var(--rit-card-w);
+  height: calc(var(--rit-card-w) * 1.4);
 }
 
 [data-layout='2d'] .mobile-board-zone .run-it-twice-card .card {
   width: 100%;
   height: 100%;
-  font-size: calc(var(--board-card-w) * 0.33);
-  border-radius: calc(var(--board-card-w) * 0.1);
+  font-size: calc(var(--rit-card-w) * 0.4);
+  border-radius: calc(var(--rit-card-w) * 0.12);
 }
 
 [data-layout='2d'] .mobile-board-zone .run-it-twice-board-result {
@@ -1076,10 +1183,6 @@
   cursor: default;
 }
 
-.mobile-hero-avatar .mobile-seat-dealer {
-  left: -5px;
-  top: -5px;
-}
 
 .mobile-hero-meta {
   display: grid;
@@ -1103,12 +1206,14 @@
 }
 
 .mobile-hero-seat-status {
+  display: -webkit-box;
   overflow: hidden;
   color: var(--c-text-3);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .mobile-hero-seat .mobile-hero-bet-anchor {
@@ -1120,7 +1225,7 @@
   content: 'Bet';
   margin-right: 2px;
   color: var(--c-text-3);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1174,13 +1279,50 @@
   letter-spacing: 0.01em;
 }
 
+/* No filter here: a filter on this row would flatten the cards' 3D faces */
 [data-layout='2d'] .mobile-hero-lane .own-card-row {
   grid-area: cards;
   position: relative;
   display: flex;
   gap: 0;
   padding: 0 0 6px;
-  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.45));
+}
+
+[data-layout='2d'] .mobile-hero-lane .own-card-slot .card {
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.45);
+}
+
+/* The shared "resting hand" dim (opacity, filter, shrink) is for the desktop
+   table; on 2D your cards stay crisp and flat after the hand. */
+.table-scene[data-layout='2d'][data-phase='between_hands'] .mobile-hero-lane .own-hand-area,
+.table-scene[data-layout='2d'][data-phase='between_hands'] .mobile-hero-lane .own-card-row,
+.table-scene[data-layout='2d'][data-phase='between_hands'] .mobile-hero-lane .own-hand-strength {
+  opacity: 1;
+  filter: none;
+  transform: none;
+}
+
+/* After the hand: the cards the table cannot see get a quiet marker */
+[data-layout='2d'] .mobile-hero-lane .own-card-slot.is-private .card {
+  outline: 1.5px dashed rgba(244, 239, 228, 0.35);
+  outline-offset: -5px;
+}
+
+.own-hand-private-mark {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: -2px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--c-ink-800);
+  color: var(--c-text-2);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 [data-layout='2d'] .mobile-hero-lane .own-card-slot {
@@ -1237,9 +1379,8 @@
   }
 }
 
-[data-layout='2d'] .mobile-hero-lane .own-hand-area.is-folded .own-card-row {
-  opacity: 0.45;
-  filter: grayscale(0.7);
+[data-layout='2d'] .mobile-hero-lane .own-hand-area.is-folded .own-card-slot {
+  opacity: 0.5;
 }
 
 [data-layout='2d'] .mobile-hero-lane .own-hand-area.is-winner .card {
@@ -1249,69 +1390,54 @@
 [data-layout='2d'] .mobile-hero-lane .own-hand-social {
   grid-area: side;
   position: relative;
+  z-index: 3;
   inset: auto;
-  align-self: start;
+  align-self: center;
   justify-self: start;
+  max-width: 100%;
   transform: none;
 }
 
-/* Show-cards choice after the hand */
-[data-layout='2d'] .mobile-hero-lane .own-hand-show-cards {
-  grid-area: show;
-  position: relative;
-  inset: auto;
-  transform: none;
-  margin-top: 16px;
-}
-
-[data-layout='2d'] .mobile-hero-lane .show-cards-toggle {
-  position: relative;
-  inset: auto;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
-  width: min(100%, 420px);
-  min-width: 0;
-  margin: 0 auto;
-  padding: 6px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  background: rgba(10, 17, 18, 0.92);
-  box-shadow: var(--shadow-2);
-  transform: none;
-}
-
-[data-layout='2d'] .mobile-hero-lane .show-cards-toggle-label {
-  grid-column: 1 / -1;
-  color: var(--c-text-2);
+.player-emote-from {
+  margin-right: 4px;
   font-size: var(--fs-11);
   font-weight: 700;
-  letter-spacing: var(--tracking-caps);
-  text-align: center;
-  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-[data-layout='2d'] .mobile-hero-lane .show-cards-toggle-button {
+/* Show / hide your cards after the hand: one small toggle beside the hand */
+[data-layout='2d'] .mobile-hero-lane .own-hand-show-cards {
+  grid-area: side;
+  position: relative;
+  inset: auto;
+  align-self: end;
+  justify-self: start;
+  margin-bottom: 10px;
+  transform: none;
+}
+
+.mobile-show-cards-toggle {
+  min-width: 44px;
   min-height: 44px;
-  min-width: 0;
-  padding: 0 6px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  padding: 0 14px;
+  border: 1px solid var(--line-brass);
+  border-radius: 999px;
   background: var(--c-ink-700);
-  color: var(--c-text-1);
+  color: var(--c-brass-200);
   font-size: var(--fs-12);
   font-weight: 800;
-  transition: transform var(--dur-fast) var(--ease-out), background var(--dur-base) var(--ease-out);
+  white-space: nowrap;
+  transition: transform var(--dur-fast) var(--ease-out);
 }
 
-[data-layout='2d'] .mobile-hero-lane .show-cards-toggle-button.is-active {
+.mobile-show-cards-toggle.is-shown {
   border-color: var(--c-brass-400);
   background: linear-gradient(180deg, var(--c-brass-400), var(--c-brass-500));
   color: var(--c-text-on-brass);
 }
 
-[data-layout='2d'] .mobile-hero-lane .show-cards-toggle-button:active {
-  transform: scale(0.97);
+.mobile-show-cards-toggle:active {
+  transform: scale(0.96);
 }
 
 /* Check / fold pre-action: a slim bar where the action tray will appear */
@@ -1381,7 +1507,7 @@
 
 [data-layout='2d'] .own-hand-pre-action-copy small {
   color: var(--c-text-3);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
@@ -1421,7 +1547,7 @@
   display: grid;
   gap: 8px;
   padding:
-    14px
+    16px
     max(10px, env(safe-area-inset-right))
     calc(10px + env(safe-area-inset-bottom))
     max(10px, env(safe-area-inset-left));
@@ -1471,7 +1597,7 @@
   left: calc(100% + 8px);
   top: 50%;
   color: var(--c-sky-400);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   transform: translateY(-50%);
@@ -1486,11 +1612,35 @@
   color: var(--c-ember-300);
 }
 
+/* Raise sizing opens above the buttons only after tapping Raise */
+.mobile-raise-sizing {
+  display: grid;
+  gap: 6px;
+  animation: statusIn 220ms var(--ease-out) both;
+}
+
 .mobile-raise-control {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  grid-template-columns: 44px minmax(0, 1fr) 44px 44px;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+}
+
+.mobile-raise-close {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--c-text-3);
+}
+
+.mobile-raise-close .panel-close-icon {
+  width: 18px;
+  height: 18px;
 }
 
 .mobile-raise-step {
@@ -1514,12 +1664,6 @@
   background: var(--c-ink-500);
 }
 
-.mobile-raise-meter {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
 .mobile-bet-amount {
   display: flex;
   align-items: baseline;
@@ -1540,10 +1684,11 @@
   font-variant-numeric: tabular-nums;
 }
 
-[data-layout='2d'] .mobile-raise-slider {
+/* 44px tall touch area around a slim track */
+[data-layout='2d'] input[type='range'].mobile-raise-slider {
   --raise-fill: 0%;
   width: 100%;
-  height: 20px;
+  height: 44px;
   margin: 0;
   padding: 0;
   background: none;
@@ -1554,7 +1699,7 @@
   cursor: pointer;
 }
 
-[data-layout='2d'] .mobile-raise-slider::-webkit-slider-runnable-track {
+[data-layout='2d'] input[type='range'].mobile-raise-slider::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: 999px;
   background:
@@ -1562,22 +1707,22 @@
     rgba(255, 255, 255, 0.12);
 }
 
-[data-layout='2d'] .mobile-raise-slider::-moz-range-track {
+[data-layout='2d'] input[type='range'].mobile-raise-slider::-moz-range-track {
   height: 6px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.12);
 }
 
-[data-layout='2d'] .mobile-raise-slider::-moz-range-progress {
+[data-layout='2d'] input[type='range'].mobile-raise-slider::-moz-range-progress {
   height: 6px;
   border-radius: 999px;
   background: var(--c-brass-400);
 }
 
-[data-layout='2d'] .mobile-raise-slider::-webkit-slider-thumb {
-  width: 24px;
-  height: 24px;
-  margin-top: -9px;
+[data-layout='2d'] input[type='range'].mobile-raise-slider::-webkit-slider-thumb {
+  width: 28px;
+  height: 28px;
+  margin-top: -11px;
   border: 3px solid var(--c-ink-900);
   border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, var(--c-brass-200), var(--c-brass-500));
@@ -1586,7 +1731,7 @@
   -webkit-appearance: none;
 }
 
-[data-layout='2d'] .mobile-raise-slider::-moz-range-thumb {
+[data-layout='2d'] input[type='range'].mobile-raise-slider::-moz-range-thumb {
   width: 20px;
   height: 20px;
   border: 3px solid var(--c-ink-900);
@@ -1638,14 +1783,18 @@
 
 .mobile-main-actions {
   display: grid;
-  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr) minmax(0, 1.1fr);
-  align-items: end;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) minmax(0, 1fr);
+  align-items: stretch;
   gap: 8px;
+}
+
+.mobile-main-actions[data-count='2'] {
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
 }
 
 .mobile-main-action {
   position: relative;
-  min-height: 56px;
+  min-height: 52px;
   min-width: 0;
   display: grid;
   place-content: center;
@@ -1685,14 +1834,12 @@
 }
 
 .mobile-action-fold {
-  min-height: 48px;
   border-color: rgba(226, 80, 92, 0.6);
   background: rgba(226, 80, 92, 0.06);
   color: var(--c-ruby-500);
 }
 
 .mobile-action-call {
-  min-height: 60px;
   border-color: rgba(57, 199, 149, 0.55);
   background:
     radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.22), transparent 55%),
@@ -1706,7 +1853,7 @@
 }
 
 .mobile-action-call strong {
-  font-size: var(--fs-20);
+  font-size: var(--fs-18, 18px);
 }
 
 .mobile-action-raise {
@@ -1744,59 +1891,37 @@
 .mobile-between-hands-card {
   display: grid;
   gap: 8px;
-  padding: 12px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: var(--r-xl);
-  background:
-    radial-gradient(100% 90% at 50% 0%, rgba(217, 164, 65, 0.12), transparent 60%),
-    linear-gradient(180deg, var(--c-ink-700), var(--c-ink-800));
+  background: linear-gradient(180deg, var(--c-ink-700), var(--c-ink-800));
   box-shadow: var(--shadow-2);
+}
+
+.mobile-between-hands-dock[data-busted='true'] .mobile-between-hands-card {
+  border-color: rgba(255, 122, 61, 0.55);
 }
 
 .mobile-between-hands-copy {
   display: grid;
-  gap: 4px;
-}
-
-.mobile-between-hands-kicker {
-  color: var(--c-brass-400);
-  font-size: var(--fs-11);
-  font-weight: 800;
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
+  gap: 2px;
+  min-width: 0;
 }
 
 .mobile-between-hands-title {
+  overflow: hidden;
   color: var(--c-text-1);
   font-size: var(--fs-14);
-  font-weight: 600;
-  line-height: 1.35;
+  font-weight: 700;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mobile-between-hands-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.mobile-between-hands-meta span {
-  padding: 3px 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--c-text-2);
-  font-size: var(--fs-11);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.mobile-between-hands-note {
   color: var(--c-text-2);
   font-size: var(--fs-12);
-}
-
-.mobile-between-hands-card:has(.mobile-between-hands-actions) .mobile-between-hands-note {
-  display: none;
+  font-variant-numeric: tabular-nums;
 }
 
 .mobile-between-hands-actions {
@@ -1810,7 +1935,7 @@
 
 .mobile-between-hands-btn,
 [data-layout='2d'] .rabbit-hunt-button {
-  min-height: 48px;
+  min-height: 44px;
   padding: 0 12px;
   border-radius: var(--r-md);
   font-size: var(--fs-14);
@@ -1885,9 +2010,12 @@
    Overlays: all-in, card request, run it twice vote, social dock
    ============================================================ */
 
-/* All-in: a calm single-line notice under the top bar, no chip burst */
-[data-layout='2d'] .all-in-announcement {
-  top: calc(var(--hud-h, 56px) + env(safe-area-inset-top) + 8px);
+/* All-in: a calm single-line notice in the board area, no chip burst */
+[data-layout='2d'] .mobile-board-notices .all-in-announcement {
+  position: relative;
+  inset: auto;
+  translate: none;
+  transform: none;
   width: max-content;
   max-width: calc(100vw - 32px);
   min-height: 0;
@@ -1899,12 +2027,39 @@
   border-radius: 999px;
   background: var(--c-ink-800);
   box-shadow: var(--shadow-2);
-  transform: translateX(-50%);
   animation: allInNotice 2600ms var(--ease-out) forwards;
 }
 
-[data-layout='2d'] .all-in-chip-burst {
+[data-layout='2d'] .all-in-chip-burst,
+[data-layout='2d'] .all-in-flare,
+[data-layout='2d'] .all-in-shockwave {
   display: none;
+}
+
+/* 7-2 bounty: a compact card in the board area instead of over the seats */
+[data-layout='2d'] .mobile-board-notices .bounty-toast {
+  position: relative;
+  inset: auto;
+  max-width: calc(100% - 16px);
+  padding: 6px 12px 6px 8px;
+  gap: 8px;
+  box-shadow: var(--shadow-2);
+  transform: none;
+  animation: statusIn 320ms var(--ease-out) both;
+}
+
+[data-layout='2d'] .mobile-board-notices .bounty-toast-cards b {
+  width: 20px;
+  height: 28px;
+  font-size: 12px;
+}
+
+[data-layout='2d'] .mobile-board-notices .bounty-toast-copy strong {
+  font-size: var(--fs-12);
+}
+
+[data-layout='2d'] .mobile-board-notices .bounty-toast-copy small {
+  font-size: var(--fs-11);
 }
 
 [data-layout='2d'] .all-in-kicker {
@@ -1964,23 +2119,16 @@
   animation: traySlideUp 380ms var(--ease-pop) both;
 }
 
+/* Card request: a slim bar (it waits until you have acted on your turn) */
 [data-layout='2d'] .card-reveal-consent {
   display: grid;
-  gap: 6px;
-  padding: 12px 14px;
+  gap: 8px;
+  padding: 10px 12px;
 }
 
-/* With the action tray open too, float the request over the table instead of
-   squeezing the felt between two docks. */
-.table-scene[data-layout='2d'][data-tray-open='true'] > .card-reveal-consent {
-  position: fixed;
-  top: calc(var(--hud-h, 56px) + env(safe-area-inset-top) + 8px);
-  left: max(8px, env(safe-area-inset-left));
-  right: max(8px, env(safe-area-inset-right));
-  width: auto;
-  max-width: 520px;
-  margin: 0 auto;
-  animation: winnerCardIn 380ms var(--ease-pop) both;
+[data-layout='2d'] .card-reveal-consent-kicker,
+[data-layout='2d'] .card-reveal-consent p {
+  display: none;
 }
 
 [data-layout='2d'] .card-reveal-consent-kicker {
@@ -1993,7 +2141,8 @@
 
 [data-layout='2d'] .card-reveal-consent strong {
   color: var(--c-text-1);
-  font-size: var(--fs-16);
+  font-size: var(--fs-14);
+  line-height: 1.3;
 }
 
 [data-layout='2d'] .card-reveal-consent p {
@@ -2116,11 +2265,12 @@
   font-size: var(--fs-12);
 }
 
-/* Table talk: its toggle lives in the top bar beside the menu, the panel drops below */
+/* Table talk: its toggle takes the top bar's first slot; the panel drops below
+   it and shrinks with the visible viewport so the keyboard never hides it. */
 .table-scene[data-layout='2d'] .social-dock {
   position: fixed;
-  top: calc(env(safe-area-inset-top) + (var(--hud-h, 56px) - 44px) / 2);
-  left: calc(max(8px, env(safe-area-inset-left)) + 52px);
+  top: calc(var(--vv-top, 0px) + env(safe-area-inset-top) + (var(--hud-h, 56px) - 44px) / 2);
+  left: max(8px, env(safe-area-inset-left));
   right: auto;
   bottom: auto;
   z-index: calc(var(--room-layer-hud) + 1);
@@ -2142,9 +2292,14 @@
   border: 1px solid var(--line);
   border-radius: 50%;
   background: var(--surface-glass);
-  color: var(--c-felt-300);
+  color: var(--c-text-1);
   box-shadow: var(--shadow-1);
   transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.table-scene[data-layout='2d'] .social-dock.is-open .social-dock-toggle {
+  border-color: var(--line-brass);
+  color: var(--c-brass-200);
 }
 
 .table-scene[data-layout='2d'] .social-dock-toggle:active {
@@ -2155,7 +2310,13 @@
   width: auto;
   height: auto;
   background: none;
-  font-size: 18px;
+  color: inherit;
+}
+
+.social-dock-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
 }
 
 .table-scene[data-layout='2d'] .social-dock-toggle strong {
@@ -2171,21 +2332,71 @@
   padding: 0 5px;
   background: var(--c-ruby-500);
   color: var(--c-cream-50);
+  font-size: 11px;
 }
 
 .table-scene[data-layout='2d'] .social-dock-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--c-ink-800);
   width: min(380px, calc(100vw - 16px - max(8px, env(safe-area-inset-left)) * 2));
-  max-height: calc(100dvh - var(--hud-h, 56px) - env(safe-area-inset-top) - 24px);
-  margin-left: -52px;
-  overflow-y: auto;
+  max-height: calc(var(--vv-h, 100dvh) - var(--hud-h, 56px) - env(safe-area-inset-top) - 16px);
+  overflow: hidden;
   animation: chipIn 260ms var(--ease-pop) both;
 }
 
+.table-scene[data-layout='2d'] .social-dock-header,
+.table-scene[data-layout='2d'] .social-dock-reactions,
+.table-scene[data-layout='2d'] .social-dock-compose {
+  flex: 0 0 auto;
+}
+
+/* Only the message list shrinks: header (close) and composer stay visible */
+.table-scene[data-layout='2d'] .social-dock-messages {
+  flex: 1 1 auto;
+  min-height: 48px;
+  max-height: none;
+}
+
+/* Reconnecting: a clear pill under the top bar while the socket is down */
+.mobile-reconnect-banner {
+  position: fixed;
+  z-index: calc(var(--room-layer-hud) + 2);
+  top: calc(env(safe-area-inset-top) + var(--hud-h, 56px) + 4px);
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 122, 61, 0.6);
+  border-radius: 999px;
+  background: var(--c-ink-800);
+  box-shadow: var(--shadow-2);
+  color: var(--c-text-1);
+  font-size: var(--fs-12);
+  font-weight: 700;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.mobile-reconnect-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-ember-500);
+  animation: reconnectBlink 1s ease-in-out infinite alternate;
+}
+
+@keyframes reconnectBlink {
+  from { opacity: 1; }
+  to { opacity: 0.3; }
+}
+
 /* ============================================================
-   Drinks are a 3D-only feature: none of it shows under 1024px
+   Drinks are a 3D-only feature: none of it shows in the 2D layout
    ============================================================ */
 
-@media (max-width: 1023px) {
+@media (max-width: 1023px), (hover: none) and (pointer: coarse) {
   .drink-controls,
   .seat-drink-badge,
   .drink-toasts,
@@ -2203,6 +2414,14 @@
 
   :root[data-drunk-hiccup] .room-shell {
     animation: none !important;
+  }
+
+  /* Mid-range phones: no backdrop blur layers anywhere in the room */
+  .room-shell *,
+  .room-shell *::before,
+  .room-shell *::after {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
   }
 }
 
@@ -2225,9 +2444,9 @@
   position: relative;
   right: auto;
   top: auto;
-  align-self: end;
-  justify-self: end;
-  margin-bottom: 10px;
+  align-self: start;
+  justify-self: start;
+  margin: 0;
 }
 
 .table-scene[data-layout='2d'] .lady-luck-sticker {
@@ -2264,7 +2483,7 @@
    left, your hand and the controls in a side column
    ============================================================ */
 
-@media (max-width: 1023px) and (orientation: landscape) {
+@media (max-width: 1023px) and (orientation: landscape), (hover: none) and (pointer: coarse) and (orientation: landscape) {
   .room-shell {
     --hud-h: 48px;
     --side-w: clamp(244px, 34vw, 330px);
@@ -2280,14 +2499,13 @@
     grid-template-columns: minmax(0, 1fr) var(--side-w);
   }
 
-  [data-layout='2d'] > .table-stage {
+  .table-scene[data-layout='2d'] > .table-stage {
     grid-column: 1;
     grid-row: 1 / -1;
   }
 
   [data-layout='2d'] .card-reveal-consent,
-  [data-layout='2d'] .run-it-twice-prompt,
-  .table-scene[data-layout='2d'][data-tray-open='true'] > .card-reveal-consent {
+  [data-layout='2d'] .run-it-twice-prompt {
     position: relative;
     inset: auto;
     grid-column: 2;
@@ -2334,8 +2552,7 @@
   }
 
   .mobile-raise-control {
-    grid-template-columns: 44px minmax(0, 1fr) 44px;
-    gap: 6px;
+    gap: 4px;
   }
 
   .mobile-bet-row {
@@ -2350,14 +2567,6 @@
   .mobile-main-action {
     min-height: 48px;
     padding-inline: 4px;
-  }
-
-  .mobile-action-fold {
-    min-height: 44px;
-  }
-
-  .mobile-action-call {
-    min-height: 52px;
   }
 
   .mobile-main-action span {
@@ -2450,13 +2659,20 @@
     justify-self: start;
   }
 
-  [data-layout='2d'] .mobile-hero-lane .own-hand-show-cards {
-    margin-top: 8px;
+  /* No side column here: Lady Luck and the show toggle sit in the top row */
+  .table-scene[data-layout='2d'] .lady-luck-badge.is-hero {
+    grid-area: strength;
+    justify-self: end;
+    align-self: center;
   }
 
-  [data-layout='2d'] .mobile-hero-lane .show-cards-toggle-button {
-    min-height: 40px;
+  [data-layout='2d'] .mobile-hero-lane .own-hand-show-cards,
+  [data-layout='2d'] .mobile-hero-lane .own-hand-social {
+    grid-area: show;
+    justify-self: center;
+    margin: 6px 0 0;
   }
+
 
   [data-layout='2d'] .check-fold-pre-action-dock {
     grid-column: 2;
@@ -2466,10 +2682,10 @@
     margin: 0 10px calc(8px + env(safe-area-inset-bottom)) 0;
   }
 
-  [data-layout='2d'] .run-it-twice-copy p,
-  [data-layout='2d'] .card-reveal-consent p {
+  [data-layout='2d'] .run-it-twice-copy p {
     display: none;
   }
+
 
   [data-layout='2d'] .run-it-twice-copy h2 {
     font-size: var(--fs-16);
@@ -2484,15 +2700,7 @@
   }
 
   .mobile-main-action {
-    min-height: 50px;
-  }
-
-  .mobile-action-fold {
-    min-height: 44px;
-  }
-
-  .mobile-action-call {
-    min-height: 54px;
+    min-height: 48px;
   }
 
   .mobile-poker-field {
@@ -2501,7 +2709,7 @@
 }
 
 /* Tablets in portrait: a little larger, same structure */
-@media (min-width: 600px) and (max-width: 1023px) and (orientation: portrait) {
+@media (min-width: 600px) and (max-width: 1023px) and (orientation: portrait), (min-width: 600px) and (hover: none) and (pointer: coarse) and (orientation: portrait) {
   .mobile-poker-field {
     --hero-card-w: clamp(80px, 12vw, 108px);
   }

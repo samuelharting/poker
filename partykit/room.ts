@@ -228,6 +228,9 @@ export default class PokerRoom implements PartyServer {
   private drinkLedger: Record<string, DrinkLedgerEntry> = {}
   private drinkWaterTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private drinkWearOffHand = 0
+  private botDrinkTimers = new Set<ReturnType<typeof setTimeout>>()
+  /** Injectable so tests can make bot drinking deterministic. */
+  botDrinkRandom: () => number = Math.random
   private passedOutFoldPending = false
   /** Who is privately looking at their hole cards, keyed to the hand they peeked in. */
   private peekingByPlayer = new Map<string, { handNumber: number; timer: ReturnType<typeof setTimeout> }>()
@@ -782,6 +785,7 @@ export default class PokerRoom implements PartyServer {
       this.recordDealtIn()
       this.recordHandsPlayedForCurrentHand()
       this.wakeRestedDrinkers()
+      this.scheduleBotDrinks()
       this.scheduleBotPeeks()
       this.syncActionTimer(true)
       this.sendActionResult(conn, this.data.gameState.handNumber > 1 ? 'Dealing next hand.' : 'Dealing the first hand.')
@@ -1518,6 +1522,19 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
+    const result = this.orderDrinkFor(playerId, kind)
+    if (!result.ok) {
+      this.sendActionFailed(conn, result.reason)
+      return
+    }
+
+    this.sendActionResult(conn)
+    this.broadcastState()
+  }
+
+  private orderDrinkFor(playerId: string, kind: DrinkKind): { ok: true } | { ok: false; reason: string } {
+    const player = this.getPlayer(playerId)
+    if (!player) return { ok: false, reason: 'Take a seat before ordering a drink' }
     const entry = this.drinkLedger[playerId] ??= createDrinkLedgerEntry()
     const state = this.data.gameState
     const now = Date.now()
@@ -1530,8 +1547,7 @@ export default class PokerRoom implements PartyServer {
     })
 
     if (!result.ok) {
-      this.sendActionFailed(conn, result.reason)
-      return
+      return { ok: false, reason: result.reason }
     }
 
     this.broadcastDrinkEvent(playerId, kind)
@@ -1548,8 +1564,30 @@ export default class PokerRoom implements PartyServer {
       }
     }
 
-    this.sendActionResult(conn)
-    this.broadcastState()
+    return { ok: true }
+  }
+
+  /**
+   * Bots grab the odd beer (and water once they're tipsy) mid-hand so the
+   * drinking animations show up even at a table of one human and bots.
+   * They never drink themselves past level 4.
+   */
+  private scheduleBotDrinks() {
+    for (const timer of this.botDrinkTimers) clearTimeout(timer)
+    this.botDrinkTimers.clear()
+    if (!this.isFunModeEnabled()) return
+    for (const player of this.data.gameState.players) {
+      if (!this.isBotPlayer(player.id) || this.botDrinkRandom() > 0.2) continue
+      const level = this.drinkLedger[player.id]?.level ?? 0
+      const kind: DrinkKind = level >= 4 || (level >= 2 && this.botDrinkRandom() < 0.35) ? 'water' : 'beer'
+      const delay = 1500 + this.botDrinkRandom() * 9000
+      const timer = setTimeout(() => {
+        this.botDrinkTimers.delete(timer)
+        if (!this.isFunModeEnabled() || !this.getPlayer(player.id)) return
+        if (this.orderDrinkFor(player.id, kind).ok) this.broadcastState()
+      }, delay)
+      this.botDrinkTimers.add(timer)
+    }
   }
 
   private scheduleWaterKickIn(playerId: string, waterId: string, delayMs: number) {
@@ -2951,6 +2989,7 @@ export default class PokerRoom implements PartyServer {
         this.recordDealtIn()
         this.recordHandsPlayedForCurrentHand()
         this.wakeRestedDrinkers()
+      this.scheduleBotDrinks()
         this.scheduleBotPeeks()
         this.clearAutoFold()
         this.syncActionTimer(true)

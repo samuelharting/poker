@@ -128,7 +128,11 @@ function getRabbitHuntStartRound(state: InternalGameState): BettingRound | null 
 }
 
 function applyRabbitHuntRunout(state: InternalGameState, force = false): boolean {
-  if ((!force && !state.rabbitHuntingEnabled) || state.communityCards.length >= 5) {
+  if (
+    (!force && !state.rabbitHuntingEnabled) ||
+    state.communityCards.length >= 5 ||
+    (state.rabbitCards?.length ?? 0) > 0
+  ) {
     return false
   }
 
@@ -137,15 +141,17 @@ function applyRabbitHuntRunout(state: InternalGameState, force = false): boolean
     return false
   }
 
+  // The real board stays as played; the hunted streets live in rabbitCards.
   const reveals: string[] = []
+  const rabbitCards: Card[] = []
   let currentRound: BettingRound | null = startRound
 
-  while (state.communityCards.length < 5) {
+  while (state.communityCards.length + rabbitCards.length < 5) {
     switch (currentRound) {
       case 'preflop': {
         dealCards(state.deck, 1)
         const flop = dealCards(state.deck, 3)
-        state.communityCards = [...state.communityCards, ...flop]
+        rabbitCards.push(...flop)
         reveals.push(`flop ${formatBoardCards(flop)}`)
         currentRound = 'flop'
         break
@@ -153,7 +159,7 @@ function applyRabbitHuntRunout(state: InternalGameState, force = false): boolean
       case 'flop': {
         dealCards(state.deck, 1)
         const turn = dealCards(state.deck, 1)
-        state.communityCards = [...state.communityCards, ...turn]
+        rabbitCards.push(...turn)
         reveals.push(`turn ${formatBoardCards(turn)}`)
         currentRound = 'turn'
         break
@@ -161,7 +167,7 @@ function applyRabbitHuntRunout(state: InternalGameState, force = false): boolean
       case 'turn': {
         dealCards(state.deck, 1)
         const river = dealCards(state.deck, 1)
-        state.communityCards = [...state.communityCards, ...river]
+        rabbitCards.push(...river)
         reveals.push(`river ${formatBoardCards(river)}`)
         currentRound = 'river'
         break
@@ -172,6 +178,7 @@ function applyRabbitHuntRunout(state: InternalGameState, force = false): boolean
   }
 
   if (reveals.length > 0) {
+    state.rabbitCards = rabbitCards
     addAction(state, `Rabbit hunt: ${reveals.join(' | ')}`)
   }
 
@@ -181,7 +188,12 @@ function applyRabbitHuntRunout(state: InternalGameState, force = false): boolean
 export function runRabbitHunt(state: InternalGameState): InternalGameState {
   const s = cloneState(state)
 
-  if (s.phase !== 'between_hands' || !s.winners?.length || s.communityCards.length >= 5) {
+  if (
+    s.phase !== 'between_hands' ||
+    !s.winners?.length ||
+    s.communityCards.length >= 5 ||
+    (s.rabbitCards?.length ?? 0) > 0
+  ) {
     throw new Error('Rabbit hunt is available after a folded hand before the river')
   }
 
@@ -424,6 +436,7 @@ export function startHand(state: InternalGameState): InternalGameState {
   s.phase = 'in_hand'
   s.round = 'preflop'
   s.communityCards = []
+  s.rabbitCards = undefined
   s.pots = []
   s.totalPot = 0
   s.currentBet = s.bigBlind
@@ -1244,6 +1257,7 @@ export function prepareNextHand(state: InternalGameState): InternalGameState {
   s.totalPot = 0
   s.currentBet = 0
   s.bounty = undefined
+  s.rabbitCards = undefined
 
   return s
 }
@@ -1370,6 +1384,7 @@ export function toTableState(
       hasActedThisRound: p.hasActedThisRound,
     })),
     communityCards: state.communityCards,
+    ...(state.rabbitCards?.length ? { rabbitCards: state.rabbitCards } : {}),
     pots: state.pots,
     totalPot: state.totalPot,
     currentBet: state.currentBet,

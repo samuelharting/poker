@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { TWO_D_LAYOUT_QUERY } from '@/lib/layoutMode'
 
 const css = readFileSync(join(process.cwd(), 'app', 'globals.css'), 'utf8')
 const polishCss = readFileSync(join(process.cwd(), 'app', 'poker-polish.css'), 'utf8')
@@ -301,7 +302,7 @@ describe('room UI layering', () => {
     // 2D table: the table-talk toggle sits in the top bar in every phase.
     expectRule(".table-scene[data-layout='2d'] .social-dock", [
       'position: fixed;',
-      'top: calc(env(safe-area-inset-top) + (var(--hud-h, 56px) - 44px) / 2);',
+      'top: calc(var(--vv-top, 0px) + env(safe-area-inset-top) + (var(--hud-h, 56px) - 44px) / 2);',
       'bottom: auto;',
     ], table2dCss)
     expectRule('.show-cards-toggle', [
@@ -401,13 +402,16 @@ describe('room UI layering', () => {
     ])
   })
 
-  it('uses one simple, table-free 2D layout for every width under 1024px', () => {
+  it('uses one simple, table-free 2D layout for every width under 1024px and every touch-first device', () => {
     // The old tableless edge layout and the 769-1023px tablet table are gone.
     expect(css).not.toContain('Mobile edge arena restructure')
     expect(polishCss).not.toContain('Mobile tableless edge layout')
     expect(css).not.toMatch(/@media \(min-width: 769px\) and \(max-width: 1023px\)/)
     expect(polishCss).not.toMatch(/@media \(min-width: 769px\) and \(max-width: 1023px\)/)
-    expect(pokerTableSource).toContain("useMediaQuery('(max-width: 1023px)')")
+    expect(pokerTableSource).toContain('useMediaQuery(TWO_D_LAYOUT_QUERY)')
+    expect(TWO_D_LAYOUT_QUERY).toBe('(max-width: 1023px), (hover: none) and (pointer: coarse)')
+    // The stylesheet switches on exactly the same condition as the component.
+    expect(table2dCss).toContain('@media (max-width: 1023px), (hover: none) and (pointer: coarse) {')
     expect(pokerTableSource).toContain("data-layout={isMobileViewport ? '2d' : 'desktop'}")
 
     expectRule(".table-scene[data-layout='2d']", [
@@ -427,20 +431,22 @@ describe('room UI layering', () => {
     ], table2dCss)
     expectRule('.mobile-board-zone', [
       'flex: 1 1 auto;',
-      'justify-content: center;',
+      // Pot and board sit just above the hero's hand.
+      'justify-content: flex-end;',
     ], table2dCss)
     expectRule('.mobile-seat-ring', [
       'conic-gradient(var(--ring) calc(var(--turn-pct) * 1%)',
     ], table2dCss)
     expectRule('.room-hud-mobile-topline', [
-      'grid-template-columns: 44px 44px minmax(0, 1fr) 94px;',
+      // Chat slot, centred game info, sound + settings: one menu button only.
+      'grid-template-columns: 94px minmax(0, 1fr) 94px;',
     ], table2dCss)
     expectRule('.mobile-betting-panel', [
       'border-radius: 22px 22px 0 0;',
       'env(safe-area-inset-bottom)',
     ], table2dCss)
     expectRule('.mobile-main-actions', [
-      'grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr) minmax(0, 1.1fr);',
+      'grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) minmax(0, 1fr);',
     ], table2dCss)
     expectRule('.mobile-bet-quick', [
       'min-height: 44px;',
@@ -453,7 +459,7 @@ describe('room UI layering', () => {
 
   it('keeps drinks off the 2D layout and Lady Luck small', () => {
     expect(table2dCss).toMatch(
-      /@media \(max-width: 1023px\) \{\s*\.drink-controls,\s*\.seat-drink-badge,\s*\.drink-toasts,\s*\.drunk-vision \{\s*display: none !important;/
+      /@media \(max-width: 1023px\), \(hover: none\) and \(pointer: coarse\) \{\s*\.drink-controls,\s*\.seat-drink-badge,\s*\.drink-toasts,\s*\.drunk-vision \{\s*display: none !important;/
     )
     expectRule(".table-scene[data-layout='2d'] .lady-luck-badge", [
       '--ll-size: 22px;',

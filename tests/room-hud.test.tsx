@@ -8,7 +8,7 @@ describe('RoomHud mobile strip', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders mobile HUD like a poker app header with game type, stakes, menu, and settings', () => {
+  it('renders mobile HUD like a poker app header with game type, stakes, one settings button and a chat slot', () => {
     vi.stubGlobal('React', React)
 
     const markup = renderToStaticMarkup(
@@ -32,7 +32,10 @@ describe('RoomHud mobile strip', () => {
       markup.indexOf('room-hud-main')
     )
 
-    expect(mobileMarkup).toContain('room-hud-mobile-menu')
+    // One menu button only: the gear. The first slot is kept for the chat button.
+    expect(mobileMarkup).not.toContain('room-hud-mobile-menu')
+    expect(mobileMarkup).toContain('room-hud-mobile-chat-slot')
+    expect(mobileMarkup).not.toContain('room-hud-mobile-game-chevron')
     expect(mobileMarkup).toContain('room-hud-mobile-game-pill')
     expect(mobileMarkup).toContain('NL Hold')
     expect(mobileMarkup).toContain('$10 / $20')

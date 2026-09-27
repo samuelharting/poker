@@ -8,6 +8,7 @@ import {
   joinTable,
   newPlayer,
   openTargetPanel,
+  openMobileRaise,
   otherViewport,
   saveTableSettings,
   seatRevealedCards,
@@ -48,6 +49,7 @@ async function sizeRaise(player: Player, amount: number, bigBlind: number) {
     await expect(actionButton(page, 'raise')).toHaveAttribute('aria-label', `Raise to $${amount.toLocaleString()}`)
     return
   }
+  await openMobileRaise(page)
   await visible(page.getByRole('button', { name: 'Min', exact: true })).first().click()
   const minAmount: number = player.tap.snapshot.minRaise
   const steps = Math.round((amount - minAmount) / bigBlind)
@@ -127,9 +129,11 @@ for (const viewport of ['desktop', 'mobile'] as ViewportName[]) {
         const turnSecond = turnFirst === host ? guest : host
         await actionButton(turnFirst.page, 'check').click()
         await expect.poll(() => turnSecond.page.evaluate(() => Boolean(document.querySelector('[data-action="check"]')))).toBe(true)
+        if (turnSecond.viewport === 'mobile') await openMobileRaise(turnSecond.page)
         await visible(turnSecond.page.getByRole('button', { name: turnSecond.viewport === 'desktop' ? '1/2 Pot' : '½ Pot', exact: true })).first().click()
         if (turnSecond.viewport === 'desktop') {
-          await expect(actionButton(turnSecond.page, 'raise')).toHaveAttribute('aria-label', 'Raise to $100')
+          // Nobody has bet the turn yet, so the wager opens as a Bet.
+          await expect(actionButton(turnSecond.page, 'raise')).toHaveAttribute('aria-label', 'Bet $100')
         } else {
           await expect(actionButton(turnSecond.page, 'raise')).toContainText('$100')
         }
@@ -143,16 +147,24 @@ for (const viewport of ['desktop', 'mobile'] as ViewportName[]) {
         await waitForSnapshot(host, state => state.winners?.[0]?.playerId === winner.tap.yourId, 'fold winner recorded')
 
         // Winner chooses which cards to show; the loser sees exactly that.
-        const showGroup = visible(winner.page.getByRole('group', { name: 'Choose which cards to reveal after this hand' })).first()
-        await expect(showGroup).toBeVisible()
         const winnerSeat = { id: winner.tap.yourId, name: winner.name }
-        await showGroup.getByRole('button', { name: 'Show left card' }).click()
-        await waitForSnapshot(loser, (_, tap) => tap.player(winnerSeat.id)?.holeCards?.length === 1, 'left card shown')
-        await expect(seatRevealedCards(loser, winnerSeat)).toHaveCount(1)
-        await showGroup.getByRole('button', { name: 'Show both cards' }).click()
-        await waitForSnapshot(loser, (_, tap) => tap.player(winnerSeat.id)?.holeCards?.length === 2, 'both cards shown')
-        await expect(seatRevealedCards(loser, winnerSeat)).toHaveCount(2)
-        await showGroup.getByRole('button', { name: 'Muck both cards' }).click()
+        if (winner.viewport === 'desktop') {
+          const showGroup = visible(winner.page.getByRole('group', { name: 'Choose which cards to reveal after this hand' })).first()
+          await expect(showGroup).toBeVisible()
+          await showGroup.getByRole('button', { name: 'Show left card' }).click()
+          await waitForSnapshot(loser, (_, tap) => tap.player(winnerSeat.id)?.holeCards?.length === 1, 'left card shown')
+          await expect(seatRevealedCards(loser, winnerSeat)).toHaveCount(1)
+          await showGroup.getByRole('button', { name: 'Show both cards' }).click()
+          await waitForSnapshot(loser, (_, tap) => tap.player(winnerSeat.id)?.holeCards?.length === 2, 'both cards shown')
+          await expect(seatRevealedCards(loser, winnerSeat)).toHaveCount(2)
+          await showGroup.getByRole('button', { name: 'Muck both cards' }).click()
+        } else {
+          // 2D: one compact Show / Hide toggle beside the hand.
+          await visible(winner.page.getByRole('button', { name: 'Show cards', exact: true })).first().click()
+          await waitForSnapshot(loser, (_, tap) => tap.player(winnerSeat.id)?.holeCards?.length === 2, 'both cards shown')
+          await expect(seatRevealedCards(loser, winnerSeat)).toHaveCount(2)
+          await visible(winner.page.getByRole('button', { name: 'Hide cards', exact: true })).first().click()
+        }
         await waitForSnapshot(loser, (_, tap) => tap.player(winnerSeat.id)?.holeCards === undefined, 'cards mucked')
         await expect(seatRevealedCards(loser, winnerSeat)).toHaveCount(0)
 
@@ -161,7 +173,10 @@ for (const viewport of ['desktop', 'mobile'] as ViewportName[]) {
         await expect(rabbit).toBeVisible()
         await rabbit.click()
         await waitForSnapshot(loser, state => (
-          state.communityCards.length === 5 && String(state.recentActions[0]).startsWith('Rabbit hunt:')
+          // The hunted streets arrive as rabbitCards; the played board is unchanged.
+          state.communityCards.length < 5 &&
+          state.communityCards.length + (state.rabbitCards?.length ?? 0) === 5 &&
+          String(state.recentActions[0]).startsWith('Rabbit hunt:')
         ), 'rabbit hunt ran out the river')
         await expect(loser.page.locator('.community-cards').first()).toHaveAttribute('data-visible-count', '5')
         await expect(visible(winner.page.getByRole('button', { name: 'Rabbit hunt' }))).toHaveCount(0)

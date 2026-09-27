@@ -7,6 +7,7 @@ import type { SocialSnapshot } from '@/shared/protocol'
 import type { SeatPlayer, TableState } from '@/lib/poker/types'
 import type { ThreeTableViewModel } from '@/components/three/tableViewModel'
 import { getShowdownTiming } from '@/lib/poker/showdown'
+import { TWO_D_LAYOUT_QUERY } from '@/lib/layoutMode'
 
 function DesktopPokerRoom3DMock(props: {
   view: ThreeTableViewModel
@@ -453,9 +454,9 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).toContain('Ask Villain for permission to see their cards')
     expect(markup).toContain('player-card-reveal-control')
     expect(markup).not.toContain('card-reveal-request-panel')
-    expect(markup.match(/Face-down card/g)).toHaveLength(2)
-    expect(markup).not.toContain('A of spades')
-    expect(markup).not.toContain('7 of clubs')
+    // Your own folded cards stay face-up to you; opponents stay hidden.
+    expect(markup).toContain('A of spades')
+    expect(markup).toContain('7 of clubs')
     expect(markup).not.toContain('K of hearts')
     expect(markup).not.toContain('Q of diamonds')
     expect(markup).not.toContain('table-show-cards-panel')
@@ -463,8 +464,8 @@ describe('PokerTable desktop 3D gate', () => {
 
   it.each([
     ['desktop 3D', { '(min-width: 1024px)': true }],
-    ['desktop 2D', { '(min-width: 1024px)': false, '(max-width: 1023px)': false }],
-    ['mobile 2D', { '(max-width: 1023px)': true }],
+    ['desktop 2D', { '(min-width: 1024px)': false, [TWO_D_LAYOUT_QUERY]: false }],
+    ['mobile 2D', { [TWO_D_LAYOUT_QUERY]: true }],
   ])('keeps the card request control beside the opponent cards after a heads-up fold on %s', (label, media) => {
     const state = makeTableState()
     state.phase = 'between_hands'
@@ -731,8 +732,10 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).toContain('>Left</button>')
     expect(markup).toContain('>Right</button>')
     expect(markup).toContain('>Muck</button>')
-    expect(markup.match(/Face-down card/g)).toHaveLength(2)
-    expect(markup).not.toContain('A of spades')
+    // Never flipped over for their owner: marked hidden from the table instead.
+    expect(markup).not.toContain('Face-down card')
+    expect(markup).toContain('A of spades')
+    expect(markup).toContain('Hidden from table')
   })
 
   it('uses a separate fixed 2D hero summary in the desktop 3D card view', () => {
@@ -769,7 +772,7 @@ describe('PokerTable desktop 3D gate', () => {
     const markup = renderWithMedia(
       {
         '(min-width: 1024px)': true,
-        '(max-width: 1023px)': false,
+        [TWO_D_LAYOUT_QUERY]: false,
       },
       <PokerTable
         state={state}
@@ -848,7 +851,7 @@ describe('PokerTable desktop 3D gate', () => {
     const markup = renderWithMedia(
       {
         '(min-width: 1024px)': true,
-        '(max-width: 1023px)': false,
+        [TWO_D_LAYOUT_QUERY]: false,
       },
       <PokerTable
         state={state}
@@ -1046,7 +1049,7 @@ describe('PokerTable desktop 3D gate', () => {
     const markup = renderWithMedia(
       {
         '(min-width: 1024px)': true,
-        '(max-width: 1023px)': false,
+        [TWO_D_LAYOUT_QUERY]: false,
       },
       <PokerTable
         state={state}
@@ -1113,7 +1116,7 @@ describe('PokerTable desktop 3D gate', () => {
     const markup = renderWithMedia(
       {
         '(min-width: 1024px)': true,
-        '(max-width: 1023px)': false,
+        [TWO_D_LAYOUT_QUERY]: false,
       },
       <PokerTable
         state={state}
@@ -1193,7 +1196,7 @@ describe('PokerTable desktop 3D gate', () => {
     const markup = renderWithMedia(
       {
         '(min-width: 1024px)': false,
-        '(max-width: 1023px)': true,
+        [TWO_D_LAYOUT_QUERY]: true,
       },
       <PokerTable
         state={state}
@@ -1256,7 +1259,7 @@ describe('PokerTable desktop 3D gate', () => {
     expect(markup).not.toContain('own-hand-pre-action-mark')
   })
 
-  it('renders the 2D action tray weighted Call > Raise > Fold with a quick-bet row', () => {
+  it('renders the compact 2D action tray: Fold / Call / Raise, sizing behind Raise', () => {
     const socialState: SocialSnapshot = {
       active: [],
       chatLog: [],
@@ -1293,7 +1296,7 @@ describe('PokerTable desktop 3D gate', () => {
     const markup = renderWithMedia(
       {
         '(min-width: 1024px)': false,
-        '(max-width: 1023px)': true,
+        [TWO_D_LAYOUT_QUERY]: true,
       },
       <PokerTable
         state={state}
@@ -1329,24 +1332,23 @@ describe('PokerTable desktop 3D gate', () => {
 
     expect(markup).toContain('mobile-betting-panel')
     expect(markup).toContain('mobile-tray-timer')
-    expect(markup).toContain('mobile-bet-row')
-    for (const label of ['Min', '½ Pot', '¾ Pot', 'Pot', 'All-in']) {
-      expect(markup).toContain(`>${label}</button>`)
-    }
-    expect(markup).toContain('mobile-bet-quick is-active')
-    expect(markup).toContain('mobile-bet-amount')
-    expect(markup).toContain('mobile-raise-control')
-    expect(markup).toContain('aria-label="Decrease bet"')
-    expect(markup).toContain('aria-label="Increase bet"')
+    // Compact by default: Fold / Call / Raise. Sizing opens only after tapping Raise.
+    expect(markup).not.toContain('mobile-bet-row')
+    expect(markup).not.toContain('mobile-raise-control')
+    expect(markup).not.toContain('aria-label="Bet amount"')
     expect(markup).toContain('mobile-main-actions')
+    expect(markup).toContain('data-count="3"')
     expect(markup).toContain('data-action="fold"')
     expect(markup).toContain('data-action="call"')
-    expect(markup).toContain('data-action="raise"')
+    expect(markup).toContain('data-action="open-raise"')
+    expect(markup).not.toContain('data-action="all_in"')
     expect(markup).toContain('Fold')
     expect(markup).toContain('CALL')
     expect(markup).not.toContain('CHECK / CALL')
-    expect(markup).toContain('Raise to')
-    expect(markup).toContain('$80')
+    expect(markup).toContain('>Raise</span>')
+    // The hero status line no longer repeats the call amount.
+    expect(markup).toContain('Your turn')
+    expect(markup).not.toContain('To call $')
     expect(markup).toContain('Small Blind')
     expect(markup).toContain('Big Blind')
     expect(markup).toContain('mobile-blind-role is-small')
@@ -1389,7 +1391,7 @@ describe('PokerTable desktop 3D gate', () => {
     const markup = renderWithMedia(
       {
         '(min-width: 1024px)': false,
-        '(max-width: 1023px)': true,
+        [TWO_D_LAYOUT_QUERY]: true,
       },
       <PokerTable
         state={state}
@@ -1533,16 +1535,32 @@ describe('PokerTable table-management controls', () => {
     const state = makeFoldEndedState()
 
     const desktopMarkup = renderTable(state, {
-      '(max-width: 1023px)': false,
+      [TWO_D_LAYOUT_QUERY]: false,
       '(min-width: 1024px)': false,
     })
     const mobileMarkup = renderTable(state, {
-      '(max-width: 1023px)': true,
+      [TWO_D_LAYOUT_QUERY]: true,
       '(min-width: 1024px)': false,
     })
 
     expect(desktopMarkup).toContain('Rabbit hunt')
     expect(mobileMarkup).toContain('Rabbit hunt')
+  })
+
+  it('shows a clear Reconnecting banner on 2D while the socket is down', () => {
+    const state = makeFoldEndedState()
+    const offline = renderTable(state, { [TWO_D_LAYOUT_QUERY]: true }, { isConnected: false })
+    const online = renderTable(state, { [TWO_D_LAYOUT_QUERY]: true })
+
+    expect(offline).toContain('mobile-reconnect-banner')
+    expect(offline).toContain('Reconnecting…')
+    expect(online).not.toContain('mobile-reconnect-banner')
+  })
+
+  it('never mounts drink controls on the 2D layout', () => {
+    const state = makeFoldEndedState()
+    const mobileMarkup = renderTable(state, { [TWO_D_LAYOUT_QUERY]: true })
+    expect(mobileMarkup).not.toContain('drink-controls')
   })
 
   it('marks the 2D winner in their seat chip instead of flying payout chips', () => {
@@ -1552,7 +1570,7 @@ describe('PokerTable table-management controls', () => {
     state.winners = [{ playerId: 'villain', amount: 30 }]
 
     const mobileMarkup = renderTable(state, {
-      '(max-width: 1023px)': true,
+      [TWO_D_LAYOUT_QUERY]: true,
       '(min-width: 1024px)': false,
     })
 
@@ -1567,11 +1585,11 @@ describe('PokerTable table-management controls', () => {
     state.players[1] = { ...state.players[1]!, seatIndex: 7 }
 
     const mobileMarkup = renderTable(state, {
-      '(max-width: 1023px)': true,
+      [TWO_D_LAYOUT_QUERY]: true,
       '(min-width: 1024px)': false,
     })
     const desktopMarkup = renderTable(state, {
-      '(max-width: 1023px)': false,
+      [TWO_D_LAYOUT_QUERY]: false,
       '(min-width: 1024px)': false,
     })
 
@@ -1581,7 +1599,8 @@ describe('PokerTable table-management controls', () => {
 
   it('clears the mobile and desktop 3D winner summaries after a rabbit runout so the board stays visible', () => {
     const state = makeFoldEndedState()
-    state.communityCards = [
+    state.communityCards = []
+    state.rabbitCards = [
       { rank: 'A', suit: 'spades' },
       { rank: 'K', suit: 'hearts' },
       { rank: 'Q', suit: 'diamonds' },
@@ -1591,18 +1610,22 @@ describe('PokerTable table-management controls', () => {
     state.recentActions = ['Rabbit hunt: flop As Kh Qd | turn Jc | river 10s', ...state.recentActions]
 
     const desktopThreeMarkup = renderTable(state, {
-      '(max-width: 1023px)': false,
+      [TWO_D_LAYOUT_QUERY]: false,
       '(min-width: 1024px)': true,
     })
     const mobileMarkup = renderTable(state, {
-      '(max-width: 1023px)': true,
+      [TWO_D_LAYOUT_QUERY]: true,
       '(min-width: 1024px)': false,
     })
 
     expect(desktopThreeMarkup).toContain('data-desktop-three="true"')
     expect(desktopThreeMarkup).not.toContain('table-hand-result-summary')
     expect(desktopThreeMarkup).toContain('class="community-cards"')
-    expect(mobileMarkup).not.toContain('mobile-edge-winners')
+    expect(desktopThreeMarkup).toContain('Rabbit hunt — not played')
+    // 2D keeps the winner line (everyone folded) and labels the unplayed runout.
+    expect(mobileMarkup).toContain('mobile-edge-winners')
+    expect(mobileMarkup).toContain('Everyone folded')
+    expect(mobileMarkup).toContain('Rabbit hunt — not played')
     expect(mobileMarkup).toContain('class="community-cards"')
   })
 

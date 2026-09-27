@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   buildActiveSocialByPlayer,
   buildActionButtonDescriptors,
+  canAnyOpponentRespond,
+  countUnreadChat,
+  formatSeatStack,
   buildPlayerManagementTags,
   canSaveTableSettings,
   formatPlayerStatsSummary,
@@ -99,6 +102,62 @@ describe('PokerTable action button descriptors', () => {
       { key: 'all_in', label: 'All-in', amountLabel: '$1,000', className: 'btn-all-in' },
       { key: 'fold', label: 'Fold', className: 'btn-fold' },
     ])
+  })
+})
+
+describe('facing an all-in with nobody left to act', () => {
+  it('offers only Fold and Call: raising or shoving again would change nothing', () => {
+    const players = [
+      { id: 'hero', status: 'active' as const, stack: 1000 },
+      { id: 'villain', status: 'all_in' as const, stack: 0 },
+      { id: 'folder', status: 'folded' as const, stack: 800 },
+    ]
+    expect(canAnyOpponentRespond(players, 'hero')).toBe(false)
+    expect(buildActionButtonDescriptors({
+      legalActions: ['fold', 'call', 'raise', 'all_in'],
+      toCall: 980,
+      raiseAmount: 1000,
+      allInAmount: 1000,
+      othersCanRespond: canAnyOpponentRespond(players, 'hero'),
+    }).map(button => button.key)).toEqual(['call', 'fold'])
+  })
+
+  it('keeps Raise and All-in while another player can still act', () => {
+    const players = [
+      { id: 'hero', status: 'active' as const, stack: 1000 },
+      { id: 'villain', status: 'all_in' as const, stack: 0 },
+      { id: 'third', status: 'active' as const, stack: 500 },
+    ]
+    expect(canAnyOpponentRespond(players, 'hero')).toBe(true)
+    expect(buildActionButtonDescriptors({
+      legalActions: ['fold', 'call', 'raise', 'all_in'],
+      toCall: 200,
+      raiseAmount: 400,
+      allInAmount: 1000,
+      othersCanRespond: true,
+    }).map(button => button.key)).toEqual(['call', 'raise', 'all_in', 'fold'])
+  })
+})
+
+describe('table chat unread count', () => {
+  it('counts only messages from other players newer than the last time chat was opened', () => {
+    const log = [
+      { playerId: 'a', createdAt: 100 },
+      { playerId: 'me', createdAt: 200 },
+      { playerId: 'b', createdAt: 300 },
+    ]
+    expect(countUnreadChat(log, 'me', 0)).toBe(2)
+    expect(countUnreadChat(log, 'me', 150)).toBe(1)
+    expect(countUnreadChat(log, 'me', 300)).toBe(0)
+  })
+})
+
+describe('2D seat stack format', () => {
+  it('never needs truncation: large stacks are shortened', () => {
+    expect(formatSeatStack(9_990)).toBe('$9,990')
+    expect(formatSeatStack(12_340)).toBe('$12.3K')
+    expect(formatSeatStack(250_000)).toBe('$250K')
+    expect(formatSeatStack(1_500_000)).toBe('$1.5M')
   })
 })
 

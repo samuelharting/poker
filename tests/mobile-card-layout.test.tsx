@@ -92,12 +92,12 @@ describe('2D layout cards and seats', () => {
     expect(pokerTableSource).not.toContain('mobile-seat-number')
   })
 
-  it('keeps card reveal controls inside the chip and at least a comfortable tap size', () => {
+  it('gives card reveal controls their own row in the chip, never over the bet', () => {
     expect(table2dCss).toMatch(
-      /\.mobile-card-reveal-control\s*\{[^}]*position:\s*absolute;[^}]*right:\s*4px;/s
+      /\.mobile-card-reveal-control\s*\{[^}]*grid-area:\s*reveal;/s
     )
     expect(table2dCss).toMatch(
-      /\.mobile-card-reveal-control \.card-reveal-seat-button\s*\{[^}]*min-width:\s*44px;/s
+      /\.mobile-card-reveal-control \.card-reveal-seat-button\s*\{[^}]*min-height:\s*36px;/s
     )
   })
 })

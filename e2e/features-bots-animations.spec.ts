@@ -63,7 +63,8 @@ for (const viewport of ['desktop', 'mobile'] as ViewportName[]) {
           hands.set(state.handNumber, {
             hand: state.handNumber,
             round: state.round,
-            board: state.communityCards.length,
+            // Rabbit-hunt streets arrive separately from the played board.
+            board: state.communityCards.length + (state.rabbitCards?.length ?? 0),
             lastAction: String(state.recentActions?.[0] ?? ''),
             winners: state.winners.length,
           })

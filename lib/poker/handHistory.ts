@@ -44,7 +44,11 @@ export function buildHandHistoryEntry(state: TableState, endedAt: number): HandH
       ?? state.lobbyPlayers?.find(player => player.id === playerId)?.nickname
       ?? 'Player'
   )
-  const playedBoardLength = Math.max(0, state.communityCards.length - getRabbitHuntCardCount(state.recentActions))
+  // Rabbit-hunt cards now arrive separately (state.rabbitCards) and are never
+  // part of communityCards; the action-log count only covers older snapshots.
+  const playedBoardLength = state.rabbitCards?.length
+    ? state.communityCards.length
+    : Math.max(0, state.communityCards.length - getRabbitHuntCardCount(state.recentActions))
   const runItTwiceBoards = state.runItTwice?.status === 'accepted' && state.runItTwice.boards?.length === 2
     ? state.runItTwice.boards.map(board => board.cards.slice(0, 5))
     : undefined

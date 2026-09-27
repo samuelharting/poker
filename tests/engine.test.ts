@@ -256,7 +256,9 @@ describe('rabbit hunting', () => {
 
     const result = processAction(state, actingId, 'fold')
 
-    expect(result.communityCards).toEqual(expectedBoard)
+    // The hunted streets stay off the played board.
+    expect(result.communityCards).toEqual([])
+    expect(result.rabbitCards).toEqual(expectedBoard)
     expect(result.winners).toHaveLength(1)
     expect(result.winners?.[0]).toMatchObject({
       playerId: winner.id,
@@ -291,9 +293,8 @@ describe('rabbit hunting', () => {
       card('A', 'spades'),
       card('K', 'hearts'),
       card('Q', 'clubs'),
-      card('J', 'spades'),
-      card('9', 'hearts'),
     ])
+    expect(result.rabbitCards).toEqual([card('J', 'spades'), card('9', 'hearts')])
     expect(result.recentActions[0]).toContain('turn Js')
     expect(result.recentActions[0]).toContain('river 9h')
   })
@@ -320,9 +321,22 @@ describe('rabbit hunting', () => {
       card('K', 'hearts'),
       card('Q', 'clubs'),
       card('J', 'diamonds'),
-      card('9', 'spades'),
     ])
+    expect(result.rabbitCards).toEqual([card('9', 'spades')])
     expect(result.recentActions[0]).toContain('Rabbit hunt: river 9s')
+  })
+
+  it('clears rabbit cards when the next hand starts and keeps them out of the public board', () => {
+    const state = startHand(setup2Players())
+    state.rabbitHuntingEnabled = true
+    const ended = processAction(state, state.actingPlayerId!, 'fold')
+    expect(ended.rabbitCards).toHaveLength(5)
+    expect(toTableState(ended, ended.players[0]!.id).rabbitCards).toHaveLength(5)
+    expect(toTableState(ended, ended.players[0]!.id).communityCards).toEqual([])
+
+    const next = startHand(ended)
+    expect(next.rabbitCards).toBeUndefined()
+    expect(toTableState(next, next.players[0]!.id).rabbitCards).toBeUndefined()
   })
 })
 

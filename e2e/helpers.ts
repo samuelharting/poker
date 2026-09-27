@@ -491,9 +491,18 @@ export async function startTable(
 }
 
 /** Go all-in with the viewport's own controls. */
+/** Mobile tray: sizing (slider, presets) opens only after tapping Raise / Bet. */
+export async function openMobileRaise(page: Page) {
+  const opener = visible(page.locator('[data-action="open-raise"]'))
+  if (await opener.count()) {
+    await opener.first().click()
+  }
+}
+
 export async function goAllIn(player: Player) {
   const page = player.page
   if (player.viewport === 'mobile') {
+    await openMobileRaise(page)
     const quickAllIn = visible(page.getByRole('group', { name: 'Quick bet sizes' }).getByRole('button', { name: 'All-in' }))
     if (await quickAllIn.count()) {
       await quickAllIn.first().click()

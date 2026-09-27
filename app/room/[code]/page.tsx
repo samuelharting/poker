@@ -7,7 +7,8 @@ import { PokerTable } from '@/components/table/PokerTable'
 import { RoomHud } from '@/components/ui/RoomHud'
 import { LandingHeroArt } from '@/components/ui/LandingHeroArt'
 import { NicknameField } from '@/components/ui/NicknameField'
-import { clearStoredReconnectToken, useRoom } from '@/hooks/useRoom'
+import { clearStoredReconnectToken, loadStoredReconnectToken, useRoom } from '@/hooks/useRoom'
+import { useIsTwoDLayout } from '@/lib/layoutMode'
 import { isAllowedEmote, sanitizeText } from '@/shared/protocol'
 import {
   DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
@@ -48,9 +49,13 @@ export default function RoomPage() {
     venmoUsername: '',
   })
   const [profileError, setProfileError] = useState('')
+  // Until the stored profile has been read, show a neutral "Rejoining" screen
+  // instead of flashing the nickname gate on reload.
+  const [profileChecked, setProfileChecked] = useState(false)
 
   useEffect(() => {
     const storedProfile = loadStoredPlayerProfile()
+    setProfileChecked(true)
     if (storedProfile) {
       setProfile(storedProfile)
       setProfileInput(storedProfile)
@@ -84,6 +89,20 @@ export default function RoomPage() {
           <p className="gate-copy">Double-check the code with your host, or start a new table.</p>
           <Link className="btn-gold entry-submit" href="/">Back to Poker Night</Link>
         </section>
+      </main>
+    )
+  }
+
+  if (!profile && !profileChecked) {
+    return (
+      <main className="landing-bg landing-gate" aria-busy="true">
+        <div className="room-loading-state">
+          <div className="room-loading-deal" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </div>
+        </div>
       </main>
     )
   }
@@ -146,13 +165,21 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     ...DEFAULT_POKER_SOUND_PREFERENCES,
   })
   const [soundPreferencesReady, setSoundPreferencesReady] = useState(false)
+  // A stored seat token means this is a reload or return: say so while we reconnect.
+  const [isRejoining, setIsRejoining] = useState(false)
+  useEffect(() => {
+    setIsRejoining(Boolean(loadStoredReconnectToken(roomCode)))
+  }, [roomCode])
 
   const { tableState, socialState, yourId, isHost, sendAction, seatMe, sendMessage, isConnected, connectionIssue, drinkEvents, orderDrink, sessionEnded, notices, dismissNotice } = useRoom(
     roomCode,
     currentProfile
   )
+  // Drinks are a 3D-table feature: the 2D layout (phones, tablets) never shows them.
+  const isTwoDLayout = useIsTwoDLayout()
   // Drunk players occasionally misread a freshly dealt card on their own screen only.
-  const displayTableState = useDrunkHallucination(tableState, yourId)
+  const hallucinatedTableState = useDrunkHallucination(tableState, yourId)
+  const displayTableState = isTwoDLayout ? tableState : hallucinatedTableState
   const { playCue: playSoundCue } = usePokerSoundscape(tableState ?? undefined, yourId, {
     enabled: soundPreferencesReady,
     connected: isConnected,
@@ -388,9 +415,11 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           <div className="room-loading-copy">
             {connectionIssue
               ? 'Live table unavailable'
-              : isConnected
-                ? 'Loading table...'
-                : 'Connecting...'}
+              : isRejoining
+                ? 'Rejoining…'
+                : isConnected
+                  ? 'Loading table...'
+                  : 'Connecting...'}
           </div>
           <div className="room-loading-subcopy">
             {connectionIssue
@@ -410,7 +439,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
         </div>
       )}
 
-      {tableState && (
+      {tableState && !isTwoDLayout && (
         <>
           <DrunkVisionLayer />
           <DrinkControls variant="desktop" />

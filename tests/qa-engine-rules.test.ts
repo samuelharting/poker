@@ -273,7 +273,8 @@ describe('rabbit hunt', () => {
     expect(() => runRabbitHunt(state)).toThrow()
     state = processAction(state, state.actingPlayerId!, 'fold')
     const hunted = runRabbitHunt(state)
-    expect(hunted.communityCards).toHaveLength(5)
+    expect(hunted.communityCards).toHaveLength(0)
+    expect(hunted.rabbitCards).toHaveLength(5)
     expect(hunted.recentActions[0]).toMatch(/^Rabbit hunt: flop .* \| turn .* \| river /)
     // Payouts never change.
     expect(hunted.players.map(player => player.stack)).toEqual(state.players.map(player => player.stack))

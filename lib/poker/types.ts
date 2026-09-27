@@ -173,6 +173,8 @@ export interface TableState {
   round: BettingRound | null
   players: SeatPlayer[]
   communityCards: Card[]
+  /** Rabbit-hunt cards after a fold-ended hand: never played, never in hand labels. */
+  rabbitCards?: Card[]
   pots: Pot[]
   totalPot: number
   currentBet: number
@@ -234,6 +236,8 @@ export interface InternalGameState {
   players: InternalPlayer[]
   deck: Card[]
   communityCards: Card[]
+  /** Streets a rabbit hunt showed after the hand ended; kept off the real board. */
+  rabbitCards?: Card[]
   pots: Pot[]
   totalPot: number
   currentBet: number

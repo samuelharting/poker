@@ -2124,7 +2124,9 @@ describe('PokerRoom rabbit hunting', () => {
     const finalSnapshot = lastMessage(alice.connection, 'room_snapshot')
     expect(finalSnapshot?.state.phase).toBe('between_hands')
     expect(finalSnapshot?.state.rabbitHuntingEnabled).toBe(true)
-    expect(finalSnapshot?.state.communityCards).toEqual([
+    // The hunted streets never join the played board.
+    expect(finalSnapshot?.state.communityCards).toEqual([])
+    expect(finalSnapshot?.state.rabbitCards).toEqual([
       { rank: 'A', suit: 'spades' },
       { rank: 'K', suit: 'hearts' },
       { rank: 'Q', suit: 'clubs' },
@@ -2182,7 +2184,9 @@ describe('PokerRoom rabbit hunting', () => {
     const finalSnapshot = lastMessage(alice.connection, 'room_snapshot')
 
     expect(result?.message).toBe('Rabbit hunt revealed the board.')
-    expect(finalSnapshot?.state.communityCards).toEqual([
+    // The hunted streets never join the played board.
+    expect(finalSnapshot?.state.communityCards).toEqual([])
+    expect(finalSnapshot?.state.rabbitCards).toEqual([
       { rank: 'A', suit: 'spades' },
       { rank: 'K', suit: 'hearts' },
       { rank: 'Q', suit: 'clubs' },
@@ -2193,7 +2197,7 @@ describe('PokerRoom rabbit hunting', () => {
 
     vi.advanceTimersByTime(AUTO_START_DELAY - 1)
     expect(lastMessage(alice.connection, 'room_snapshot')?.state.phase).toBe('between_hands')
-    expect(lastMessage(alice.connection, 'room_snapshot')?.state.communityCards).toHaveLength(5)
+    expect(lastMessage(alice.connection, 'room_snapshot')?.state.rabbitCards).toHaveLength(5)
 
     vi.advanceTimersByTime(2)
     expect(lastMessage(alice.connection, 'room_snapshot')?.state.phase).toBe('in_hand')
@@ -2308,6 +2312,41 @@ describe('PokerRoom fun mode', () => {
 
     send(server, guest.connection, { type: 'update_table_settings', funModeEnabled: false })
     expect(lastMessage(host.connection, 'room_snapshot')?.state.funModeEnabled).toBe(true)
+  })
+})
+
+describe('PokerRoom bot drinks', () => {
+  it('bots order a drink mid-hand in fun mode so drinking shows up at bot tables', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-15T12:00:00.000Z'))
+    const { room, server } = createHarness()
+    server.botDrinkRandom = () => 0
+    const host = joinPlayer(server, room, 'drink-host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+    send(server, host.connection, { type: 'add_bots', count: 2 })
+    send(server, host.connection, { type: 'start_game' })
+
+    vi.advanceTimersByTime(1600)
+    const bots = lastMessage(host.connection, 'room_snapshot')?.state.players.filter(player => player.isBot) ?? []
+    expect(bots.length).toBe(2)
+    expect(bots.map(bot => bot.drinks?.beers)).toEqual([1, 1])
+    vi.useRealTimers()
+  })
+
+  it('bots stay sober when fun mode is off', () => {
+    vi.useFakeTimers()
+    const { room, server } = createHarness()
+    server.botDrinkRandom = () => 0
+    const host = joinPlayer(server, room, 'dry-host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+    send(server, host.connection, { type: 'add_bots', count: 2 })
+    send(server, host.connection, { type: 'update_table_settings', funModeEnabled: false })
+    send(server, host.connection, { type: 'start_game' })
+
+    vi.advanceTimersByTime(12000)
+    const bots = lastMessage(host.connection, 'room_snapshot')?.state.players.filter(player => player.isBot) ?? []
+    expect(bots.every(bot => (bot.drinks?.beers ?? 0) === 0)).toBe(true)
+    vi.useRealTimers()
   })
 })
 
