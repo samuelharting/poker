@@ -120,6 +120,8 @@ export interface PrankRuntime {
   heroShot: HeroShot | null
   firstPerson: FirstPersonShot
   shake: { startedAt: number; strength: number; duration: number }
+  /** Chip hit you: head snaps back, then you glare at whoever threw it. */
+  glare: { startedAt: number; yaw: number; pitch: number }
   createChip: () => THREE.Mesh
   glassMaterials: THREE.Material[]
   glassGeometries: THREE.BufferGeometry[]
@@ -477,6 +479,7 @@ export function createPrankRuntime(
     heroShot: null,
     firstPerson: createFirstPersonShot(camera),
     shake: { startedAt: Number.NEGATIVE_INFINITY, strength: 0, duration: 0 },
+    glare: { startedAt: Number.NEGATIVE_INFINITY, yaw: 0, pitch: 0 },
     createChip,
     glassMaterials: [],
     glassGeometries: [],
@@ -773,8 +776,8 @@ function updateFlick(runtime: PrankRuntime, flick: FlickPrank, frame: PrankFrame
       flick.launch.z * a + control.z * b + end.z * c
     )
     chip.position.copy(flick.position)
-    // Flying at the lens it would fill the screen: cap its apparent size.
-    if (flick.toHero) chip.scale.setScalar(Math.min(CHIP_SCALE, 0.55 * runtime.camera.position.distanceTo(flick.position)))
+    // Flying at you: big enough to see coming, capped only right at the lens.
+    if (flick.toHero) chip.scale.setScalar(Math.min(CHIP_SCALE * 1.6, 2.4 * runtime.camera.position.distanceTo(flick.position)))
     chip.rotation.x += delta * 30
     chip.rotation.z += delta * 8
     if (t >= 1) {
@@ -782,7 +785,19 @@ function updateFlick(runtime: PrankRuntime, flick: FlickPrank, frame: PrankFrame
       if (flick.toHero) {
         const screen = project(runtime, end, 1, 1)
         addFlash(runtime, 'bonk', time, { x: screen.x, y: screen.y }, flick.peripheral)
-        startShake(runtime, time, flick.peripheral ? 0.25 : 1, flick.peripheral ? 0.2 : 0.4)
+        startShake(runtime, time, flick.peripheral ? 0.35 : 1.6, flick.peripheral ? 0.25 : 0.55)
+        if (!flick.peripheral && sender) {
+          // Look daggers at whoever threw it (never while you're deciding).
+          headWorld(sender, scratchC)
+          runtime.camera.updateMatrixWorld()
+          const local = runtime.camera.worldToLocal(scratchC)
+          const yaw = Math.atan2(-local.x, -local.z)
+          runtime.glare = {
+            startedAt: time,
+            yaw: THREE.MathUtils.clamp(yaw, -0.45, 0.45),
+            pitch: THREE.MathUtils.clamp(Math.atan2(local.y, Math.hypot(local.x, local.z)), -0.15, 0.2),
+          }
+        }
         countOnHost(runtime, 'popsBonk')
         // Drops away out of view, down onto the felt in front of the hero.
         runtime.camera.getWorldDirection(flick.velocity).multiplyScalar(0.6)
@@ -869,14 +884,30 @@ export function updatePranks(runtime: PrankRuntime, frame: PrankFrame): PrankCam
   updatePops(runtime, frame)
   const headTilt = updateFirstPersonShot(runtime, frame.time, frame.heroColors)
   if (frame.reducedMotion) return headTilt > 0 ? { ...NO_KICK, headTilt } : NO_KICK
+  // Glare: after the snap-back, turn toward the thrower, hold, turn back.
+  const glareSince = frame.time - runtime.glare.startedAt
+  const GLARE_IN = 0.3
+  const GLARE_HOLD = 0.9
+  const GLARE_OUT = 0.6
+  const glareAmount = glareSince < 0.18 || glareSince > 0.18 + GLARE_IN + GLARE_HOLD + GLARE_OUT
+    ? 0
+    : Math.min(1, (glareSince - 0.18) / GLARE_IN, (0.18 + GLARE_IN + GLARE_HOLD + GLARE_OUT - glareSince) / GLARE_OUT)
+  const glareEase = glareAmount * glareAmount * (3 - 2 * glareAmount)
+  const glareYaw = runtime.glare.yaw * glareEase
+  const glarePitch = runtime.glare.pitch * glareEase
   const shake = runtime.shake
   const since = frame.time - shake.startedAt
-  if (since < 0 || since > shake.duration) return headTilt > 0 ? { ...NO_KICK, headTilt } : NO_KICK
+  if (since < 0 || since > shake.duration) {
+    if (glareEase > 0) return { headTilt, pitch: glarePitch, yaw: glareYaw, roll: 0 }
+    return headTilt > 0 ? { ...NO_KICK, headTilt } : NO_KICK
+  }
   const decay = Math.pow(1 - since / shake.duration, 2) * shake.strength
+  // A hit snaps the head back (pitch up) before the wobble settles.
+  const snap = since < 0.35 ? Math.sin((since / 0.35) * Math.PI) * 0.09 * Math.min(1, shake.strength) : 0
   return {
     headTilt,
-    pitch: Math.sin(since * 57) * 0.022 * decay + 0.02 * decay,
-    yaw: Math.sin(since * 43 + 1.3) * 0.016 * decay,
+    pitch: Math.sin(since * 57) * 0.022 * decay + 0.02 * decay + snap + glarePitch,
+    yaw: Math.sin(since * 43 + 1.3) * 0.016 * decay + glareYaw,
     roll: Math.sin(since * 38 + 0.5) * 0.02 * decay,
   }
 }
