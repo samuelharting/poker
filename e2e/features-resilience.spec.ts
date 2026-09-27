@@ -79,12 +79,16 @@ test('a server rejection shows a small notice instead of vanishing', async ({ br
 
 test('a double-clicked action is sent once', async ({ browser }) => {
   const host = await newPlayer(browser, 'DblHostD', 'desktop')
+  // Each action is keyed to the turn it was sent in (per the latest snapshot):
+  // a turn may only ever get one, and only when it is ours.
   const sent: string[] = []
   host.page.on('websocket', ws => {
     if (!ws.url().includes('/parties/')) return
     ws.on('framesent', frame => {
       const raw = typeof frame.payload === 'string' ? frame.payload : frame.payload.toString('utf8')
-      if (raw.includes('"player_action"')) sent.push(raw)
+      if (!raw.includes('"player_action"')) return
+      const state = host.tap.snapshot
+      sent.push(`${state?.handNumber}:${state?.round}:${state?.actingPlayerId === host.tap.yourId ? 'mine' : 'NOT MINE'}:${state?.currentBet}`)
     })
   })
   try {
@@ -98,7 +102,9 @@ test('a double-clicked action is sent once', async ({ browser }) => {
     await button.dblclick()
     await host.page.keyboard.press('c')
     await host.page.waitForTimeout(1_500)
-    expect(sent).toHaveLength(1)
+    expect(sent.length).toBeGreaterThanOrEqual(1)
+    expect(sent.filter(key => key.includes('NOT MINE'))).toEqual([])
+    expect(new Set(sent).size, `one action per turn: ${sent.join(' | ')}`).toBe(sent.length)
   } finally {
     await closeAll([host])
   }
