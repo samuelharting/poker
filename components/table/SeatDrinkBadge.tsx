@@ -33,8 +33,8 @@ export function SeatDrinkBadge({
     }
 
     seenDrinkIdRef.current = lastDrinkId
-    // Nobody cares when someone drinks water (owner): no bubble for it.
-    if (lastDrinkKind === 'water') return
+    // No big emoji bubble for beers or water (owner): the 3D drink shows it.
+    if (lastDrinkKind === 'water' || lastDrinkKind === 'beer') return
     setSip({ id: lastDrinkId, kind: lastDrinkKind })
     const timer = window.setTimeout(() => setSip(null), SIP_ANIMATION_MS)
     return () => window.clearTimeout(timer)

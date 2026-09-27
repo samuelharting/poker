@@ -240,7 +240,7 @@ describe('companion3D runtime', () => {
     id: 'll-2-1', ownerId: 'bob', reason: 'streak', streak: 2, mood: 'arrive', since: 1, muted: false,
   })
 
-  it('builds, enters, chats, cheers, sulks off and disposes without WebGL', () => {
+  it('builds, enters, cheers, sulks off and disposes without WebGL, and never says a word', () => {
     const scene = new THREE.Scene()
     const camera = makeCamera()
     const seat = makeSeat(4)
@@ -266,52 +266,17 @@ describe('companion3D runtime', () => {
     run(2.5)
     expect(runtime.group.visible).toBe(true)
     expect(runtime.group.position.distanceTo(seat.getWorldPosition(new THREE.Vector3()))).toBeLessThan(1.3)
-    expect(getCompanionLine(runtime)).toBeTypeOf('string')
-    expect(getCompanionBubbleAnchor(runtime, new THREE.Vector3())).toBe(true)
-
-    // Chatty: several different short lines within ~40 s.
     run(40)
-    expect(lines.size).toBeGreaterThanOrEqual(4)
-    for (const line of lines) expect(countLadyLuckWords(line)).toBeLessThanOrEqual(5)
-
     state = { ...state, mood: 'cheer', streak: 3, since: 2 }
     run(0.5)
-    expect(LADY_LUCK_LINES.cheer).toContain(getCompanionLine(runtime))
-
     state = { ...state, mood: 'sulk_leave', since: 3 }
-    run(0.2)
-    expect(LADY_LUCK_LINES.sulk_leave).toContain(getCompanionLine(runtime))
-    run(2.5)
+    run(2.7)
     expect(runtime.group.visible).toBe(false)
+    // Owner: Lady Luck never talks.
+    expect(lines.size).toBe(0)
 
     disposeCompanion(runtime)
     expect(runtime.group.parent).toBeNull()
-  })
-
-  it('says one pouty "Fine." when muted and then stays silent while still animating', () => {
-    const scene = new THREE.Scene()
-    const camera = makeCamera()
-    const seat = makeSeat(3)
-    const runtime = createCompanion(scene)
-    let time = 0
-    let state: CompanionState = baseState()
-    const run = (seconds: number) => {
-      const seen: Array<string | null> = []
-      for (let frame = 0; frame < seconds * 30; frame += 1) {
-        time += 1 / 30
-        updateCompanion(runtime, { time, delta: 1 / 30, reducedMotion: false, state, ownerSeat: seat, ownerIsHero: false, camera })
-        seen.push(getCompanionLine(runtime))
-      }
-      return seen
-    }
-    run(3)
-    state = { ...state, muted: true }
-    const afterMute = run(1)
-    expect(afterMute[0]).toBe(LADY_LUCK_LINES.muted[0])
-    const later = run(30).slice(45) // after the 2.2 s "Fine." line
-    expect(later.every(line => line === null)).toBe(true)
-    expect(runtime.group.visible).toBe(true)
-    disposeCompanion(runtime)
   })
 
   it('hides when the owner seat is unknown and supports the hero placement', () => {

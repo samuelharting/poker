@@ -88,7 +88,10 @@ export function CompanionBadge({
   const timerRef = useRef<number | null>(null)
   const counterRef = useRef(0)
 
+  // Owner: Lady Luck never talks, so the badge never shows a speech bubble.
+  const LADY_LUCK_SPEAKS = false
   const show = (key: string, text: string) => {
+    if (!LADY_LUCK_SPEAKS) return
     setBubble({ key, text })
     if (timerRef.current !== null) window.clearTimeout(timerRef.current)
     timerRef.current = window.setTimeout(() => {

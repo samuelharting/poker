@@ -4008,3 +4008,74 @@
     opacity: 0.7;
   }
 }
+
+/* ============================================================
+   Time to act: hard to miss. Calm → amber at 10s → red + pulse at 5s.
+   ============================================================ */
+.table-scene[data-desktop-three='true'] .timer-bar-shell {
+  --timer-color: var(--c-felt-300, #39c795);
+  padding: 8px 12px 10px;
+  border: 1px solid color-mix(in srgb, var(--timer-color) 45%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--timer-color) 10%, rgba(8, 10, 14, 0.6));
+  transition: border-color 300ms var(--ease-out), background 300ms var(--ease-out);
+}
+
+.table-scene[data-desktop-three='true'] .timer-bar-shell[data-urgency='warn'] {
+  --timer-color: #f5b43b;
+}
+
+.table-scene[data-desktop-three='true'] .timer-bar-shell[data-urgency='low'] {
+  --timer-color: #ff5a4f;
+  animation: timer-urgent-pulse 900ms ease-in-out infinite;
+}
+
+.table-scene[data-desktop-three='true'] .timer-bar-header > span:first-child {
+  color: color-mix(in srgb, var(--timer-color) 70%, var(--c-text-2));
+  font-weight: 800;
+}
+
+.table-scene[data-desktop-three='true'] .timer-bar-header span.timer-bar-seconds,
+.table-scene[data-desktop-three='true'] .timer-bar-header span.timer-bar-seconds.is-low {
+  color: var(--timer-color);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.table-scene[data-desktop-three='true'] .timer-bar-seconds b {
+  display: inline-block;
+  font-size: 26px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  animation: timer-tick 280ms var(--ease-pop, cubic-bezier(.2,1.4,.4,1)) both;
+}
+
+.table-scene[data-desktop-three='true'] .timer-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.table-scene[data-desktop-three='true'] .timer-bar-fill,
+.table-scene[data-desktop-three='true'] .timer-bar-fill.timer-low {
+  background: var(--timer-color);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--timer-color) 70%, transparent);
+  transition: transform 1s linear, background 300ms var(--ease-out);
+}
+
+@keyframes timer-tick {
+  0% { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+
+@keyframes timer-urgent-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 90, 79, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(255, 90, 79, 0.35), 0 0 22px rgba(255, 90, 79, 0.45); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-scene[data-desktop-three='true'] .timer-bar-shell[data-urgency='low'],
+  .table-scene[data-desktop-three='true'] .timer-bar-seconds b {
+    animation: none;
+  }
+}

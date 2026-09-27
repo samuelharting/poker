@@ -2346,7 +2346,11 @@ export function triggerCompanionGesture(runtime: CompanionRuntime, name: Compani
   startGesture(anim, name, anim.time)
 }
 
+/** Owner: Lady Luck never talks (no lines, no bubble, no talking mouth). */
+const LADY_LUCK_SPEAKS = false
+
 function say(anim: CompanionAnimState, context: LadyLuckLineContext, duration: number, name?: string) {
+  if (!LADY_LUCK_SPEAKS) return
   // Once told to shut up she only gets her one pouty "Fine." in.
   if (anim.muted && context !== 'muted') return
   const id = anim.current?.id ?? 'lady-luck'

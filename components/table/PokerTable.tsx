@@ -20,7 +20,7 @@ import { useDrinks } from './DrinkContext'
 import { PrankControls } from './PrankControls'
 import { getShotBlockReasonFromState, isLiveInHand, type DrinkEvent } from '@/lib/drinks'
 import { CHIP_FLICK_COOLDOWN_MS, type PrankEvent } from '@/lib/pranks'
-import { CompanionBadge, CompanionMuteButton, CompanionToast } from './CompanionBadge'
+import { CompanionBadge } from './CompanionBadge'
 import { BountyToast } from './BountyToast'
 import { ChipStack } from '@/components/ui/ChipStack'
 import { PlayingCard } from '@/components/ui/PlayingCard'
@@ -2567,7 +2567,6 @@ export function PokerTable({
           <HandOddsPanel view={handOddsView} names={playerNamesById} yourId={yourId} />
         </div>
       ) : null}
-      <CompanionMuteButton companion={presentedCompanion} yourId={yourId} hidden={isMobileViewport} />
       {!isMobileViewport && <BountyToast bounty={presentedBounty} players={state.players} />}
       {/* Both layouts: the desktop 3D room stays mounted through a socket drop. */}
       {!isConnected && (
@@ -2576,13 +2575,6 @@ export function PokerTable({
           Reconnecting…
         </div>
       )}
-      <CompanionToast
-        companion={presentedCompanion}
-        yourId={yourId}
-        nameOf={id => state.players.find(player => player.id === id)?.nickname
-          ?? state.lobbyPlayers?.find(player => player.id === id)?.nickname
-          ?? 'someone'}
-      />
       {/* Held back while it is your turn so it never covers the action. */}
       {pendingIncomingCardRequest && incomingCardRequester && !settingsOpen && !hasActionTray ? (
         <CardRevealConsentPrompt
@@ -3268,10 +3260,15 @@ export function PokerTable({
               )}
             </div>
 
-            <div className="timer-bar-shell">
+            <div
+              className="timer-bar-shell"
+              data-urgency={turnTimer.percent <= 28 || turnTimer.secondsLeft <= 3 ? 'low' : turnTimer.percent <= 55 ? 'warn' : 'calm'}
+            >
               <div className="timer-bar-header">
                 <span>Time to act</span>
-                <span className={turnTimer.secondsLeft <= 5 ? 'is-low' : undefined}>{turnTimer.secondsLeft}s left</span>
+                <span className={`timer-bar-seconds ${turnTimer.secondsLeft <= 5 ? 'is-low' : ''}`}>
+                  <b key={turnTimer.secondsLeft}>{turnTimer.secondsLeft}</b>s left
+                </span>
               </div>
               <div className="timer-bar">
                 <div

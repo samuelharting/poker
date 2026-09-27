@@ -3913,10 +3913,10 @@ export function DesktopPokerRoom3D({
     for (const event of prankEvents) queuePrank(runtime.pranks, event, context)
     for (const event of drinkEvents) {
       if (Date.now() - event.at > 6_000) continue
-      // Water is never announced over someone's seat (owner); only the pill's trip is.
-      if (event.kind === 'house_beer') {
-        queueSeatPop(runtime.pranks, event.id, event.playerId, (event.amount ?? 1) >= 2 ? 'beer2' : 'beer', context)
-      }
+      // No icon pops over seats for beers or water (owner): the 3D drinking
+      // animation is the only tell. Keeps the event loop for future cues.
+      void event
+      void queueSeatPop
     }
   }, [prankEvents, drinkEvents])
 
