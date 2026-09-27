@@ -374,6 +374,17 @@
   height: 100%;
 }
 
+/* Ease the room in once it has actually rendered a few frames (after shader
+   compiles), instead of popping in at full brightness. */
+.desktop-3d-stage .desktop-3d-canvas {
+  opacity: 0;
+}
+
+.desktop-3d-stage[data-scene-ready='true'] .desktop-3d-canvas {
+  opacity: 1;
+  transition: opacity 650ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
 /* Pot readout rides on the felt above the pot chips ------------------------ */
 
 .table-scene[data-desktop-three='true'] .table-surface .pot-display {

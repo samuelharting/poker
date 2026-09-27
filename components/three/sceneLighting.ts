@@ -35,6 +35,8 @@ export interface StageLights {
   bounce: THREE.PointLight
   /** Warm pool that swells on a winner or an all-in. */
   accent: THREE.PointLight
+  /** Soft warm fill from behind the camera so the near rail and hands never go muddy. */
+  front: THREE.PointLight
 }
 
 /**
@@ -76,7 +78,11 @@ export function createStageLights(scene: THREE.Scene): StageLights {
   accent.position.set(0, 3.2, 0)
   scene.add(accent)
 
-  return { key, fill, rimLeft, rimRight, bounce, accent }
+  const front = new THREE.PointLight('#ffd9b0', 7, 11, 1.5)
+  front.position.set(0, 3.4, 6.2)
+  scene.add(front)
+
+  return { key, fill, rimLeft, rimRight, bounce, accent, front }
 }
 
 const VignetteShader = {
@@ -118,6 +124,8 @@ export interface PostFx {
   bloom: UnrealBloomPass
   fxaa: ShaderPass
   setSize: (width: number, height: number, pixelRatio: number) => void
+  /** Full-resolution bloom (false) or a half-resolution bloom chain (true). */
+  setReducedBloom: (reduced: boolean) => void
   dispose: () => void
 }
 
@@ -139,15 +147,34 @@ export function createPostFx(
   const fxaa = new ShaderPass(FXAAShader)
   composer.addPass(fxaa)
 
+  let reducedBloom = false
+  const size = { width: 1, height: 1, pixelRatio: 1 }
+  const applyBloomSize = () => {
+    const scale = reducedBloom ? 0.5 : 1
+    bloom.setSize(
+      Math.max(1, Math.round(size.width * size.pixelRatio * scale)),
+      Math.max(1, Math.round(size.height * size.pixelRatio * scale))
+    )
+  }
+
   return {
     composer,
     bloom,
     fxaa,
     setSize(width, height, pixelRatio) {
+      size.width = width
+      size.height = height
+      size.pixelRatio = pixelRatio
       composer.setPixelRatio(pixelRatio)
       composer.setSize(width, height)
+      applyBloomSize()
       const resolution = fxaa.material.uniforms.resolution?.value as THREE.Vector2 | undefined
       resolution?.set(1 / (width * pixelRatio), 1 / (height * pixelRatio))
+    },
+    setReducedBloom(reduced) {
+      if (reduced === reducedBloom) return
+      reducedBloom = reduced
+      applyBloomSize()
     },
     dispose() {
       composer.dispose()
@@ -156,31 +183,75 @@ export function createPostFx(
   }
 }
 
+/** 0 = full post (bloom, vignette, FXAA); 1 = half-res bloom, lower pixel ratio; 2 = no post. */
+export type RenderQuality = 0 | 1 | 2
+
 /**
- * Watches frame time and reports when the device can't afford post effects.
- * Uses a rolling average so a single hitch (GC, tab switch) never downgrades.
+ * Adaptive quality: watches steady-state frame times and steps render quality
+ * down when the device can't hold ~60fps, and back up when it can.
+ *
+ * - The first seconds after start (and after any avatar load, resume or
+ *   resize, see `settle`) are ignored: shader compiles and model uploads are
+ *   one-off stalls, not the device's steady cost.
+ * - Single hitches (>250ms: GC, tab switch, a React commit) never count.
+ * - It uses the window median, so a few slow frames can't trigger a change.
+ * - It recovers: sustained headroom steps quality back up, with a longer
+ *   hold-off whenever an upgrade had to be undone (no oscillation).
  */
 export class FrameBudget {
+  level: RenderQuality = 0
   private samples: number[] = []
-  private readonly limitMs: number
+  private settleUntil: number
+  private cooldownUntil = 0
+  private upgradeBlockedUntil = 0
+  private lastUpgradeAt = Number.NEGATIVE_INFINITY
+  private fastWindows = 0
   private readonly window: number
-  degraded = false
 
-  constructor(limitMs = 22, window = 90) {
-    this.limitMs = limitMs
+  constructor(startTime = 0, private readonly warmupSeconds = 5, window = 120) {
     this.window = window
+    this.settleUntil = startTime + warmupSeconds
   }
 
-  push(deltaSeconds: number) {
-    if (this.degraded) return false
-    this.samples.push(deltaSeconds * 1000)
-    if (this.samples.length < this.window) return false
-    const average = this.samples.reduce((sum, value) => sum + value, 0) / this.samples.length
-    this.samples = []
-    if (average > this.limitMs) {
-      this.degraded = true
-      return true
+  /** Ignore frame times until `time + seconds` (loads, resumes, resizes). */
+  settle(time: number, seconds = 2.5) {
+    this.settleUntil = Math.max(this.settleUntil, time + seconds)
+    this.samples.length = 0
+  }
+
+  /** @returns the new quality level when it changes, otherwise null. */
+  push(deltaSeconds: number, time: number): RenderQuality | null {
+    if (time < this.settleUntil || time < this.cooldownUntil) return null
+    const ms = deltaSeconds * 1000
+    if (ms > 250) return null
+    this.samples.push(ms)
+    if (this.samples.length < this.window) return null
+    const sorted = this.samples.slice().sort((a, b) => a - b)
+    this.samples.length = 0
+    const median = sorted[sorted.length >> 1]!
+    const p80 = sorted[Math.floor(sorted.length * 0.8)]!
+    if (median > 22 && this.level < 2) {
+      if (time - this.lastUpgradeAt < 12) {
+        // The last upgrade didn't hold; stay down for a good while.
+        this.upgradeBlockedUntil = time + 60
+      }
+      this.fastWindows = 0
+      this.cooldownUntil = time + 1.5
+      this.level = (this.level + 1) as RenderQuality
+      return this.level
     }
-    return false
+    if (this.level > 0 && median < 17.5 && p80 < 18.5 && time >= this.upgradeBlockedUntil) {
+      this.fastWindows += 1
+      if (this.fastWindows >= 3) {
+        this.fastWindows = 0
+        this.cooldownUntil = time + 1.5
+        this.lastUpgradeAt = time
+        this.level = (this.level - 1) as RenderQuality
+        return this.level
+      }
+    } else {
+      this.fastWindows = 0
+    }
+    return null
   }
 }

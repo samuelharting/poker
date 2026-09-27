@@ -57,7 +57,7 @@ describe('desktop room rendering stability', () => {
     expect(roomArtSource).toContain('seededRandom(0x3344524f)')
     expect(sceneSource).toContain('seat.cardMeshes.forEach')
     expect(sceneSource).toContain('wager.chipMeshes.forEach')
-    expect(sceneSource).toContain('animatePot(runtime, time, reducedMotion)')
+    expect(sceneSource).toContain('animatePot(runtime, time, reducedMotion, host)')
     expect(sceneSource).toContain('seat.winnerHalo.visible = seat.winner')
     // One always-on accent light follows the winner; toggling per-seat lights
     // changed the light count and recompiled every shader at showdown.

@@ -90,6 +90,11 @@ function toToonMaterial(source: THREE.Material) {
 
 /** Outline thickness as a fraction of each mesh's bounding radius (rigs use different units). */
 const OUTLINE_WIDTH_RATIO = 0.0075
+/** Outline budget per avatar (each hull re-skins its mesh every frame). */
+const MAX_OUTLINES_PER_AVATAR = 3
+const OUTLINE_MIN_VERTICES = 400
+/** Skinned parts smaller than this skip the shadow pass. */
+const SHADOW_MIN_VERTICES = 300
 
 function createOutlineMaterial(width: number) {
   const material = new THREE.MeshBasicMaterial({
@@ -344,11 +349,22 @@ export function stylizeAvatar(
   applyLook(model, converted.values(), look)
 
   const outlineMaterials: THREE.Material[] = []
+  // Perf: every outline is a second skinned draw. Legs/feet hide under the
+  // table skirt and small parts (eyes, teeth, trims) read fine without ink, so
+  // only the largest few shells (body, head, hair) get a hull.
+  const vertexCountOf = (mesh: THREE.SkinnedMesh) => mesh.geometry.getAttribute('position').count
+  const outlined = new Set(
+    skinnedMeshes
+      .filter(mesh => !/legs|feet|foot/i.test(mesh.name) && vertexCountOf(mesh) >= OUTLINE_MIN_VERTICES)
+      .sort((a, b) => vertexCountOf(b) - vertexCountOf(a))
+      .slice(0, MAX_OUTLINES_PER_AVATAR)
+  )
   for (const mesh of skinnedMeshes) {
-    // Legs/feet hide under the table skirt and tiny painted parts don't need
-    // their own ink line; skip them to save draw calls.
-    const vertexCount = mesh.geometry.getAttribute('position').count
-    if (/legs|feet|foot/i.test(mesh.name) || vertexCount < 120) continue
+    // Shadow pass cost: hidden legs/feet and tiny parts never cast.
+    if (/legs|feet|foot/i.test(mesh.name) || vertexCountOf(mesh) < SHADOW_MIN_VERTICES) mesh.castShadow = false
+  }
+  for (const mesh of skinnedMeshes) {
+    if (!outlined.has(mesh)) continue
     mesh.geometry.computeBoundingSphere()
     const radius = mesh.geometry.boundingSphere?.radius ?? 1
     const outlineMaterial = createOutlineMaterial(radius * OUTLINE_WIDTH_RATIO)

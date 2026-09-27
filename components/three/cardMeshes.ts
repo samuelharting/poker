@@ -110,6 +110,8 @@ export interface CardMesh {
   faceMaterial: THREE.MeshStandardMaterial
   backMaterial: THREE.MeshStandardMaterial
   face: CardFace | null
+  faceMesh: THREE.Mesh
+  backMesh: THREE.Mesh
 }
 
 /**
@@ -144,7 +146,7 @@ export function createCardMesh(width: number): CardMesh {
   group.add(edgeMesh, faceMesh, backMesh)
   group.scale.setScalar(width)
 
-  const card: CardMesh = { group, faceMaterial, backMaterial, face: null }
+  const card: CardMesh = { group, faceMaterial, backMaterial, face: null, faceMesh, backMesh }
   setCardFace(card, null)
   return card
 }
@@ -155,6 +157,27 @@ export function setCardFace(card: CardMesh, face: CardFace | null) {
   card.face = face
   card.faceMaterial.map = face ? getCardFaceTexture(face.rank, face.suit) : getCardBackTexture()
   card.faceMaterial.needsUpdate = true
+}
+
+const cardUp = new THREE.Vector3()
+const cardToCamera = new THREE.Vector3()
+const cardWorld = new THREE.Vector3()
+
+/**
+ * Only one printed side of a card can face the camera, so skip the draw for
+ * the other (backface culling would discard its pixels anyway, but the draw
+ * call itself is the cost). Call once per frame after cards are posed.
+ */
+export function cullHiddenCardSide(card: CardMesh, cameraPosition: THREE.Vector3) {
+  const group = card.group
+  if (!group.visible) return
+  group.updateWorldMatrix(true, false)
+  const elements = group.matrixWorld.elements
+  cardUp.set(elements[4]!, elements[5]!, elements[6]!)
+  cardWorld.setFromMatrixPosition(group.matrixWorld)
+  const facing = cardUp.dot(cardToCamera.subVectors(cameraPosition, cardWorld))
+  card.faceMesh.visible = facing > -1e-4
+  card.backMesh.visible = facing < 1e-4
 }
 
 export function disposeCardMesh(card: CardMesh) {

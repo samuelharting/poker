@@ -2530,8 +2530,15 @@
   gap: var(--sp-1);
   width: max-content;
   max-width: calc(100vw - 32px);
-  padding: var(--sp-3) var(--sp-8);
+  padding: var(--sp-3) var(--sp-8) var(--sp-4);
   translate: -50% -50%;
+  /* A solid plate so the slam reads crisply over the busy back bar. */
+  border: 1px solid color-mix(in srgb, var(--c-ember-300) 55%, transparent);
+  border-radius: 22px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c-ink-900) 88%, transparent), color-mix(in srgb, var(--c-ink-950) 92%, transparent));
+  box-shadow:
+    0 18px 48px color-mix(in srgb, var(--c-ink-950) 70%, transparent),
+    0 0 36px color-mix(in srgb, var(--c-ember-500) 22%, transparent);
   text-align: center;
   pointer-events: none;
   animation: allInSlam 2600ms var(--ease-out) forwards;
@@ -2545,8 +2552,7 @@
   width: 180%;
   aspect-ratio: 2.2;
   border-radius: 50%;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--c-ember-500) 55%, transparent), color-mix(in srgb, var(--c-ember-500) 18%, transparent) 55%, transparent);
-  filter: blur(6px);
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--c-ember-500) 26%, transparent), color-mix(in srgb, var(--c-ember-500) 8%, transparent) 55%, transparent);
   translate: -50% -50%;
   animation: allInFlare 2600ms var(--ease-out) forwards;
 }
@@ -2568,7 +2574,7 @@
 .all-in-kicker {
   display: block;
   padding: 0 0.08em 0.06em;
-  background: linear-gradient(180deg, var(--c-cream-50) 0%, var(--c-brass-200) 30%, var(--c-ember-300) 62%, var(--c-ember-500) 100%);
+  background: linear-gradient(180deg, var(--c-cream-50) 0%, var(--c-brass-200) 38%, var(--c-ember-300) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -2578,8 +2584,8 @@
   letter-spacing: -0.02em;
   text-transform: uppercase;
   filter:
-    drop-shadow(0 3px 0 color-mix(in srgb, var(--c-ruby-600) 90%, transparent))
-    drop-shadow(0 0 26px color-mix(in srgb, var(--c-ember-500) 70%, transparent));
+    drop-shadow(0 3px 0 color-mix(in srgb, var(--c-ruby-600) 95%, transparent))
+    drop-shadow(0 0 10px color-mix(in srgb, var(--c-ember-500) 45%, transparent));
 }
 
 .all-in-player {
@@ -3278,8 +3284,8 @@
 
 /* Anticipation (small), slam (overshoot), shake, hold, quick exit. */
 @keyframes allInSlam {
-  0% { opacity: 0; transform: scale(2.6); filter: blur(8px); }
-  9% { opacity: 1; transform: scale(0.9); filter: blur(0); }
+  0% { opacity: 0; transform: scale(1.7); }
+  7% { opacity: 1; transform: scale(0.92); }
   13% { transform: scale(1.06) translate(0, 0); }
   16% { transform: scale(1) translate(-7px, 3px) rotate(-1.5deg); }
   19% { transform: translate(6px, -3px) rotate(1.2deg); }

@@ -34,13 +34,18 @@ page.on('pageerror', error => console.log('pageerror:', error.message))
 page.on('console', message => {
   if (message.type() === 'error') console.log('console:', message.text().slice(0, 300))
 })
-await page.goto(appUrl, { waitUntil: 'networkidle' })
+await page.goto(appUrl, { waitUntil: 'load', timeout: 120000 })
 await page.getByLabel('Your nickname').fill('Hero')
 await page.getByRole('button', { name: 'Create Table' }).click()
 await page.waitForURL(/\/room\//)
 await page.waitForSelector('.desktop-3d-stage[data-webgl-status="ready"]', { timeout: 60000 })
-await sleep(2500)
-await clickVisible(page, 'Fill seats')
+// Seat restoration can briefly disable Fill seats; retry until the bots sit.
+for (let attempt = 0; attempt < 40; attempt += 1) {
+  const seated = await page.evaluate(() => Number(document.querySelector('.desktop-3d-stage')?.dataset.riggedAvatarTargets ?? 0))
+  if (seated >= 5) break
+  await clickVisible(page, 'Fill seats')
+  await sleep(700)
+}
 await sleep(1500)
 if (process.argv.includes('--deal')) {
   await page.waitForFunction(() => Number(document.querySelector('.desktop-3d-stage')?.dataset.avatarModelsLoaded ?? 0) >= 6, null, { timeout: 60000 }).catch(() => {})

@@ -175,14 +175,14 @@ export interface Shockwave {
 
 export function createShockwave(scene: THREE.Scene): Shockwave {
   const material = new THREE.MeshBasicMaterial({
-    color: '#ff9a4d',
+    color: '#ffb36b',
     transparent: true,
     opacity: 0,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
   })
-  const mesh = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 64), material)
+  const mesh = new THREE.Mesh(new THREE.RingGeometry(0.94, 1, 72), material)
   mesh.rotation.x = -Math.PI / 2
   mesh.visible = false
   mesh.name = 'all-in-shockwave'
@@ -200,8 +200,9 @@ export function animateShockwave(wave: Shockwave, time: number) {
   wave.mesh.visible = progress >= 0 && progress < 1
   if (!wave.mesh.visible) return
   const eased = 1 - Math.pow(1 - progress, 3)
-  wave.mesh.scale.setScalar(0.2 + eased * 3.2)
-  wave.material.opacity = (1 - progress) * 0.9
+  wave.mesh.scale.setScalar(0.2 + eased * 2.1)
+  // A crisp thin ring that fades fast, rather than a thick smeared band.
+  wave.material.opacity = Math.pow(1 - progress, 1.6) * 0.55
 }
 
 export function disposeShockwave(wave: Shockwave) {
