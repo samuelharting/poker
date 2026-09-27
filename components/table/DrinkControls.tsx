@@ -135,7 +135,14 @@ export function DrinkControls({
           aria-label={myDrinks.passedOut ? 'You are passed out' : 'Take a shot (+3)'}
           title={myDrinks.passedOut ? 'You are passed out' : 'Take a shot (+3)'}
         >
-          <span className="drink-button-glyph" aria-hidden="true">🥃</span>
+          <span className="drink-button-glyph" aria-hidden="true">
+            {/* Drawn, not an emoji: some fonts show the tumbler glass as a picture box. */}
+            <svg viewBox="0 0 24 24" width="1em" height="1em">
+              <path d="M5 4h14l-1.6 15.2a2 2 0 0 1-2 1.8H8.6a2 2 0 0 1-2-1.8L5 4Z" fill="rgba(255,255,255,0.18)" stroke="#f4efe4" strokeWidth="1.6" strokeLinejoin="round" />
+              <path d="M6.3 11h11.4l-.9 8.1a1 1 0 0 1-1 .9H8.2a1 1 0 0 1-1-.9L6.3 11Z" fill="#e9a23b" />
+              <path d="M7 12.3h10" stroke="#ffd88a" strokeWidth="1" strokeLinecap="round" />
+            </svg>
+          </span>
           <span className="drink-button-label">Shot</span>
         </button>
         {isCooling && lastOrderAt !== null && (
