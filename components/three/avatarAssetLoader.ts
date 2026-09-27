@@ -93,10 +93,41 @@ export async function createAvatarAssetInstance(
   return createAvatarAssetInstanceFromTemplate(template)
 }
 
+/**
+ * SkeletonUtils.clone gives every skinned mesh its own Skeleton copy, even when
+ * the GLB's meshes shared one. Each Skeleton recomputes its bone matrices and
+ * re-uploads its bone texture every frame, so an avatar of a dozen skinned
+ * parts cost a dozen uploads a frame (~86 texture uploads per frame at a full
+ * table). Meshes bound to the same bones with the same bind inverses get one
+ * shared Skeleton again.
+ */
+export function shareClonedSkeletons(model: THREE.Object3D) {
+  const shared: THREE.Skeleton[] = []
+  model.traverse(object => {
+    const mesh = object as THREE.SkinnedMesh
+    if (!mesh.isSkinnedMesh || !mesh.skeleton) return
+    const skeleton = mesh.skeleton
+    const match = shared.find(candidate => (
+      candidate.bones.length === skeleton.bones.length &&
+      candidate.bones.every((bone, index) => bone === skeleton.bones[index]) &&
+      candidate.boneInverses.every((inverse, index) => inverse.equals(skeleton.boneInverses[index]!))
+    ))
+    if (match) {
+      if (match !== skeleton) {
+        mesh.skeleton = match
+        skeleton.dispose()
+      }
+    } else {
+      shared.push(skeleton)
+    }
+  })
+}
+
 export function createAvatarAssetInstanceFromTemplate(
   template: AvatarAssetTemplate
 ): AvatarAssetInstance {
   const model = cloneSkeleton(template.scene)
+  shareClonedSkeletons(model)
   const materialClones = new Map<THREE.Material, THREE.Material>()
 
   model.traverse(object => {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, type MutableRefObject } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject } from 'react'
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import {
@@ -180,6 +180,8 @@ interface DesktopPokerRoom3DProps {
   drinkEvents?: readonly DrinkEvent[]
   /** Winning board cards to glow during the showdown highlight. */
   highlightedCards?: ReadonlyArray<{ rank: string; suit: ThreeCardView['suit'] }>
+  /** The acting opponent's clock (0-100), drained on their nameplate. */
+  actingTimerPercent?: number
 }
 
 interface SeatRuntime {
@@ -340,6 +342,8 @@ interface SceneRuntime {
   pause: () => void
   resume: () => void
   dispose: () => void
+  /** Set by the component: the scene is unusable (black output) and must be rebuilt. */
+  onBroken?: () => void
 }
 
 const SUIT_SYMBOLS: Record<ThreeCardView['suit'], string> = {
@@ -2033,7 +2037,7 @@ function formatPotAmount(amount: number) {
  * takes its place and counts down as each chip lands on the winner's stack.
  */
 function updatePayoutReadout(host: HTMLElement, amount: number | null) {
-  const readout = host.querySelector<HTMLElement>('.payout-pot-readout')
+  const readout = cachedQuery(host, '.payout-pot-readout')
   if (!readout) return
   const visible = amount !== null
   if (readout.dataset.visible !== String(visible)) readout.dataset.visible = String(visible)
@@ -2884,28 +2888,31 @@ function getTableHeat(runtime: SceneRuntime, time: number) {
  * the camera drifts, pushes in on all-ins, and pans toward winners.
  */
 function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width: number, height: number) {
-  const scratch = new THREE.Vector3()
+  const scratch = overlayScratch
   const placedPlates: Array<{ element: HTMLElement; x: number; y: number; extra: number }> = []
-  // The pot readout floats just above the pot chips on the felt.
-  const tableScene = host.closest<HTMLElement>('.table-scene')
-  if (tableScene) {
-    scratch.copy(runtime.pot.group.position)
-    scratch.x += 0.42
-    scratch.y += 0.12
-    scratch.project(runtime.camera)
-    tableScene.style.setProperty('--pot-x', `${((scratch.x * 0.5 + 0.5) * width).toFixed(1)}px`)
-    tableScene.style.setProperty('--pot-y', `${((-scratch.y * 0.5 + 0.5) * height).toFixed(1)}px`)
-  }
+  // Everything below is computed first and written last: no DOM read (hover,
+  // querySelector) ever follows a style write in the same frame, so the frame
+  // never forces a synchronous style recalc.
+  // The pot readout floats just above the pot chips on the felt. Its position
+  // is written on the two readouts themselves, never on .table-scene: a custom
+  // property changed on the scene root is inherited by (and re-styles) the whole
+  // table DOM every frame.
+  scratch.copy(runtime.pot.group.position)
+  scratch.x += 0.42
+  scratch.y += 0.12
+  scratch.project(runtime.camera)
+  const potX = (scratch.x * 0.5 + 0.5) * width
+  const potY = (-scratch.y * 0.5 + 0.5) * height
+  let heroBet: { x: number; y: number } | null = null
   for (const seat of runtime.seats.values()) {
-    if (!seat.root.visible && tableScene) {
+    if (!seat.root.visible) {
       // The hero's own bet label rides on their chips in front of the camera.
       const heroWager = runtime.wagers.get(seat.playerId)
       if (heroWager) {
         scratch.copy(heroWager.target)
         scratch.y += 0.2
         scratch.project(runtime.camera)
-        tableScene.style.setProperty('--hero-bet-x', `${((scratch.x * 0.5 + 0.5) * width).toFixed(1)}px`)
-        tableScene.style.setProperty('--hero-bet-y', `${((-scratch.y * 0.5 + 0.5) * height).toFixed(1)}px`)
+        heroBet = { x: (scratch.x * 0.5 + 0.5) * width, y: (-scratch.y * 0.5 + 0.5) * height }
       }
     }
     let element = runtime.overlayElements.get(seat.playerId)
@@ -2932,24 +2939,25 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
       ? height - 18
       : THREE.MathUtils.clamp((-scratch.y * 0.5 + 0.5) * height, 150, height - 260)
     const pinned = !nearSpectated && x !== rawX
-    element.classList.toggle('is-edge-pinned', pinned)
-    element.classList.toggle('is-near-spectated', nearSpectated)
-    if (!element.classList.contains('is-local-player')) {
-      // Revealed hole cards sit above the plate and need clearance too.
-      const extra = element.querySelector('.has-revealed-cards') ? 62 : 0
-      placedPlates.push({ element, x, y, extra })
-    }
-    element.style.setProperty('--seat-x', `${x.toFixed(1)}px`)
-    element.style.setProperty('--seat-y', `${y.toFixed(1)}px`)
-    element.style.setProperty('--seat-depth', `${(TABLE_SEAT_SCALES[toVisualSeat(seat.visualSeat)] ?? 1).toFixed(3)}`)
+    const isLocal = element.classList.contains('is-local-player')
+    // Revealed hole cards sit above the plate and need clearance too.
+    const extra = !isLocal && element.querySelector('.has-revealed-cards') ? 62 : 0
+    placedPlates.push({ element, x, y, extra: isLocal ? -1 : extra })
+    toggleClass(element, 'is-edge-pinned', pinned)
+    toggleClass(element, 'is-near-spectated', nearSpectated)
+    setStyleVar(element, '--seat-depth', (TABLE_SEAT_SCALES[toVisualSeat(seat.visualSeat)] ?? 1).toFixed(3))
 
     const wager = runtime.wagers.get(seat.playerId)
     if (wager) {
       scratch.copy(wager.target)
       scratch.y += WAGER_LABEL_LIFT
       scratch.project(runtime.camera)
-      element.style.setProperty('--bet-x', `${((scratch.x * 0.5 + 0.5) * width - x).toFixed(1)}px`)
-      element.style.setProperty('--bet-y', `${((-scratch.y * 0.5 + 0.5) * height - y).toFixed(1)}px`)
+      overlayBetPositions.set(element, {
+        x: (scratch.x * 0.5 + 0.5) * width,
+        y: (-scratch.y * 0.5 + 0.5) * height,
+      })
+    } else {
+      overlayBetPositions.delete(element)
     }
   }
   // Resolve collisions: nudge plates apart so no two nameplates overlap, even
@@ -2957,12 +2965,13 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
   const compact = width < 1366 || height < 820
   const plateWidth = compact ? 168 : 196
   const plateHeight = compact ? 62 : 72
-  placedPlates.sort((a, b) => a.y - b.y)
+  const plates = placedPlates.filter(plate => plate.extra >= 0)
+  plates.sort((a, b) => a.y - b.y)
   for (let pass = 0; pass < 3; pass += 1) {
-    for (let i = 0; i < placedPlates.length; i += 1) {
-      for (let j = i + 1; j < placedPlates.length; j += 1) {
-        const upper = placedPlates[i]!
-        const lower = placedPlates[j]!
+    for (let i = 0; i < plates.length; i += 1) {
+      for (let j = i + 1; j < plates.length; j += 1) {
+        const upper = plates[i]!
+        const lower = plates[j]!
         const overlapX = plateWidth - Math.abs(upper.x - lower.x)
         const overlapY = plateHeight + lower.extra - Math.abs(lower.y - upper.y)
         if (overlapX <= 0 || overlapY <= 0) continue
@@ -2973,28 +2982,93 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
       }
     }
   }
+
+  // Write phase: only values that changed reach the DOM.
+  const tableScene = host.closest<HTMLElement>('.table-scene')
+  const potXValue = `${potX.toFixed(1)}px`
+  const potYValue = `${potY.toFixed(1)}px`
+  for (const readout of [cachedQuery(tableScene, '.table-surface .pot-display'), cachedQuery(host, '.payout-pot-readout')]) {
+    if (!readout) continue
+    setStyleVar(readout, '--pot-x', potXValue)
+    setStyleVar(readout, '--pot-y', potYValue)
+  }
+  if (heroBet) {
+    const heroBetLabel = cachedQuery(tableScene, '.hero-table-bet')
+    if (heroBetLabel) {
+      setStyleVar(heroBetLabel, '--hero-bet-x', `${heroBet.x.toFixed(1)}px`)
+      setStyleVar(heroBetLabel, '--hero-bet-y', `${heroBet.y.toFixed(1)}px`)
+    }
+  }
   for (const plate of placedPlates) {
-    // Steady plates: ignore sub-pixel sway, ease real moves, and freeze a plate
-    // under the pointer so it can be clicked (targeted emotes).
-    const previous = plateScreenPositions.get(plate.element)
     let x = plate.x
     let y = plate.y
-    if (previous) {
-      const hovered = plate.element.matches(':hover')
-      const dx = x - previous.x
-      const dy = y - previous.y
-      if (hovered || Math.hypot(dx, dy) < 4) {
-        x = previous.x
-        y = previous.y
-      } else {
-        x = previous.x + dx * 0.35
-        y = previous.y + dy * 0.35
+    if (plate.extra >= 0) {
+      // Steady plates: ignore sub-pixel sway, ease real moves, and freeze a plate
+      // under the pointer so it can be clicked (targeted emotes).
+      const previous = plateScreenPositions.get(plate.element)
+      if (previous) {
+        const hovered = hoveredOverlayElement === plate.element
+        const dx = x - previous.x
+        const dy = y - previous.y
+        if (hovered || Math.hypot(dx, dy) < 4) {
+          x = previous.x
+          y = previous.y
+        } else {
+          x = previous.x + dx * 0.35
+          y = previous.y + dy * 0.35
+        }
       }
+      plateScreenPositions.set(plate.element, { x, y })
     }
-    plateScreenPositions.set(plate.element, { x, y })
-    plate.element.style.setProperty('--seat-x', `${x.toFixed(1)}px`)
-    plate.element.style.setProperty('--seat-y', `${y.toFixed(1)}px`)
+    setStyleVar(plate.element, '--seat-x', `${x.toFixed(1)}px`)
+    setStyleVar(plate.element, '--seat-y', `${y.toFixed(1)}px`)
+    const bet = overlayBetPositions.get(plate.element)
+    // Written on the bet label itself (a leaf) so the rest of the plate is not re-styled.
+    const betLabel = bet ? cachedQuery(plate.element, '.cinematic-seat-bet') : null
+    if (bet && betLabel) {
+      setStyleVar(betLabel, '--bet-x', `${(bet.x - x).toFixed(1)}px`)
+      setStyleVar(betLabel, '--bet-y', `${(bet.y - y).toFixed(1)}px`)
+    }
   }
+}
+
+const overlayScratch = new THREE.Vector3()
+const overlayBetPositions = new WeakMap<HTMLElement, { x: number; y: number }>()
+/** The seat plate under the pointer (kept by pointer events, never read from :hover per frame). */
+let hoveredOverlayElement: HTMLElement | null = null
+const styleVarCache = new WeakMap<HTMLElement, Map<string, string>>()
+
+/** Writes a CSS custom property only when its value actually changed. */
+function setStyleVar(element: HTMLElement, name: string, value: string) {
+  let values = styleVarCache.get(element)
+  if (!values) {
+    values = new Map()
+    styleVarCache.set(element, values)
+  }
+  if (values.get(name) === value) return
+  values.set(name, value)
+  element.style.setProperty(name, value)
+}
+
+function toggleClass(element: HTMLElement, name: string, on: boolean) {
+  if (element.classList.contains(name) !== on) element.classList.toggle(name, on)
+}
+
+const queryCache = new WeakMap<Element, Map<string, HTMLElement>>()
+/** querySelector memoised per root until the element leaves the document. */
+function cachedQuery(root: Element | null, selector: string): HTMLElement | null {
+  if (!root) return null
+  let entries = queryCache.get(root)
+  if (!entries) {
+    entries = new Map()
+    queryCache.set(root, entries)
+  }
+  const cached = entries.get(selector)
+  if (cached?.isConnected && root.contains(cached)) return cached
+  const found = root.querySelector<HTMLElement>(selector)
+  if (found) entries.set(selector, found)
+  else entries.delete(selector)
+  return found
 }
 
 const plateScreenPositions = new WeakMap<HTMLElement, { x: number; y: number }>()
@@ -3113,6 +3187,15 @@ function pruneShadowCasters(root: THREE.Object3D) {
   })
 }
 
+/** Bakes a static subtree's matrices and skips it in every later matrix update. */
+function freezeStaticObject(root: THREE.Object3D) {
+  root.updateMatrixWorld(true)
+  root.traverse(object => {
+    object.matrixAutoUpdate = false
+  })
+  root.matrixWorldAutoUpdate = false
+}
+
 function precompileScene(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, postFx: PostFx | null = null) {
   const hidden: THREE.Object3D[] = []
   scene.traverse(object => {
@@ -3195,20 +3278,20 @@ function updateLadyLuck(
     },
   })
 
-  const bubble = host.querySelector<HTMLElement>('.lady-luck-bubble-3d')
+  const bubble = cachedQuery(host, '.lady-luck-bubble-3d')
   if (!bubble) return
   const line = getCompanionLine(companion)
   if (!line || !getCompanionBubbleAnchor(companion, companionBubbleWorld)) {
-    bubble.dataset.visible = 'false'
+    if (bubble.dataset.visible !== 'false') bubble.dataset.visible = 'false'
     return
   }
   companionBubbleWorld.project(runtime.camera)
   const x = THREE.MathUtils.clamp((companionBubbleWorld.x * 0.5 + 0.5) * width, 140, width - 140)
   const y = THREE.MathUtils.clamp((-companionBubbleWorld.y * 0.5 + 0.5) * height, 90, height - 200)
-  bubble.dataset.visible = 'true'
+  if (bubble.dataset.visible !== 'true') bubble.dataset.visible = 'true'
   if (bubble.textContent !== line) bubble.textContent = line
-  bubble.style.setProperty('--bubble-x', `${x.toFixed(1)}px`)
-  bubble.style.setProperty('--bubble-y', `${y.toFixed(1)}px`)
+  setStyleVar(bubble, '--bubble-x', `${x.toFixed(1)}px`)
+  setStyleVar(bubble, '--bubble-y', `${y.toFixed(1)}px`)
 }
 
 function createSceneRuntime(
@@ -3224,6 +3307,9 @@ function createSceneRuntime(
     powerPreference: 'high-performance',
   })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
+  // Checking every new shader's compile log is a synchronous GPU round trip
+  // (40ms+ per program on ANGLE/D3D11): development keeps it, players skip it.
+  renderer.debug.checkShaderErrors = process.env.NODE_ENV !== 'production'
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 1.0
@@ -3247,13 +3333,20 @@ function createSceneRuntime(
 
   const environment = applyEnvironmentLighting(renderer, scene)
   const lights = createStageLights(scene)
+  const beforeRoom = new Set(scene.children)
   const { neonMaterials } = createRoom(scene)
+  const roomObjects = scene.children.filter(child => !beforeRoom.has(child))
   // Only the table (rail onto felt) keeps casting among the static set.
   scene.children.forEach(child => {
     child.traverse(object => { if ((object as THREE.Mesh).isMesh) object.castShadow = false })
   })
   const table = createStylizedTable()
   scene.add(table.group)
+  // The room and the table never move: compute their matrices once and take
+  // them (hundreds of objects) out of the per-frame matrix walk. The scene root
+  // itself never moves either, so it must not force-update every child.
+  scene.matrixAutoUpdate = false
+  for (const object of [...roomObjects, table.group]) freezeStaticObject(object)
   const feltMaterial = table.feltMaterial
   const pot = createPotRuntime(scene)
   const board = createBoardRuntime(scene)
@@ -3330,6 +3423,7 @@ function createSceneRuntime(
     pause: () => {},
     resume: () => {},
     dispose: () => {},
+    onBroken: undefined as (() => void) | undefined,
   } satisfies SceneRuntime
 
   // Blackout bonks, hangovers and the pill trip (see funFx.ts).
@@ -3375,6 +3469,16 @@ function createSceneRuntime(
   }
   const resizeObserver = new ResizeObserver(resize)
   resizeObserver.observe(host)
+  // Which seat plate is under the pointer, tracked by events so the frame loop
+  // never has to ask the style engine (matches(':hover')) mid-frame.
+  const handlePointerOver = (event: PointerEvent) => {
+    hoveredOverlayElement = (event.target as Element | null)?.closest<HTMLElement>('[data-seat-player]') ?? null
+  }
+  const handlePointerLeave = () => {
+    hoveredOverlayElement = null
+  }
+  host.addEventListener('pointerover', handlePointerOver)
+  host.addEventListener('pointerleave', handlePointerLeave)
   runtime.resizeObserver = resizeObserver
   resize()
 
@@ -3387,9 +3491,31 @@ function createSceneRuntime(
   const actingFocus = new THREE.Vector3()
   const accentTarget = new THREE.Vector3()
   let heroHeadTilt = 0
+  let frameErrorReported = false
   const animate = () => {
     if (runtime.disposed || runtime.suspended) return
     runtime.animationFrame = window.requestAnimationFrame(animate)
+    try {
+      renderFrame()
+    } catch (error) {
+      // One bad update (a half-synced seat, a missing bone) must never leave the
+      // canvas frozen or black: report it once and still draw the scene.
+      if (!frameErrorReported) {
+        frameErrorReported = true
+        console.error('3D frame update failed; rendering without it.', error)
+      }
+      try {
+        renderer.render(scene, camera)
+        // The canvas stays transparent until the scene is ready: never let a
+        // failing update keep it hidden (a black table).
+        renderedFrames += 1
+        if (renderedFrames >= 4 && host.dataset.sceneReady !== 'true') host.dataset.sceneReady = 'true'
+      } catch {
+        // The context itself is gone; the context-loss handler rebuilds the scene.
+      }
+    }
+  }
+  const renderFrame = () => {
     const time = (performance.now() - runtime.startTime) / 1000
     const delta = Math.min(0.05, Math.max(0.001, time - lastTime))
     lastTime = time
@@ -3562,6 +3688,33 @@ function createSceneRuntime(
     }
     renderedFrames += 1
     if (renderedFrames === 4) host.dataset.sceneReady = 'true'
+    // Black-canvas watchdog: the room is never pure black (the walls, the
+    // felt, the fog colour), so an all-black frame means the output path broke.
+    if (renderedFrames === 30 || renderedFrames === 120) checkForBlackFrame()
+  }
+  const blackProbe = new Uint8Array(4)
+  const checkForBlackFrame = () => {
+    const gl = renderer.getContext()
+    if (gl.isContextLost()) return
+    const width = gl.drawingBufferWidth
+    const height = gl.drawingBufferHeight
+    const points: Array<[number, number]> = [[0.5, 0.5], [0.25, 0.3], [0.75, 0.3], [0.25, 0.75], [0.75, 0.75]]
+    const black = points.every(([u, v]) => {
+      gl.readPixels(Math.floor(width * u), Math.floor(height * v), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, blackProbe)
+      return blackProbe[0]! + blackProbe[1]! + blackProbe[2]! === 0
+    })
+    if (!black) return
+    if (runtime.postFx) {
+      // Most likely the post-processing chain (render targets, passes): drop it.
+      console.warn('3D table rendered black through post effects; falling back to direct rendering.')
+      runtime.postFx.dispose()
+      runtime.postFx = null
+      host.dataset.postFx = 'off'
+      renderedFrames = 60
+      return
+    }
+    console.warn('3D table rendered black; rebuilding the scene.')
+    runtime.onBroken?.()
   }
 
   runtime.pause = () => {
@@ -3595,6 +3748,9 @@ function createSceneRuntime(
     runtime.disposed = true
     window.cancelAnimationFrame(runtime.animationFrame)
     resizeObserver.disconnect()
+    host.removeEventListener('pointerover', handlePointerOver)
+    host.removeEventListener('pointerleave', handlePointerLeave)
+    hoveredOverlayElement = null
     motionPreference.removeEventListener('change', handleMotionPreference)
     document.removeEventListener('visibilitychange', handleVisibilityChange)
     for (const seat of runtime.seats.values()) {
@@ -3646,6 +3802,7 @@ export function DesktopPokerRoom3D({
   prankEvents = NO_PRANK_EVENTS,
   drinkEvents = NO_DRINK_EVENTS,
   highlightedCards = NO_HIGHLIGHTED_CARDS,
+  actingTimerPercent,
 }: DesktopPokerRoom3DProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -3653,6 +3810,13 @@ export function DesktopPokerRoom3D({
   const viewRef = useRef(view)
   const highlightRef = useRef(highlightedCards)
   const [webGLStatus, setWebGLStatus] = useState<WebGLStatus>('loading')
+  /**
+   * Bumped to throw the whole WebGL scene away and build it again on a fresh
+   * canvas (a lost context that never comes back, a failed start, a black
+   * frame). A canvas whose context was lost can never make a new one.
+   */
+  const [sceneGeneration, setSceneGeneration] = useState(0)
+  const failedStartsRef = useRef(0)
 
   viewRef.current = view
   highlightRef.current = highlightedCards
@@ -3663,21 +3827,26 @@ export function DesktopPokerRoom3D({
     if (!canvas || !host) return
 
     let disposed = false
-    let recoveryFrame = 0
+    let rebuildTimer = 0
+    const rebuild = (delayMs: number) => {
+      window.clearTimeout(rebuildTimer)
+      rebuildTimer = window.setTimeout(() => {
+        if (!disposed) setSceneGeneration(generation => generation + 1)
+      }, delayMs)
+    }
     const handleContextLost = (event: Event) => {
+      // preventDefault asks the browser to restore the context; if it does not
+      // within a moment (GPU reset, too many contexts), rebuild regardless.
       event.preventDefault()
       if (!disposed) {
         runtimeRef.current?.pause()
         setWebGLStatus('error')
+        rebuild(2_000)
       }
     }
     const handleContextRestored = () => {
-      window.cancelAnimationFrame(recoveryFrame)
-      recoveryFrame = window.requestAnimationFrame(() => {
-        if (disposed) return
-        runtimeRef.current?.resume()
-        setWebGLStatus('ready')
-      })
+      // Rebuilding from scratch is more reliable than resuming three.js state.
+      if (!disposed) rebuild(0)
     }
     canvas.addEventListener('webglcontextlost', handleContextLost)
     canvas.addEventListener('webglcontextrestored', handleContextRestored)
@@ -3685,6 +3854,11 @@ export function DesktopPokerRoom3D({
     try {
       const runtime = createSceneRuntime(canvas, host, viewRef, highlightRef)
       runtimeRef.current = runtime
+      runtime.onBroken = () => {
+        runtime.pause()
+        rebuild(0)
+      }
+      failedStartsRef.current = 0
       if (process.env.NODE_ENV !== 'production') {
         // Development-only handle for inspecting the live scene from devtools.
         ;(host as HTMLDivElement & { __pokerRuntime?: SceneRuntime }).__pokerRuntime = runtime
@@ -3711,17 +3885,20 @@ export function DesktopPokerRoom3D({
     } catch (error) {
       console.error('Unable to start the desktop 3D poker room.', error)
       setWebGLStatus('error')
+      // A start can fail transiently (context limit, GPU busy): retry a few times.
+      failedStartsRef.current += 1
+      if (failedStartsRef.current <= 4) rebuild(700 * failedStartsRef.current)
     }
 
     return () => {
       disposed = true
-      window.cancelAnimationFrame(recoveryFrame)
+      window.clearTimeout(rebuildTimer)
       canvas.removeEventListener('webglcontextlost', handleContextLost)
       canvas.removeEventListener('webglcontextrestored', handleContextRestored)
       runtimeRef.current?.dispose()
       runtimeRef.current = null
     }
-  }, [])
+  }, [sceneGeneration])
 
   // Pranks and house-rule drinks: each server event plays exactly once.
   useEffect(() => {
@@ -3800,6 +3977,7 @@ export function DesktopPokerRoom3D({
       data-winner-ids={view.players.filter(player => player.isWinner).map(player => player.id).join(',')}
     >
       <canvas
+        key={sceneGeneration}
         ref={canvasRef}
         className="desktop-3d-canvas"
         aria-label="Animated 3D poker room"
@@ -3888,7 +4066,13 @@ export function DesktopPokerRoom3D({
                   <CinematicHoleCards player={player} />
                 )}
 
-                <span className="cinematic-seat-panel">
+                <span
+                  className="cinematic-seat-panel"
+                  // Set on the acting plate only (not the table root) so a clock tick re-styles one plate.
+                  style={player.isActing && actingTimerPercent !== undefined
+                    ? { ['--acting-timer-pct' as string]: actingTimerPercent / 100 } as CSSProperties
+                    : undefined}
+                >
                 <span className="cinematic-seat-topline">
                   <strong>{player.nickname}</strong>
                   {player.shotsWaiting > 0 && (

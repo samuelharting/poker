@@ -4,6 +4,35 @@
  * board is rendered as physical cards in the scene).
  */
 
+/*
+ * The 3D loop moves every nameplate every frame. Registered as non-inherited,
+ * a new position re-styles only the plate itself; an ordinary (inherited)
+ * custom property would re-style every element inside it, every frame.
+ */
+@property --seat-x {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: -999px;
+}
+
+@property --seat-y {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: -999px;
+}
+
+@property --bubble-x {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: -999px;
+}
+
+@property --bubble-y {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: -999px;
+}
+
 .desktop-3d-stage .cinematic-seats {
   position: absolute;
   inset: 0;
@@ -304,9 +333,10 @@
 /* Bet label anchored to the chips on the felt ------------------------------ */
 
 .desktop-3d-stage .cinematic-seat .cinematic-seat-bet {
+  /* Follows the 3D chips every frame via transform (no relayout). */
   position: absolute;
-  left: calc(50% + var(--bet-x, 0px));
-  top: calc(100% + var(--bet-y, 40px));
+  left: 50%;
+  top: 100%;
   right: auto;
   bottom: auto;
   padding: 3px 9px;
@@ -319,7 +349,7 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  transform: translate(-50%, -50%);
+  transform: translate(var(--bet-x, 0px), var(--bet-y, 40px)) translate(-50%, -50%);
   box-shadow: 0 6px 14px rgba(0, 0, 0, 0.4);
   pointer-events: none;
   animation: seat-bet-in 360ms var(--ease-pop) both;
@@ -328,11 +358,11 @@
 @keyframes seat-bet-in {
   from {
     opacity: 0;
-    transform: translate(-50%, -30%) scale(0.8);
+    transform: translate(var(--bet-x, 0px), var(--bet-y, 40px)) translate(-50%, -30%) scale(0.8);
   }
   to {
     opacity: 1;
-    transform: translate(-50%, -50%);
+    transform: translate(var(--bet-x, 0px), var(--bet-y, 40px)) translate(-50%, -50%);
   }
 }
 
@@ -389,14 +419,15 @@
 /* Pot readout rides on the felt above the pot chips ------------------------ */
 
 .table-scene[data-desktop-three='true'] .table-surface .pot-display {
+  /* Positioned by the 3D loop every frame: transform only, so it never relayouts. */
   position: fixed;
-  left: var(--pot-x, 50%);
-  top: var(--pot-y, 18%);
+  left: 0;
+  top: 0;
   right: auto;
   bottom: auto;
   z-index: 4;
   margin: 0;
-  transform: translate(-50%, 0);
+  transform: translate3d(var(--pot-x, 50vw), var(--pot-y, 18vh), 0) translate(-50%, 0);
   pointer-events: none;
 }
 
@@ -451,8 +482,8 @@
 /* Takes over from the pot label during the payout and counts down to $0. */
 .desktop-3d-stage .payout-pot-readout {
   position: fixed;
-  left: var(--pot-x, 50%);
-  top: var(--pot-y, 18%);
+  left: 0;
+  top: 0;
   z-index: 4;
   display: flex;
   align-items: baseline;
@@ -462,7 +493,7 @@
   border-radius: var(--r-pill);
   background: var(--surface-glass-strong);
   box-shadow: var(--shadow-2);
-  transform: translate(-50%, 0);
+  transform: translate3d(var(--pot-x, 50vw), var(--pot-y, 18vh), 0) translate(-50%, 0);
   pointer-events: none;
   opacity: 0;
   transition: opacity 180ms ease-out;
@@ -679,14 +710,27 @@
 /* The hero's bet label rides on their 3D chips. */
 .table-scene[data-desktop-three='true'] .hero-table-bet {
   position: fixed;
-  left: var(--hero-bet-x, 50%);
-  top: var(--hero-bet-y, 70%);
+  left: 0;
+  top: 0;
   right: auto;
   bottom: auto;
   z-index: 4;
   margin: 0;
-  transform: translate(-50%, -100%);
+  transform: translate3d(var(--hero-bet-x, 50vw), var(--hero-bet-y, 70vh), 0) translate(-50%, -100%);
   pointer-events: none;
+  /* The shared betStackPop would replace this transform (and jump the label) while it plays. */
+  animation: hero-bet-3d-in 300ms ease-out;
+}
+
+@keyframes hero-bet-3d-in {
+  from {
+    opacity: 0;
+    transform: translate3d(var(--hero-bet-x, 50vw), var(--hero-bet-y, 70vh), 0) translate(-50%, -90%) scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(var(--hero-bet-x, 50vw), var(--hero-bet-y, 70vh), 0) translate(-50%, -100%);
+  }
 }
 
 /* Critic fixes: readable blind chips, reveal pill off the name, no stray bets */
