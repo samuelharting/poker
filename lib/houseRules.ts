@@ -19,6 +19,7 @@
  * - bubble: at the end of each orbit the shortest stack at the table drinks (1).
  * - dealer: dealer's round, whoever had the button this hand drinks (1).
  * - waterfall: every WATERFALL_EVERY_HANDS hands the whole table drinks (1).
+ * - winner: win a pot, drink a victory beer (1).
  * Water:
  * - big_win: won a pot worth more than 50% of the hand-start stack: a free,
  *   instant -2 water.
@@ -30,7 +31,7 @@ import { compareHands, evaluateHand } from './poker/evaluator'
 import type { Card, HandResult } from './poker/types'
 
 export type HouseShotRule = 'seven_two' | 'rivered' | 'cheers'
-export type HouseBeerRule = 'big_loss' | 'bad_beat' | 'lost_showdown' | 'scared_money' | 'bubble' | 'dealer' | 'waterfall'
+export type HouseBeerRule = 'big_loss' | 'bad_beat' | 'lost_showdown' | 'scared_money' | 'bubble' | 'dealer' | 'waterfall' | 'winner'
 
 export const HOUSE_SHOT_RULES: readonly HouseShotRule[] = ['seven_two', 'rivered', 'cheers']
 /** Forced beers from one hand never exceed this. */
@@ -190,6 +191,10 @@ export function computeHouseRules(hand: HouseRuleHand): HouseRuleOutcome[] {
     if (hand.waterfall && player.startStack !== undefined) {
       beers += 1
       beerRules.push('waterfall')
+    }
+    if (player.won > 0 && player.startStack !== undefined) {
+      beers += 1
+      beerRules.push('winner')
     }
     beers = Math.min(HOUSE_BEER_CAP, beers)
 

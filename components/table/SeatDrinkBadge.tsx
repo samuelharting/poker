@@ -33,6 +33,8 @@ export function SeatDrinkBadge({
     }
 
     seenDrinkIdRef.current = lastDrinkId
+    // Nobody cares when someone drinks water (owner): no bubble for it.
+    if (lastDrinkKind === 'water') return
     setSip({ id: lastDrinkId, kind: lastDrinkKind })
     const timer = window.setTimeout(() => setSip(null), SIP_ANIMATION_MS)
     return () => window.clearTimeout(timer)

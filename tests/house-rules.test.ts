@@ -61,3 +61,11 @@ describe('house rules: waterfall', () => {
     expect(outcomes.every(outcome => outcome.beerRules.includes('waterfall'))).toBe(true)
   })
 })
+
+describe('house rules: victory beer', () => {
+  it('winning a pot is a beer', () => {
+    const base = { drinkCapable: true, folded: false, holeCards: [], startStack: 1000, endStack: 1000, won: 0 }
+    const outcomes = computeHouseRules({ showdown: false, boards: [[]], players: [{ ...base, id: 'w', won: 30, endStack: 1030 }, { ...base, id: 'l', folded: true }] })
+    expect(outcomes).toEqual([expect.objectContaining({ playerId: 'w', beers: 1, beerRules: ['winner'] })])
+  })
+})

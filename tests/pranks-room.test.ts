@@ -732,7 +732,8 @@ describe('house rules (pure)', () => {
       ],
     })
     expect(outcomeOf(outcomes, 'big')?.freeWater).toBe(true)
-    expect(outcomeOf(outcomes, 'small')).toBeUndefined()
+    // Every winner drinks a victory beer; only the big one also gets the free water.
+    expect(outcomeOf(outcomes, 'small')).toMatchObject({ freeWater: false, beerRules: ['winner'] })
   })
 })
 
