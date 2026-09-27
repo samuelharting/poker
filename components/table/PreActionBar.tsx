@@ -20,16 +20,19 @@ export function PreActionBar({
   queued,
   onToggle,
   showShortcuts = false,
+  disabled = false,
 }: {
   options: PreActionOption[]
   queued: QueuedPreAction | null
   onToggle: (kind: PreActionKind) => void
   showShortcuts?: boolean
+  /** Between streets: the bar keeps its place but nothing can be queued yet. */
+  disabled?: boolean
 }) {
   const activeOption = options.find(option => isPreActionOptionActive(queued, option.kind))
 
   return (
-    <div className="pre-action-bar" role="group" aria-label="Pre-actions: act automatically when it is your turn">
+    <div className={`pre-action-bar ${disabled ? 'is-idle' : ''}`} role="group" aria-label="Pre-actions: act automatically when it is your turn">
       <div className="pre-action-bar-head" aria-live="polite">
         {activeOption ? (
           <>
@@ -57,6 +60,7 @@ export function PreActionBar({
               aria-label={active ? `Cancel pre-action: ${option.description}` : `Pre-action: ${option.description}`}
               aria-keyshortcuts={shortcut}
               title={shortcut ? `${option.description} (key ${shortcut})` : option.description}
+              disabled={disabled}
               onClick={() => onToggle(option.kind)}
             >
               <span className="pre-action-chip-box" aria-hidden="true" />

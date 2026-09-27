@@ -231,6 +231,15 @@
   padding-bottom: 8px;
 }
 
+/* Seated with nothing docked (showdown, next deal, after a fold): keep the
+   action tray's footprint, so the end of a hand doesn't drop the whole table
+   (board, seats, your cards) by a tray's height mid-reveal. */
+@media (orientation: portrait) {
+  .table-scene[data-layout='2d'][data-hero-seat='true']:not([data-tray-open='true']):not(:has(> .mobile-between-hands-dock, > .rabbit-hunt-dock, > .check-fold-pre-action-dock)) .mobile-poker-field {
+    padding-bottom: calc(max(8px, var(--mobile-tray-h, 0px)) + env(safe-area-inset-bottom));
+  }
+}
+
 /* ============================================================
    Seats: a tidy grid of small chips
    ============================================================ */
@@ -1216,6 +1225,36 @@
   -webkit-line-clamp: 2;
 }
 
+/* Phones: a compact box so short statuses ("Showdown") never clip and the
+   box keeps clear air before the hole cards */
+@container field (max-width: 400px) {
+  /* The seat column may take the status's longest word from the empty right
+     column (the cards drift a few px off centre rather than "Showd" clipping) */
+  .mobile-hero-lane {
+    grid-template-columns: minmax(min-content, 1fr) auto minmax(0, 1fr);
+    column-gap: 12px;
+  }
+
+  .mobile-hero-seat {
+    grid-template-columns: auto minmax(min-content, 1fr);
+    column-gap: 6px;
+    min-width: min-content;
+    padding: 5px 8px 5px 5px;
+  }
+
+  .mobile-hero-seat .mobile-hero-meta,
+  .mobile-hero-seat .mobile-hero-seat-status {
+    min-width: min-content;
+  }
+
+  .mobile-hero-seat .mobile-hero-avatar {
+    --avatar: 26px;
+    width: 26px;
+    height: 26px;
+    font-size: 12px;
+  }
+}
+
 .mobile-hero-seat .mobile-hero-bet-anchor {
   grid-column: 1 / -1;
   margin: 4px 0 0;
@@ -1253,6 +1292,12 @@
 
 [data-layout='2d'] .mobile-hero-lane .own-hand-turn-chip {
   display: none;
+}
+
+/* While you hold cards the hand-strength row keeps its height, so the chip
+   showing (deal, peek, showdown) or hiding never shifts the whole table */
+.mobile-hero-lane[data-strength-slot='true'] {
+  grid-template-rows: minmax(36px, auto) auto auto;
 }
 
 [data-layout='2d'] .mobile-hero-lane .own-hand-strength {
@@ -2563,6 +2608,11 @@
   }
 
   /* The hand sits in the side column, above the tray or dock */
+  .mobile-hero-lane,
+  .mobile-hero-lane[data-strength-slot='true'] {
+    grid-template-rows: none;
+  }
+
   .mobile-hero-lane {
     position: fixed;
     top: calc(var(--hud-h) + env(safe-area-inset-top) + 6px);
@@ -2730,8 +2780,38 @@
   top: 62%;
 }
 
-/* Wide arenas (landscape phones/tablets): seats hug the four corners and the top edge */
-@container arena (orientation: landscape) {
+/* The card row is the anchor: the pot / hand result above it and the showdown
+   caption below it hang off the board, so the cards never jump when those
+   change size or come and go. The shift keeps the in-hand look (pot + board
+   centred together) exactly where it was. */
+.mobile-arena > .mobile-board-zone {
+  translate: 0 calc(-50% + 16px);
+}
+
+.mobile-arena > .mobile-board-zone > .mobile-board-header,
+.mobile-arena > .mobile-board-zone > .mobile-board-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.mobile-arena > .mobile-board-zone > .mobile-board-header {
+  bottom: calc(100% + 10px);
+}
+
+.mobile-arena > .mobile-board-zone > .mobile-board-footer {
+  top: calc(100% + 8px);
+}
+
+.mobile-arena > .mobile-board-zone > .mobile-board-notices {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+/* Wide arenas (landscape phones/tablets): seats hug the four corners and the top edge.
+   Clearly wide only: a short portrait phone's near-square arena (the tray up,
+   your cards showing) must not flip the whole seat layout mid-hand. */
+@container arena (min-aspect-ratio: 6/5) {
   /* A container query cannot restyle the arena itself, so size its layers. */
   .mobile-arena > .mobile-seat-grid,
   .mobile-arena > .mobile-board-zone {
@@ -2760,7 +2840,10 @@
 [data-layout='2d'] .check-fold-pre-action-dock {
   display: grid;
   justify-items: stretch;
+  align-content: end;
   gap: 6px;
+  /* Same footprint as the action tray (measured), so nothing above reflows */
+  min-height: calc(var(--mobile-tray-h, 0px) - 8px - env(safe-area-inset-bottom));
 }
 
 [data-layout='2d'] .check-fold-pre-action-dock .pre-action-note {

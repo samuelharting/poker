@@ -1597,7 +1597,18 @@ export function PokerTable({
     isConnected &&
     !settingsOpen
   )
-  const showPreActionBar = canQueuePreAction && (
+  // The chips keep their slot for the whole time you are live in the hand:
+  // between streets (nobody to act yet) they stay put, just inactive, instead
+  // of vanishing and reflowing the table under your thumb for a second.
+  const preActionSlotLive = Boolean(
+    isInHand &&
+    !isMyTurn &&
+    me?.status === 'active' &&
+    visibleOwnPlayer &&
+    isConnected &&
+    !settingsOpen
+  )
+  const showPreActionBar = preActionSlotLive && (
     isMobileViewport || Boolean(threeTableView)
   )
   const meStack = me?.stack ?? 0
@@ -1757,6 +1768,39 @@ export function PokerTable({
   useEffect(() => {
     setRaiseSizingOpen(false)
   }, [bettingDecisionKey])
+
+  // Phones: the pre-action chips reserve the plain action tray's height, so
+  // the table doesn't shift up and down every time the action reaches you.
+  const mobileTrayRef = useRef<HTMLDivElement | null>(null)
+  const [mobileTrayHeight, setMobileTrayHeight] = useState(0)
+  const measureMobileTray = isMobileViewport && hasActionTray
+  useEffect(() => {
+    const tray = mobileTrayRef.current
+    if (!measureMobileTray || !tray) {
+      return
+    }
+    const read = () => {
+      if (!tray.isConnected || tray.offsetHeight === 0) {
+        return
+      }
+      // The plain tray: leave out the optional rows (blind tip, auto-action
+      // note, raise sizing) that come and go on top of it.
+      const gap = parseFloat(getComputedStyle(tray).rowGap) || 0
+      let height = tray.offsetHeight
+      tray.querySelectorAll<HTMLElement>(':scope > .blind-tip, :scope > .pre-action-note, :scope > .mobile-raise-sizing').forEach(row => {
+        height -= row.offsetHeight + gap
+      })
+      height = Math.round(height)
+      setMobileTrayHeight(current => (Math.abs(current - height) > 1 ? height : current))
+    }
+    read()
+    if (typeof ResizeObserver === 'undefined') {
+      return
+    }
+    const observer = new ResizeObserver(read)
+    observer.observe(tray)
+    return () => observer.disconnect()
+  }, [measureMobileTray])
 
   useEffect(() => {
     setRaiseAmount(current => resolveRaiseDraftAmount({
@@ -2161,6 +2205,7 @@ export function PokerTable({
           options={preActionOptions}
           queued={queuedPreAction}
           onToggle={togglePreAction}
+          disabled={!canQueuePreAction}
           showShortcuts={!isMobileViewport}
         />
       )}
@@ -2169,7 +2214,7 @@ export function PokerTable({
 
   // Desktop: 1 / 2 / 3 toggle the pre-action chips while someone else acts.
   useEffect(() => {
-    if (!showPreActionBar || isMobileViewport || preActionOptions.length === 0) {
+    if (!showPreActionBar || !canQueuePreAction || isMobileViewport || preActionOptions.length === 0) {
       return
     }
 
@@ -2197,7 +2242,7 @@ export function PokerTable({
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [isMobileViewport, preActionOptions, showPreActionBar, togglePreAction])
+  }, [canQueuePreAction, isMobileViewport, preActionOptions, showPreActionBar, togglePreAction])
 
   const tableWaitingCopy = !isConnected
     ? 'Restoring the room snapshot and reconnecting your seat.'
@@ -2367,9 +2412,10 @@ export function PokerTable({
       data-settings-open={settingsOpen ? 'true' : 'false'}
       data-layout={isMobileViewport ? '2d' : 'desktop'}
       data-acting-timer={opponentTimerVisible ? (turnTimer.percent < 25 ? 'low' : 'live') : 'none'}
-      style={opponentTimerVisible
-        ? { ['--acting-timer-pct' as string]: Math.round(turnTimer.percent * 10) / 1000 } as CSSProperties
-        : undefined}
+      style={{
+        ...(opponentTimerVisible ? { ['--acting-timer-pct' as string]: Math.round(turnTimer.percent * 10) / 1000 } : {}),
+        ...(isMobileViewport && mobileTrayHeight > 0 ? { ['--mobile-tray-h' as string]: `${mobileTrayHeight}px` } : {}),
+      } as CSSProperties}
     >
       {threeTableView ? (
         <DesktopPokerRoom3D
@@ -2554,6 +2600,7 @@ export function PokerTable({
               <div
                 className={`mobile-hero-lane ${isMyTurn ? 'is-acting' : ''}`}
                 data-show-cards={showMobileShowCardsToggle ? 'true' : 'false'}
+                data-strength-slot={isInHand && ownHandCards.length > 0 ? 'true' : 'false'}
               >
                 <MobileHeroSeat
                   player={visibleOwnPlayer}
@@ -2904,6 +2951,7 @@ export function PokerTable({
       {hasActionTray && me && (
         isMobileViewport ? (
           <div
+            ref={mobileTrayRef}
             className="mobile-betting-panel"
             data-raise={raiseSizingOpen && canMobileRaise ? 'open' : 'closed'}
             data-blind-tip={blindTip ? 'true' : 'false'}

@@ -3702,6 +3702,20 @@
 .pre-action-chips {
   display: flex;
   gap: 6px;
+  transition: opacity 200ms ease;
+}
+
+/* Between streets: same place, just resting until someone is to act. */
+.pre-action-bar.is-idle .pre-action-chips {
+  opacity: 0.55;
+}
+
+.pre-action-chip:disabled {
+  cursor: default;
+}
+
+.pre-action-chip:disabled:active {
+  transform: none;
 }
 
 .pre-action-chip {
@@ -3764,6 +3778,16 @@
 .pre-action-chip.is-active .pre-action-chip-box {
   border-color: #67d176;
   background: #67d176;
+}
+
+.pre-action-chip.is-active .pre-action-chip-box {
+  animation: pre-action-tick 220ms var(--ease-pop, ease-out);
+}
+
+@keyframes pre-action-tick {
+  0% { transform: scale(0.6); }
+  60% { transform: scale(1.18); }
+  100% { transform: none; }
 }
 
 .pre-action-chip.is-active .pre-action-chip-box::after {
@@ -3956,6 +3980,7 @@
   .turn-edge-glow,
   .turn-prompt-kicker::before,
   .pre-action-bar,
+  .pre-action-chip.is-active .pre-action-chip-box,
   .pre-action-note,
   .blind-tip,
   .table-scene[data-desktop-three='true'] .btn-action.is-primary {
