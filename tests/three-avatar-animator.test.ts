@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest'
 import {
   computeAvatarTargetPose,
   createAvatarAnimatorState,
+  FLIP_OFF_SECONDS,
+  getFlipOffHand,
   updateAvatarAnimator,
   type AvatarAnimatorInput,
 } from '@/components/three/avatarAnimator'
-import { getArmChain, solveArmIK } from '@/components/three/avatarIK'
+import { ARM_MAX_EXTENSION, getArmChain, getArmOvershoot, orientBoneFrame, solveArmIK } from '@/components/three/avatarIK'
 
 const anchors = {
   railR: [0.3, 0.9, -0.9] as [number, number, number],
@@ -160,7 +162,122 @@ describe('arm IK', () => {
     solveArmIK(getArmChain(upper, lower, hand)!, new THREE.Vector3(0, 0, -3), new THREE.Vector3(1, 0, 0))
     upper.updateMatrixWorld(true)
     const wrist = hand.getWorldPosition(new THREE.Vector3())
-    expect(wrist.length()).toBeGreaterThan(0.7)
-    expect(wrist.z).toBeLessThan(-0.7)
+    // Soft elbows: the arm reaches ~90% of its length, never locked straight.
+    expect(wrist.length()).toBeGreaterThan(0.75 * ARM_MAX_EXTENSION - 0.01)
+    expect(wrist.length()).toBeLessThan(0.75 * 0.97)
+    expect(wrist.z).toBeLessThan(-0.6)
+    // ...and reports how far it fell short so the torso can lean in.
+    expect(getArmOvershoot(getArmChain(upper, lower, hand)!, new THREE.Vector3(0, 0, -3))).toBeGreaterThan(2)
+  })
+
+  it('turns a hand so its fingers point up with the knuckles facing a target', () => {
+    const wrist = new THREE.Bone()
+    const middle = new THREE.Bone()
+    const index = new THREE.Bone()
+    const pinky = new THREE.Bone()
+    wrist.add(middle, index, pinky)
+    middle.position.set(0, 0, -0.1)
+    index.position.set(0.03, 0, -0.1)
+    pinky.position.set(-0.03, 0, -0.1)
+    const root = new THREE.Group()
+    root.add(wrist)
+    root.updateMatrixWorld(true)
+    orientBoneFrame(wrist, middle, index, pinky, new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0))
+    root.updateMatrixWorld(true)
+    const up = middle.getWorldPosition(new THREE.Vector3()).sub(wrist.getWorldPosition(new THREE.Vector3())).normalize()
+    const side = pinky.getWorldPosition(new THREE.Vector3()).sub(index.getWorldPosition(new THREE.Vector3())).normalize()
+    expect(up.y).toBeGreaterThan(0.99)
+    expect(side.x).toBeGreaterThan(0.99)
+  })
+})
+
+describe('flick-off, pass-out and reactions', () => {
+  const target: [number, number, number] = [0.4, 1.5, -3.5]
+
+  it('throws the arm out toward the target at face height and holds it', () => {
+    const state = createAvatarAnimatorState('p1')
+    const holdPose = computeAvatarTargetPose(state, input({ flipOff: { elapsed: 1.2, target } }))
+    const shoulder = anchors.shoulderR
+    const reach = Math.hypot(holdPose.handR[0] - shoulder[0], holdPose.handR[2] - shoulder[2])
+    expect(reach).toBeGreaterThan(0.5)
+    expect(holdPose.handR[1]).toBeGreaterThan(shoulder[1])
+    expect(holdPose.middleFinger).toBeCloseTo(1, 2)
+    expect(holdPose.fingerCurlR).toBeCloseTo(1, 2)
+    // Head and chest turn toward the target (target is to the right: negative yaw).
+    expect(Math.sign(holdPose.bones.Head[1])).toBe(Math.sign(Math.atan2(-(target[0] - shoulder[0]), -(target[2] - shoulder[2]))))
+    // Still readable for most of the gesture, then released.
+    const late = computeAvatarTargetPose(createAvatarAnimatorState('p1'), input({ flipOff: { elapsed: 2.3, target } }))
+    expect(late.middleFinger).toBeGreaterThan(0.9)
+    const done = computeAvatarTargetPose(createAvatarAnimatorState('p1'), input({ flipOff: { elapsed: FLIP_OFF_SECONDS + 0.01, target } }))
+    expect(done.middleFinger).toBe(0)
+  })
+
+  it('uses the hand on the target side so the arm never crosses the body', () => {
+    expect(getFlipOffHand([2, 1.5, -1])).toBe('R')
+    expect(getFlipOffHand([-2, 1.5, -1])).toBe('L')
+    const pose = computeAvatarTargetPose(createAvatarAnimatorState('p1'), input({ flipOff: { elapsed: 1.2, target: [-2, 1.5, -1] } }))
+    expect(pose.handL[0]).toBeLessThan(anchors.shoulderL[0] - 0.3)
+  })
+
+  it('never flicks anyone off while passed out', () => {
+    const pose = computeAvatarTargetPose(createAvatarAnimatorState('p1'), input({ passedOut: true, flipOff: { elapsed: 1.2, target } }))
+    expect(pose.middleFinger).toBe(0)
+  })
+
+  it('passes out with forearms folded on the rail and elbows splayed', () => {
+    const pose = computeAvatarTargetPose(createAvatarAnimatorState('p1'), input({ passedOut: true }))
+    expect(pose.elbowOut).toBe(1)
+    // Wrists cross toward the middle, resting at rail height.
+    expect(pose.handR[0]).toBeLessThan(anchors.railR[0])
+    expect(pose.handL[0]).toBeGreaterThan(anchors.railL[0])
+    expect(Math.abs(pose.handR[1] - anchors.railR[1])).toBeLessThan(0.12)
+    // Slumped forward over them, head rolled onto a cheek.
+    expect(pose.bones.Chest[0]).toBeGreaterThan(0.5)
+    expect(Math.abs(pose.bones.Head[2])).toBeGreaterThan(0.5)
+  })
+
+  it('sways more the drunker they are', () => {
+    const swayAt = (drunkLevel: number) => {
+      let max = 0
+      for (let step = 0; step < 120; step += 1) {
+        const pose = computeAvatarTargetPose(createAvatarAnimatorState('p1'), input({ reducedMotion: false, drunkLevel, time: step * 0.1 }))
+        max = Math.max(max, Math.abs(pose.bones.Torso[2]))
+      }
+      return max
+    }
+    expect(swayAt(8)).toBeGreaterThan(swayAt(2) * 2)
+  })
+
+  it('rakes the pot in, then crouches before popping up to celebrate', () => {
+    const state = createAvatarAnimatorState('p1')
+    computeAvatarTargetPose(state, input({ reducedMotion: false, winner: true, time: 0 }))
+    const rake = computeAvatarTargetPose(state, input({ reducedMotion: false, winner: true, time: 0.4 }))
+    // Both hands reach out over the felt toward the pot.
+    expect(rake.handR[2]).toBeLessThan(anchors.cards[2])
+    expect(rake.handL[2]).toBeLessThan(anchors.cards[2])
+    const antic = computeAvatarTargetPose(state, input({ reducedMotion: false, winner: true, time: 1.12 }))
+    const up = computeAvatarTargetPose(state, input({ reducedMotion: false, winner: true, time: 1.9 }))
+    expect(antic.bodyPosition[1]).toBeLessThan(up.bodyPosition[1])
+    expect(up.bodyPosition[1]).toBeGreaterThan(0.1)
+  })
+
+  it('pushes chips with the chips: hand at the stack as they leave, out front as they land', () => {
+    const cueInput = (cue: 'bet' | 'call' | 'raise' | 'all_in', ms: number, wagerIntensity = 0) =>
+      computeAvatarTargetPose(createAvatarAnimatorState('p1'), input({ cue, cueActive: true, cueElapsedMs: ms, wagerIntensity }))
+    const atGrab = cueInput('bet', 250)
+    expect(Math.hypot(atGrab.handR[0] - anchors.stack[0], atGrab.handR[2] - anchors.stack[2])).toBeLessThan(0.15)
+    const atLand = cueInput('bet', 780)
+    expect(atLand.handR[2]).toBeLessThan(anchors.stack[2] - 0.3)
+    // A big raise brings the second hand in and leans further.
+    const small = cueInput('raise', 550, 0)
+    const huge = cueInput('raise', 550, 1)
+    expect(huge.bones.Chest[0]).toBeGreaterThan(small.bones.Chest[0])
+    expect(huge.handL[2]).toBeLessThan(small.handL[2] - 0.3)
+    // A call is a flat hand, not a grab.
+    expect(cueInput('call', 500).fingerCurlR).toBeLessThan(0.3)
+    // All-in: both arms sweep forward and the chin comes up at the hold.
+    const shove = cueInput('all_in', 700)
+    expect(shove.handR[2]).toBeLessThan(anchors.stack[2])
+    expect(shove.handL[2]).toBeLessThan(anchors.stack[2])
   })
 })

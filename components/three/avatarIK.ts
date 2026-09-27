@@ -40,6 +40,79 @@ export function aimBoneAt(bone: THREE.Object3D, child: THREE.Object3D, target: T
   bone.updateMatrixWorld(true)
 }
 
+/** Fraction of full arm length the IK will extend to (soft elbows). */
+export const ARM_MAX_EXTENSION = 0.9
+
+/**
+ * How far past a comfortable reach `target` is from the chain's shoulder, in
+ * world units (0 when it is within reach).
+ */
+export function getArmOvershoot(chain: ArmChain, target: THREE.Vector3): number {
+  chain.upper.getWorldPosition(shoulder)
+  chain.lower.getWorldPosition(elbow)
+  chain.hand.getWorldPosition(wrist)
+  const length = shoulder.distanceTo(elbow) + elbow.distanceTo(wrist)
+  return Math.max(0, shoulder.distanceTo(target) - length * ARM_MAX_EXTENSION)
+}
+
+const frameCurrentX = new THREE.Vector3()
+const frameCurrentY = new THREE.Vector3()
+const frameDesiredX = new THREE.Vector3()
+const frameDesiredY = new THREE.Vector3()
+const frameBasis = new THREE.Matrix4()
+const frameCurrentQ = new THREE.Quaternion()
+const frameDesiredQ = new THREE.Quaternion()
+const frameDelta = new THREE.Quaternion()
+const framePoint = new THREE.Vector3()
+const frameOrigin = new THREE.Vector3()
+
+function basisQuaternion(primary: THREE.Vector3, secondary: THREE.Vector3, out: THREE.Quaternion) {
+  const x = primary.normalize()
+  const z = new THREE.Vector3().crossVectors(x, secondary).normalize()
+  const y = new THREE.Vector3().crossVectors(z, x)
+  frameBasis.makeBasis(x, y, z)
+  return out.setFromRotationMatrix(frameBasis)
+}
+
+/**
+ * Rotates `bone` (in world space, about its own origin) so the direction from
+ * it to `primaryChild` points along `desiredPrimary` and the direction from
+ * `sideA` to `sideB` lines up with `desiredSide` as closely as possible.
+ * Used to orient hands (fingers up, knuckles out) independent of the forearm.
+ */
+export function orientBoneFrame(
+  bone: THREE.Object3D,
+  primaryChild: THREE.Object3D,
+  sideA: THREE.Object3D,
+  sideB: THREE.Object3D,
+  desiredPrimary: THREE.Vector3,
+  desiredSide: THREE.Vector3,
+  weight = 1
+) {
+  if (weight <= 0.001) return
+  bone.getWorldPosition(frameOrigin)
+  frameCurrentX.copy(primaryChild.getWorldPosition(framePoint)).sub(frameOrigin)
+  frameCurrentY.copy(sideB.getWorldPosition(framePoint)).sub(sideA.getWorldPosition(frameOrigin))
+  bone.getWorldPosition(frameOrigin)
+  if (frameCurrentX.lengthSq() < 1e-12 || frameCurrentY.lengthSq() < 1e-12) return
+  frameDesiredX.copy(desiredPrimary)
+  frameDesiredY.copy(desiredSide)
+  if (frameDesiredX.lengthSq() < 1e-10 || frameDesiredY.lengthSq() < 1e-10) return
+  basisQuaternion(frameCurrentX, frameCurrentY, frameCurrentQ)
+  basisQuaternion(frameDesiredX, frameDesiredY, frameDesiredQ)
+  frameDelta.copy(frameDesiredQ).multiply(frameCurrentQ.invert())
+  if (weight < 1) frameDelta.slerp(new THREE.Quaternion(), 1 - weight)
+  bone.getWorldQuaternion(boneWorldQuaternion)
+  boneWorldQuaternion.premultiply(frameDelta)
+  if (bone.parent) {
+    bone.parent.getWorldQuaternion(parentWorldQuaternion)
+    bone.quaternion.copy(parentWorldQuaternion.invert().multiply(boneWorldQuaternion))
+  } else {
+    bone.quaternion.copy(boneWorldQuaternion)
+  }
+  bone.updateMatrixWorld(true)
+}
+
 const shoulder = new THREE.Vector3()
 const elbow = new THREE.Vector3()
 const wrist = new THREE.Vector3()
@@ -75,7 +148,9 @@ export function solveArmIK(chain: ArmChain, target: THREE.Vector3, pole: THREE.V
   if (a < 1e-5 || b < 1e-5) return
 
   toTarget.subVectors(target, shoulder)
-  const reach = Math.max(Math.abs(a - b) + 1e-3, Math.min(toTarget.length(), (a + b) * 0.995))
+  // Never lock the elbow straight: a slightly bent arm reads relaxed, and the
+  // renderer leans the torso in for anything further away.
+  const reach = Math.max(Math.abs(a - b) + 1e-3, Math.min(toTarget.length(), (a + b) * ARM_MAX_EXTENSION))
   toTarget.normalize()
   clampedTarget.copy(shoulder).addScaledVector(toTarget, reach)
 

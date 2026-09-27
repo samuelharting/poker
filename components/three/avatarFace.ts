@@ -133,29 +133,46 @@ export function createAvatarFace(
   const lidGeometry = new THREE.SphereGeometry(1.04, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2)
   geometries.push(sphere, pupilDisc, lidGeometry)
 
+  // The face surface around each eye (skin in Head space), so the cartoon
+  // eyes sit *on* the head instead of bulging out of it in profile.
+  const skinPoints = collectRegion(model, headBone, /^skin$/i)
+  const surfaceDepthAt = (center: THREE.Vector3) => {
+    let best = -Infinity
+    for (const point of skinPoints) {
+      if (Math.abs(point.x - center.x) < radius * 0.9 && Math.abs(point.y - center.y) < radius * 0.9) {
+        best = Math.max(best, point.dot(forward))
+      }
+    }
+    return Number.isFinite(best) ? best : center.dot(forward) + radius * 0.3
+  }
+  const BALL_DEPTH = 0.5
   const eyes: EyeRig[] = []
   for (const [box, side] of [[right, 1], [left, -1]] as const) {
     const eyeCenter = box.getCenter(new THREE.Vector3())
     const root = new THREE.Group()
     root.name = 'cartoon-eye'
-    // Clear glasses sit in front: keep the eyes tucked in behind the lenses.
-    root.position.copy(eyeCenter).addScaledVector(forward, radius * (eyewear === 'none' ? 0.22 : 0.02))
-    root.quaternion.copy(quaternion)
+    // Only a shallow dome of the eyeball shows in front of the face (less
+    // still behind glasses, so the lenses clear them).
+    const protrude = radius * (eyewear === 'none' ? 0.26 : 0.14)
+    const along = eyeCenter.dot(forward)
+    root.position.copy(eyeCenter).addScaledVector(forward, surfaceDepthAt(eyeCenter) + protrude - radius * BALL_DEPTH - along)
+    // Follow the curve of the face: each eye turns slightly outward.
+    root.quaternion.copy(quaternion).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), side * 0.22))
     root.scale.setScalar(radius)
 
     const ball = new THREE.Mesh(sphere, sclera)
-    ball.scale.set(0.9, 1.1, eyewear === 'none' ? 0.62 : 0.45)
+    ball.scale.set(0.9, 1.1, BALL_DEPTH)
     root.add(ball)
 
     const pupil = new THREE.Group()
     const irisMesh = new THREE.Mesh(pupilDisc, iris)
     irisMesh.scale.setScalar(0.46)
     pupil.add(irisMesh)
-    pupil.position.z = 0.63
+    pupil.position.z = BALL_DEPTH + 0.015
     root.add(pupil)
 
     const upperLid = new THREE.Mesh(lidGeometry, lid)
-    upperLid.scale.set(0.94, 1.12, 0.7)
+    upperLid.scale.set(0.94, 1.12, BALL_DEPTH + 0.08)
     root.add(upperLid)
     // A single upper lid handles blinks, squints and droops (one draw per eye).
     const lowerLid = upperLid

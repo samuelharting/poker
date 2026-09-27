@@ -67,6 +67,8 @@ export interface AvatarPose {
   drinkLift: number
   /** 0..1 middle finger extended (the flick-off gesture). */
   middleFinger: number
+  /** 0..1 elbows splayed out level with the hands (arms folded on the rail). */
+  elbowOut: number
 }
 
 export interface AvatarAnimatorInput {
@@ -145,9 +147,12 @@ export interface AvatarAnimatorState {
 const BONE_CHANNELS = ANIMATED_BONES.length * 3
 /** Channel index of bodyPosition in writeChannels (after bones, hands and fingers). */
 const BODY_CHANNEL_START = BONE_CHANNELS + 3 + 3 + 2
-const CHANNEL_COUNT = BONE_CHANNELS + 3 + 3 + 2 + 3 + 3 + 1 + 1 + 1
-export const FLIP_OFF_SECONDS = 2.4
+const CHANNEL_COUNT = BONE_CHANNELS + 3 + 3 + 2 + 3 + 3 + 1 + 1 + 1 + 1
+/** Wind-up, thrust + jab, a readable ~1.4s hold, and a relaxed return. */
+export const FLIP_OFF_SECONDS = 3.2
 const DRINK_SECONDS = 2.6
+/** Winners rake the pot toward themselves before celebrating. */
+const WINNER_RAKE_SECONDS = 1.0
 const PEEK_DURATION = 2.1
 
 export function createAvatarAnimatorState(seedSource: string): AvatarAnimatorState {
@@ -206,7 +211,30 @@ function emptyPose(): AvatarPose {
     cardLift: 0,
     drinkLift: 0,
     middleFinger: 0,
+    elbowOut: 0,
   }
+}
+
+/**
+ * Which hand throws the flick-off: the one on the target's side, so the arm
+ * extends toward them instead of crossing the body. `target` is seat-local.
+ */
+export function getFlipOffHand(target: Vec3): 'R' | 'L' {
+  return target[0] < -0.2 * Math.abs(target[2]) ? 'L' : 'R'
+}
+
+/** Blends one rotation axis of a bone toward `value` (so a gesture can own it). */
+function blendAxis(target: Vec3, axis: 0 | 1 | 2, value: number, weight: number) {
+  const w = Math.max(0, Math.min(1, weight))
+  target[axis] += (value - target[axis]!) * w
+}
+
+/** A quick accent: rises over `attack`, then decays over `decay` seconds. */
+function pulse(elapsed: number, at: number, attack: number, decay = attack * 2.2) {
+  const local = elapsed - at
+  if (local < 0) return 0
+  if (local < attack) return smoothStep(local / attack)
+  return Math.max(0, 1 - smoothStep((local - attack) / decay))
 }
 
 function add(target: Vec3, x: number, y: number, z: number, weight = 1) {
@@ -319,7 +347,8 @@ export function computeAvatarTargetPose(
   add(bones.Chest, 0.08, 0, 0)
   pose.handR = [...anchors.railR]
   pose.handL = [...anchors.railL]
-  pose.fingerCurlR = 0.3
+  // Relaxed hands: fingers loosely curled, never flat mittens.
+  pose.fingerCurlR = 0.32
   pose.fingerCurlL = 0.3
 
   // 2. Breathing and slow weight shifts keep every player alive.
@@ -364,7 +393,7 @@ export function computeAvatarTargetPose(
   }
 
   // 4. Idle card peeks: reach to the cards, lift the corners, look down.
-  const canIdle = !input.acting && !input.cueActive && !input.folded && !input.winner && !input.loser
+  const canIdle = !input.acting && !input.cueActive && !input.folded && !input.winner && !input.loser && !input.passedOut
   if (canIdle && input.hasCards && time >= state.nextPeekAt && !Number.isFinite(state.peekStartedAt)) {
     state.peekStartedAt = time
   }
@@ -422,8 +451,10 @@ export function computeAvatarTargetPose(
       case 0:
         add(bones.Chest, 0.12, -0.05, 0, think)
         add(bones.Head, 0.05, -0.06, 0.12, think)
-        blendTo(pose.handR, offset(anchors.chin, 0.02, -0.02 - 0.015 * tap, -0.04), think)
-        pose.fingerCurlR += 0.45 * think
+        // Chin resting on a loose fist.
+        blendTo(pose.handR, offset(anchors.chin, 0.02, -0.04 - 0.015 * tap, -0.04), think)
+        add(bones.WristR, -0.35, 0, 0, think)
+        pose.fingerCurlR = pose.fingerCurlR * (1 - think) + 0.85 * think
         break
       case 1: {
         const riffle = Math.sin(time * 11 + seed * 3) * motion
@@ -448,6 +479,13 @@ export function computeAvatarTargetPose(
         pose.fingerCurlL += 0.5 * think
         break
       }
+    }
+    // Every few seconds, a sidelong glance down at their own chips.
+    const glance = envelope(positiveModulo(time - state.actingSince - 1.2 + seed * 2, 3.4), 0.9, 0.18, 0.25) * think * motion
+    if (glance > 0) {
+      const stackYaw = Math.atan2(-anchors.stack[0], -anchors.stack[2])
+      blendAxis(bones.Head, 1, stackYaw * 0.8, glance)
+      add(bones.Head, 0.22 * glance, 0, 0)
     }
     pose.bodyPosition[2] -= 0.05 * think
   }
@@ -490,81 +528,139 @@ export function computeAvatarTargetPose(
     const rail = anchors.railR
     switch (input.cue) {
       case 'check': {
-        // Two crisp knuckle taps on the felt in front of the cards.
+        // Wind up, two crisp knuckle taps on the felt (head nods with them), lift away.
         const reach = envelope(t, 1, 0.16, 0.22)
-        const tap = Math.max(0, Math.sin(clamp01((t - 0.18) / 0.16) * Math.PI), Math.sin(clamp01((t - 0.4) / 0.16) * Math.PI))
-        blendTo(pose.handR, offset(anchors.tap, 0, 0.1 - 0.1 * tap, 0), reach)
-        add(bones.WristR, 0.5 * tap, 0, 0, reach)
+        const tap = Math.max(0, Math.sin(clamp01((t - 0.2) / 0.14) * Math.PI), Math.sin(clamp01((t - 0.42) / 0.14) * Math.PI))
+        const cock = smoothStep(t / 0.18) * (1 - smoothStep((t - 0.2) / 0.08))
+        const lift = smoothStep((t - 0.58) / 0.2) * (1 - smoothStep((t - 0.8) / 0.2))
+        blendTo(pose.handR, offset(anchors.tap, 0, 0.12 + 0.05 * cock - 0.12 * tap + 0.06 * lift, 0.02 * lift), reach)
+        add(bones.WristR, 0.55 * tap - 0.35 * cock - 0.2 * lift, 0, 0, reach)
         pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + reach
-        add(bones.Head, 0.12 * reach, 0, 0)
+        add(bones.Head, 0.1 * reach + 0.07 * tap, 0, 0)
+        add(bones.Chest, 0.05 * tap, 0, 0)
         break
       }
       case 'call':
       case 'bet':
       case 'raise': {
-        // Reach → grab from the stack → slide to the bet line → release → return.
-        const reach = smoothStep(t / 0.22)
-        const push = smoothStep((t - 0.25) / 0.4)
-        const release = smoothStep((t - 0.68) / 0.12)
-        const back = smoothStep((t - 0.8) / 0.2)
-        const grabbed = offset(anchors.stack, 0, 0.04, 0.02)
-        const pushed: Vec3 = [
-          grabbed[0] + (anchors.betSpot[0] - grabbed[0]) * 0.8,
-          grabbed[1] + Math.sin(push * Math.PI) * 0.06,
-          grabbed[2] + (anchors.betSpot[2] - grabbed[2]) * 0.8,
-        ]
+        // Anticipation (sit up, hand hovers over the stack) → take the chips →
+        // push them out *with* the chips (which leave the stack ~0.25s in and
+        // land ~0.95s in) → release with a little wrist flick → settle back.
+        // A call slides a neat stack with a flat hand; bets grip and push with
+        // a lean that grows with the size of the bet, and big raises bring
+        // the second hand in too.
+        const isCall = input.cue === 'call'
+        const big = clamp01(input.wagerIntensity)
+        const antic = envelope(t, 0.28, 0.1, 0.14) * motion
+        const reach = smoothStep(t / 0.2)
+        const push = smoothStep((t - 0.25) / 0.55)
+        const release = smoothStep((t - 0.8) / 0.08)
+        const back = smoothStep((t - 0.86) / 0.14)
+        const flick = pulse(t, 0.8, 0.05, 0.14) * motion
+        const hold = reach * (1 - back)
+        const grabbed = offset(anchors.stack, 0, 0.04 + 0.08 * antic, 0.04)
+        // Push a hand-length or two toward the bet line; the chips fly on.
+        const toBetX = anchors.betSpot[0] - grabbed[0]
+        const toBetZ = anchors.betSpot[2] - grabbed[2]
+        const toBetLength = Math.hypot(toBetX, toBetZ) || 1
+        const pushDistance = Math.min(toBetLength * 0.8, isCall ? 0.32 : 0.4 + 0.14 * big)
+        const travel = pushDistance / toBetLength
         const path: Vec3 = [
-          grabbed[0] + (pushed[0] - grabbed[0]) * push,
-          grabbed[1] + (pushed[1] - grabbed[1]) * push + 0.05 * release,
-          grabbed[2] + (pushed[2] - grabbed[2]) * push,
+          grabbed[0] + toBetX * travel * push,
+          grabbed[1] + (isCall ? 0 : Math.sin(push * Math.PI) * 0.05) + 0.07 * release,
+          grabbed[2] + toBetZ * travel * push + 0.05 * release,
         ]
-        blendTo(pose.handR, path, reach * (1 - back))
-        add(bones.WristR, -0.2 * push, 0, 0, reach * (1 - back))
-        pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + (0.95 - 0.8 * release) * reach
-        add(bones.Chest, 0.16 * push * (1 - back), 0, 0)
-        add(bones.Head, 0.1 * push * (1 - back), 0, 0)
-        if (input.cue === 'raise') add(bones.Head, -0.08 * release * (1 - back), 0.1 * release * (1 - back), 0)
+        blendTo(pose.handR, path, hold)
+        if (isCall) {
+          // Flat hand behind the stack, palm down, fingers together.
+          add(bones.WristR, -0.28, 0, 0, hold)
+          pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + 0.1 * reach
+        } else {
+          add(bones.WristR, -0.2 * push - 0.45 * flick, 0, 0, hold)
+          pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + (0.9 - 0.75 * release) * reach
+        }
+        const twoHands = isCall ? 0 : smoothStep((big - 0.5) / 0.25)
+        if (twoHands > 0) {
+          const fromL = offset(anchors.stack, -0.22, 0.04 + 0.06 * antic, 0.06)
+          const pathL: Vec3 = [
+            fromL[0] + (anchors.betSpot[0] - 0.12 - fromL[0]) * travel * push,
+            path[1],
+            fromL[2] + (anchors.betSpot[2] - fromL[2]) * travel * push + 0.05 * release,
+          ]
+          blendTo(pose.handL, pathL, hold * twoHands)
+          pose.fingerCurlL = pose.fingerCurlL * (1 - twoHands * reach) + 0.2 * twoHands * reach
+        }
+        const drive = Math.sin(clamp01((t - 0.2) / 0.66) * Math.PI)
+        const lean = isCall ? 0.12 : 0.16 + 0.2 * big
+        add(bones.Chest, -0.06 * antic + lean * drive * (1 - back) + 0.03 * flick, 0.05 * drive * (1 - twoHands), 0)
+        add(bones.Head, 0.04 * push * (1 - back) - 0.05 * antic, 0, 0)
+        pose.bodyPosition[2] -= (isCall ? 0.04 : 0.06 + 0.08 * big) * drive
+        if (input.cue === 'raise') {
+          // Confident: chin up and a little head tilt as the chips land.
+          add(bones.Head, -0.14 * release * (1 - back * 0.5), 0.1 * release * (1 - back), 0.06 * release * (1 - back))
+        }
         void rail
         break
       }
       case 'all_in': {
-        // Both hands wrap the stack and shove it in, then a palms-up "I'm in".
-        const grip = smoothStep(t / 0.2)
-        const shove = smoothStep((t - 0.2) / 0.38)
-        const flourish = smoothStep((t - 0.62) / 0.18)
-        const fromR = offset(anchors.stack, 0.14, 0.04, 0.06)
-        const fromL = offset(anchors.stack, -0.18, 0.04, 0.06)
+        // Gather (a breath: lean back, arms open wide around the stack), then
+        // both arms sweep the whole stack forward as the torso lunges, chin
+        // up — a brief defiant hold — then sit back.
+        const gather = envelope(t, 0.3, 0.1, 0.12) * motion
+        const grip = smoothStep((t - 0.06) / 0.16)
+        const shove = smoothStep((t - 0.22) / 0.32)
+        const hold = smoothStep((t - 0.5) / 0.08)
+        const settle = smoothStep((t - 0.84) / 0.16)
+        const slam = pulse(t, 0.52, 0.05, 0.16) * motion
+        add(bones.Chest, -0.16 * gather, 0, 0)
+        add(bones.Head, -0.08 * gather, 0, 0)
+        add(bones.ShoulderR, 0, 0, 0.08 * gather)
+        add(bones.ShoulderL, 0, 0, -0.08 * gather)
+        pose.bodyPosition[2] += 0.06 * gather
+        // Hands start wide around the stack and converge as they sweep in.
         const toX = anchors.betSpot[0] - anchors.stack[0]
         const toZ = anchors.betSpot[2] - anchors.stack[2]
-        const drive = shove * 0.85
-        blendTo(pose.handR, offset(fromR, toX * drive, 0.03 * Math.sin(shove * Math.PI), toZ * drive), grip * (1 - flourish))
-        blendTo(pose.handL, offset(fromL, toX * drive, 0.03 * Math.sin(shove * Math.PI), toZ * drive), grip * (1 - flourish))
-        blendTo(pose.handR, offset(anchors.shoulderR, 0.3, 0.05, -0.38), flourish)
-        blendTo(pose.handL, offset(anchors.shoulderL, -0.3, 0.05, -0.38), flourish)
-        add(bones.WristR, 0, 0, -0.8 * flourish)
-        add(bones.WristL, 0, 0, 0.8 * flourish)
-        pose.fingerCurlR = 0.9 * grip * (1 - flourish)
-        pose.fingerCurlL = 0.9 * grip * (1 - flourish)
-        add(bones.Chest, 0.26 * shove * (1 - flourish) - 0.12 * flourish, 0, 0)
-        add(bones.Head, -0.12 * flourish, 0, 0)
-        pose.bodyPosition[2] -= 0.12 * shove * (1 - flourish)
+        const drive = shove * 0.88
+        const spread = 0.26 - 0.12 * shove
+        const sweepY = 0.04 + 0.06 * gather + 0.03 * Math.sin(shove * Math.PI)
+        blendTo(pose.handR, offset(anchors.stack, spread + toX * drive, sweepY, 0.06 + toZ * drive), grip * (1 - settle))
+        blendTo(pose.handL, offset(anchors.stack, -spread - 0.08 + toX * drive, sweepY, 0.06 + toZ * drive), grip * (1 - settle))
+        add(bones.WristR, -0.25 * shove, 0, 0, 1 - settle)
+        add(bones.WristL, -0.25 * shove, 0, 0, 1 - settle)
+        pose.fingerCurlR = pose.fingerCurlR * (1 - grip) + 0.35 * grip * (1 - settle)
+        pose.fingerCurlL = pose.fingerCurlL * (1 - grip) + 0.35 * grip * (1 - settle)
+        // Lunge with the shove, chin up and hold.
+        add(bones.Chest, (0.34 * shove + 0.06 * slam) * (1 - settle), 0, 0)
+        add(bones.Neck, -0.1 * hold * (1 - settle), 0, 0)
+        add(bones.Head, (0.06 * shove - 0.26 * hold) * (1 - settle), 0, 0)
+        pose.bodyPosition[2] -= (0.2 * shove + 0.03 * slam) * (1 - settle)
         break
       }
       case 'fold': {
-        // Pick up the cards, flick them toward the middle, sit back.
-        const reach = smoothStep(t / 0.22)
-        const flick = smoothStep((t - 0.28) / 0.18)
-        const back = smoothStep((t - 0.6) / 0.3)
+        // Pick up both cards, draw back, a wrist-snap toss toward the middle
+        // with follow-through, then lean back and fold the arms. Facing a big
+        // bet, a small disgusted head shake.
+        const reach = smoothStep(t / 0.2)
+        const cock = envelope(t, 0.4, 0.2, 0.06) * motion
+        const flick = smoothStep((t - 0.34) / 0.1)
+        const follow = pulse(t, 0.42, 0.06, 0.25) * motion
+        const back = smoothStep((t - 0.55) / 0.35)
         const toward: Vec3 = [
-          anchors.cards[0] + (anchors.board[0] - anchors.cards[0]) * 0.18,
-          anchors.cards[1] + 0.12,
-          anchors.cards[2] + (anchors.board[2] - anchors.cards[2]) * 0.18,
+          anchors.cards[0] + (anchors.board[0] - anchors.cards[0]) * 0.2,
+          anchors.cards[1] + 0.14 + 0.05 * follow,
+          anchors.cards[2] + (anchors.board[2] - anchors.cards[2]) * 0.2,
         ]
-        blendTo(pose.handR, offset(anchors.cards, 0.06, 0.04, 0.08), reach * (1 - back))
+        blendTo(pose.handR, offset(anchors.cards, 0.06, 0.05 + 0.1 * cock, 0.1 + 0.1 * cock), reach * (1 - back))
         blendTo(pose.handR, toward, flick * (1 - back))
-        add(bones.WristR, -0.6 * flick, 0, 0.3 * flick, 1 - back)
-        pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + (0.8 - 0.7 * flick) * reach
-        add(bones.Head, 0.05, -0.2 * back, 0)
+        add(bones.WristR, 0.5 * cock - 0.75 * flick - 0.3 * follow, 0, 0.3 * flick, 1 - back)
+        pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + (0.75 - 0.65 * flick) * reach
+        // Lean back into the folded-arms rest the fold state holds afterwards.
+        blendTo(pose.handR, offset(anchors.chest, -0.2, -0.12, -0.16), back * 0.8)
+        blendTo(pose.handL, offset(anchors.chest, 0.2, -0.16, -0.14), back * 0.8)
+        add(bones.Chest, 0.08 * reach * (1 - back) + 0.04 * cock - 0.14 * back, -0.06 * back, 0)
+        const disgust = clamp01((input.tableHeat - 0.2) / 0.4) * envelope(t - 0.5, 0.5, 0.08, 0.15) * motion
+        add(bones.Head, 0.05 - 0.08 * back, -0.2 * back + 0.2 * Math.sin((t - 0.5) * 38) * disgust, 0.05 * back)
+        pose.bodyPosition[2] += 0.07 * back
         break
       }
       default:
@@ -715,65 +811,139 @@ export function computeAvatarTargetPose(
       pose.fingerCurlR *= 1 - shrug
       pose.fingerCurlL *= 1 - shrug
     }
-    pose.bodyPosition[1] -= 0.04 * settle
+    // Then a long exhale and a slump: shoulders rise on the sigh, drop, and
+    // the whole body sinks into the chair.
+    const sigh = envelope(elapsed - 1.1, 1.3, 0.45, 0.7) * motion
+    const slump = smoothStep((elapsed - 1.6) / 1.1)
+    add(bones.Chest, -0.06 * sigh + 0.12 * slump, 0, 0)
+    add(bones.ShoulderR, 0, 0, 0.1 * sigh - 0.08 * slump)
+    add(bones.ShoulderL, 0, 0, -0.1 * sigh + 0.08 * slump)
+    add(bones.Head, 0.1 * slump, 0, 0.04 * slump)
+    pose.handR[1] -= 0.03 * slump
+    pose.handL[1] -= 0.03 * slump
+    pose.bodyPosition[1] -= 0.04 * settle + 0.03 * slump
+    pose.bodyPosition[2] += 0.05 * slump
   }
 
-  // 11. Winner: pop up out of the seat into their celebration.
+  // 11. Winner: a quick crouch of anticipation, pop up out of the seat into
+  // their celebration, then settle back into a smug lean in the chair.
   if (input.winner) {
-    const elapsed = time - state.winnerSince
-    const rise = smoothStep(elapsed / 0.32)
-    const hop = Math.max(0, Math.sin(Math.min(1, elapsed / 0.45) * Math.PI)) * motion
+    // First rake the pot in with both arms (as the payout chips fly over),
+    // then celebrate.
+    const sinceWin = time - state.winnerSince
+    const rakeW = envelope(sinceWin, WINNER_RAKE_SECONDS + 0.25, 0.22, 0.3) * motion
+    if (rakeW > 0) {
+      const pull = smoothStep((sinceWin - 0.3) / 0.65)
+      const far: Vec3 = [
+        anchors.cards[0] + (anchors.board[0] - anchors.cards[0]) * 0.3,
+        anchors.cards[1] + 0.06,
+        anchors.cards[2] + (anchors.board[2] - anchors.cards[2]) * 0.3,
+      ]
+      const near = offset(anchors.cards, 0, 0.06, 0.25)
+      const sweep: Vec3 = [far[0] + (near[0] - far[0]) * pull, far[1], far[2] + (near[2] - far[2]) * pull]
+      blendTo(pose.handR, offset(sweep, 0.2, 0, 0), rakeW)
+      blendTo(pose.handL, offset(sweep, -0.2, 0, 0), rakeW)
+      add(bones.WristR, 0.3, 0, 0, rakeW)
+      add(bones.WristL, 0.3, 0, 0, rakeW)
+      pose.fingerCurlR = pose.fingerCurlR * (1 - rakeW) + 0.5 * rakeW
+      pose.fingerCurlL = pose.fingerCurlL * (1 - rakeW) + 0.5 * rakeW
+      add(bones.Chest, 0.3 * (1 - pull * 0.6), 0, 0, rakeW)
+      add(bones.Head, 0.12, 0, 0, rakeW)
+      pose.bodyPosition[2] -= 0.12 * (1 - pull) * rakeW
+    }
+    const elapsed = sinceWin - WINNER_RAKE_SECONDS
+    const antic = envelope(elapsed, 0.3, 0.08, 0.18) * motion
+    const rise = smoothStep((elapsed - 0.1) / 0.3)
+    const hop = Math.max(0, Math.sin(clamp01((elapsed - 0.12) / 0.45) * Math.PI)) * motion
+    const lounge = smoothStep((elapsed - 3.2) / 1.2) * motion
     const beat = time * 6 + seed * 10
+    add(bones.Chest, 0.14 * antic, 0, 0)
+    add(bones.Head, 0.08 * antic, 0, 0)
+    pose.bodyPosition[1] -= 0.05 * antic
     add(bones.Chest, -0.18, 0, 0, rise)
     add(bones.Head, -0.16, 0, 0, rise)
     switch (input.celebration) {
-      case 'victory':
-        blendTo(pose.handR, offset(anchors.shoulderR, 0.22, 0.72 + 0.04 * Math.sin(beat) * motion, -0.08), rise)
-        blendTo(pose.handL, offset(anchors.shoulderL, -0.22, 0.72 + 0.04 * Math.sin(beat + 1) * motion, -0.08), rise)
-        pose.fingerCurlR = 0.1
-        pose.fingerCurlL = 0.1
+      case 'victory': {
+        // Both arms up, a triumphant bounce, then hands laced behind the head.
+        const up = rise * (1 - lounge)
+        blendTo(pose.handR, offset(anchors.shoulderR, 0.22, 0.7 + 0.05 * Math.sin(beat) * motion, -0.08), up)
+        blendTo(pose.handL, offset(anchors.shoulderL, -0.22, 0.7 + 0.05 * Math.sin(beat + 1) * motion, -0.08), up)
+        blendTo(pose.handR, offset(anchors.chin, 0.12, 0.24, 0.3), lounge)
+        blendTo(pose.handL, offset(anchors.chin, -0.12, 0.24, 0.3), lounge)
+        add(bones.Head, 0.06 * Math.sin(beat * 0.5) * up * motion, 0, 0)
+        pose.fingerCurlR = 0.12 + 0.3 * lounge
+        pose.fingerCurlL = 0.12 + 0.3 * lounge
         break
+      }
       case 'fist_pump': {
-        const pump = (0.5 + 0.5 * Math.sin(time * 9 + seed)) * motion
-        blendTo(pose.handR, offset(anchors.shoulderR, 0.12, 0.34 + 0.24 * pump, -0.2), rise)
-        add(bones.Chest, 0.06 * pump, 0, 0, rise)
-        pose.fingerCurlR = 1
+        // Snappy pumps: a quick punch up, a slower pull down, chest and head
+        // driving with each one.
+        const phase = positiveModulo(elapsed * 2.1 + seed, 1)
+        const punch = (phase < 0.22 ? smoothStep(phase / 0.22) : 1 - smoothStep((phase - 0.22) / 0.78)) * motion
+        const pumping = rise * (1 - lounge)
+        blendTo(pose.handR, offset(anchors.shoulderR, 0.2, 0.3 + 0.42 * punch, -0.24), pumping)
+        blendTo(pose.handR, offset(anchors.chin, 0.12, 0.24, 0.3), lounge)
+        blendTo(pose.handL, offset(anchors.chest, 0.08, -0.08, -0.26), pumping * 0.6)
+        add(bones.Chest, 0.1 * punch * pumping, 0.06 * punch * pumping, 0)
+        add(bones.Head, -0.08 * punch * pumping, 0, 0)
+        add(bones.WristR, -0.3 * punch * pumping, 0, 0)
+        pose.fingerCurlR = 1 - 0.6 * lounge
+        pose.fingerCurlL = 0.6
         break
       }
       case 'slow_clap': {
         const clap = (0.5 + 0.5 * Math.sin(time * 5.4 + seed)) * motion
         blendTo(pose.handR, offset(anchors.chest, 0.03 + 0.12 * clap, 0.14, -0.32), rise)
         blendTo(pose.handL, offset(anchors.chest, -0.03 - 0.12 * clap, 0.14, -0.32), rise)
-        pose.fingerCurlR = 0.1
-        pose.fingerCurlL = 0.1
+        add(bones.Head, 0.05 * clap, 0, 0, rise)
+        pose.fingerCurlR = 0.12
+        pose.fingerCurlL = 0.12
         break
       }
       case 'wave':
-      default:
-        blendTo(pose.handR, offset(anchors.shoulderR, 0.34 + 0.12 * Math.sin(time * 8) * motion, 0.56, -0.1), rise)
-        add(bones.WristR, 0, 0, 0.4 * Math.sin(time * 8) * motion, rise)
-        pose.fingerCurlR = 0.05
+      default: {
+        const wave = Math.sin(time * 8) * motion
+        // Arm up and out beside the head (not a salute), hand swinging.
+        blendTo(pose.handR, offset(anchors.shoulderR, 0.44 + 0.12 * wave, 0.74, -0.16), rise * (1 - lounge * 0.5))
+        add(bones.WristR, 0, 0, 0.4 * wave, rise)
+        add(bones.Head, 0, 0, -0.06 * wave, rise)
+        pose.fingerCurlR = 0.06
         break
+      }
     }
-    pose.bodyPosition[1] += 0.14 * rise + 0.16 * hop
-    pose.bodyPosition[2] += 0.08 * rise
+    pose.bodyPosition[1] += 0.14 * rise * (1 - lounge) + 0.16 * hop
+    pose.bodyPosition[2] += 0.08 * rise + 0.08 * lounge
+    add(bones.Chest, -0.14 * lounge, 0, 0)
+    add(bones.Torso, -0.06 * lounge, 0.05 * lounge, 0)
   }
 
-  // 12. Drunkenness: a loose, growing sway, lolling head, and hiccups.
-  const drunk = clamp01((input.drunkLevel ?? 0) / 10)
+  // 12. Drunkenness: a loose, circling sway that grows with every drink, a
+  // head that lags behind the body, and hiccups once they are a few deep.
+  const drunkLevel = input.drunkLevel ?? 0
+  const drunk = clamp01(drunkLevel / 10)
   if (drunk > 0 && !input.passedOut) {
-    const wobble = Math.sin(time * (0.9 + drunk * 0.6) + seed * 9) * motion
-    const loll = Math.sin(time * 1.35 + seed * 4) * motion
-    add(bones.Torso, 0, 0.05 * wobble * drunk, 0.16 * wobble * drunk)
-    add(bones.Chest, 0.06 * drunk, 0, 0.05 * loll * drunk)
-    add(bones.Head, 0.08 * drunk + 0.06 * loll * drunk, 0.1 * wobble * drunk, 0.22 * loll * drunk)
-    pose.handR[0] += 0.04 * wobble * drunk
-    pose.handL[0] += 0.04 * wobble * drunk
-    if ((input.drunkLevel ?? 0) >= 5) {
-      const period = 3.2 + seed * 2
-      const hiccup = Math.max(0, 1 - Math.abs(positiveModulo(time + seed * 13, period) - 0.1) / 0.12) * motion
-      add(bones.Chest, -0.14 * hiccup, 0, 0)
-      add(bones.Head, -0.18 * hiccup, 0, 0)
+    const amp = Math.pow(drunk, 0.8) * motion
+    const phase = time * (0.8 + drunk * 0.5) + seed * 9
+    const swayX = Math.sin(phase)
+    const swayZ = Math.cos(phase * 0.83 + 1.3)
+    const lag = Math.sin(phase - 0.9)
+    const loll = Math.sin(time * 1.35 + seed * 4)
+    add(bones.Torso, 0.05 * swayZ * amp, 0.05 * swayX * amp, 0.17 * swayX * amp)
+    add(bones.Chest, 0.06 * drunk, 0, 0.07 * lag * amp)
+    add(bones.Neck, 0, 0, 0.08 * lag * amp)
+    add(bones.Head, 0.07 * drunk + 0.06 * loll * amp, 0.1 * swayX * amp, 0.2 * lag * amp)
+    pose.bodyPosition[0] += 0.03 * swayX * amp
+    pose.handR[0] += 0.04 * swayX * amp
+    pose.handL[0] += 0.04 * swayX * amp
+    if (drunkLevel >= 3) {
+      // A sharp hiccup: shoulders jump, head snaps back, then it all settles.
+      const period = 4.6 - drunk * 1.6 + seed * 1.5
+      const since = positiveModulo(time + seed * 13, period)
+      const hiccup = (since < 0.07 ? since / 0.07 : Math.exp(-(since - 0.07) * 8)) * motion * (0.6 + 0.4 * drunk)
+      add(bones.Chest, -0.12 * hiccup, 0, 0)
+      add(bones.Head, -0.16 * hiccup, 0, 0)
+      add(bones.ShoulderR, 0, 0, 0.14 * hiccup)
+      add(bones.ShoulderL, 0, 0, -0.14 * hiccup)
       pose.bodyPosition[1] += 0.05 * hiccup
     }
   }
@@ -781,58 +951,98 @@ export function computeAvatarTargetPose(
   // 13. Drinking: grab the glass, lift it to the mouth, tip the head back, set it down.
   if (input.drinkElapsed !== null && input.drinkElapsed !== undefined && !input.passedOut) {
     const elapsed = input.drinkElapsed
-    // Reach for the glass on the felt, raise it to the mouth, tip back, set it down.
     const holding = envelope(elapsed, DRINK_SECONDS, 0.35, 0.35)
     const lift = smoothStep((elapsed - 0.35) / 0.45) * smoothStep((DRINK_SECONDS - 0.4 - elapsed) / 0.45)
     blendTo(pose.handR, offset(anchors.drinkRest, 0.02, 0.1, 0.04), holding)
     blendTo(pose.handR, offset(anchors.chin, 0.02, -0.12, -0.12), lift)
     add(bones.Head, -0.42 * lift, 0, 0)
     add(bones.Chest, -0.1 * lift, 0, 0)
-    pose.fingerCurlR = pose.fingerCurlR * (1 - holding) + 1 * holding
+    pose.fingerCurlR = pose.fingerCurlR * (1 - holding) + 0.85 * holding
     pose.drinkLift = lift
   }
 
-  // 14. Passed out: face-down on the rail, arms sprawled.
+  // 14. Passed out: forearms folded on the rail, head resting sideways on
+  // them (cheek down), breathing slow and deep. Owns the whole body.
   if (input.passedOut) {
-    add(bones.Chest, 0.75, 0, 0.05)
-    add(bones.Torso, 0.3, 0, 0)
-    add(bones.Neck, 0.3, 0.2, 0)
-    add(bones.Head, 0.35, 0.25, 0.2)
-    blendTo(pose.handR, offset(anchors.railR, 0.18, -0.04, -0.2), 1)
-    blendTo(pose.handL, offset(anchors.railL, -0.18, -0.04, -0.2), 1)
-    pose.fingerCurlR = 0.05
-    pose.fingerCurlL = 0.05
-    pose.bodyPosition[1] -= 0.08
-    pose.bodyPosition[2] -= 0.08
+    for (const bone of ANIMATED_BONES) bones[bone] = [0, 0, 0]
+    const breathe = Math.sin(time * 1.2 + seed * 7) * motion
+    const midX = (anchors.railR[0] + anchors.railL[0]) / 2
+    const railY = (anchors.railR[1] + anchors.railL[1]) / 2
+    const railZ = (anchors.railR[2] + anchors.railL[2]) / 2
+    const span = Math.abs(anchors.railR[0] - anchors.railL[0])
+    bones.Torso = [0.45, 0, 0.03]
+    bones.Chest = [0.7 + 0.035 * breathe, 0.04, 0.05]
+    bones.Neck = [0.08, 0.12, 0.28]
+    bones.Head = [0.02, 0.28, 0.85]
+    bones.ShoulderR = [0, 0, 0.03 * breathe]
+    bones.ShoulderL = [0, 0, -0.03 * breathe]
+    // Wrists cross in front of the chest so the forearms stack on the rail.
+    pose.handR = [midX - span * 0.2, railY + 0.05, railZ - 0.46]
+    pose.handL = [midX + span * 0.62, railY + 0.08, railZ - 0.4]
+    pose.fingerCurlR = 0.4
+    pose.fingerCurlL = 0.4
+    pose.elbowOut = 1
+    // Slid down in the chair, folded over the rail.
+    pose.bodyPosition = [0.02, -0.22 + 0.012 * breathe, -0.15]
+    pose.bodyRotation = [0, 0, 0]
+    pose.cardLift = 0
+    pose.drinkLift = 0
+    pose.middleFinger = 0
   }
 
-  // 15. The flick-off: turn to the target, raise the fist, pump it twice.
+  // 15. The flick-off: a wind-up, then the arm on the target's side shoots
+  // out toward their face, back of the hand to them, middle finger up; head
+  // and chest turn square to them, a jab accent, a readable hold, and a
+  // relaxed return.
   if (input.flipOff && !input.passedOut) {
     const { elapsed, target } = input.flipOff
-    const raise = envelope(elapsed, FLIP_OFF_SECONDS, 0.28, 0.4)
-    const pump = (Math.max(0, Math.sin(Math.min(1, Math.max(0, (elapsed - 0.35) / 0.9)) * Math.PI * 2)) * 0.5) * motion
-    const shoulder = anchors.shoulderR
+    const left = getFlipOffHand(target) === 'L'
+    const mirror = left ? -1 : 1
+    const w = envelope(elapsed, FLIP_OFF_SECONDS, 0.16, 0.6)
+    const windup = envelope(elapsed, 0.42, 0.14, 0.26) * motion
+    const extend = smoothStep((elapsed - 0.24) / 0.26) * smoothStep((FLIP_OFF_SECONDS - 0.3 - elapsed) / 0.5)
+    const jab = (pulse(elapsed, 0.5, 0.08, 0.26) + 0.7 * pulse(elapsed, 1.45, 0.08, 0.26)) * motion
+    const shake = Math.sin(elapsed * 17) * 0.012 * extend * motion
+    const shoulder = left ? anchors.shoulderL : anchors.shoulderR
     const dx = target[0] - shoulder[0]
+    const dy = target[1] - shoulder[1]
     const dz = target[2] - shoulder[2]
-    const length = Math.hypot(dx, dz) || 1
-    const turn = Math.atan2(-dx, -dz)
-    const reach = 0.36 + 0.12 * pump
+    const flat = Math.hypot(dx, dz) || 1
+    const turn = Math.max(-1.35, Math.min(1.35, Math.atan2(-dx, -dz)))
+    const aimPitch = Math.max(-0.25, Math.min(0.3, Math.atan2(dy, flat)))
+    const reach = 0.62 + 0.08 * jab
     const goal: Vec3 = [
-      shoulder[0] + (dx / length) * reach,
-      shoulder[1] + 0.18 + 0.08 * pump,
-      shoulder[2] + (dz / length) * reach,
+      shoulder[0] + (dx / flat) * reach * Math.cos(aimPitch),
+      shoulder[1] + 0.08 + reach * Math.sin(aimPitch) + 0.03 * jab + shake,
+      shoulder[2] + (dz / flat) * reach * Math.cos(aimPitch),
     ]
-    blendTo(pose.handR, goal, raise)
-    add(bones.Chest, -0.06, turn * 0.3, 0, raise)
-    add(bones.Head, -0.1, turn * 0.45, 0.12, raise)
-    add(bones.WristR, -0.3, 0, 0, raise)
-    pose.fingerCurlR = pose.fingerCurlR * (1 - raise) + raise
-    pose.middleFinger = raise
-    pose.bodyPosition[2] -= 0.05 * pump * raise
+    const gestureHand = left ? pose.handL : pose.handR
+    const braceHand = left ? pose.handR : pose.handL
+    // Wind-up: the fist draws back beside the chest before it's thrown.
+    const cocked = offset(anchors.chest, 0.14 * mirror, 0.02, -0.12)
+    blendTo(gestureHand, cocked, windup * (1 - extend))
+    blendTo(gestureHand, goal, extend * w)
+    // The off hand braces on the rail.
+    blendTo(braceHand, left ? anchors.railR : anchors.railL, w)
+    blendAxis(bones.Torso, 1, turn * 0.22, w)
+    blendAxis(bones.Chest, 1, turn * 0.38, w)
+    blendAxis(bones.Neck, 1, turn * 0.2, w)
+    blendAxis(bones.Head, 1, turn * 0.3, w)
+    blendAxis(bones.Head, 0, -0.06 + 0.05 * jab, w)
+    blendAxis(bones.Neck, 0, 0, w)
+    add(bones.Chest, -0.06 * windup + 0.1 * jab, 0, 0, w)
+    add(bones.Head, 0, 0, (0.1 * windup - 0.06 * extend) * mirror, w)
+    add(left ? bones.ShoulderL : bones.ShoulderR, 0, 0, 0.1 * extend * mirror, w)
+    if (left) pose.fingerCurlL = pose.fingerCurlL * (1 - w) + w
+    else pose.fingerCurlR = pose.fingerCurlR * (1 - w) + w
+    pose.middleFinger = w * smoothStep((elapsed - 0.18) / 0.22)
+    pose.bodyPosition[2] -= (0.05 * extend + 0.05 * jab) * w
   }
 
   // Keep faces visible: clamp the stacked downward pitch of neck + head, and
   // keep the body close to the chair no matter what stacks up.
+  // Leaning in, people keep their eyes up: counter a deep chest lean at the head.
+  if (!input.passedOut) bones.Head[0] -= Math.max(0, bones.Chest[0] - 0.15) * 0.8
   const totalPitch = bones.Neck[0] + bones.Head[0]
   const maxPitch = input.passedOut ? 0.9 : 0.34
   if (totalPitch > maxPitch) {
@@ -865,6 +1075,7 @@ function writeChannels(pose: AvatarPose, out: number[]) {
   out[index++] = pose.cardLift
   out[index++] = pose.drinkLift
   out[index++] = pose.middleFinger
+  out[index++] = pose.elbowOut
 }
 
 function readChannels(values: readonly number[]): AvatarPose {
@@ -882,6 +1093,7 @@ function readChannels(values: readonly number[]): AvatarPose {
   pose.cardLift = values[index++]!
   pose.drinkLift = values[index++]!
   pose.middleFinger = values[index++]!
+  pose.elbowOut = values[index++]!
   return pose
 }
 
@@ -909,7 +1121,8 @@ export function updateAvatarAnimator(
 
   // Semi-implicit spring integration with fixed substeps: unconditionally
   // stable at any frame rate (a slow frame can never launch an avatar).
-  const omega = input.cueActive ? 18 : input.winner ? 12 : 9
+  // Flick-offs and hiccups need snap; passing out sinks slowly.
+  const omega = input.cueActive ? 18 : input.flipOff ? 14 : input.winner ? 12 : input.passedOut ? 5 : 9
   const dt = Math.min(0.1, Math.max(0.0001, input.delta))
   const steps = Math.max(1, Math.ceil(dt / (1 / 120)))
   const h = dt / steps

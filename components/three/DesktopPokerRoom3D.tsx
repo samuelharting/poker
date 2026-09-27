@@ -747,7 +747,8 @@ function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
   seat.stack.group.position.copy(stackWorld)
   seat.stack.group.rotation.set(0, seat.root.rotation.y, 0)
   seat.stack.group.scale.setScalar(1)
-  const tapSpot = at(-0.18, FELT_TOP_Y + 0.02)
+  // Check taps land just inside the felt edge, within a leaning reach.
+  const tapSpot = at(-0.06, FELT_TOP_Y + 0.02)
   seat.anchors.tap = [0.16 / scale, tapSpot[1], tapSpot[2]]
   const betWorld = getTableWagerAnchor(safeSeat)
   const betLocal = toSeatLocal(seat, betWorld[0], betWorld[1] + 0.05, betWorld[2])
@@ -2046,9 +2047,12 @@ function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | n
     overshoot = Math.max(overshoot, getArmOvershoot(chain, ikTarget))
   }
   if (overshoot > 0.001) {
-    const lean = Math.min(0.32, (overshoot / Math.max(0.2, seat.root.scale.x)) * 0.9)
-    applyAvatarBoneOffset(seat, bones.get('Chest'), lean * 0.7, 0, 0)
-    applyAvatarBoneOffset(seat, bones.get('Torso'), lean * 0.3, 0, 0)
+    // Lean over the (wide) rail to reach the felt, keeping the eyes up so the
+    // face stays readable from across the table.
+    const lean = Math.min(0.55, (overshoot / Math.max(0.2, seat.root.scale.x)) * 0.9)
+    applyAvatarBoneOffset(seat, bones.get('Chest'), lean * 0.62, 0, 0)
+    applyAvatarBoneOffset(seat, bones.get('Torso'), lean * 0.38, 0, 0)
+    applyAvatarBoneOffset(seat, bones.get('Head'), -lean * 0.65, 0, 0)
     seat.avatar?.model.updateMatrixWorld(true)
   }
   const splay = THREE.MathUtils.clamp(pose.elbowOut, 0, 1)

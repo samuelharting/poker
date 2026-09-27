@@ -32,27 +32,59 @@ export interface AvatarAccessorySet {
 }
 
 interface HeadAccessoryCalibration {
+  /** Head-space units per accessory unit. */
   scale: number
+  /** +1 when the face looks down +Z in head space, -1 for -Z. */
   front: number
+}
+
+/**
+ * Where accessories sit on a particular head, in accessory units (see
+ * measureHeadFit). Fallback values are used for the procedural avatar and for
+ * rigs that cannot be measured.
+ */
+export interface HeadFit {
+  /** Widest half-width of the skull (incl. hair) above the eyes. */
+  halfWidth: number
+  /** Top of the skull/hair where a hat rests. */
+  top: number
+  /** Front/back middle and half-depth of the skull above the eyes. */
+  centerZ: number
+  depth: number
+  /** Eye height, the face surface in front of the eyes, and each eye's |x|. */
   eyeY: number
-  eyeDepth: number
-  hatY: number
+  eyeFront: number
+  eyeX: number
+  /** Half-width of the face at the temples (where glasses arms run). */
+  faceHalfWidth: number
+  /** Height where the skull is still wide enough to seat a small crown. */
+  crownSeatY?: number
 }
 
-const FALLBACK_HEAD: HeadAccessoryCalibration = {
-  scale: 1,
-  front: -1,
+const FALLBACK_HEAD: HeadAccessoryCalibration = { scale: 1, front: -1 }
+const FALLBACK_FIT: HeadFit = {
+  halfWidth: 0.41,
+  top: 0.4,
+  centerZ: 0,
+  depth: 0.38,
   eyeY: 0.035,
-  eyeDepth: 0.355,
-  hatY: 0.37,
+  eyeFront: 0.33,
+  eyeX: 0.132,
+  faceHalfWidth: 0.37,
 }
 
-const RIGGED_ROOT_HEAD: HeadAccessoryCalibration = {
-  scale: 0.43,
-  front: 1,
-  eyeY: 0.035,
-  eyeDepth: 0.355,
-  hatY: 0.385,
+const RIGGED_ROOT_HEAD: HeadAccessoryCalibration = { scale: 0.43, front: 1 }
+
+/** The bundled rigs' heads, measured in bind pose (used if measuring fails). */
+const RIGGED_DEFAULT_FIT: HeadFit = {
+  halfWidth: 0.27,
+  top: 0.62,
+  centerZ: 0.03,
+  depth: 0.29,
+  eyeY: 0.26,
+  eyeFront: 0.255,
+  eyeX: 0.1,
+  faceHalfWidth: 0.25,
 }
 
 const RIGGED_JACKET_TARGETS: Record<PlayerAvatarModelKey, string> = {
@@ -74,7 +106,7 @@ export function createFallbackAvatarAccessories(
   selection: CosmeticSelection
 ): AvatarAccessorySet {
   const materials: THREE.Material[] = []
-  const headGroup = createHeadAccessories(selection.hat, selection.glasses, FALLBACK_HEAD, materials)
+  const headGroup = createHeadAccessories(selection.hat, selection.glasses, FALLBACK_HEAD, FALLBACK_FIT, materials)
   head.add(headGroup)
 
   const jacketGroup = createJacket(selection.jacket, selection.jacketColor, {
@@ -94,14 +126,25 @@ export function createRiggedAvatarAccessories(
   selection: RiggedCosmeticSelection
 ): AvatarAccessorySet {
   const materials: THREE.Material[] = []
+  const restores: Array<() => void> = []
+  // Hide incompatible built-in headwear first so the head is measured bare.
+  const restoreHeadwear = applyRiggedHeadwearCompatibility(
+    avatarRoot,
+    selection.modelKey,
+    selection.hat
+  )
+  if (restoreHeadwear) restores.push(restoreHeadwear)
+
   const headBone = bones.get('Head')
-  const headCalibration = headBone
-    ? getRiggedHeadCalibration(selection.modelKey, selection.hat)
-    : RIGGED_ROOT_HEAD
+  const headCalibration = headBone ? getRiggedHeadCalibration() : RIGGED_ROOT_HEAD
+  const fit = headBone
+    ? measureHeadFit(avatarRoot, headBone, headCalibration.scale) ?? RIGGED_DEFAULT_FIT
+    : FALLBACK_FIT
   const headGroup = createHeadAccessories(
     selection.hat,
     selection.glasses,
     headCalibration,
+    fit,
     materials
   )
   if (headBone) {
@@ -113,24 +156,16 @@ export function createRiggedAvatarAccessories(
 
   const chestBone = bones.get('Chest')
   const jacketGroup = chestBone
-    ? createJacket(selection.jacket, selection.jacketColor, {
-        front: 1,
-        centerY: 0.02 * 0.0043,
-        centerZ: 0.12 * 0.0043,
-        scale: 0.0043,
-        fitted: true,
-      }, materials)
+    ? createFittedJacketAccent(
+        selection.jacket,
+        selection.jacketColor,
+        measureChestBadgeSpot(avatarRoot, chestBone, 0.0043),
+        0.0043,
+        materials
+      )
     : createEmptyJacketGroup(selection.jacket, selection.jacketColor)
   const jacketParent = chestBone ?? avatarRoot
   jacketParent.add(jacketGroup)
-
-  const restores: Array<() => void> = []
-  const restoreHeadwear = applyRiggedHeadwearCompatibility(
-    avatarRoot,
-    selection.modelKey,
-    selection.hat
-  )
-  if (restoreHeadwear) restores.push(restoreHeadwear)
 
   const jacketOverride = applyRiggedJacketMaterial(
     avatarRoot,
@@ -161,29 +196,121 @@ export function disposeAvatarAccessorySet(set: AvatarAccessorySet | null): void 
   set.materials.forEach(material => material.dispose())
 }
 
-function getRiggedHeadCalibration(
-  modelKey: PlayerAvatarModelKey,
-  hat: PlayerAvatarHatStyle
-): HeadAccessoryCalibration {
-  let hatY = 0.5
-  if (modelKey === 'hoodie') hatY = 0.53
-  if (modelKey === 'worker') hatY = 0.4
-  if (modelKey === 'punk') {
-    hatY = hat === 'crown'
-      ? 0.67
-      : hat === 'visor'
-        ? 0.39
-        : 0.46
-  }
-
+function getRiggedHeadCalibration(): HeadAccessoryCalibration {
   return {
     // Every bundled GLB has a 100x armature scale above Head. Counter it here;
     // the avatar root's ~2.3x display scale then restores head-sized props.
     scale: 0.0043,
     front: 1,
-    eyeY: 0.26,
-    eyeDepth: 0.29,
-    hatY,
+  }
+}
+
+/**
+ * Measures the skull, face and eyes of a skinned avatar in Head-bone space
+ * (bind pose, in calibration units) so hats and glasses fit each model: a hat
+ * band sits just outside the hair, lenses sit just in front of the face, and
+ * temple arms run back along the side of the head instead of sticking out.
+ * Returns null when the rig has no skinned head geometry to measure.
+ */
+export function measureHeadFit(
+  avatarRoot: THREE.Object3D,
+  headBone: THREE.Bone,
+  scale: number
+): HeadFit | null {
+  const skull: THREE.Vector3[] = []
+  const skin: THREE.Vector3[] = []
+  const eyes: THREE.Vector3[] = []
+  const toHead = new THREE.Matrix4()
+  const point = new THREE.Vector3()
+  avatarRoot.traverse(object => {
+    const mesh = object as THREE.SkinnedMesh
+    if (!mesh.isSkinnedMesh || !mesh.visible || /outline/i.test(mesh.name)) return
+    const headIndex = mesh.skeleton.bones.indexOf(headBone)
+    if (headIndex < 0) return
+    const position = mesh.geometry.getAttribute('position')
+    const skinIndex = mesh.geometry.getAttribute('skinIndex')
+    const skinWeight = mesh.geometry.getAttribute('skinWeight')
+    if (!position || !skinIndex || !skinWeight) return
+    toHead.multiplyMatrices(mesh.skeleton.boneInverses[headIndex]!, mesh.bindMatrix)
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    const name = materials[0]?.name ?? ''
+    const kind = /^eye$/i.test(name)
+      ? 'eye'
+      : /^skin/i.test(name)
+        ? 'skin'
+        : /moustache|beard|earring/i.test(name)
+          ? 'detail'
+          : 'skull'
+    if (kind === 'detail') return
+    for (let vertex = 0; vertex < position.count; vertex += 1) {
+      let weight = 0
+      for (let slot = 0; slot < 4; slot += 1) {
+        if (skinIndex.getComponent(vertex, slot) === headIndex) weight += skinWeight.getComponent(vertex, slot)
+      }
+      if (weight < 0.5) continue
+      point.fromBufferAttribute(position, vertex).applyMatrix4(toHead).divideScalar(scale)
+      const copy = point.clone()
+      if (kind === 'eye') eyes.push(copy)
+      else {
+        skull.push(copy)
+        if (kind === 'skin') skin.push(copy)
+      }
+    }
+  })
+  if (skin.length < 20 || skull.length < 20) return null
+
+  const eyeBox = eyes.length >= 6 ? new THREE.Box3().setFromPoints(eyes) : null
+  const skinBox = new THREE.Box3().setFromPoints(skin)
+  const eyeY = eyeBox ? (eyeBox.min.y + eyeBox.max.y) / 2 : skinBox.min.y + (skinBox.max.y - skinBox.min.y) * 0.5
+  const eyeX = eyeBox ? Math.max(0.06, (eyeBox.max.x - eyeBox.min.x) / 2 - (eyeBox.max.x - eyeBox.min.x) / 8) : 0.1
+  // The skull above the eyes decides hat size; narrow tufts (a mohawk, a
+  // ponytail) are ignored when finding where a hat would rest.
+  const upper = skull.filter(p => p.y > eyeY)
+  let halfWidth = 0
+  let minZ = Infinity
+  let maxZ = -Infinity
+  for (const p of upper) {
+    halfWidth = Math.max(halfWidth, Math.abs(p.x))
+  }
+  let top = -Infinity
+  for (const p of upper) {
+    if (Math.abs(p.x) > halfWidth * 0.3) top = Math.max(top, p.y)
+    if (p.y > eyeY + 0.08 && p.y < eyeY + 0.3) {
+      minZ = Math.min(minZ, p.z)
+      maxZ = Math.max(maxZ, p.z)
+    }
+  }
+  if (!Number.isFinite(top) || !Number.isFinite(minZ)) return null
+  let eyeFront = -Infinity
+  let faceHalfWidth = 0
+  for (const p of skin) {
+    if (Math.abs(p.y - eyeY) < 0.045) eyeFront = Math.max(eyeFront, p.z)
+    if (Math.abs(p.y - eyeY) < 0.07) faceHalfWidth = Math.max(faceHalfWidth, Math.abs(p.x))
+  }
+  if (!Number.isFinite(eyeFront)) eyeFront = skinBox.max.z
+  // Built-in headwear (the worker's hard hat) makes the skull look huge;
+  // clamp to a sane head so glasses still fit.
+  halfWidth = Math.min(halfWidth, Math.max(faceHalfWidth * 1.3, 0.2))
+  // Walk down from the top until the skull is wide enough to hold a crown.
+  let crownSeatY = top - 0.07
+  for (let y = top; y > eyeY + 0.1; y -= 0.01) {
+    let widthHere = 0
+    for (const p of upper) if (Math.abs(p.y - y) < 0.02) widthHere = Math.max(widthHere, Math.abs(p.x))
+    if (widthHere >= halfWidth * 0.66) {
+      crownSeatY = y
+      break
+    }
+  }
+  return {
+    crownSeatY,
+    halfWidth,
+    top,
+    centerZ: (minZ + maxZ) / 2,
+    depth: Math.max(0.15, (maxZ - minZ) / 2),
+    eyeY,
+    eyeFront,
+    eyeX,
+    faceHalfWidth: Math.max(faceHalfWidth, eyeX + 0.08),
   }
 }
 
@@ -191,30 +318,36 @@ function createHeadAccessories(
   hat: PlayerAvatarHatStyle,
   glasses: PlayerAvatarGlassesStyle,
   calibration: HeadAccessoryCalibration,
+  fit: HeadFit,
   materials: THREE.Material[]
 ): THREE.Group {
   const group = new THREE.Group()
   group.name = `avatar-head-accessories-${hat}-${glasses}`
 
-  const glassesGroup = createGlasses(glasses, calibration, materials)
-  group.add(glassesGroup)
-
-  const hatGroup = createHat(hat, calibration, materials)
-  group.add(hatGroup)
-
+  // Pieces are modelled facing +Z; heads that face -Z get the group turned.
+  const glassesGroup = createGlasses(glasses, calibration, fit, materials)
+  const hatGroup = createHat(hat, calibration, fit, materials)
+  if (calibration.front < 0) {
+    for (const piece of [glassesGroup, hatGroup]) {
+      piece.position.z *= -1
+      piece.rotation.y += Math.PI
+    }
+  }
+  group.add(glassesGroup, hatGroup)
   return group
 }
 
 function createGlasses(
   style: PlayerAvatarGlassesStyle,
   calibration: HeadAccessoryCalibration,
+  fit: HeadFit,
   materials: THREE.Material[]
 ): THREE.Group {
   const group = new THREE.Group()
   group.name = `avatar-glasses-${style}`
   if (style === 'none') return group
 
-  const scale = calibration.scale
+  const s = calibration.scale
   const frame = standardMaterial(style === 'aviator' ? '#c8a95f' : '#171a1c', {
     roughness: 0.28,
     metalness: 0.78,
@@ -223,179 +356,248 @@ function createGlasses(
     roughness: 0.12,
     metalness: 0.18,
     transparent: true,
-    opacity: style === 'shades' ? 0.92 : 0.36,
+    opacity: style === 'shades' ? 0.92 : 0.3,
   })
   materials.push(frame, lens)
 
-  const front = calibration.front
-  group.position.set(
-    0,
-    calibration.eyeY * scale,
-    front * calibration.eyeDepth * scale
-  )
+  // Lenses sit just in front of the face at eye height.
+  const lensZ = fit.eyeFront + 0.035
+  group.position.set(0, fit.eyeY * s, lensZ * s)
+  const eyeX = fit.eyeX
+  const radius = Math.min(0.1, Math.max(0.06, eyeX * 0.82))
 
   if (style === 'shades') {
     for (const side of [-1, 1]) {
       const glass = mesh(
-        new THREE.BoxGeometry(0.235 * scale, 0.12 * scale, 0.025 * scale),
+        new THREE.BoxGeometry(radius * 2.15 * s, radius * 1.15 * s, 0.022 * s),
         lens,
-        [side * 0.135 * scale, 0, 0]
+        [side * eyeX * s, 0, 0]
       )
-      glass.rotation.z = side * 0.035
+      glass.rotation.z = side * 0.04
+      glass.rotation.y = side * 0.12
       group.add(glass)
     }
   } else {
     for (const side of [-1, 1]) {
       const rim = mesh(
-        new THREE.TorusGeometry(
-          (style === 'aviator' ? 0.112 : 0.105) * scale,
-          0.014 * scale,
-          6,
-          24
-        ),
+        new THREE.TorusGeometry((style === 'aviator' ? radius * 1.06 : radius) * s, 0.011 * s, 6, 24),
         frame,
-        [side * 0.132 * scale, 0, 0]
+        [side * eyeX * s, 0, 0]
       )
-      if (style === 'aviator') rim.scale.set(1.08, 0.82, 1)
+      if (style === 'aviator') rim.scale.set(1.05, 0.84, 1)
+      rim.rotation.y = side * 0.1
       group.add(rim)
-
       const glass = mesh(
-        new THREE.CircleGeometry(0.094 * scale, 24),
+        new THREE.CircleGeometry(radius * 0.93 * s, 24),
         lens,
-        [side * 0.132 * scale, 0, front * 0.009 * scale]
+        [side * eyeX * s, 0, 0.004 * s]
       )
-      if (style === 'aviator') glass.scale.set(1.08, 0.82, 1)
+      if (style === 'aviator') glass.scale.set(1.05, 0.84, 1)
+      glass.rotation.y = side * 0.1
       group.add(glass)
     }
   }
 
+  // Bridge over the nose.
   group.add(mesh(
-    new THREE.BoxGeometry(0.08 * scale, 0.018 * scale, 0.02 * scale),
+    new THREE.BoxGeometry(Math.max(0.03, eyeX * 2 - radius * 2 + 0.02) * s, 0.014 * s, 0.014 * s),
     frame,
-    [0, 0.005 * scale, 0]
+    [0, 0.012 * s, 0]
   ))
+  // Temple arms: a short hinge out to the side of the head, then back along
+  // it to the ear — hugging the head, never sticking out.
+  const templeX = Math.max(fit.faceHalfWidth, eyeX + radius) + 0.012
+  const armBack = Math.max(0.12, lensZ - (fit.centerZ - 0.02))
   for (const side of [-1, 1]) {
-    const arm = mesh(
-      new THREE.BoxGeometry(0.16 * scale, 0.018 * scale, 0.018 * scale),
+    const hingeWidth = Math.max(0.01, templeX - (eyeX + radius * 0.95))
+    group.add(mesh(
+      new THREE.BoxGeometry(hingeWidth * s, 0.016 * s, 0.016 * s),
       frame,
-      [side * 0.27 * scale, 0.012 * scale, -front * 0.055 * scale]
-    )
-    arm.rotation.y = side * front * 0.3
-    group.add(arm)
+      [side * (templeX - hingeWidth / 2) * s, 0.01 * s, -0.012 * s]
+    ))
+    group.add(mesh(
+      new THREE.BoxGeometry(0.014 * s, 0.016 * s, armBack * s),
+      frame,
+      [side * templeX * s, 0.01 * s, -(armBack / 2 + 0.012) * s]
+    ))
   }
 
   return group
 }
 
+/** A hat brim: a flat ring whose outer edge curls up by `curl`. */
+function createBrimGeometry(inner: number, outer: number, curl: number, thickness: number) {
+  const profile = [
+    new THREE.Vector2(inner, 0),
+    new THREE.Vector2(inner + (outer - inner) * 0.55, -thickness * 0.2),
+    new THREE.Vector2(outer * 0.97, curl * 0.7),
+    new THREE.Vector2(outer, curl + thickness * 0.5),
+    new THREE.Vector2(outer * 0.97, curl + thickness),
+    new THREE.Vector2(inner + (outer - inner) * 0.55, thickness * 0.8),
+    new THREE.Vector2(inner, thickness),
+    new THREE.Vector2(inner, 0),
+  ]
+  return new THREE.LatheGeometry(profile, 40)
+}
+
 function createHat(
   style: PlayerAvatarHatStyle,
   calibration: HeadAccessoryCalibration,
+  fit: HeadFit,
   materials: THREE.Material[]
 ): THREE.Group {
   const group = new THREE.Group()
   group.name = `avatar-hat-${style}`
   if (style === 'none') return group
 
-  const scale = calibration.scale
-  const primary = standardMaterial(
-    style === 'crown' ? '#d8ad43' : style === 'visor' ? '#1c5b48' : '#252229',
-    { roughness: style === 'crown' ? 0.24 : 0.68, metalness: style === 'crown' ? 0.72 : 0.08 }
-  )
-  const trim = standardMaterial(
-    style === 'crown' ? '#f3de83' : style === 'cowboy' ? '#b88442' : '#8d283e',
-    { roughness: 0.42, metalness: style === 'crown' ? 0.56 : 0.16 }
-  )
+  const s = calibration.scale
+  const colors: Record<Exclude<PlayerAvatarHatStyle, 'none'>, [string, string]> = {
+    fedora: ['#3a3230', '#8d283e'],
+    cowboy: ['#7a5234', '#3b2618'],
+    beanie: ['#9b2d45', '#efe4cc'],
+    visor: ['#1c5b48', '#123d31'],
+    crown: ['#d8ad43', '#c0392b'],
+  }
+  const [primaryColor, trimColor] = colors[style]
+  const primary = standardMaterial(primaryColor, {
+    roughness: style === 'crown' ? 0.24 : 0.72,
+    metalness: style === 'crown' ? 0.72 : 0.04,
+  })
+  const trim = standardMaterial(trimColor, {
+    roughness: style === 'crown' ? 0.3 : 0.5,
+    metalness: style === 'crown' ? 0.4 : 0.05,
+  })
+  primary.side = THREE.DoubleSide
+  trim.side = THREE.DoubleSide
   materials.push(primary, trim)
 
-  const front = calibration.front
-  group.position.set(0, calibration.hatY * scale, 0)
+  // Everything is placed relative to the measured skull, centred front/back.
+  const width = fit.halfWidth
+  const depthScale = THREE.MathUtils.clamp(fit.depth / width, 0.8, 1.25)
+  group.position.set(0, 0, fit.centerZ * s)
+  const oval = (object: THREE.Object3D) => {
+    object.scale.z *= depthScale
+    return object
+  }
 
   if (style === 'beanie') {
-    const cap = mesh(
-      new THREE.SphereGeometry(0.315 * scale, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.56),
-      primary
-    )
-    cap.scale.y = 0.76
-    group.add(cap)
-    group.add(mesh(
-      new THREE.TorusGeometry(0.255 * scale, 0.035 * scale, 8, 28),
+    // Knit cap hugging the skull down to the brow, a folded cuff and a pom-pom.
+    const radius = width * 1.2
+    const cuffY = fit.eyeY + 0.13
+    const domeHeight = Math.max(0.2, fit.top + 0.06 - cuffY)
+    const dome = oval(mesh(
+      new THREE.SphereGeometry(radius * s, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2),
+      primary,
+      [0, cuffY * s, 0]
+    ))
+    dome.scale.y = domeHeight / radius
+    group.add(dome)
+    // A thick, folded-up cuff in a contrasting knit.
+    const cuff = mesh(
+      new THREE.TorusGeometry(radius * 1.02 * s, 0.05 * s, 8, 32),
       trim,
-      [0, -0.02 * scale, 0],
+      [0, (cuffY + 0.03) * s, 0],
       [Math.PI / 2, 0, 0]
+    )
+    // Lying flat, the torus's local Y runs front-to-back and Z runs up.
+    cuff.scale.set(1, depthScale, 1.5)
+    group.add(cuff)
+    group.add(mesh(
+      new THREE.SphereGeometry(0.075 * s, 14, 10),
+      trim,
+      [0, (cuffY + domeHeight + 0.045) * s, 0]
     ))
     return group
   }
 
-  if (style === 'crown') {
-    group.add(mesh(
-      new THREE.CylinderGeometry(0.27 * scale, 0.27 * scale, 0.105 * scale, 24),
+  if (style === 'visor') {
+    // A sweatband around the forehead with a bill out front.
+    const bandY = fit.eyeY + 0.17
+    const radius = width * 1.04
+    group.add(oval(mesh(
+      new THREE.CylinderGeometry(radius * s, radius * s, 0.07 * s, 32, 1, true),
+      trim,
+      [0, bandY * s, 0]
+    )))
+    const bill = mesh(
+      new THREE.CylinderGeometry(radius * 0.95 * s, radius * 0.95 * s, 0.022 * s, 28, 1, false, -Math.PI / 2, Math.PI),
       primary,
-      [0, 0.02 * scale, 0]
-    ))
+      [0, (bandY - 0.03) * s, 0]
+    )
+    bill.scale.z = (fit.depth * 1.6) / radius
+    bill.rotation.x = 0.16
+    group.add(bill)
+    return group
+  }
+
+  if (style === 'crown') {
+    // A small crown perched on top of the head.
+    const radius = width * 0.64
+    const baseY = (fit.crownSeatY ?? fit.top - 0.07) + 0.02
+    group.add(oval(mesh(
+      new THREE.CylinderGeometry(radius * s, radius * 0.94 * s, 0.09 * s, 28, 1, true),
+      primary,
+      [0, baseY * s, 0]
+    )))
     for (let index = 0; index < 7; index += 1) {
       const angle = index / 7 * Math.PI * 2
+      const spike = mesh(
+        new THREE.ConeGeometry(0.036 * s, 0.13 * s, 4),
+        primary,
+        [Math.sin(angle) * radius * 0.97 * s, (baseY + 0.1) * s, Math.cos(angle) * radius * depthScale * 0.97 * s]
+      )
+      group.add(spike)
       group.add(mesh(
-        new THREE.ConeGeometry(0.058 * scale, 0.22 * scale, 5),
-        index % 2 === 0 ? trim : primary,
-        [
-          Math.cos(angle) * 0.205 * scale,
-          0.16 * scale,
-          Math.sin(angle) * 0.205 * scale,
-        ]
+        new THREE.SphereGeometry(0.02 * s, 8, 6),
+        trim,
+        [Math.sin(angle) * radius * 1.01 * s, baseY * s, Math.cos(angle) * radius * depthScale * 1.01 * s]
       ))
     }
     return group
   }
 
-  if (style === 'visor') {
-    group.add(mesh(
-      new THREE.TorusGeometry(0.255 * scale, 0.052 * scale, 8, 32),
-      primary,
-      [0, 0, 0],
-      [Math.PI / 2, 0, 0]
-    ))
-    const bill = mesh(
-      new THREE.CylinderGeometry(0.29 * scale, 0.29 * scale, 0.028 * scale, 32, 1, false, 0, Math.PI),
-      trim,
-      [0, -0.04 * scale, front * 0.22 * scale]
-    )
-    bill.scale.z = 0.62
-    group.add(bill)
-    return group
-  }
-
-  const brim = mesh(
-    new THREE.CylinderGeometry(
-      (style === 'cowboy' ? 0.44 : 0.37) * scale,
-      (style === 'cowboy' ? 0.44 : 0.37) * scale,
-      0.035 * scale,
-      36
-    ),
+  // Fedora and cowboy: a tapered crown with a pinched top, a band, and a
+  // brim that curls up at the edge (much wider and curlier for the cowboy).
+  const cowboy = style === 'cowboy'
+  const crownRadius = width * 1.06
+  const bandY = fit.top - (cowboy ? 0.2 : 0.19)
+  const crownHeight = cowboy ? 0.25 : 0.21
+  const crown = oval(mesh(
+    new THREE.CylinderGeometry(crownRadius * (cowboy ? 0.82 : 0.86) * s, crownRadius * s, crownHeight * s, 28, 1, true),
     primary,
-    [0, 0, 0]
-  )
-  brim.scale.z = style === 'cowboy' ? 0.68 : 0.82
-  if (style === 'cowboy') brim.rotation.z = 0.035
-  group.add(brim)
-
-  const crown = mesh(
-    new THREE.CylinderGeometry(
-      (style === 'cowboy' ? 0.19 : 0.205) * scale,
-      0.25 * scale,
-      (style === 'cowboy' ? 0.31 : 0.25) * scale,
-      28
-    ),
-    primary,
-    [0, (style === 'cowboy' ? 0.17 : 0.14) * scale, 0]
-  )
-  crown.scale.z = 0.88
-  group.add(crown)
-  group.add(mesh(
-    new THREE.TorusGeometry(0.225 * scale, 0.026 * scale, 6, 32),
-    trim,
-    [0, 0.07 * scale, 0],
-    [Math.PI / 2, 0, 0]
+    [0, (bandY + crownHeight / 2) * s, 0]
   ))
+  group.add(crown)
+  // Pinched top: a shallow dome with a front-to-back crease.
+  const cap = oval(mesh(
+    new THREE.SphereGeometry(crownRadius * (cowboy ? 0.82 : 0.86) * s, 24, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+    primary,
+    [0, (bandY + crownHeight) * s, 0]
+  ))
+  cap.scale.y = cowboy ? 0.2 : 0.26
+  cap.scale.x = 0.92
+  group.add(cap)
+  const crease = mesh(
+    new THREE.BoxGeometry(0.02 * s, 0.03 * s, crownRadius * 1.3 * depthScale * s),
+    trim,
+    [0, (bandY + crownHeight + 0.03) * s, 0]
+  )
+  crease.visible = !cowboy
+  group.add(crease)
+  group.add(oval(mesh(
+    new THREE.CylinderGeometry(crownRadius * 1.012 * s, crownRadius * 1.012 * s, 0.055 * s, 28, 1, true),
+    trim,
+    [0, (bandY + 0.035) * s, 0]
+  )))
+  const brim = oval(mesh(
+    createBrimGeometry(crownRadius * 0.98 * s, crownRadius * (cowboy ? 1.95 : 1.5) * s, (cowboy ? 0.1 : 0.035) * s, 0.018 * s),
+    primary,
+    [0, bandY * s, 0]
+  ))
+  // Fedoras snap down a touch at the front; cowboy brims roll up at the sides.
+  brim.rotation.x = cowboy ? 0 : 0.07
+  if (cowboy) brim.scale.z *= 0.82
+  group.add(brim)
   return group
 }
 
@@ -485,6 +687,109 @@ function createJacket(
     }
   }
 
+  return group
+}
+
+interface ChestBadgeSpot {
+  /** Point on the shirt surface (chest units) and the outward surface normal. */
+  position: THREE.Vector3
+  normal: THREE.Vector3
+}
+
+/**
+ * Finds a spot on the wearer's left breast, on the surface of the part of the
+ * shirt that moves with the Chest bone, so a badge stays flush with the shirt
+ * through every lean and twist (never drifting down to the belly).
+ */
+export function measureChestBadgeSpot(
+  avatarRoot: THREE.Object3D,
+  chestBone: THREE.Bone,
+  scale: number
+): ChestBadgeSpot | null {
+  const points: THREE.Vector3[] = []
+  const toChest = new THREE.Matrix4()
+  avatarRoot.traverse(object => {
+    const mesh = object as THREE.SkinnedMesh
+    if (!mesh.isSkinnedMesh || !mesh.visible || /outline/i.test(mesh.name)) return
+    const chestIndex = mesh.skeleton.bones.indexOf(chestBone)
+    if (chestIndex < 0) return
+    const position = mesh.geometry.getAttribute('position')
+    const skinIndex = mesh.geometry.getAttribute('skinIndex')
+    const skinWeight = mesh.geometry.getAttribute('skinWeight')
+    if (!position || !skinIndex || !skinWeight) return
+    const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material
+    if (material && /skin/i.test(material.name)) return
+    toChest.multiplyMatrices(mesh.skeleton.boneInverses[chestIndex]!, mesh.bindMatrix)
+    for (let vertex = 0; vertex < position.count; vertex += 1) {
+      let weight = 0
+      for (let slot = 0; slot < 4; slot += 1) {
+        if (skinIndex.getComponent(vertex, slot) === chestIndex) weight += skinWeight.getComponent(vertex, slot)
+      }
+      if (weight < 0.75) continue
+      points.push(new THREE.Vector3().fromBufferAttribute(position, vertex).applyMatrix4(toChest).divideScalar(scale))
+    }
+  })
+  if (points.length < 30) return null
+  const box = new THREE.Box3().setFromPoints(points)
+  const width = box.max.x - box.min.x
+  const height = box.max.y - box.min.y
+  const targetX = (box.min.x + box.max.x) / 2 + width * 0.2
+  const targetY = box.min.y + height * 0.62
+  let best: THREE.Vector3 | null = null
+  for (const point of points) {
+    if (Math.abs(point.x - targetX) > width * 0.08 || Math.abs(point.y - targetY) > height * 0.12) continue
+    if (!best || point.z > best.z) best = point
+  }
+  if (!best) return null
+  // Surface normal from the front-most points around the spot.
+  const near = points.filter(point => point.distanceTo(best!) < Math.max(width, height) * 0.15 && point.z > best!.z - height * 0.12)
+  const center = near.reduce((sum, point) => sum.add(point), new THREE.Vector3()).divideScalar(Math.max(1, near.length))
+  const normal = new THREE.Vector3(center.x - (box.min.x + box.max.x) / 2, 0, center.z - (box.min.z + box.max.z) / 2 + width * 0.5)
+  if (normal.lengthSq() < 1e-8) normal.set(0, 0, 1)
+  normal.normalize()
+  return { position: best.clone(), normal }
+}
+
+/**
+ * Rigged jackets recolour the model's own clothing; this adds one small,
+ * flush accent on the left breast (pin, pocket square, patch) attached to
+ * the Chest bone.
+ */
+function createFittedJacketAccent(
+  style: PlayerAvatarJacketStyle,
+  colorKey: PlayerAvatarJacketColor,
+  spot: ChestBadgeSpot | null,
+  scale: number,
+  materials: THREE.Material[]
+): THREE.Group {
+  const group = new THREE.Group()
+  group.name = `avatar-jacket-${style}-${colorKey}`
+  if (style === 'none') return group
+  const color = style === 'varsity'
+    ? '#ded5bd'
+    : style === 'western'
+      ? '#b58b51'
+      : style === 'leather'
+        ? '#b9bec4'
+        : '#d8b768'
+  const material = standardMaterial(color, {
+    roughness: 0.45,
+    metalness: style === 'leather' || style === 'tuxedo' || style === 'smoking' ? 0.6 : 0.1,
+  })
+  materials.push(material)
+  const position = spot?.position ?? new THREE.Vector3(0.1, 0.1, 0.16)
+  const normal = spot?.normal ?? new THREE.Vector3(0, 0, 1)
+  const size = style === 'varsity' ? [0.09, 0.1] : style === 'western' ? [0.1, 0.045] : style === 'leather' ? [0.02, 0.07] : [0.07, 0.035]
+  const accent = mesh(
+    new THREE.BoxGeometry(size[0]! * scale, size[1]! * scale, 0.014 * scale),
+    material
+  )
+  accent.name = 'avatar-jacket-accent'
+  // Sit a hair outside the surface, facing along its normal.
+  accent.position.copy(position).addScaledVector(normal, 0.006).multiplyScalar(scale)
+  accent.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
+  accent.castShadow = false
+  group.add(accent)
   return group
 }
 
