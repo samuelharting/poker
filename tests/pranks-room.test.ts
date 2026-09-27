@@ -767,12 +767,13 @@ describe('PokerRoom house rules', () => {
       .map(message => message.event)
       .filter(event => event.kind === 'house_beer')
     if (busted) {
-      expect(houseBeers).toEqual([expect.objectContaining({ playerId: busted.id, amount: 2 })])
+      // The dealer's-round beer can also land on the button; only check the bust.
+      expect(houseBeers.filter(event => event.playerId === busted.id)).toEqual([expect.objectContaining({ playerId: busted.id, amount: 2 })])
       expect(busted.drinks?.beers).toBe(2)
       expect(drinkEventKinds(sam.connection)).toContain('house_water')
     } else {
-      // Chopped pot: nobody lost anything.
-      expect(houseBeers).toEqual([])
+      // Chopped pot: nobody lost anything (only a dealer's-round beer, at most).
+      expect(houseBeers.every(event => event.amount === 1)).toBe(true)
     }
   })
 
