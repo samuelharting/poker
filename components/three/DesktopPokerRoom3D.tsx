@@ -739,11 +739,13 @@ function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
   seat.anchors.cards = [0, cardSpot[1] + 0.02, cardSpot[2]]
   seat.cards.userData.restY = cardSpot[1]
   // The player's own chips sit to the right of their cards, just inside the rail.
-  const stackSpot = at(-0.26, FELT_TOP_Y)
-  seat.anchors.stack = [0.62 / scale, stackSpot[1] + 0.06, stackSpot[2]]
+  // Close enough to the chest that the bet/call/all-in hands actually land on it.
+  const STACK_SIDE = 0.44
+  const stackSpot = at(-0.1, FELT_TOP_Y)
+  seat.anchors.stack = [STACK_SIDE / scale, stackSpot[1] + 0.06, stackSpot[2]]
   // The stack is a world object (not a child of the seat) so the hero, whose
   // seat is hidden, still sees their own chips in front of them.
-  const stackWorld = seat.root.localToWorld(new THREE.Vector3(0.62 / scale, stackSpot[1], stackSpot[2]))
+  const stackWorld = seat.root.localToWorld(new THREE.Vector3(STACK_SIDE / scale, stackSpot[1], stackSpot[2]))
   seat.stack.group.position.copy(stackWorld)
   seat.stack.group.rotation.set(0, seat.root.rotation.y, 0)
   seat.stack.group.scale.setScalar(1)
