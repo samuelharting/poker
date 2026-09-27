@@ -2879,8 +2879,10 @@
     font-size: var(--fs-16, 16px);
   }
 
-  [data-layout='2d'] .mobile-betting-panel .blind-tip p {
-    font-size: 11.5px;
+  /* Short screens: the tall tip would cover the hero cards; the prompt's
+     blind context line already says the same thing. */
+  [data-layout='2d'] .mobile-betting-panel > .blind-tip {
+    display: none;
   }
 }
 
