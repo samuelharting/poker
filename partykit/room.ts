@@ -11,7 +11,8 @@ import type {
   TableChatEntry,
 } from '../shared/protocol'
 import type { ShowCardsMode } from '../lib/poker/types'
-import type { CardRevealRequest, InternalGameState, InternalPlayer, LobbyPlayer, PlayerStats, SeatPlayer } from '../lib/poker/types'
+import type { CardRevealRequest, HandHistoryEntry, InternalGameState, InternalPlayer, LobbyPlayer, PlayerStats, SeatPlayer } from '../lib/poker/types'
+import { buildHandHistoryEntry, upsertHandHistory } from '../lib/poker/handHistory'
 import { normalizePlayerUsername, type PlayerAvatarCustomization } from '../lib/profile'
 import {
   createInitialGameState,
@@ -104,6 +105,7 @@ interface RoomData {
   pendingTableSettings: Partial<TableSettings> | null
   autoStartEnabled: boolean
   ladyLuck: LadyLuckTracker
+  handHistory: HandHistoryEntry[]
 }
 
 function generateId(length = 8): string {
@@ -143,6 +145,20 @@ const BOT_NAMES = ['Maverick', 'River', 'Bluff', 'Ace', 'Nova', 'Dealer Dan', 'P
 
 function formatCurrency(amount: number): string {
   return `$${Math.abs(Math.trunc(amount)).toLocaleString()}`
+}
+
+function mergeShownHands(
+  previous: HandHistoryEntry['shown'],
+  next: HandHistoryEntry['shown']
+): HandHistoryEntry['shown'] {
+  const merged = new Map(previous.map(hand => [hand.playerId, hand]))
+  for (const hand of next) {
+    const known = merged.get(hand.playerId)
+    if (!known || hand.cards.length >= known.cards.length) {
+      merged.set(hand.playerId, hand)
+    }
+  }
+  return [...merged.values()]
 }
 
 function describeChipAdjustment(playerName: string, delta: number): string {
@@ -203,6 +219,7 @@ export default class PokerRoom implements PartyServer {
       pendingTableSettings: null,
       autoStartEnabled: true,
       ladyLuck: createLadyLuckTracker(),
+      handHistory: [],
     }
   }
 
@@ -1144,6 +1161,7 @@ export default class PokerRoom implements PartyServer {
     }
 
     player.showCards = mode
+    this.recordHandHistory(true)
     this.sendActionResult(conn)
     this.broadcastState()
   }
@@ -1784,6 +1802,7 @@ export default class PokerRoom implements PartyServer {
         autoStartDelay: this.data.tableSettings.autoStartDelay,
         pendingTableSettings,
         lobbyPlayers: this.buildLobbyPlayers(),
+        handHistory: this.data.handHistory ?? [],
         funModeEnabled: this.isFunModeEnabled(),
         companion: this.isFunModeEnabled()
           ? getVisibleLadyLuck(this.data.ladyLuck, this.getSeatedPlayerIds())
@@ -2001,6 +2020,37 @@ export default class PokerRoom implements PartyServer {
         venmoUsername: profile.venmoUsername,
       }
     })
+    this.recordHandHistory()
+  }
+
+  /**
+   * Keeps a short public log of completed hands. `refreshOnly` updates the
+   * current hand's entry (e.g. someone chose to show) without adding one.
+   */
+  private recordHandHistory(refreshOnly = false) {
+    const state = this.data.gameState
+    if (state.phase !== 'between_hands' || !state.winners?.length) {
+      return
+    }
+
+    const history = this.data.handHistory ?? []
+    if (refreshOnly && !history.some(entry => entry.handNumber === state.handNumber)) {
+      return
+    }
+
+    const previous = history.find(entry => entry.handNumber === state.handNumber)
+    const entry = buildHandHistoryEntry(toTableState(state, ''), previous?.endedAt ?? Date.now())
+    if (!entry) {
+      return
+    }
+
+    if (previous) {
+      // The board and winners are fixed when the hand ends; only shown hands can change.
+      entry.board = previous.board
+      entry.shown = mergeShownHands(previous.shown, entry.shown)
+    }
+
+    this.data.handHistory = upsertHandHistory(history, entry)
   }
 
   private getSeatedPlayerIds(): Set<string> {

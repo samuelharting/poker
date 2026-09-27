@@ -132,6 +132,21 @@ export interface LobbyPlayer {
   isSpectator: boolean
 }
 
+/** Public summary of a completed hand for the "Last hands" view. */
+export interface HandHistoryEntry {
+  handNumber: number
+  endedAt: number
+  endedBy: 'showdown' | 'fold'
+  pot: number
+  /** The board that was actually played (never rabbit-hunt cards). */
+  board: Card[]
+  /** Both runouts when the hand was run twice. */
+  boards?: Card[][]
+  winners: Array<{ playerId: string; nickname: string; amount: number; handDescription?: string }>
+  /** Hands the whole table saw (showdown or chosen to show). */
+  shown: Array<{ playerId: string; nickname: string; cards: Card[] }>
+}
+
 export interface TableSettingsSnapshot {
   smallBlind: number
   bigBlind: number
@@ -176,6 +191,8 @@ export interface TableState {
   lobbyPlayers: LobbyPlayer[]
   winners?: HandWinner[]
   bounty?: BountyMetadata
+  /** Last completed hands, newest first. */
+  handHistory?: HandHistoryEntry[]
   /** Drinks and Lady Luck; absent means on. */
   funModeEnabled?: boolean
   /** "Lady Luck" win-streak companion; null/absent when nobody is hot. */
