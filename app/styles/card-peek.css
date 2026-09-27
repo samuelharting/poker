@@ -348,32 +348,6 @@
   transition-delay: 30ms;
 }
 
-/* (2) Hinge lift: the cards tip up toward you on their bottom edge. ------ */
-.own-card-row[data-peek-style='hinge'] .own-card-cover {
-  transform-origin: 50% 100%;
-}
-
-.own-card-row[data-peek-style='hinge'].is-peeking .own-card-cover {
-  transform: rotateX(-50deg);
-  transition: transform 200ms cubic-bezier(0.25, 1.4, 0.4, 1);
-}
-
-.own-card-row[data-peek-style='hinge'].is-peek-held .own-card-cover {
-  transform: rotateX(-66deg);
-}
-
-.own-card-row[data-peek-style='hinge'].is-peek-open .own-card-cover {
-  transform: rotateX(-100deg);
-}
-
-.own-card-row[data-peek-style='hinge'] .own-card-cover-sheen {
-  background: linear-gradient(0deg, rgba(255, 255, 255, 0) 30%, rgba(255, 244, 214, 0.4) 80%, rgba(255, 255, 255, 0.65) 100%);
-}
-
-.own-card-row[data-peek-style='hinge'] .own-card-peek-shade {
-  background: linear-gradient(0deg, rgba(20, 8, 4, 0.5) 0%, rgba(20, 8, 4, 0.14) 40%, transparent 70%);
-}
-
 /* (3) Quick spin: a fast flip over the long edge with a little pop. ------ */
 .own-card-row[data-peek-style='spin'] .own-card-peek-face {
   transform: rotateY(-90deg);
@@ -455,58 +429,6 @@
 
 .own-card-row[data-peek-style='slide'].is-peeking .own-card-peek-shade {
   opacity: 0.22;
-}
-
-/* (5) Fan squeeze: the cards fan apart, tilt and lift at the corners. --- */
-.own-card-row[data-peek-style='fan'] .own-card-cover {
-  transform-origin: 50% 100%;
-}
-
-.own-card-row[data-peek-style='fan'].is-peeking .own-card-slot-left .own-card-peek-body {
-  transform: translate(-12px, -9px) rotate(-10deg) scale(1.04);
-}
-
-.own-card-row[data-peek-style='fan'].is-peeking .own-card-slot-right .own-card-peek-body {
-  transform: translate(12px, -9px) rotate(10deg) scale(1.04);
-  transition-delay: 0ms;
-}
-
-.own-card-row[data-peek-style='fan'].is-peek-held .own-card-slot-left .own-card-peek-body {
-  transform: translate(-16px, -12px) rotate(-14deg) scale(1.06);
-}
-
-.own-card-row[data-peek-style='fan'].is-peek-held .own-card-slot-right .own-card-peek-body {
-  transform: translate(16px, -12px) rotate(14deg) scale(1.06);
-}
-
-.own-card-row[data-peek-style='fan'].is-peek-open .own-card-slot-left .own-card-peek-body {
-  transform: translate(-8px, -6px) rotate(-7deg) scale(1.03);
-}
-
-.own-card-row[data-peek-style='fan'].is-peek-open .own-card-slot-right .own-card-peek-body {
-  transform: translate(8px, -6px) rotate(7deg) scale(1.03);
-}
-
-.own-card-row[data-peek-style='fan'].is-peeking .own-card-cover {
-  transform: rotateX(-50deg) rotateY(-8deg);
-  transition: transform 200ms cubic-bezier(0.25, 1.4, 0.4, 1);
-}
-
-.own-card-row[data-peek-style='fan'].is-peeking .own-card-slot-right .own-card-cover {
-  transform: rotateX(-50deg) rotateY(8deg);
-}
-
-.own-card-row[data-peek-style='fan'].is-peek-held .own-card-cover {
-  transform: rotateX(-68deg) rotateY(-8deg);
-}
-
-.own-card-row[data-peek-style='fan'].is-peek-held .own-card-slot-right .own-card-cover {
-  transform: rotateX(-68deg) rotateY(8deg);
-}
-
-.own-card-row[data-peek-style='fan'].is-peek-open .own-card-cover,
-.own-card-row[data-peek-style='fan'].is-peek-open .own-card-slot-right .own-card-cover {
-  transform: rotateX(-100deg);
 }
 
 /* (6) Light wipe: a bright sweep wipes the back away. -------------------- */

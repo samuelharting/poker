@@ -17,6 +17,7 @@
  * - lost_showdown: lost any contested showdown: a sip (half a beer).
  * - scared_money: folded 3 dealt-in hands in a row (1); the streak then resets.
  * - bubble: at the end of each orbit the shortest stack at the table drinks (1).
+ * - dealer: dealer's round, whoever had the button this hand drinks (1).
  * Water:
  * - big_win: won a pot worth more than 50% of the hand-start stack: a free,
  *   instant -2 water.
@@ -28,7 +29,7 @@ import { compareHands, evaluateHand } from './poker/evaluator'
 import type { Card, HandResult } from './poker/types'
 
 export type HouseShotRule = 'seven_two' | 'rivered' | 'cheers'
-export type HouseBeerRule = 'big_loss' | 'bad_beat' | 'lost_showdown' | 'scared_money' | 'bubble'
+export type HouseBeerRule = 'big_loss' | 'bad_beat' | 'lost_showdown' | 'scared_money' | 'bubble' | 'dealer'
 
 export const HOUSE_SHOT_RULES: readonly HouseShotRule[] = ['seven_two', 'rivered', 'cheers']
 /** Forced beers from one hand never exceed this. */
@@ -66,6 +67,8 @@ export interface HouseRuleHand {
   players: readonly HouseRulePlayer[]
   /** An orbit just finished: these shortest-stack players drink (room-decided). */
   bubbleIds?: readonly string[]
+  /** Who had the dealer button this hand (dealer's round). */
+  dealerId?: string | null
 }
 
 export interface HouseRuleOutcome {
@@ -174,6 +177,10 @@ export function computeHouseRules(hand: HouseRuleHand): HouseRuleOutcome[] {
     if (hand.bubbleIds?.includes(player.id)) {
       beers += 1
       beerRules.push('bubble')
+    }
+    if (hand.dealerId && hand.dealerId === player.id && player.startStack !== undefined) {
+      beers += 1
+      beerRules.push('dealer')
     }
     beers = Math.min(HOUSE_BEER_CAP, beers)
 

@@ -6,16 +6,15 @@ import { useCallback, useSyncExternalStore } from 'react'
  * How your own hole cards animate when you look at them. Purely a per-player
  * look preference (localStorage); timing and behaviour are shared.
  */
-export const PEEK_STYLES = ['curl', 'hinge', 'spin', 'slide', 'fan', 'wipe'] as const
+// Owner picked Light wipe as the default; hinge lift and fan squeeze were cut.
+export const PEEK_STYLES = ['wipe', 'curl', 'spin', 'slide'] as const
 export type PeekStyle = typeof PEEK_STYLES[number]
-export const DEFAULT_PEEK_STYLE: PeekStyle = 'spin'
+export const DEFAULT_PEEK_STYLE: PeekStyle = 'wipe'
 
 export const PEEK_STYLE_LABELS: Record<PeekStyle, { name: string; blurb: string }> = {
   curl: { name: 'Corner curl', blurb: 'The near corner curls, then the back lifts' },
-  hinge: { name: 'Hinge lift', blurb: 'Cards tip up toward you on their bottom edge' },
   spin: { name: 'Quick spin', blurb: 'A fast flip over the long edge with a pop' },
   slide: { name: 'Slide reveal', blurb: 'The back slides up off the face' },
-  fan: { name: 'Fan squeeze', blurb: 'The cards fan apart and lift at the corners' },
   wipe: { name: 'Light wipe', blurb: 'A bright sweep wipes the back away' },
 }
 

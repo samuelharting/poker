@@ -788,7 +788,12 @@ describe('PokerRoom house rules', () => {
     shover.send({ type: 'player_action', action: 'all_in' })
     folder.send({ type: 'player_action', action: 'fold' })
     expect(state(sam).phase).toBe('between_hands')
-    expect(drinkEventKinds(sam.connection).filter(kind => kind === 'house_beer')).toEqual([])
+    // The folder lost only a blind: no big-loss beer. (The dealer's-round beer goes to the button.)
+    const folderBeers = messagesOf(sam.connection)
+      .filter((message): message is TypedMessage<'drink_event'> => message.type === 'drink_event')
+      .map(message => message.event)
+      .filter(event => event.kind === 'house_beer' && event.playerId === folder.playerId && !state(sam).players.find(player => player.id === folder.playerId)?.isDealer)
+    expect(folderBeers).toEqual([])
   })
 
   it('pours house shots with their rule, bypassing shot limits; skips phones and fun mode off', () => {

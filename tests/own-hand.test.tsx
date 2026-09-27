@@ -112,8 +112,8 @@ describe('OwnHand peeking (live hand)', () => {
     expect(markup).not.toContain('Tap to peek')
   })
 
-  it('tags the card row with a swappable reveal style (quick spin by default)', () => {
-    expect(renderToStaticMarkup(<OwnHand cards={cards} isActing={false} concealed />)).toContain('data-peek-style="spin"')
+  it('tags the card row with a swappable reveal style (light wipe by default)', () => {
+    expect(renderToStaticMarkup(<OwnHand cards={cards} isActing={false} concealed />)).toContain('data-peek-style="wipe"')
     expect(renderToStaticMarkup(<OwnHand cards={cards} isActing={false} concealed peekStyle="wipe" />)).toContain('data-peek-style="wipe"')
   })
 

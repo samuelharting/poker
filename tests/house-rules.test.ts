@@ -40,3 +40,15 @@ describe('house rules: sips, scared money and the bubble', () => {
     expect(outcomes[0]!.beers).toBe(2)
   })
 })
+
+describe("house rules: dealer's round", () => {
+  const base = { drinkCapable: true, folded: true, holeCards: [], startStack: 1000, endStack: 1000, won: 0 }
+  it('whoever had the button this hand drinks a beer', () => {
+    const outcomes = computeHouseRules({ showdown: false, boards: [[]], players: [{ ...base, id: 'dealer' }, { ...base, id: 'other' }], dealerId: 'dealer' })
+    expect(outcomes).toEqual([expect.objectContaining({ playerId: 'dealer', beers: 1, beerRules: ['dealer'] })])
+  })
+  it('skips a dealer who was not dealt in', () => {
+    const outcomes = computeHouseRules({ showdown: false, boards: [[]], players: [{ ...base, id: 'dealer', startStack: undefined }], dealerId: 'dealer' })
+    expect(outcomes).toEqual([])
+  })
+})

@@ -1980,6 +1980,7 @@ export default class PokerRoom implements PartyServer {
         foldStreak: this.foldStreaks.get(player.id) ?? 0,
       })),
       bubbleIds,
+      dealerId: state.players.find(player => player.isDealer)?.id ?? null,
     })
     for (const outcome of outcomes) {
       if (outcome.beerRules.includes('scared_money')) this.foldStreaks.set(outcome.playerId, 0)
