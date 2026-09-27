@@ -320,6 +320,8 @@ const DesktopPokerRoom3D = dynamic<DesktopPokerRoom3DProps>(
 const ALL_IN_ANNOUNCEMENT_MS = 2600
 /** How long a sent action keeps the tray locked if the server never answers. */
 const ACTION_PENDING_TIMEOUT_MS = 2500
+/** Two submits closer than this are one double-click, whatever the server did in between. */
+const ACTION_REPEAT_GUARD_MS = 450
 
 const SUIT_GLYPHS: Record<Card['suit'], string> = {
   hearts: '♥',
@@ -1437,9 +1439,16 @@ export function PokerTable({
     }, ACTION_PENDING_TIMEOUT_MS)
     return () => window.clearTimeout(timeout)
   }, [pendingAction, turnKey])
+  const isMyTurnRef = useRef(isMyTurn)
+  isMyTurnRef.current = isMyTurn
+  const lastSubmitAtRef = useRef(0)
   const submitAction = useCallback((action: PokerAction, amount?: number) => {
     const pending = pendingActionRef.current
     if (pending && pending.turnKey === turnKeyRef.current) return
+    // A local server can answer before the second click of a double-click
+    // lands; never act off-turn, and never twice within a double-click.
+    if (!isMyTurnRef.current || performance.now() - lastSubmitAtRef.current < ACTION_REPEAT_GUARD_MS) return
+    lastSubmitAtRef.current = performance.now()
     const next = { key: action, turnKey: turnKeyRef.current }
     pendingActionRef.current = next
     setPendingAction(next)

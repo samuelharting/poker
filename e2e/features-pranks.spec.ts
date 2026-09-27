@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { SHOT_COOLDOWN_HANDS } from '../lib/drinks'
 import {
   closeAll,
   createTable,
@@ -69,7 +70,8 @@ test('desktop players flick a chip and buy a shot at each other', async ({ brows
     panel = await openTargetPanel(sam, 'PrankAlex')
     const shotButton = panel.getByRole('button', { name: /Buy PrankAlex a shot/ })
     await expect(shotButton).toBeDisabled()
-    await expect(shotButton.locator('.prank-button-badge')).toHaveText('5')
+    // One bought shot per hand (SHOT_COOLDOWN_HANDS, was 5 hands).
+    await expect(shotButton.locator('.prank-button-badge')).toHaveText(String(SHOT_COOLDOWN_HANDS))
     await snap(sam.page, 'pranks-sam-cooldown')
 
     // A chaser water is instant (-2), not queued.
