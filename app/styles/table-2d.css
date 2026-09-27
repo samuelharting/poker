@@ -233,8 +233,9 @@
 
 /* Seated with nothing docked (showdown, next deal, after a fold): keep the
    action tray's footprint, so the end of a hand doesn't drop the whole table
-   (board, seats, your cards) by a tray's height mid-reveal. */
-@media (orientation: portrait) {
+   (board, seats, your cards) by a tray's height mid-reveal. Only on tall
+   phones: a short one (iPhone SE) needs that room for the shown hands. */
+@media (orientation: portrait) and (min-height: 760px) {
   .table-scene[data-layout='2d'][data-hero-seat='true']:not([data-tray-open='true']):not(:has(> .mobile-between-hands-dock, > .rabbit-hunt-dock, > .check-fold-pre-action-dock)) .mobile-poker-field {
     padding-bottom: calc(max(8px, var(--mobile-tray-h, 0px)) + env(safe-area-inset-bottom));
   }
@@ -2795,29 +2796,64 @@
 /* The card row is the anchor: the pot / hand result above it and the showdown
    caption below it hang off the board, so the cards never jump when those
    change size or come and go. The shift keeps the in-hand look (pot + board
-   centred together) exactly where it was. */
-.mobile-arena > .mobile-board-zone {
-  translate: 0 calc(-50% + 16px);
+   centred together) exactly where it was. Tall arenas only: in a short one
+   the taller result card would reach the side seats, so there the stack
+   stays centred as before. */
+@container arena (min-height: 480px) {
+  .mobile-arena > .mobile-board-zone {
+    translate: 0 calc(-50% + 16px);
+  }
+
+  .mobile-arena > .mobile-board-zone > .mobile-board-header,
+  .mobile-arena > .mobile-board-zone > .mobile-board-footer {
+    position: absolute;
+    left: 0;
+    right: 0;
+  }
+
+  .mobile-arena > .mobile-board-zone > .mobile-board-header {
+    bottom: calc(100% + 10px);
+  }
+
+  .mobile-arena > .mobile-board-zone > .mobile-board-footer {
+    top: calc(100% + 8px);
+  }
+
+  .mobile-arena > .mobile-board-zone > .mobile-board-notices {
+    top: auto;
+    bottom: calc(100% + 6px);
+  }
 }
 
-.mobile-arena > .mobile-board-zone > .mobile-board-header,
-.mobile-arena > .mobile-board-zone > .mobile-board-footer {
-  position: absolute;
-  left: 0;
-  right: 0;
+/* Portrait arenas with seats down both sides: at showdown those seats grow
+   with their shown cards, so the hand result stays between the side columns
+   (wrapping) instead of sliding under the seats beside it. */
+@container arena (max-aspect-ratio: 6/5) {
+  .mobile-arena:has([data-slot='l2'], [data-slot='r2']) > .mobile-board-zone .mobile-edge-winners {
+    width: calc(100% - 2 * (var(--chip-w) + 6px));
+    padding: 6px 10px;
+  }
+
+  .mobile-arena:has([data-slot='l2'], [data-slot='r2']) > .mobile-board-zone .mobile-edge-winner-line {
+    flex-wrap: wrap;
+    column-gap: 8px;
+    row-gap: 2px;
+  }
+
+  .mobile-arena:has([data-slot='l2'], [data-slot='r2']) > .mobile-board-zone .mobile-edge-winner-line small {
+    white-space: normal;
+  }
 }
 
-.mobile-arena > .mobile-board-zone > .mobile-board-header {
-  bottom: calc(100% + 10px);
-}
+/* ...and on a short one (iPhone SE) that column is narrow: smaller type */
+@container arena (max-height: 479.98px) and (max-aspect-ratio: 6/5) {
+  .mobile-arena > .mobile-board-zone .mobile-edge-winner-line small {
+    font-size: var(--fs-11);
+  }
 
-.mobile-arena > .mobile-board-zone > .mobile-board-footer {
-  top: calc(100% + 8px);
-}
-
-.mobile-arena > .mobile-board-zone > .mobile-board-notices {
-  top: auto;
-  bottom: calc(100% + 6px);
+  .mobile-arena > .mobile-board-zone .mobile-edge-winner-line strong {
+    font-size: var(--fs-14);
+  }
 }
 
 /* Wide arenas (landscape phones/tablets): seats hug the four corners and the top edge.
