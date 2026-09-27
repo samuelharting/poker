@@ -325,6 +325,60 @@ function envelope(elapsed: number, duration: number, attack: number, release: nu
   return Math.min(smoothStep(elapsed / attack), smoothStep((duration - elapsed) / release))
 }
 
+/** How far in front of the shoulder a relaxed forearm puts the wrist (seat units). */
+const REST_REACH = 0.47
+/** Seat-space distance from the rail anchor (outer shoulder of the cushion) in to its crown. */
+const RAIL_CROWN_IN = 0.21
+
+/**
+ * The resting hands everyone spends most of the game in: forearms on the
+ * crown of the padded rail, elbows bent ~100 degrees and out to the sides,
+ * hands meeting in front of the chest. Where the wrist lands comes from the
+ * measured shoulder (every model's proportions), clamped onto the cushion.
+ * Three relaxed styles (by seed) so the table never looks cloned: loosely
+ * clasped, one hand over the other, and hands resting apart.
+ */
+export function restingHands(anchors: AvatarAnchors, seed: number) {
+  const style = Math.floor(seed * 3) % 3
+  const jitter = (salt: number) => (((seed * 9301 + salt * 49297) % 1) + 1) % 1 - 0.5
+  const railZ = (anchors.railR[2] + anchors.railL[2]) / 2
+  const railY = (anchors.railR[1] + anchors.railL[1]) / 2
+  const wristZ = (shoulder: Vec3) => Math.min(railZ - 0.08, Math.max(railZ - RAIL_CROWN_IN - 0.1, shoulder[2] - REST_REACH))
+  let rightX: number
+  let leftX: number
+  let rightLift = 0
+  let leftLift = 0
+  let rightFwd = 0
+  let leftFwd = 0
+  let curlR = 0.36
+  let curlL = 0.34
+  if (style === 0) {
+    // Loosely clasped: wrists close, fingertips meeting in the middle.
+    rightX = 0.095
+    leftX = -0.105
+    curlR = 0.46
+    curlL = 0.44
+  } else if (style === 1) {
+    // Right hand resting on the back of the left.
+    rightX = 0.04
+    leftX = -0.12
+    rightLift = 0.035
+    rightFwd = 0.03
+    leftFwd = -0.02
+    curlR = 0.3
+    curlL = 0.4
+  } else {
+    // Relaxed apart, each forearm on the cushion.
+    rightX = 0.19
+    leftX = -0.2
+    curlR = 0.3
+    curlL = 0.28
+  }
+  const right: Vec3 = [rightX + 0.015 * jitter(1), railY + rightLift, wristZ(anchors.shoulderR) - rightFwd + 0.03 * jitter(2)]
+  const left: Vec3 = [leftX + 0.015 * jitter(3), railY + leftLift, wristZ(anchors.shoulderL) - leftFwd + 0.03 * jitter(4)]
+  return { right, left, curlR, curlL, style }
+}
+
 function sway(time: number, seed: number) {
   return (
     Math.sin(time * 0.61 + seed * 11) * 0.6 +
@@ -400,11 +454,12 @@ export function computeAvatarTargetPose(
 
   // 1. Seated base: lean into the table, forearms resting on the rail.
   add(bones.Chest, 0.08, 0, 0)
-  pose.handR = [...anchors.railR]
-  pose.handL = [...anchors.railL]
+  const rest = restingHands(anchors, seed)
+  pose.handR = rest.right
+  pose.handL = rest.left
   // Relaxed hands: fingers loosely curled, never flat mittens.
-  pose.fingerCurlR = 0.32
-  pose.fingerCurlL = 0.3
+  pose.fingerCurlR = rest.curlR
+  pose.fingerCurlL = rest.curlL
 
   // 2. Breathing and slow weight shifts keep every player alive.
   const breath = Math.sin(time * 1.3 + seed * 20) * motion
@@ -417,6 +472,13 @@ export function computeAvatarTargetPose(
   add(bones.Head, 0, -0.025 * shift, -0.02 * shift)
   pose.handR[1] += 0.01 * breath
   pose.handL[1] += 0.01 * breath
+  // Resting hands are never frozen: a slow, small drift of each wrist on the
+  // padding (out of step with each other), like thumbs idly moving.
+  const drift = motion * 0.012
+  pose.handR[0] += drift * Math.sin(time * 0.43 + seed * 17)
+  pose.handR[2] += drift * Math.sin(time * 0.31 + seed * 5)
+  pose.handL[0] += drift * Math.sin(time * 0.37 + seed * 13 + 1.7)
+  pose.handL[2] += drift * Math.sin(time * 0.29 + seed * 3 + 0.8)
 
   // 3. Attention: follow the acting player, otherwise glance around the table.
   const someoneElseActing = Math.abs(input.lookYaw) > 0.001 || input.lookPitch > -0.03

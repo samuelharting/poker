@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   computeAvatarTargetPose,
   createAvatarAnimatorState,
+  restingHands,
   FLIP_OFF_SECONDS,
   getFlipOffHand,
   updateAvatarAnimator,
@@ -54,9 +55,24 @@ function input(overrides: Partial<AvatarAnimatorInput> = {}): AvatarAnimatorInpu
 describe('avatar animator', () => {
   it('rests both hands on the rail when idle', () => {
     const pose = computeAvatarTargetPose(createAvatarAnimatorState('p1'), input())
-    expect(pose.handR[2]).toBeCloseTo(anchors.railR[2], 1)
+    // Forearms out on the crown of the cushion, in front of the shoulders.
+    expect(pose.handR[1]).toBeCloseTo(anchors.railR[1], 1)
+    expect(pose.handR[2]).toBeLessThan(anchors.railR[2] - 0.05)
+    expect(pose.handR[2]).toBeGreaterThan(anchors.railR[2] - 0.35)
+    expect(pose.handR[2]).toBeLessThan(anchors.shoulderR[2] - 0.2)
     expect(pose.handL[0]).toBeLessThan(0)
     expect(pose.handR[0]).toBeGreaterThan(0)
+  })
+
+  it('varies the resting hands between players', () => {
+    const styles = new Set<number>()
+    for (let index = 0; index < 40; index += 1) styles.add(restingHands(anchors, index / 40).style)
+    expect(styles.size).toBe(3)
+    for (let index = 0; index < 40; index += 1) {
+      const rest = restingHands(anchors, index / 40)
+      // Hands never cross or stack exactly: the right stays right of the left.
+      expect(rest.right[0] - rest.left[0]).toBeGreaterThan(0.12)
+    }
   })
 
   it('throws both hands above the shoulders for a victory celebration', () => {

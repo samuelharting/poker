@@ -2060,6 +2060,11 @@ const faceGuardOffset = new THREE.Vector3()
 /** Skull radius (seat units) the wrists are kept outside of. */
 const FACE_GUARD_RADIUS = 0.2
 
+const restElbow = new THREE.Vector3()
+const restWrist = new THREE.Vector3()
+const restFingers = new THREE.Vector3()
+const restInward = new THREE.Vector3()
+const restSide = new THREE.Vector3()
 const flipUp = new THREE.Vector3()
 const flipSide = new THREE.Vector3()
 const flipToward = new THREE.Vector3()
@@ -2135,6 +2140,32 @@ function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | n
     )
     seat.root.localToWorld(ikPole)
     solveArmIK(chain, ikTarget, ikPole)
+
+    // Resting on the rail: palm down on the padding, fingers carrying on from
+    // the forearm and curving in toward the other hand, the pinky edge a touch
+    // lower (a relaxed, slightly rolled hand), instead of whatever roll the
+    // IK left (palms up, "begging"). Fades out as the hand leaves the rail.
+    const restWeight = 1 - THREE.MathUtils.smoothstep(Math.abs(hand[1] - (out > 0 ? seat.anchors.railR[1] : seat.anchors.railL[1])), 0.04, 0.14)
+    if (restWeight > 0.01 && raise < 0.01) {
+      const middle = bones.get(`Middle2${side}`)
+      const index = bones.get(`Index2${side}`)
+      const pinky = bones.get(`Pinky2${side}`)
+      if (middle && index && pinky) {
+        chain.lower.getWorldPosition(restElbow)
+        chain.hand.getWorldPosition(restWrist)
+        restFingers.subVectors(restWrist, restElbow).setY(0)
+        if (restFingers.lengthSq() > 1e-8) {
+          restFingers.normalize()
+          // Curve in toward the middle (~15 degrees), tip a little down.
+          restInward.crossVectors(WORLD_UP, restFingers).multiplyScalar(out > 0 ? 1 : -1)
+          restFingers.addScaledVector(restInward, 0.27).normalize()
+          restSide.crossVectors(restFingers, WORLD_UP).normalize().multiplyScalar(out)
+          restSide.addScaledVector(WORLD_UP, -0.3).normalize()
+          restFingers.addScaledVector(WORLD_UP, -0.22).normalize()
+          orientBoneFrame(chain.hand, middle, index, pinky, restFingers, restSide, restWeight)
+        }
+      }
+    }
 
     if (raise > 0.01) {
       // Raised arms: fingers up and back over the skull, palms to the head,
