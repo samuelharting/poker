@@ -436,6 +436,49 @@
   transform: translateX(-50%);
 }
 
+/* Takes over from the pot label during the payout and counts down to $0. */
+.desktop-3d-stage .payout-pot-readout {
+  position: fixed;
+  left: var(--pot-x, 50%);
+  top: var(--pot-y, 18%);
+  z-index: 4;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 14px 7px;
+  border: 1px solid var(--line-brass);
+  border-radius: var(--r-pill);
+  background: var(--surface-glass-strong);
+  box-shadow: var(--shadow-2);
+  transform: translate(-50%, 0);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 180ms ease-out;
+}
+
+.desktop-3d-stage .payout-pot-readout[data-visible='true'] {
+  opacity: 1;
+  transition: none;
+}
+
+.desktop-3d-stage .payout-pot-readout span {
+  color: var(--c-brass-400);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.desktop-3d-stage .payout-pot-readout b {
+  color: var(--c-cream-50);
+  font-family: var(--font-display);
+  font-size: var(--fs-20);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
 /* The action tray already states the amount to call. */
 .table-scene[data-desktop-three='true'] .table-surface .pot-display .pot-to-call {
   display: none;

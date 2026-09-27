@@ -256,6 +256,12 @@ interface PotRuntime {
   payoutStartedAt: number
   payoutCount: number
   payoutTargets: THREE.Vector3[]
+  /** Winner ids already paid, so a lingering winner flag never replays the payout. */
+  paidKey: string
+  /** Pot total being shipped (drives the counting-down pot readout). */
+  payoutAmount: number
+  /** Last pot total seen before the payout began. */
+  lastPotAmount: number
 }
 
 interface SceneRuntime {
@@ -1453,6 +1459,7 @@ function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
 const CHIP_RADIUS = 0.13
 const CHIP_HEIGHT = 0.042
 const CHIPS_PER_COLUMN = 5
+const WAGER_CHIPS_PER_COLUMN = 6
 let sharedChipGeometry: THREE.CylinderGeometry | null = null
 
 function getChipGeometry() {
@@ -1545,7 +1552,11 @@ function updateChipInstances(instancer: ChipInstancer, scene: THREE.Scene) {
   })
 }
 
-function createChipSet(maxChips: number) {
+/**
+ * mound: loose clustered columns (pot, personal stacks).
+ * stack: a bet as one or two neat, squared columns side by side.
+ */
+function createChipSet(maxChips: number, layout: 'mound' | 'stack' = 'mound') {
   const group = new THREE.Group()
   const materials = getSharedChipMaterials()
   const chipMeshes: THREE.Mesh[] = []
@@ -1554,22 +1565,28 @@ function createChipSet(maxChips: number) {
   const random = createSeededRandom(maxChips * 7919)
 
   for (let index = 0; index < maxChips; index += 1) {
-    const column = Math.floor(index / CHIPS_PER_COLUMN)
-    const level = index % CHIPS_PER_COLUMN
-    const styleIndex = column % CHIP_DENOMINATIONS.length
+    const neat = layout === 'stack'
+    const perColumn = neat ? WAGER_CHIPS_PER_COLUMN : CHIPS_PER_COLUMN
+    const column = Math.floor(index / perColumn)
+    const level = index % perColumn
+    const styleIndex = neat
+      ? (column * 2 + Math.floor(level / 3)) % CHIP_DENOMINATIONS.length
+      : column % CHIP_DENOMINATIONS.length
     const edgeMaterial = materials[styleIndex * 2]!
     const faceMaterial = materials[styleIndex * 2 + 1]!
     // Columns sit in a tight cluster; each chip is nudged so stacks look hand-placed.
     const angle = column * 2.4
-    const radius = column === 0 ? 0 : 0.24 + Math.floor((column - 1) / 6) * 0.2
+    const radius = neat ? 0 : column === 0 ? 0 : 0.24 + Math.floor((column - 1) / 6) * 0.2
+    const neatX = neat ? column * (CHIP_RADIUS * 2 + 0.012) : 0
+    const jitter = neat ? 0.004 : 0.012
     const chip = addMesh(
       group,
       chipBodyGeometry,
       [edgeMaterial, faceMaterial, faceMaterial],
       [
-        Math.cos(angle) * radius + (random() - 0.5) * 0.012,
+        neatX + Math.cos(angle) * radius + (random() - 0.5) * jitter,
         CHIP_HEIGHT / 2 + level * (CHIP_HEIGHT + 0.002),
-        Math.sin(angle) * radius * 0.8 + (random() - 0.5) * 0.012,
+        Math.sin(angle) * radius * 0.8 + (random() - 0.5) * jitter,
       ]
     )
     chip.rotation.y = random() * Math.PI * 2
@@ -1605,7 +1622,7 @@ function createWagerRuntime(
   player: ThreePlayerView,
   now: number
 ): WagerRuntime {
-  const chips = createChipSet(12)
+  const chips = createChipSet(12, 'stack')
   const visualSeat = toVisualSeat(player.visualSeat)
   const start = toVector3(getTableWagerStartPoint(visualSeat))
   const target = toVector3(getTableWagerAnchor(visualSeat))
@@ -1747,7 +1764,8 @@ function animateWagers(runtime: SceneRuntime, time: number, reducedMotion: boole
         [wager.target.x, wager.target.y, wager.target.z],
         [potPosition.x, potPosition.y, potPosition.z],
         collectProgress,
-        0.12
+        // High enough to clear the board cards when sweeping across the felt.
+        0.5
       )
       wager.group.position.set(position[0], position[1], position[2])
       wager.group.visible = true
@@ -1854,10 +1872,22 @@ function createPotRuntime(scene: THREE.Scene): PotRuntime {
     payoutStartedAt: Number.NEGATIVE_INFINITY,
     payoutCount: 0,
     payoutTargets: [],
+    paidKey: '',
+    payoutAmount: 0,
+    lastPotAmount: 0,
   }
 }
 
-const POT_PAYOUT_SECONDS = 1.35
+/** Launch window for the pot's chips; each chip then flies CHIP_FLIGHT_SECONDS. */
+const POT_PAYOUT_STAGGER_SECONDS = 0.32
+const CHIP_FLIGHT_SECONDS = 0.5
+const POT_PAYOUT_SECONDS = POT_PAYOUT_STAGGER_SECONDS + CHIP_FLIGHT_SECONDS + 0.05
+/** Payout chips peak this high above the felt so they clear the board cards. */
+const PAYOUT_ARC_PEAK = 0.62
+
+function getPayoutChipDelay(index: number, count: number) {
+  return count <= 1 ? 0 : (index / (count - 1)) * POT_PAYOUT_STAGGER_SECONDS
+}
 
 function syncPot(runtime: SceneRuntime, view: ThreeTableViewModel) {
   const now = (performance.now() - runtime.startTime) / 1000
@@ -1865,29 +1895,42 @@ function syncPot(runtime: SceneRuntime, view: ThreeTableViewModel) {
   const pot = runtime.pot
   const winners = view.players.filter(player => player.isWinner)
   const winnerKey = winners.map(player => player.id).join(',')
-  if (winners.length > 0 && winnerKey !== pot.payoutKey) {
-    // Showdown payout: the pot's chips arc across the felt to each winner.
+  const payoutRunning = pot.payoutKey !== '' && now - pot.payoutStartedAt < POT_PAYOUT_SECONDS
+  if (winners.length > 0 && winnerKey !== pot.payoutKey && winnerKey !== pot.paidKey) {
+    // Payout: the pot's chips arc high over the board and land on each
+    // winner's own stack, while the pot readout counts down.
     pot.payoutKey = winnerKey
     pot.payoutStartedAt = now
-    pot.payoutCount = Math.max(pot.visibleChipCount, count, 6)
+    pot.payoutCount = Math.min(pot.chipMeshes.length, Math.max(pot.visibleChipCount, count, 6))
+    pot.payoutAmount = Math.max(view.pot, pot.lastPotAmount)
     pot.payoutTargets = winners.map(winner => {
       const winnerSeat = runtime.seats.get(winner.id)
-      if (winnerSeat?.root.visible) {
+      if (winnerSeat) {
         const target = winnerSeat.stack.group.getWorldPosition(new THREE.Vector3())
-        target.y = FELT_TOP_Y
+        // Land on top of the winner's centre column.
+        const levels = Math.min(CHIPS_PER_COLUMN, Math.max(1, winnerSeat.stackCount))
+        target.y = FELT_TOP_Y + levels * (CHIP_HEIGHT + 0.002) + CHIP_HEIGHT / 2
         return target
       }
-      return toVector3(getTableWagerStartPoint(toVisualSeat(winner.visualSeat)))
+      const fallback = toVector3(getTableWagerStartPoint(toVisualSeat(winner.visualSeat)))
+      fallback.y = FELT_TOP_Y + CHIP_HEIGHT / 2
+      return fallback
     })
   } else if (winners.length === 0) {
-    pot.payoutKey = ''
-    pot.payoutTargets = []
+    pot.paidKey = ''
+    if (!payoutRunning) {
+      pot.payoutKey = ''
+      pot.payoutTargets = []
+    }
+  }
+  if (!pot.payoutKey && winners.length === 0) {
+    pot.lastPotAmount = Math.max(view.pot, view.collectedPot)
   }
   if (count > pot.visibleChipCount && !pot.payoutKey) {
     pot.bounceStartedAt = now
   }
   pot.visibleChipCount = count
-  const shown = pot.payoutKey ? Math.min(pot.chipMeshes.length, pot.payoutCount) : count
+  const shown = pot.payoutKey ? pot.payoutCount : count
   pot.group.visible = shown > 0
   pot.chipMeshes.forEach((chip, index) => {
     chip.visible = index < shown
@@ -1901,48 +1944,113 @@ function syncPot(runtime: SceneRuntime, view: ThreeTableViewModel) {
   }
 }
 
-function animatePot(runtime: SceneRuntime, time: number, reducedMotion: boolean) {
+const payoutStart = new THREE.Vector3()
+const payoutEnd = new THREE.Vector3()
+const payoutPoint = new THREE.Vector3()
+
+/** Formats a chip amount like the DOM pot label ($1,600 / $12.5K). */
+function formatPotAmount(amount: number) {
+  if (amount >= 1000000) return `$${(amount / 1000000).toFixed(2)}M`
+  if (amount >= 10000) return `$${(amount / 1000).toFixed(1)}K`
+  return `$${Math.round(amount).toLocaleString()}`
+}
+
+/**
+ * The DOM pot label disappears the moment the payout starts; this readout
+ * takes its place and counts down as each chip lands on the winner's stack.
+ */
+function updatePayoutReadout(host: HTMLElement, amount: number | null) {
+  const readout = host.querySelector<HTMLElement>('.payout-pot-readout')
+  if (!readout) return
+  const visible = amount !== null
+  if (readout.dataset.visible !== String(visible)) readout.dataset.visible = String(visible)
+  if (amount === null) return
+  const value = readout.querySelector('b')
+  const text = formatPotAmount(amount)
+  if (value && value.textContent !== text) value.textContent = text
+}
+
+function animatePot(runtime: SceneRuntime, time: number, reducedMotion: boolean, host: HTMLElement) {
   const pot = runtime.pot
   if (pot.payoutKey && pot.payoutTargets.length > 0) {
     const elapsed = reducedMotion ? POT_PAYOUT_SECONDS : time - pot.payoutStartedAt
-    const localTarget = new THREE.Vector3()
+    const count = pot.payoutCount
+    let landed = 0
+    pot.group.updateWorldMatrix(true, false)
     pot.chipMeshes.forEach((chip, index) => {
       const base = pot.chipBasePositions[index]
       const target = pot.payoutTargets[index % pot.payoutTargets.length]
-      if (!base || !target) return
-      localTarget.copy(target)
-      pot.group.worldToLocal(localTarget)
-      const chipProgress = THREE.MathUtils.clamp((elapsed - index * 0.03) / 0.7, 0, 1)
-      const position = interpolateWagerArc(
-        [base.x, base.y, base.z],
-        [localTarget.x, base.y, localTarget.z],
-        chipProgress,
-        0.9
-      )
-      chip.position.set(position[0], position[1], position[2])
-      chip.rotation.x = chipProgress * Math.PI * 2 * (index % 2 === 0 ? 1 : -1)
-      chip.visible = index < pot.payoutCount && chipProgress < 1
+      if (!base || !target || index >= count) {
+        chip.visible = false
+        return
+      }
+      // Top of the mound leaves first so the pile visibly shrinks.
+      const order = count - 1 - index
+      const progress = THREE.MathUtils.clamp((elapsed - getPayoutChipDelay(order, count)) / CHIP_FLIGHT_SECONDS, 0, 1)
+      if (progress >= 1) {
+        landed += 1
+        chip.visible = false
+        return
+      }
+      chip.visible = true
+      if (progress <= 0) {
+        chip.position.copy(base)
+        chip.rotation.set(0, Number(chip.userData.baseYaw ?? 0), 0)
+        return
+      }
+      payoutStart.copy(base)
+      pot.group.localToWorld(payoutStart)
+      // Chips fan out a little so they stack beside each other on arrival.
+      const spread = ((index * 7) % 5 - 2) * 0.018
+      payoutEnd.set(target.x + spread, target.y + (order % 3) * 0.004, target.z - spread * 0.6)
+      const eased = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2
+      payoutPoint.lerpVectors(payoutStart, payoutEnd, eased)
+      // A high arc that always clears the (tilted, lifted) board cards.
+      const peak = FELT_TOP_Y + PAYOUT_ARC_PEAK + (order % 4) * 0.03
+      const arcBase = Math.max(payoutStart.y, payoutEnd.y)
+      payoutPoint.y += 4 * eased * (1 - eased) * Math.max(0, peak - arcBase)
+      pot.group.worldToLocal(payoutPoint)
+      chip.position.copy(payoutPoint)
+      // One clean flip in flight, flat again on landing.
+      const direction = index % 2 === 0 ? 1 : -1
+      chip.rotation.set(eased * Math.PI * 2 * direction, Number(chip.userData.baseYaw ?? 0) + eased * 1.4, 0)
     })
-    pot.group.visible = elapsed < POT_PAYOUT_SECONDS
+    const remaining = elapsed >= POT_PAYOUT_SECONDS ? 0 : pot.payoutAmount * (1 - landed / Math.max(1, count))
+    updatePayoutReadout(host, pot.payoutAmount > 0 && elapsed < POT_PAYOUT_SECONDS + 0.35 ? remaining : null)
+    if (elapsed >= POT_PAYOUT_SECONDS + 0.35) {
+      // Done: remember who was paid so the lingering winner flag never replays it.
+      pot.paidKey = pot.payoutKey
+      pot.payoutKey = ''
+      pot.payoutTargets = []
+      resetChipTransforms(pot.chipMeshes, pot.chipBasePositions)
+      pot.chipMeshes.forEach((chip, index) => { chip.visible = index < pot.visibleChipCount })
+      pot.group.visible = pot.visibleChipCount > 0
+    } else {
+      pot.group.visible = true
+    }
     return
   }
+  updatePayoutReadout(host, null)
+  if (pot.bounceStartedAt === Number.POSITIVE_INFINITY) return
 
   const progress = reducedMotion
     ? 1
-    : THREE.MathUtils.clamp((time - runtime.pot.bounceStartedAt) / 0.72, 0, 1)
+    : THREE.MathUtils.clamp((time - pot.bounceStartedAt) / 0.72, 0, 1)
+  if (progress >= 1) {
+    resetChipTransforms(pot.chipMeshes, pot.chipBasePositions)
+    // Settled: skip the per-chip work until the next bounce.
+    pot.bounceStartedAt = Number.POSITIVE_INFINITY
+    return
+  }
 
-  runtime.pot.chipMeshes.forEach((chip, index) => {
-    const base = runtime.pot.chipBasePositions[index]
+  pot.chipMeshes.forEach((chip, index) => {
+    const base = pot.chipBasePositions[index]
     if (!base) return
     const delayed = THREE.MathUtils.clamp(progress * 1.35 - index * 0.025, 0, 1)
     const bounce = Math.sin(delayed * Math.PI) * 0.095 * (1 - delayed * 0.35)
     chip.position.set(base.x, base.y + bounce, base.z)
     chip.rotation.z = (index % 2 === 0 ? 1 : -1) * Math.sin(delayed * Math.PI) * 0.06
   })
-
-  if (progress >= 1) {
-    resetChipTransforms(runtime.pot.chipMeshes, runtime.pot.chipBasePositions)
-  }
 }
 
 const ikTarget = new THREE.Vector3()
@@ -2036,14 +2144,16 @@ function curlHand(seat: SeatRuntime, bones: ReadonlyMap<string, THREE.Bone>, sid
     const amount = THREE.MathUtils.clamp(fist + FINGER_CASCADE[finger] * (1 - fist), 0, 1)
     for (let joint = 0; joint < 3; joint += 1) {
       const bend = (FINGER_REST_CURL[joint] + amount * FINGER_FIST_CURL[joint]) * (1 - extended) - 0.05 * extended
-      applyAvatarBoneOffset(seat, bones.get(`${finger}${joint + 1}${side}`), bend, 0, 0)
+      // On these rigs negative local X flexes a finger toward the palm
+      // (positive bends it back toward the knuckles).
+      applyAvatarBoneOffset(seat, bones.get(`${finger}${joint + 1}${side}`), -bend, 0, 0)
     }
   }
-  // Thumb folds across the curled fingers (tucked for the flick-off).
+  // Thumb folds in over the curled fingers (tucked for the flick-off).
   const mirror = side === 'R' ? 1 : -1
-  applyAvatarBoneOffset(seat, bones.get(`Thumb1${side}`), fist * 0.3 + 0.3 * middleUp, -mirror * (fist * 0.28 + 0.35 * middleUp), 0)
-  applyAvatarBoneOffset(seat, bones.get(`Thumb2${side}`), 0.1 + fist * 0.45 + 0.3 * middleUp, 0, 0)
-  applyAvatarBoneOffset(seat, bones.get(`Thumb3${side}`), 0.08 + fist * 0.35, 0, 0)
+  applyAvatarBoneOffset(seat, bones.get(`Thumb1${side}`), -(0.05 + fist * 0.3 + 0.25 * middleUp), -mirror * (fist * 0.3 + 0.3 * middleUp), 0)
+  applyAvatarBoneOffset(seat, bones.get(`Thumb2${side}`), -(0.1 + fist * 0.45 + 0.25 * middleUp), 0, 0)
+  applyAvatarBoneOffset(seat, bones.get(`Thumb3${side}`), -(0.08 + fist * 0.35), 0, 0)
 }
 
 const flipTargetWorld = new THREE.Vector3()
@@ -2350,7 +2460,7 @@ function animateSeat(
     seat.cards.position.set(
       tablePose.cards.position[0],
       restY + tablePose.cards.position[1] + Math.sin(peekTilt) * 0.13 + peekLift * 0.015,
-      seat.cardLocalZ + tablePose.cards.position[2] * 0.6 + (1 - Math.cos(peekTilt)) * 0.13
+      seat.cardLocalZ + tablePose.cards.position[2] * 0.6 - (1 - Math.cos(peekTilt)) * 0.13
     )
     seat.cards.rotation.set(
       tablePose.cards.rotation[0] - peekTilt,
@@ -2870,7 +2980,7 @@ function createSceneRuntime(
       if (seat.winner && seat.root.visible && !winnerSeat) winnerSeat = seat
     }
     animateWagers(runtime, time, reducedMotion)
-    animatePot(runtime, time, reducedMotion)
+    animatePot(runtime, time, reducedMotion, host)
     animateBoardRuntime(runtime.board, time, reducedMotion)
     animateEffects(runtime, time, delta, reducedMotion)
 
@@ -3162,6 +3272,11 @@ export function DesktopPokerRoom3D({
         aria-label="Animated 3D poker room"
       />
       <div className="lady-luck-bubble-3d" data-visible="false" aria-live="polite" />
+      {/* Counts the pot down while its chips fly to the winner (driven by animatePot). */}
+      <div className="payout-pot-readout" data-visible="false" aria-hidden="true">
+        <span>Pot</span>
+        <b />
+      </div>
 
       {webGLStatus === 'loading' && (
         <div className="three-webgl-status" role="status">Warming up the 3D table…</div>
