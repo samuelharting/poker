@@ -289,7 +289,7 @@ describe('settings and player management helpers', () => {
     }), true)).toEqual({
       canTakeSeat: false,
       actionLabel: undefined,
-      message: 'Out of chips. Rebuy (Settings > Ledger) to take a seat.',
+      message: 'Out of chips.',
     })
 
     expect(getSpectatorRailState(makeLobbyPlayer({

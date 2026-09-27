@@ -1886,9 +1886,9 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
   height: 100%;
   background: linear-gradient(90deg, #c9a84c 0%, #f6e4ab 50%, #c9a84c 100%);
   background-size: 200% 100%;
-  transition: width 120ms linear;
+  transform-origin: left center;
+  transition: transform 1s linear;
   border-radius: 999px;
-  will-change: width, background-position;
   animation: timerSweep 1.3s linear infinite;
 }
 
@@ -4507,7 +4507,8 @@ button.player-seat-marker:focus-visible {
   transform: translateY(-1px);
 }
 
-.btn-action:active:not(:disabled) {
+.btn-action:active:not(:disabled),
+.btn-action[data-pending='true'] {
   transform: translateY(0);
 }
 

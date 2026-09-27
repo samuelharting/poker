@@ -214,7 +214,10 @@
     border-radius: inherit;
     background: linear-gradient(90deg, var(--c-sky-400), var(--c-felt-300));
     box-shadow: 0 0 10px rgba(127, 208, 255, 0.6);
-    transition: width 1s linear;
+    /* Drained by transform (compositor only), eased across the 1s clock ticks. */
+    transform-origin: left center;
+    transition: transform 1s linear;
+    animation: none;
   }
 
   .table-scene[data-desktop-three='true'] .timer-bar-fill.timer-low {
@@ -383,7 +386,8 @@
     transform: translateY(-2px);
   }
 
-  .table-scene[data-desktop-three='true'] .btn-action:active {
+  .table-scene[data-desktop-three='true'] .btn-action:active,
+  .table-scene[data-desktop-three='true'] .btn-action[data-pending='true'] {
     filter: brightness(0.95);
     transform: translateY(1px) scale(0.97);
   }
@@ -843,7 +847,8 @@
     box-shadow: 0 0 8px rgba(127, 208, 255, 0.7);
     transform: scaleX(var(--acting-timer-pct, 1));
     transform-origin: left center;
-    transition: transform 120ms linear;
+    /* The clock ticks once a second; this eases each tick into a smooth drain. */
+    transition: transform 1s linear;
     pointer-events: none;
   }
 

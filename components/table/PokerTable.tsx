@@ -309,6 +309,7 @@ interface DesktopPokerRoom3DProps {
   cardRevealActions: CardRevealSeatAction[]
   onRequestCardReveal: (playerId: string) => void
   highlightedCards?: ReadonlyArray<Pick<Card, 'rank' | 'suit'>>
+  actingTimerPercent?: number
 }
 
 const DesktopPokerRoom3D = dynamic<DesktopPokerRoom3DProps>(
@@ -317,6 +318,8 @@ const DesktopPokerRoom3D = dynamic<DesktopPokerRoom3DProps>(
 )
 
 const ALL_IN_ANNOUNCEMENT_MS = 2600
+/** How long a sent action keeps the tray locked if the server never answers. */
+const ACTION_PENDING_TIMEOUT_MS = 2500
 
 const SUIT_GLYPHS: Record<Card['suit'], string> = {
   hearts: '♥',
@@ -1093,7 +1096,9 @@ export function getSpectatorRailState(
     return {
       canTakeSeat: false,
       actionLabel: undefined,
-      message: 'Out of chips. Rebuy (Settings > Ledger) to take a seat.',
+      // A status, not a second prompt: the one rebuy prompt is the out-of-chips
+      // card (desktop) / the between-hands dock (phones).
+      message: 'Out of chips.',
     }
   }
 
@@ -1408,6 +1413,38 @@ export function PokerTable({
   const actingPlayer = state.players.find(player => player.id === state.actingPlayerId)
   const isMyTurn = state.actingPlayerId === yourId
   const isInHand = state.phase === 'in_hand'
+
+  // One action per turn. A click (or shortcut) marks that button pressed at
+  // once and swallows any repeat until the server moves the turn on, so a
+  // double-click or click + key can never send two actions. If the server
+  // rejects it, the lock lifts after a moment and the toast explains why.
+  const turnKey = `${state.handNumber}:${state.round ?? ''}:${state.actingPlayerId ?? ''}:${state.currentBet}:${me?.bet ?? 0}:${me?.status ?? ''}`
+  const turnKeyRef = useRef(turnKey)
+  turnKeyRef.current = turnKey
+  const [pendingAction, setPendingAction] = useState<{ key: PokerAction; turnKey: string } | null>(null)
+  const pendingActionRef = useRef(pendingAction)
+  const isActionPending = pendingAction !== null && pendingAction.turnKey === turnKey
+  useEffect(() => {
+    if (!pendingAction) return
+    if (pendingAction.turnKey !== turnKey) {
+      pendingActionRef.current = null
+      setPendingAction(null)
+      return
+    }
+    const timeout = window.setTimeout(() => {
+      pendingActionRef.current = null
+      setPendingAction(null)
+    }, ACTION_PENDING_TIMEOUT_MS)
+    return () => window.clearTimeout(timeout)
+  }, [pendingAction, turnKey])
+  const submitAction = useCallback((action: PokerAction, amount?: number) => {
+    const pending = pendingActionRef.current
+    if (pending && pending.turnKey === turnKeyRef.current) return
+    const next = { key: action, turnKey: turnKeyRef.current }
+    pendingActionRef.current = next
+    setPendingAction(next)
+    onAction(action, amount)
+  }, [onAction])
   const betweenHands = !isInHand
   const hasCompletedHandWinner = betweenHands && Boolean(state.winners?.length)
   const isSpectator = isSpectatorViewer
@@ -1745,7 +1782,7 @@ export function PokerTable({
     if (!action) {
       return
     }
-    onAction(action)
+    submitAction(action)
     setPreActionNote({ id: Date.now(), text: describeAutoAction(action, preActionToCall), tone: 'done' })
   }, [
     isConnected,
@@ -1753,7 +1790,7 @@ export function PokerTable({
     isMyTurn,
     legalActions,
     me?.status,
-    onAction,
+    submitAction,
     preActionToCall,
     queuedPreAction,
     settingsOpen,
@@ -1951,8 +1988,8 @@ export function PokerTable({
       return
     }
 
-    onAction('raise', commitRaiseDraft())
-  }, [commitRaiseDraft, isConnected, onAction, onFeedback])
+    submitAction('raise', commitRaiseDraft())
+  }, [commitRaiseDraft, isConnected, submitAction, onFeedback])
 
   const turnTimer = useTurnTimer(
     state.actionTimerStart,
@@ -2132,14 +2169,14 @@ export function PokerTable({
     return actionButtonDescriptors.map(actionButton => {
       const onClick = actionButton.key === 'raise'
         ? handleRaise
-        : () => onAction(actionButton.key)
+        : () => submitAction(actionButton.key)
 
       return {
         ...actionButton,
         onClick,
       }
     })
-  }, [actionButtonDescriptors, handleRaise, onAction])
+  }, [actionButtonDescriptors, handleRaise, submitAction])
   // Facing an all-in with only Fold / Call left there is nothing to size.
   const showDesktopRaiseSizing = effectiveMin > 0 &&
     actionButtons.some(actionButton => actionButton.key === 'raise')
@@ -2494,7 +2531,6 @@ export function PokerTable({
       data-layout={isMobileViewport ? '2d' : 'desktop'}
       data-acting-timer={opponentTimerVisible ? (turnTimer.percent < 25 ? 'low' : 'live') : 'none'}
       style={{
-        ...(opponentTimerVisible ? { ['--acting-timer-pct' as string]: Math.round(turnTimer.percent * 10) / 1000 } : {}),
         ...(isMobileViewport && mobileTrayHeight > 0 ? { ['--mobile-tray-h' as string]: `${mobileTrayHeight}px` } : {}),
       } as CSSProperties}
     >
@@ -2510,6 +2546,7 @@ export function PokerTable({
           cardRevealActions={cardRevealActions}
           onRequestCardReveal={onRequestCardReveal}
           highlightedCards={highlightedWinningCards}
+          actingTimerPercent={opponentTimerVisible ? turnTimer.percent : undefined}
         />
       ) : null}
       {!isMobileViewport && showdownCinematic}
@@ -3155,6 +3192,7 @@ export function PokerTable({
                 type="button"
                 className={`mobile-main-action mobile-action-fold ${mobileCheckCallAction?.key === 'check' ? 'is-check-free' : ''}`}
                 data-action="fold"
+                data-pending={isActionPending && pendingAction?.key === 'fold' ? 'true' : undefined}
                 onClick={mobileFoldAction?.onClick}
                 disabled={!mobileFoldAction}
               >
@@ -3165,6 +3203,7 @@ export function PokerTable({
                 type="button"
                 className="mobile-main-action mobile-action-call is-primary"
                 data-action={mobileCheckCallAction?.key ?? 'check-call'}
+                data-pending={isActionPending && pendingAction?.key === mobileCheckCallAction?.key ? 'true' : undefined}
                 onClick={mobileCheckCallAction?.onClick}
                 disabled={!mobileCheckCallAction}
               >
@@ -3176,6 +3215,7 @@ export function PokerTable({
                   type="button"
                   className={`mobile-main-action mobile-action-raise ${mobileRaiseIsAllIn ? 'is-all-in' : ''}`}
                   data-action={mobileRaiseIsAllIn ? 'all_in' : 'raise'}
+                  data-pending={isActionPending && pendingAction?.key === (mobileRaiseIsAllIn ? 'all_in' : 'raise') ? 'true' : undefined}
                   onClick={mobileRaiseIsAllIn ? mobileAllInAction?.onClick : mobileBetRaiseAction?.onClick}
                   disabled={mobileRaiseIsAllIn ? !mobileAllInAction : !mobileBetRaiseAction}
                 >
@@ -3236,7 +3276,7 @@ export function PokerTable({
               <div className="timer-bar">
                 <div
                   className={`timer-bar-fill ${turnTimer.percent < 20 ? 'timer-low' : ''}`}
-                  style={{ width: `${turnTimer.percent}%` }}
+                  style={{ transform: `scaleX(${turnTimer.percent / 100})` }}
                 />
               </div>
             </div>
@@ -3335,6 +3375,8 @@ export function PokerTable({
                     type="button"
                     className={`btn-action ${actionButton.className} ${isFreeCheckFold ? 'is-check-free' : ''} ${actionButton.key === turnPrompt?.primary ? 'is-primary' : ''}`}
                     data-action={actionButton.key}
+                    data-pending={isActionPending && pendingAction?.key === actionButton.key ? 'true' : undefined}
+                    aria-busy={isActionPending && pendingAction?.key === actionButton.key ? true : undefined}
                     disabled={isTrayReconnecting}
                     aria-keyshortcuts={shortcut}
                     title={shortcut ? `Shortcut: ${shortcut}${actionButton.key === 'raise' ? ' to size, Enter to confirm' : ''}` : undefined}
@@ -3882,6 +3924,13 @@ function TargetedEmotePanel({
   )
 }
 
+/**
+ * The action clock. It re-renders the table once per second (when the
+ * seconds readout changes), never 10x a second: every bar and ring that drains
+ * eases between those ticks with a 1s linear CSS transition, so `percent` is
+ * the value the clock will reach at the *next* tick (where the transition
+ * lands exactly on time).
+ */
 function useTurnTimer(
   timerStart: number | null,
   duration: number,
@@ -3891,11 +3940,15 @@ function useTurnTimer(
     percent: 100,
     secondsLeft: Math.max(0, Math.ceil(duration / 1000)),
   })
-  const intervalRef = useRef<number | null>(null)
 
   useEffect(() => {
+    const update = (next: { percent: number; secondsLeft: number }) => {
+      setTimer(previous => (
+        previous.percent === next.percent && previous.secondsLeft === next.secondsLeft ? previous : next
+      ))
+    }
     if (!timerStart) {
-      setTimer({
+      update({
         percent: 100,
         secondsLeft: Math.max(0, Math.ceil(duration / 1000)),
       })
@@ -3903,30 +3956,24 @@ function useTurnTimer(
     }
 
     const deadline = Date.now() + Math.max(0, timerStart + duration - serverNow)
+    let timeout: number | null = null
 
     const tick = () => {
       const remainingMs = Math.max(0, deadline - Date.now())
-      const remainingPercent = duration > 0 ? (remainingMs / duration) * 100 : 0
-
-      setTimer({
-        percent: remainingPercent,
+      // Wake exactly when the whole-second readout changes.
+      const untilNextTick = remainingMs % 1000 || 1000
+      const remainingAtNextTick = Math.max(0, remainingMs - untilNextTick)
+      update({
+        percent: duration > 0 ? Math.round((remainingAtNextTick / duration) * 1000) / 10 : 0,
         secondsLeft: Math.max(0, Math.ceil(remainingMs / 1000)),
       })
-
-      if (remainingMs <= 0 && intervalRef.current !== null) {
-        window.clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
+      timeout = remainingMs > 0 ? window.setTimeout(tick, untilNextTick + 5) : null
     }
 
     tick()
-    intervalRef.current = window.setInterval(tick, 100)
 
     return () => {
-      if (intervalRef.current !== null) {
-        window.clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
+      if (timeout !== null) window.clearTimeout(timeout)
     }
   }, [duration, serverNow, timerStart])
 
