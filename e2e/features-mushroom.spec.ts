@@ -71,13 +71,14 @@ test('the pill: a private pick card, a secret spike, then a table-wide reveal an
     expect(JSON.stringify(guest.tap.snapshot)).not.toContain('"trip"')
 
     // The guest's next water is the spiked one.
+    const levelBefore = guest.tap.me()?.drinks?.level ?? 0
     await visible(guest.page.locator('.drink-button.is-water')).first().click()
     await waitForSnapshot(guest, (_, tap) => Boolean(tap.me()?.trip), 'the trip kicks in after the sip', 15_000)
     await expect(guest.page.locator('.pill-reveal')).toContainText(/PillHost spiked your water!/)
     await expect(host.page.locator('.pill-reveal')).toContainText(/You spiked PillGuest's water!/)
     await expect.poll(() => rootFlag(guest.page, 'funTrip')).toBe('on')
     // The victim's level never moved: that water did nothing else.
-    expect(guest.tap.me()?.drinks?.level ?? 0).toBe(0)
+    expect(guest.tap.me()?.drinks?.level ?? 0).toBe(levelBefore)
     // Phones see none of it.
     await expect(phone.page.locator('.pill-reveal')).toBeHidden()
     expect(await rootFlag(phone.page, 'funTrip')).toBeNull()
