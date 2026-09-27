@@ -286,6 +286,10 @@ function offset(base: Vec3, x: number, y: number, z: number): Vec3 {
   return [base[0] + x, base[1] + y, base[2] + z]
 }
 
+/** Folded-arms wrist targets (seat space): right over left, tucked at the elbows. */
+const FOLD_HAND_R = (anchors: AvatarAnchors): Vec3 => offset(anchors.chest, -0.24, -0.12, -0.1)
+const FOLD_HAND_L = (anchors: AvatarAnchors): Vec3 => offset(anchors.chest, 0.24, -0.2, -0.06)
+
 /**
  * Wrist target for hands laced behind the head. The chin anchor sits in front
  * of the face, so the target goes up and well back past the skull; the arm IK
@@ -708,8 +712,8 @@ export function computeAvatarTargetPose(
         add(bones.WristR, 0.5 * cock - 0.75 * flick - 0.3 * follow, 0, 0.3 * flick, 1 - back)
         pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + (0.75 - 0.65 * flick) * reach
         // Lean back into the folded-arms rest the fold state holds afterwards.
-        blendTo(pose.handR, offset(anchors.chest, -0.2, -0.12, -0.16), back * 0.8)
-        blendTo(pose.handL, offset(anchors.chest, 0.2, -0.16, -0.14), back * 0.8)
+        blendTo(pose.handR, FOLD_HAND_R(anchors), back * 0.8)
+        blendTo(pose.handL, FOLD_HAND_L(anchors), back * 0.8)
         add(bones.Chest, 0.08 * reach * (1 - back) + 0.04 * cock - 0.14 * back, -0.06 * back, 0)
         const disgust = clamp01((input.tableHeat - 0.2) / 0.4) * envelope(t - 0.5, 0.5, 0.08, 0.15) * motion
         add(bones.Head, 0.05 - 0.08 * back, -0.2 * back + 0.2 * Math.sin((t - 0.5) * 38) * disgust, 0.05 * back)
@@ -828,10 +832,12 @@ export function computeAvatarTargetPose(
     add(bones.Chest, -0.16, 0, 0, settle)
     add(bones.Torso, -0.06, 0.08, 0, settle)
     add(bones.Head, 0.1, -0.12, 0.04, settle)
-    blendTo(pose.handR, offset(anchors.chest, -0.2, -0.12, -0.16), settle)
-    blendTo(pose.handL, offset(anchors.chest, 0.2, -0.16, -0.14), settle)
-    pose.fingerCurlR += 0.3 * settle
-    pose.fingerCurlL += 0.3 * settle
+    // Arms crossed high and snug: each hand tucks in at the opposite elbow,
+    // the right forearm resting on top of the left.
+    blendTo(pose.handR, FOLD_HAND_R(anchors), settle)
+    blendTo(pose.handL, FOLD_HAND_L(anchors), settle)
+    pose.fingerCurlR += 0.45 * settle
+    pose.fingerCurlL += 0.45 * settle
     pose.bodyPosition[2] += 0.08 * settle
   }
 
@@ -915,8 +921,9 @@ export function computeAvatarTargetPose(
       add(bones.WristL, 0.3, 0, 0, rakeW)
       pose.fingerCurlR = pose.fingerCurlR * (1 - rakeW) + 0.5 * rakeW
       pose.fingerCurlL = pose.fingerCurlL * (1 - rakeW) + 0.5 * rakeW
-      add(bones.Chest, 0.3 * (1 - pull * 0.6), 0, 0, rakeW)
-      add(bones.Head, 0.12, 0, 0, rakeW)
+      add(bones.Chest, 0.24 * (1 - pull * 0.6), 0, 0, rakeW)
+      // Eyes up and grinning at the table while the arms pull the pot in.
+      add(bones.Head, -0.1, 0, 0, rakeW)
       pose.bodyPosition[2] -= 0.12 * (1 - pull) * rakeW
     }
     const elapsed = sinceWin - WINNER_RAKE_SECONDS
@@ -1147,8 +1154,10 @@ export function computeAvatarTargetPose(
     add(bones.ShoulderR, 0, 0, 0.18 * shudder)
     add(bones.ShoulderL, 0, 0, -0.18 * shudder)
     add(bones.Torso, 0, 0.05 * buzz * shudder, 0)
-    blendTo(pose.handL, offset(anchors.chest, 0.02, 0.02, -0.18), shudder * 0.7)
-    pose.fingerCurlL = pose.fingerCurlL * (1 - shudder) + shudder
+    // The burn: a flat hand thumps the chest a couple of times.
+    const thump = Math.max(0, Math.sin((e - SHOT_SLAM_AT) * 14)) * motion
+    blendTo(pose.handL, offset(anchors.chest, 0.06, -0.16, 0.06 - 0.03 * thump), shudder * 0.85)
+    pose.fingerCurlL = pose.fingerCurlL * (1 - shudder) + 0.2 * shudder
     pose.drinkLift = Math.max(pose.drinkLift, tip)
     // Cheers: glass held high out over the table, a little clink bump, chin up.
     const raise = input.cheersRaise ?? 0
@@ -1199,14 +1208,18 @@ export function computeAvatarTargetPose(
     add(bones.ShoulderR, 0, 0, 0.12 * flinch)
     add(bones.ShoulderL, 0, 0, -0.12 * flinch)
     pose.bodyPosition[2] += 0.07 * flinch
+    // On the crown, a little to the side: the chin anchor is at the lips, so
+    // this is up past the forehead and back over the top of the skull.
     const sore: Vec3 = offset(
       anchors.chin,
-      0.1 + Math.cos(circle) * 0.035 * motion,
-      0.2 + Math.sin(circle) * 0.02 * motion,
-      0.2
+      0.09 + Math.cos(circle) * 0.03 * motion,
+      0.3 + Math.sin(circle) * 0.02 * motion,
+      0.27
     )
     blendTo(pose.handR, sore, rub)
-    pose.fingerCurlR = pose.fingerCurlR * (1 - rub) + 0.2 * rub
+    aroundHead(pose.handR, rub, 1)
+    pose.elbowUp = Math.max(pose.elbowUp, rub)
+    pose.fingerCurlR = pose.fingerCurlR * (1 - rub) + 0.35 * rub
     // Head bows into the rub, wincing side to side.
     add(bones.Head, 0.14 * rub, 0.06 * Math.sin(b * 5) * rub * motion, -0.08 * rub)
   }

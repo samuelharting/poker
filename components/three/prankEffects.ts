@@ -45,6 +45,8 @@ export interface PrankSeat {
   avatar: { bones: ReadonlyMap<string, THREE.Bone> } | null
   passedOut: boolean
   lastPose: { drinkLift: number } | null
+  /** The lips in the Head bone's local space, when the rig has been measured. */
+  mouthInHead?: THREE.Vector3
 }
 
 export interface SeatPrankInput {
@@ -58,6 +60,8 @@ interface ShotGlass {
   group: THREE.Group
   liquid: THREE.Mesh
   shadow: THREE.Mesh
+  /** Soft halo that helps the glass read on the felt (off in a fist). */
+  glow: THREE.Object3D
 }
 
 interface ShotPrank {
@@ -132,6 +136,11 @@ const GLASS_SCALE = 2
 const CHIP_SCALE = 1.8
 
 const scratch = new THREE.Vector3()
+const shotMouth = new THREE.Vector3()
+const shotRim = new THREE.Vector3()
+/** Rim height of the shot glass model, and its size in a fist. */
+const SHOT_RIM_HEIGHT = 0.16
+const SHOT_IN_HAND_SCALE = 1.45
 
 let glowTexture: THREE.CanvasTexture | null = null
 /** Soft round glow shared by the flying chip and the shot glass. */
@@ -168,6 +177,7 @@ function createGlow(color: string, size: number) {
   return sprite
 }
 const scratchB = new THREE.Vector3()
+const scratchC = new THREE.Vector3()
 
 // ---------------------------------------------------------------------------
 // Props
@@ -176,7 +186,8 @@ const scratchB = new THREE.Vector3()
 function createGlassMaterials() {
   const glass = new THREE.MeshStandardMaterial({
     color: '#f6fbff',
-    roughness: 0.08,
+    // Not mirror-smooth: a hard glint blooms into a white flash at the lips.
+    roughness: 0.24,
     metalness: 0,
     transparent: true,
     opacity: 0.38,
@@ -186,7 +197,7 @@ function createGlassMaterials() {
   })
   const base = new THREE.MeshStandardMaterial({ color: '#e8f3f7', roughness: 0.12, transparent: true, opacity: 0.7 })
   // Whiskey: warm amber with a glow so it reads from across the table.
-  const liquid = new THREE.MeshStandardMaterial({ color: '#d8861c', emissive: '#b85b00', emissiveIntensity: 0.85, roughness: 0.25 })
+  const liquid = new THREE.MeshStandardMaterial({ color: '#d8861c', emissive: '#b85b00', emissiveIntensity: 0.4, roughness: 0.25 })
   const shadow = new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.32, depthWrite: false })
   return { glass, base, liquid, shadow }
 }
@@ -226,7 +237,7 @@ function createShotGlass(runtime: PrankRuntime): ShotGlass {
   shadow.rotation.x = -Math.PI / 2
   shadow.renderOrder = 1
   runtime.scene.add(group, shadow)
-  return { group, liquid, shadow }
+  return { group, liquid, shadow, glow }
 }
 
 function removeShotGlass(glass: ShotGlass) {
@@ -630,7 +641,7 @@ function updateShot(runtime: PrankRuntime, shot: ShotPrank, frame: PrankFrame) {
   const elapsed = time - shot.startedAt
   const local = getShotLocalTime(elapsed, shot.cheers)
   const total = getShotTotalSeconds(shot.cheers)
-  const { group, liquid, shadow } = shot.glass
+  const { group, liquid, shadow, glow } = shot.glass
   const seat = frame.seats.get(shot.targetId)
   if (elapsed > total || !seat) {
     removeShotGlass(shot.glass)
@@ -658,7 +669,14 @@ function updateShot(runtime: PrankRuntime, shot: ShotPrank, frame: PrankFrame) {
       group.position.lerp(scratch, grab)
       const lift = seat.lastPose?.drinkLift ?? 0
       group.rotation.set(0, seat.root.rotation.y, 0)
-      group.rotateX(lift * 2.3)
+      group.rotateX(lift * 2.1)
+      const head = seat.avatar?.bones.get('Head')
+      if (lift > 0.001 && head && seat.mouthInHead) {
+        // The rim goes to the actual lips as it is thrown back.
+        head.localToWorld(shotMouth.copy(seat.mouthInHead))
+        shotRim.set(0, SHOT_RIM_HEIGHT * SHOT_IN_HAND_SCALE, 0).applyQuaternion(group.quaternion)
+        group.position.lerp(shotMouth.sub(shotRim), smooth((lift - 0.15) / 0.6))
+      }
       inHand = grab > 0.5
     }
   } else if (shot.toHero && local < SHOT_SLAM_AT + 0.1) {
@@ -688,10 +706,11 @@ function updateShot(runtime: PrankRuntime, shot: ShotPrank, frame: PrankFrame) {
   }
   liquid.visible = local < (inHand ? SHOT_DOWN_AT - 0.1 : SHOT_SLAM_AT)
   // In a fist it is hand-sized; on the felt it is drawn big enough to read.
-  const size = inHand ? 1.45 : GLASS_SCALE
+  const size = inHand ? SHOT_IN_HAND_SCALE : GLASS_SCALE
   group.scale.setScalar(Math.max(0.001, scale * size))
   group.visible = scale > 0.01
   shadow.visible = group.visible && !inHand
+  glow.visible = !inHand
   shadow.position.set(group.position.x, FELT_TOP_Y + 0.004, group.position.z)
   shadow.scale.setScalar(Math.max(0.001, scale * size))
 }
@@ -707,9 +726,18 @@ function updateFlick(runtime: PrankRuntime, flick: FlickPrank, frame: PrankFrame
   }
   const sender = frame.seats.get(flick.fromId)
   const target = frame.seats.get(flick.targetId)
-  const impactPoint = (out: THREE.Vector3) => flick.toHero
-    ? heroCameraPoint(runtime, flick.peripheral ? [0.55, 0.32, -1.1] : [0.03, 0.06, -0.8], out)
-    : headWorld(target, out, 0.14)
+  const impactPoint = (out: THREE.Vector3) => {
+    if (flick.toHero) return heroCameraPoint(runtime, flick.peripheral ? [0.55, 0.32, -1.1] : [0.03, 0.06, -0.8], out)
+    // Hit the skull's surface on the side facing the flicker (never fly
+    // into the middle of the head through the face).
+    headWorld(target, out, 0.16)
+    if (flick.launch) {
+      scratchC.subVectors(flick.launch, out).setY(0)
+      if (scratchC.lengthSq() > 1e-6) out.addScaledVector(scratchC.normalize(), 0.17 * (target?.root.scale.x ?? 1))
+    }
+    out.y += 0.08 * (target?.root.scale.x ?? 1)
+    return out
+  }
 
   if (elapsed < CHIP_LAUNCH_AT) {
     // Balanced on the flicker's fingertips while they cock the flick.

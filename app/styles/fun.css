@@ -128,9 +128,14 @@
 
 /* --- Too sober: a greyer, flatter world (and the beer button asks) --------- */
 
+/* The transition lives on the base rule so the colour eases back when the
+   sober look ends too (it used to snap to full colour in one frame). */
+.desktop-3d-canvas {
+  transition: filter 1.2s ease;
+}
+
 :root[data-fun-sober] .desktop-3d-canvas {
   filter: grayscale(0.42) saturate(0.72) brightness(0.95);
-  transition: filter 1.2s ease;
 }
 
 .drink-button.is-beer.is-nudge {

@@ -2097,7 +2097,7 @@ function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | n
     seat.avatar?.model.updateMatrixWorld(true)
   }
   const splay = THREE.MathUtils.clamp(pose.elbowOut, 0, 1)
-  const raise = THREE.MathUtils.clamp(pose.elbowUp, 0, 1)
+  const raiseAll = THREE.MathUtils.clamp(pose.elbowUp, 0, 1)
   // Face guard: the live skull, as a sphere a little above the head bone
   // (which sits at the top of the neck), in seat space. A wrist target that
   // would pass through it (hands travelling to or from behind the head, a rub
@@ -2124,7 +2124,9 @@ function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | n
     }
     seat.root.localToWorld(ikTarget)
     // Elbows swing out to the side and down/back, like arms resting on a rail;
-    // folded on the rail (passed out) they splay out level with the hands.
+    // folded on the rail (passed out) they splay out level with the hands;
+    // a hand raised to or above the head (elbowUp) lifts its own elbow only.
+    const raise = raiseAll * THREE.MathUtils.smoothstep(hand[1], shoulder[1] - 0.05, shoulder[1] + 0.2)
     ikPole.set(
       shoulder[0] + out * (0.7 + 0.5 * splay + 0.3 * raise),
       shoulder[1] - (0.7 * (1 - splay) + 0.12 * splay) * (1 - raise) + 0.5 * raise,
@@ -3258,6 +3260,7 @@ function createSceneRuntime(
   const winnerFocus = new THREE.Vector3()
   const actingFocus = new THREE.Vector3()
   const accentTarget = new THREE.Vector3()
+  let heroHeadTilt = 0
   const animate = () => {
     if (runtime.disposed || runtime.suspended) return
     runtime.animationFrame = window.requestAnimationFrame(animate)
@@ -3381,8 +3384,6 @@ function createSceneRuntime(
     }
     camera.lookAt(cameraLookAt)
     const headTilt = updateHeroDrink(runtime, viewRef.current, time, reducedMotion)
-    // Tip the head back with the sip.
-    if (headTilt > 0 && !runtime.debugCamera) camera.rotateX(headTilt * 0.13)
     const heroProfile = viewRef.current.players.find(player => player.isHero)?.avatarProfile
     const kick = updatePranks(runtime.pranks, {
       time,
@@ -3393,9 +3394,13 @@ function createSceneRuntime(
       seats: runtime.seats,
       heroColors: { skin: heroProfile?.skinColor ?? '#d9a27c', sleeve: heroProfile?.sleeveColor ?? '#2b2f3a' },
     })
+    // Tip the head back with a sip or a shot, eased so a low frame rate never
+    // turns it into a one-frame snap of the whole view.
+    const tiltGoal = headTilt * 0.13 + kick.headTilt * 0.2
+    heroHeadTilt += (tiltGoal - heroHeadTilt) * (reducedMotion ? 1 : 1 - Math.exp(-delta * 9))
     if (!runtime.debugCamera) {
-      // Throw your own shot back; jolt on a slam or a chip to the face.
-      if (kick.headTilt > 0) camera.rotateX(kick.headTilt * 0.2)
+      if (heroHeadTilt > 0.0005) camera.rotateX(heroHeadTilt)
+      // Jolt on a slam or a chip to the face.
       if (kick.pitch || kick.yaw || kick.roll) {
         camera.rotateX(kick.pitch)
         camera.rotateY(kick.yaw)

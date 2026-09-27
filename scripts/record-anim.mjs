@@ -125,7 +125,7 @@ const scenarios = {
     await sleep(4500)
     // Play check/call; mark streets as they land.
     let board = 0
-    const deadline = Date.now() + 70000
+    const deadline = Date.now() + 150000
     let raised = false
     while (Date.now() < deadline) {
       const count = await host.page.evaluate(() => document.querySelector('.desktop-3d-stage')?.__pokerRuntime?.board.visibleCount ?? 0).catch(() => 0)
@@ -133,7 +133,7 @@ const scenarios = {
       if (!raised && await clickVisible(host.page, /^(Bet|Raise)/)) { mark('host-raise', 2.5); raised = true }
       await clickVisible(host.page, /^(Check|Call)/)
       await clickVisible(guest.page, /^(Call|Check)/)
-      if (await phase(host.page) === 'between_hands') { mark('showdown', 7); await sleep(7000); break }
+      if (await phase(host.page) === 'between_hands') { mark('showdown', 8); await sleep(8000); break }
       await sleep(300)
     }
     mark('next-deal', 4)

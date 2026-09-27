@@ -1,4 +1,6 @@
 import * as THREE from 'three'
+import { FELT_TOP_Y, RAIL_PEAK_Y, RAIL_WIDTH } from './tableArt'
+import { TABLE_FELT_SEMI_AXIS_X, TABLE_FELT_SEMI_AXIS_Z } from './tableWagerLayout'
 
 /**
  * Cinematic effects for the lounge: a soft light cone over the felt,
@@ -130,6 +132,16 @@ export function burstConfetti(confetti: Confetti, origin: THREE.Vector3, amount 
   }
 }
 
+const RAIL_SCALE = 1 + RAIL_WIDTH / TABLE_FELT_SEMI_AXIS_Z
+
+/** Height paper settles at over the table (felt, then rail), or null past the rail. */
+function getConfettiFloor(x: number, z: number): number | null {
+  const e = (x / TABLE_FELT_SEMI_AXIS_X) ** 2 + (z / TABLE_FELT_SEMI_AXIS_Z) ** 2
+  if (e < 1) return FELT_TOP_Y + 0.004
+  if (e < RAIL_SCALE * RAIL_SCALE) return RAIL_PEAK_Y + 0.004
+  return null
+}
+
 const confettiMatrix = new THREE.Matrix4()
 const confettiQuaternion = new THREE.Quaternion()
 const confettiEuler = new THREE.Euler()
@@ -150,6 +162,18 @@ export function animateConfetti(confetti: Confetti, delta: number) {
     for (let axis = 0; axis < 3; axis += 1) {
       confetti.positions[v + axis]! += confetti.velocities[v + axis]! * delta
       confetti.rotations[v + axis]! += confetti.spins[v + axis]! * delta
+    }
+    // Paper lands and lies flat on the felt or rail instead of sinking
+    // through the table.
+    const floor = getConfettiFloor(confetti.positions[v]!, confetti.positions[v + 2]!)
+    if (floor !== null && confetti.velocities[v + 1]! < 0 && confetti.positions[v + 1]! <= floor) {
+      confetti.positions[v + 1] = floor
+      confetti.velocities.fill(0, v, v + 3)
+      confetti.spins.fill(0, v, v + 3)
+      confetti.rotations[v] = -Math.PI / 2
+      confetti.rotations[v + 2] = 0
+      // Resting pieces fade out a little sooner.
+      confetti.life[index] = Math.min(confetti.life[index]!, 1.4)
     }
     const alive = Math.min(1, confetti.life[index]! / 0.6)
     confettiPosition.set(confetti.positions[v]!, confetti.positions[v + 1]!, confetti.positions[v + 2]!)
