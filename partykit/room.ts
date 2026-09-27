@@ -43,7 +43,9 @@ import {
   applyQueuedWaters,
   chooseBotDrink,
   computeSoberTax,
+  BUZZ,
   createDrinkLedgerEntry,
+  createSeatedDrinkLedgerEntry,
   discardQueuedWater,
   endHangoverIfOver,
   deliverShot,
@@ -1640,7 +1642,7 @@ export default class PokerRoom implements PartyServer {
   private orderDrinkFor(playerId: string, kind: DrinkKind): { ok: true } | { ok: false; reason: string } {
     const player = this.getPlayer(playerId)
     if (!player) return { ok: false, reason: 'Take a seat before ordering a drink' }
-    const entry = this.drinkLedger[playerId] ??= createDrinkLedgerEntry()
+    const entry = this.drinkLedger[playerId] ??= this.newSeatedDrinkEntry()
     const state = this.data.gameState
     const now = Date.now()
     const result = orderDrink(entry, {
@@ -1775,7 +1777,7 @@ export default class PokerRoom implements PartyServer {
     if (!this.isDrinkCapable(target)) {
       return { ok: false, reason: "They're on their phone — no bar service" }
     }
-    const buyerEntry = this.drinkLedger[buyerId] ??= createDrinkLedgerEntry()
+    const buyerEntry = this.drinkLedger[buyerId] ??= this.newSeatedDrinkEntry()
     const blocked = getShotBlockReason(buyerEntry, this.drinkLedger[targetId], this.data.gameState.handNumber, target.nickname)
     if (blocked) {
       return { ok: false, reason: blocked }
@@ -1816,7 +1818,7 @@ export default class PokerRoom implements PartyServer {
       const target = this.getPlayer(shot.targetId)
       if (!target || !this.isDrinkCapable(target)) return false
       if (servedTargets.has(target.id)) return true
-      const entry = this.drinkLedger[target.id] ??= createDrinkLedgerEntry()
+      const entry = this.drinkLedger[target.id] ??= this.newSeatedDrinkEntry()
       const result = deliverShot(entry, { ...this.getShotContext(target), now })
       if (!result.ok) return true
       servedTargets.add(target.id)
@@ -1915,7 +1917,7 @@ export default class PokerRoom implements PartyServer {
     })
     const now = Date.now()
     for (const outcome of outcomes) {
-      const entry = this.drinkLedger[outcome.playerId] ??= createDrinkLedgerEntry()
+      const entry = this.drinkLedger[outcome.playerId] ??= this.newSeatedDrinkEntry()
       for (const rule of outcome.shots) {
         const result = pourHouseShot(entry, { handNumber: state.handNumber, now })
         if (!result.ok) break
@@ -1974,6 +1976,13 @@ export default class PokerRoom implements PartyServer {
    * drinking animations show up even at a table of one human and bots.
    * They never drink themselves past level 4.
    */
+  /** Humans sit down in the sweet spot (tests can override via seatedStartLevel). */
+  seatedStartLevel: number = BUZZ.startLevel
+
+  private newSeatedDrinkEntry() {
+    return createSeatedDrinkLedgerEntry(this.seatedStartLevel)
+  }
+
   private scheduleBotDrinks() {
     for (const timer of this.botDrinkTimers) clearTimeout(timer)
     this.botDrinkTimers.clear()
@@ -2255,7 +2264,7 @@ export default class PokerRoom implements PartyServer {
         break
       }
       case 'blackout': {
-        const entry = this.drinkLedger[subjectId] ??= createDrinkLedgerEntry()
+        const entry = this.drinkLedger[subjectId] ??= this.newSeatedDrinkEntry()
         entry.level = PASS_OUT_LEVEL
         entry.passedOut = true
         entry.passedOutAt = Date.now()
@@ -2273,7 +2282,7 @@ export default class PokerRoom implements PartyServer {
 
   /** Dev: jump straight into a hangover, or to the edge of the sober tax. */
   private applyDevDrinkState(playerId: string, action: string) {
-    const entry = this.drinkLedger[playerId] ??= createDrinkLedgerEntry()
+    const entry = this.drinkLedger[playerId] ??= this.newSeatedDrinkEntry()
     if (action === 'hangover') {
       this.clearBlackoutTimers(playerId)
       entry.passedOut = false
@@ -2366,7 +2375,7 @@ export default class PokerRoom implements PartyServer {
 
     this.drinkWearOffHand = handNumber
     for (const player of this.data.gameState.players) {
-      if (this.isBuzzTaxable(player)) this.drinkLedger[player.id] ??= createDrinkLedgerEntry()
+      if (this.isBuzzTaxable(player)) this.drinkLedger[player.id] ??= this.newSeatedDrinkEntry()
     }
     for (const [playerId, entry] of Object.entries(this.drinkLedger)) {
       const player = this.getPlayer(playerId)
@@ -3059,7 +3068,7 @@ export default class PokerRoom implements PartyServer {
         ? { trip: getPublicTrip(this.mushrooms, player.id)! }
         : {}),
       drinks: {
-        ...toPublicDrinkState(this.drinkLedger[player.id]),
+        ...toPublicDrinkState(this.drinkLedger[player.id] ?? (this.isBotPlayer(player.id) ? undefined : this.newSeatedDrinkEntry())),
         shotsWaiting: this.shotQueue.filter(shot => shot.targetId === player.id).length,
       },
       ...(this.isPlayerPeeking(player.id) ? { isPeeking: true } : {}),

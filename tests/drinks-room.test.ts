@@ -56,6 +56,8 @@ function createTable() {
     broadcast: () => {},
   }
   const server = new PokerRoom(room as unknown as Room)
+  // These rules are easier to read from a sober start; real seats begin at BUZZ.startLevel.
+  server.seatedStartLevel = 0
 
   const join = (id: string, nickname: string, seatIndex: number): Seat => {
     const connection = new MockConnection(id) as unknown as Connection
@@ -397,5 +399,17 @@ describe('PokerRoom sober tax', () => {
       expect(seatState(bob, alice.playerId)?.drinks?.soberTax ?? 0).toBe(0)
       foldHandOut(alice, bob)
     }
+  })
+})
+
+describe('PokerRoom seated buzz', () => {
+  it('seats new players in the sweet spot so nobody is taxed on their first hands', async () => {
+    const { BUZZ, createSeatedDrinkLedgerEntry } = await import('@/lib/drinks')
+    expect(BUZZ.startLevel).toBeGreaterThanOrEqual(BUZZ.sweetSpotMin)
+    expect(BUZZ.startLevel).toBeLessThanOrEqual(BUZZ.sweetSpotMax)
+    expect(createSeatedDrinkLedgerEntry().level).toBe(BUZZ.startLevel)
+    // Hands of sobering before a player first reaches the sober line.
+    const graceHands = (BUZZ.startLevel - BUZZ.soberLevel) / BUZZ.soberingPerHand
+    expect(graceHands).toBeGreaterThanOrEqual(5)
   })
 })

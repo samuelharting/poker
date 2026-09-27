@@ -45,6 +45,8 @@ export type DrinkKind = 'beer' | 'water'
 /** Every tunable number of the buzz economy in one place. */
 export const BUZZ = {
   max: 10,
+  /** Everyone sits down with a buzz in the sweet spot: about 6 hands before the first beer is due. */
+  startLevel: 4,
   blackoutLevel: 10,
   sweetSpotMin: 3,
   sweetSpotMax: 6,
@@ -251,6 +253,11 @@ export interface DrinkLedgerEntry {
   lastShotReceivedHand: number | null
   /** Open chaser window after a delivered shot (server ms). */
   chaserUntil: number | null
+}
+
+/** A player sitting down at the table: starts in the sweet spot, not sober. */
+export function createSeatedDrinkLedgerEntry(startLevel: number = BUZZ.startLevel): DrinkLedgerEntry {
+  return { ...createDrinkLedgerEntry(), level: startLevel }
 }
 
 export function createDrinkLedgerEntry(): DrinkLedgerEntry {

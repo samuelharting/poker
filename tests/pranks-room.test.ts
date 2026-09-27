@@ -32,6 +32,7 @@ interface Seat {
 
 function createTable() {
   const { room, server } = createHarness()
+  server.seatedStartLevel = 0
   const tunable = server as unknown as { botShotRandom: () => number }
   tunable.botShotRandom = () => 1
   /** `phone` joins from the 2D layout: no drink controls, so no pranks either way. */
@@ -244,7 +245,12 @@ describe('PokerRoom buy_shot', () => {
     other.send({ type: 'player_action', action: 'call' })
     runOutHand(sam)
     expect(state(sam).phase).toBe('between_hands')
-    expect(drinksOf(sam, shover.playerId)).toMatchObject({ level: 3, shots: 1, shotsWaiting: 0 })
+    // The bought shot (+3) lands once the hand is over. The random runout can also
+    // fire house rules for the all-in player (big-loss beers, a rivered/7-2 house shot).
+    const settled = drinksOf(sam, shover.playerId)!
+    expect(settled.shotsWaiting).toBe(0)
+    expect(settled.shots).toBeGreaterThanOrEqual(1)
+    expect(settled.level).toBeGreaterThanOrEqual(3)
   })
 
   it('can black someone out, but only once they are out of the hand', () => {
