@@ -302,6 +302,9 @@ export default class PokerRoom implements PartyServer {
   private shotQueue: QueuedShot[] = []
   /** Shot took them to the edge mid-hand: blackout waits until they fold or the hand ends. */
   private pendingBlackouts = new Set<string>()
+  /** House rules across hands: dealt-in folds in a row, and hands into the current orbit. */
+  private foldStreaks = new Map<string, number>()
+  private orbitHands = 0
   /** Clients that reported drink controls (desktop 3D). Unknown = false. */
   private drinkCapableByPlayer = new Map<string, boolean>()
   /** Stack (plus blinds posted) of every dealt-in player when the hand started. */
@@ -1950,6 +1953,19 @@ export default class PokerRoom implements PartyServer {
     const runBoards = state.runItTwice?.status === 'accepted'
       ? (state.runItTwice.boards ?? []).map(board => board.cards)
       : []
+    // Scared money: dealt-in folds in a row. Bubble: shortest stack drinks as each orbit ends.
+    const dealtIn = state.players.filter(player => starts.has(player.id))
+    for (const player of dealtIn) {
+      this.foldStreaks.set(player.id, player.status === 'folded' ? (this.foldStreaks.get(player.id) ?? 0) + 1 : 0)
+    }
+    this.orbitHands += 1
+    let bubbleIds: string[] = []
+    if (dealtIn.length >= 2 && this.orbitHands >= dealtIn.length) {
+      this.orbitHands = 0
+      const alive = dealtIn.filter(player => player.stack > 0 && this.isDrinkCapable(player))
+      const shortest = Math.min(...alive.map(player => player.stack))
+      bubbleIds = alive.filter(player => player.stack === shortest).map(player => player.id)
+    }
     const outcomes = computeHouseRules({
       showdown: isTrueShowdown(state),
       boards: runBoards.length > 0 ? runBoards : [state.communityCards],
@@ -1961,8 +1977,13 @@ export default class PokerRoom implements PartyServer {
         startStack: starts.get(player.id),
         endStack: player.stack,
         won: winnerAmounts.get(player.id) ?? 0,
+        foldStreak: this.foldStreaks.get(player.id) ?? 0,
       })),
+      bubbleIds,
     })
+    for (const outcome of outcomes) {
+      if (outcome.beerRules.includes('scared_money')) this.foldStreaks.set(outcome.playerId, 0)
+    }
     const now = Date.now()
     for (const outcome of outcomes) {
       const entry = this.drinkLedger[outcome.playerId] ??= this.newSeatedDrinkEntry()

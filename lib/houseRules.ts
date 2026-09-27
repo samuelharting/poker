@@ -14,6 +14,9 @@
  * - big_loss: lost more than 10% of the hand-start stack (1), more than 25% (2).
  * - bad_beat: lost at showdown holding three of a kind or better that the hole
  *   cards made (a better category than the board plays on its own) (1).
+ * - lost_showdown: lost any contested showdown: a sip (half a beer).
+ * - scared_money: folded 3 dealt-in hands in a row (1); the streak then resets.
+ * - bubble: at the end of each orbit the shortest stack at the table drinks (1).
  * Water:
  * - big_win: won a pot worth more than 50% of the hand-start stack: a free,
  *   instant -2 water.
@@ -25,13 +28,17 @@ import { compareHands, evaluateHand } from './poker/evaluator'
 import type { Card, HandResult } from './poker/types'
 
 export type HouseShotRule = 'seven_two' | 'rivered' | 'cheers'
-export type HouseBeerRule = 'big_loss' | 'bad_beat'
+export type HouseBeerRule = 'big_loss' | 'bad_beat' | 'lost_showdown' | 'scared_money' | 'bubble'
 
 export const HOUSE_SHOT_RULES: readonly HouseShotRule[] = ['seven_two', 'rivered', 'cheers']
 /** Forced beers from one hand never exceed this. */
 export const HOUSE_BEER_CAP = 2
 /** Win a pot worth more than this share of your hand-start stack: free water. */
 export const BIG_WIN_FRACTION = 0.5
+/** Losing any showdown: a sip. */
+export const LOST_SHOWDOWN_BEERS = 0.5
+/** Folds in a row (dealt-in hands) that cost a beer. */
+export const SCARED_MONEY_FOLDS = 3
 /** Quads (rankIndex 7) or better at showdown: cheers. */
 const QUADS_RANK_INDEX = 7
 const THREE_OF_A_KIND_RANK_INDEX = 3
@@ -47,6 +54,8 @@ export interface HouseRulePlayer {
   endStack: number
   /** Chips collected from the pot(s) this hand. */
   won: number
+  /** Dealt-in hands folded in a row, including this one (room-tracked). */
+  foldStreak?: number
 }
 
 export interface HouseRuleHand {
@@ -55,6 +64,8 @@ export interface HouseRuleHand {
   /** The final board(s): one, or two when run twice. */
   boards: ReadonlyArray<readonly Card[]>
   players: readonly HouseRulePlayer[]
+  /** An orbit just finished: these shortest-stack players drink (room-decided). */
+  bubbleIds?: readonly string[]
 }
 
 export interface HouseRuleOutcome {
@@ -153,6 +164,16 @@ export function computeHouseRules(hand: HouseRuleHand): HouseRuleOutcome[] {
         beers += 1
         beerRules.push('bad_beat')
       }
+      beers += LOST_SHOWDOWN_BEERS
+      beerRules.push('lost_showdown')
+    }
+    if ((player.foldStreak ?? 0) >= SCARED_MONEY_FOLDS) {
+      beers += 1
+      beerRules.push('scared_money')
+    }
+    if (hand.bubbleIds?.includes(player.id)) {
+      beers += 1
+      beerRules.push('bubble')
     }
     beers = Math.min(HOUSE_BEER_CAP, beers)
 

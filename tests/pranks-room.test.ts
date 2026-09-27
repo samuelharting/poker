@@ -97,7 +97,8 @@ function lastFailure(seat: Seat) {
 
 /** Lets the showdown run out, stopping as soon as the hand is over (before the next deal). */
 function runOutHand(viewer: Seat) {
-  for (let step = 0; step < 80 && state(viewer).phase === 'in_hand'; step += 1) {
+  // Covers a run-it-twice vote timing out plus the paced street-by-street runout.
+  for (let step = 0; step < 200 && state(viewer).phase === 'in_hand'; step += 1) {
     vi.advanceTimersByTime(250)
   }
 }
@@ -705,7 +706,7 @@ describe('house rules (pure)', () => {
       ],
     })
     const set = outcomeOf(outcomes, 'set')!
-    expect(set.beerRules).toEqual(['big_loss', 'bad_beat'])
+    expect(set.beerRules).toEqual(['big_loss', 'bad_beat', 'lost_showdown'])
     expect(set.beers).toBe(HOUSE_BEER_CAP)
   })
 
