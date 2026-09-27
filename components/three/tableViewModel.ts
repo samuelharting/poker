@@ -206,6 +206,8 @@ export interface ThreeTableViewModel {
   currentBet: number
   smallBlind: number
   bigBlind: number
+  /** Table buy-in; personal chip stacks are sized against it. */
+  startingStack: number
   actionCue: ThreeActionCue
   actionKey: string
   lastAction: string
@@ -442,6 +444,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
     currentBet: state.currentBet,
     smallBlind: state.smallBlind,
     bigBlind: state.bigBlind,
+    startingStack: state.startingStack,
     actionCue,
     actionKey,
     lastAction,

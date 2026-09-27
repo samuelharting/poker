@@ -73,6 +73,7 @@ import {
   type CompanionRuntime,
 } from './companion3D'
 import { DESKTOP_CAMERA_FRAMING } from './cameraFraming'
+import { PERSONAL_STACK_MAX_CHIPS, PersonalChipStack, StackSparkles } from './personalChipStack'
 import {
   createPrankRuntime,
   disposePrankRuntime,
@@ -204,7 +205,10 @@ interface SeatRuntime {
   chair: THREE.Group
   /** The player's own chip stack in front of them. */
   stack: ReturnType<typeof createChipSet>
+  /** Lays out and animates the personal stack (short stack to chip tower). */
+  stackFx: PersonalChipStack
   stackCount: number
+  lastStackAmount: number
   /** How far the chair and body slide in toward the rail (seat-local Z). */
   seatShiftZ: number
   anchors: AvatarAnchors
@@ -322,6 +326,8 @@ interface SceneRuntime {
   boardRevealAt: number
   anyWinner: boolean
   chipInstancer: ChipInstancer
+  /** Glints on personal stacks as chips land (one draw for the whole table). */
+  stackSparkles: StackSparkles
   /** Development-only camera override used by scripts/snap-3d.mjs close-ups. */
   debugCamera: { position: Vec3; lookAt: Vec3; fov?: number } | null
   feltMaterial: THREE.MeshStandardMaterial
@@ -765,10 +771,13 @@ function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
   seat.anchors.cards = [0, cardSpot[1] + 0.02, cardSpot[2]]
   seat.cards.userData.restY = cardSpot[1]
   // The player's own chips sit to the right of their cards, just inside the rail.
-  // Close enough to the chest that the bet/call/all-in hands actually land on it.
-  const STACK_SIDE = 0.44
+  // Close enough to the chest that the bet/call/all-in hands actually land on it
+  // (the hands aim between the front columns of the stack's block, see
+  // personalChipStack.ts). The hero has no body to reach with, so their stack
+  // sits further right, clear of the pot and board in the first-person view.
+  const STACK_SIDE = seat.isHero ? HERO_STACK_SIDE : 0.44
   const stackSpot = at(-0.1, FELT_TOP_Y)
-  seat.anchors.stack = [STACK_SIDE / scale, stackSpot[1] + 0.06, stackSpot[2]]
+  seat.anchors.stack = [(STACK_SIDE + 0.07) / scale, stackSpot[1] + 0.06, stackSpot[2]]
   // The stack is a world object (not a child of the seat) so the hero, whose
   // seat is hidden, still sees their own chips in front of them.
   const stackWorld = seat.root.localToWorld(new THREE.Vector3(STACK_SIDE / scale, stackSpot[1], stackSpot[2]))
@@ -846,8 +855,15 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
   const chair = createStylizedChair(chairMaterial.color, trimMaterial.color)
   root.add(chair.group)
   const chairGroup = chair.group
-  const personalStack = createChipSet(20)
+  // Headroom over the visible cap so chips can leave while others drop in.
+  const personalStack = createChipSet(PERSONAL_STACK_MAX_CHIPS + 12)
   personalStack.group.name = `personal-stack-${player.id}`
+  const personalStackFx = new PersonalChipStack(
+    personalStack.chipMeshes,
+    CHIP_HEIGHT + 0.002,
+    CHIP_HEIGHT,
+    Array.from(player.id).reduce((sum, char) => sum + char.charCodeAt(0), 1)
+  )
   materials.push(...chair.materials)
 
   const body = new THREE.Group()
@@ -1000,7 +1016,9 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     animator: createAvatarAnimatorState(player.id),
     chair: chairGroup,
     stack: personalStack,
+    stackFx: personalStackFx,
     stackCount: 0,
+    lastStackAmount: 0,
     seatShiftZ: 0,
     anchors: createDefaultAnchors(),
     anchorsFromRig: false,
@@ -1372,13 +1390,26 @@ function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
       runtime.scene.add(seat.stack.group)
     }
     syncSeat(seat, player, now)
-    // Personal chip stack: denser for deeper stacks, capped for readability.
-    const bigBlind = Math.max(1, view.bigBlind)
-    seat.stackCount = player.stack <= 0 ? 0 : Math.min(20, Math.max(2, Math.round(Math.log2(player.stack / bigBlind + 1) * 3.2)))
-    seat.stack.group.visible = seat.stackCount > 0
-    seat.stack.chipMeshes.forEach((chip, index) => {
-      chip.visible = index < seat.stackCount
+    // Personal chip stack: sized against the starting stack, from one short
+    // column up to a chip tower. Winnings drop in once the payout has landed.
+    const startingStack = view.startingStack > 0 ? view.startingStack : Math.max(1, view.bigBlind) * 100
+    const grew = player.stack > seat.lastStackAmount
+    // Winnings start stacking as the first payout chips land (the stack update
+    // can arrive a beat after the payout started).
+    const landing = POT_PAYOUT_STAGGER_SECONDS * 0.4 + CHIP_FLIGHT_SECONDS
+    const paying = runtime.pot.payoutKey.split(',').includes(player.id)
+    const delay = !grew ? 0 : paying
+      ? Math.max(0, runtime.pot.payoutStartedAt + landing - now)
+      : player.isWinner ? landing : 0
+    seat.stackFx.sync(player.stack, startingStack, now, {
+      delay,
+      // The hero's own stack sits just below the camera: keep it low.
+      maxLevels: player.isHero ? HERO_STACK_MAX_LEVELS : undefined,
+      reducedMotion: runtime.reducedMotion,
     })
+    seat.lastStackAmount = player.stack
+    seat.stackCount = seat.stackFx.count
+    seat.stack.group.visible = true
     // Anyone who reached the showdown and didn't win reacts to the loss.
     seat.loser = hasWinner && !player.isWinner && !player.isOutOfHand && player.hasCards
 
@@ -1399,6 +1430,10 @@ const CHIP_RADIUS = 0.13
 const CHIP_HEIGHT = 0.042
 const CHIPS_PER_COLUMN = 5
 const WAGER_CHIPS_PER_COLUMN = 6
+/** Tallest column the hero's own stack may build (it sits under the camera). */
+const HERO_STACK_MAX_LEVELS = 14
+/** How far right of the hero's chair their own stack sits. */
+const HERO_STACK_SIDE = 0.95
 let sharedChipGeometry: THREE.CylinderGeometry | null = null
 
 function getChipGeometry() {
@@ -1474,6 +1509,8 @@ function createChipInstancer(scene: THREE.Scene): ChipInstancer {
     mesh.castShadow = true
     mesh.receiveShadow = true
     mesh.frustumCulled = false
+    // Per-chip tint (white = as printed): lets freshly won chips flash gold.
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(CHIP_INSTANCE_CAPACITY * 3).fill(1), 3)
     mesh.count = 0
     scene.add(mesh)
     return mesh
@@ -1525,7 +1562,16 @@ function updateChipInstances(instancer: ChipInstancer, scene: THREE.Scene) {
     const mesh = instancer.meshes[denomination]
     if (!mesh || counts[denomination]! >= CHIP_INSTANCE_CAPACITY) continue
     chip.updateWorldMatrix(true, false)
-    mesh.setMatrixAt(counts[denomination]!, chip.matrixWorld)
+    const slot = counts[denomination]!
+    mesh.setMatrixAt(slot, chip.matrixWorld)
+    const tint = mesh.instanceColor?.array as Float32Array | undefined
+    if (tint) {
+      // Glow (0..1) pushes the chip toward a bright gold that the bloom picks up.
+      const glow = Number(chip.userData.glow ?? 0)
+      tint[slot * 3] = 1 + glow * 0.8
+      tint[slot * 3 + 1] = 1 + glow * 0.58
+      tint[slot * 3 + 2] = 1 + glow * 0.08
+    }
     counts[denomination]! += 1
     // The bottom chip of each column grounds it with a soft blob on the felt
     // (fades out as the chip lifts off during a toss).
@@ -1546,6 +1592,7 @@ function updateChipInstances(instancer: ChipInstancer, scene: THREE.Scene) {
   instancer.meshes.forEach((mesh, index) => {
     mesh.count = counts[index]!
     mesh.instanceMatrix.needsUpdate = true
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
   })
 }
 
@@ -1601,6 +1648,36 @@ function createChipSet(maxChips: number, layout: 'mound' | 'stack' = 'mound') {
   }
 
   return { group, chipMeshes, chipBasePositions, materials }
+}
+
+const leaderStacks: SeatRuntime[] = []
+
+/**
+ * Personal stacks: drop-in growth, shrinking bets, and a gold glint loop on
+ * the chip leader's stack (only when they are clearly ahead of the table).
+ */
+function animatePersonalStacks(runtime: SceneRuntime, time: number, delta: number, reducedMotion: boolean) {
+  leaderStacks.length = 0
+  let best = 0
+  let runnerUp = 0
+  for (const seat of runtime.seats.values()) {
+    const amount = seat.lastStackAmount
+    if (amount > best) {
+      runnerUp = best
+      best = amount
+      leaderStacks.length = 0
+      leaderStacks.push(seat)
+    } else if (amount > runnerUp) {
+      runnerUp = amount
+    }
+  }
+  const leader = leaderStacks[0]
+  const clearLeader = leader && runtime.seats.size > 1 && best > runnerUp * 1.15 && (leader.stackFx.layout.ratio >= 1.25)
+  for (const seat of runtime.seats.values()) {
+    seat.stackFx.setLeader(Boolean(clearLeader && seat === leader), time)
+    seat.stackFx.update(time, delta, reducedMotion, seat.stack.group, runtime.stackSparkles)
+  }
+  runtime.stackSparkles.update(time)
 }
 
 function toVisualSeat(value: number): TableVisualSeat {
@@ -1904,11 +1981,9 @@ function syncPot(runtime: SceneRuntime, view: ThreeTableViewModel) {
     pot.payoutTargets = winners.map(winner => {
       const winnerSeat = runtime.seats.get(winner.id)
       if (winnerSeat) {
-        const target = winnerSeat.stack.group.getWorldPosition(new THREE.Vector3())
-        // Land on top of the winner's centre column.
-        const levels = Math.min(CHIPS_PER_COLUMN, Math.max(1, winnerSeat.stackCount))
-        target.y = FELT_TOP_Y + levels * (CHIP_HEIGHT + 0.002) + CHIP_HEIGHT / 2
-        return target
+        // Land on top of the winner's tallest column.
+        winnerSeat.stack.group.updateWorldMatrix(true, false)
+        return winnerSeat.stack.group.localToWorld(winnerSeat.stackFx.getLandingPoint(new THREE.Vector3()))
       }
       const fallback = toVector3(getTableWagerStartPoint(toVisualSeat(winner.visualSeat)))
       fallback.y = FELT_TOP_Y + CHIP_HEIGHT / 2
@@ -3236,6 +3311,7 @@ function createSceneRuntime(
     boardRevealAt: Number.NEGATIVE_INFINITY,
     anyWinner: false,
     chipInstancer: createChipInstancer(scene),
+    stackSparkles: new StackSparkles(scene),
     debugCamera: null as SceneRuntime['debugCamera'],
     feltMaterial,
     startTime: performance.now(),
@@ -3340,6 +3416,7 @@ function createSceneRuntime(
     funFx.afterSeats(viewRef.current, runtime.seats, time, delta)
     animateWagers(runtime, time, reducedMotion)
     animatePot(runtime, time, reducedMotion, host)
+    animatePersonalStacks(runtime, time, delta, reducedMotion)
     animateBoardRuntime(runtime.board, time, reducedMotion)
     animateEffects(runtime, time, delta, reducedMotion)
 
