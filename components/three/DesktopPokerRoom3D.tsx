@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject } from 'react'
+import { memo, useEffect, useRef, useState, type CSSProperties, type MutableRefObject } from 'react'
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import {
@@ -2985,8 +2985,10 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
 
   // Write phase: only values that changed reach the DOM.
   const tableScene = host.closest<HTMLElement>('.table-scene')
-  const potXValue = `${potX.toFixed(1)}px`
-  const potYValue = `${potY.toFixed(1)}px`
+  // Whole pixels: the camera's slow breathing would otherwise nudge these by a
+  // fraction of a pixel (and cost a style pass) on every single frame.
+  const potXValue = `${Math.round(potX)}px`
+  const potYValue = `${Math.round(potY)}px`
   for (const readout of [cachedQuery(tableScene, '.table-surface .pot-display'), cachedQuery(host, '.payout-pot-readout')]) {
     if (!readout) continue
     setStyleVar(readout, '--pot-x', potXValue)
@@ -2995,11 +2997,13 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
   if (heroBet) {
     const heroBetLabel = cachedQuery(tableScene, '.hero-table-bet')
     if (heroBetLabel) {
-      setStyleVar(heroBetLabel, '--hero-bet-x', `${heroBet.x.toFixed(1)}px`)
-      setStyleVar(heroBetLabel, '--hero-bet-y', `${heroBet.y.toFixed(1)}px`)
+      setStyleVar(heroBetLabel, '--hero-bet-x', `${Math.round(heroBet.x)}px`)
+      setStyleVar(heroBetLabel, '--hero-bet-y', `${Math.round(heroBet.y)}px`)
     }
   }
   for (const plate of placedPlates) {
+    // The hero's own plate is hidden (display: none): nothing to move.
+    if (plate.extra < 0) continue
     let x = plate.x
     let y = plate.y
     if (plate.extra >= 0) {
@@ -3026,8 +3030,8 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
     // Written on the bet label itself (a leaf) so the rest of the plate is not re-styled.
     const betLabel = bet ? cachedQuery(plate.element, '.cinematic-seat-bet') : null
     if (bet && betLabel) {
-      setStyleVar(betLabel, '--bet-x', `${(bet.x - x).toFixed(1)}px`)
-      setStyleVar(betLabel, '--bet-y', `${(bet.y - y).toFixed(1)}px`)
+      setStyleVar(betLabel, '--bet-x', `${Math.round(bet.x - x)}px`)
+      setStyleVar(betLabel, '--bet-y', `${Math.round(bet.y - y)}px`)
     }
   }
 }
@@ -3791,7 +3795,12 @@ const NO_HIGHLIGHTED_CARDS: ReadonlyArray<{ rank: string; suit: ThreeCardView['s
 const NO_PRANK_EVENTS: readonly PrankEvent[] = []
 const NO_DRINK_EVENTS: readonly DrinkEvent[] = []
 
-export function DesktopPokerRoom3D({
+/**
+ * Memoised: the table component re-renders for things the room never shows
+ * (the raise slider while dragging, the clock tick, chat drafts), and every one
+ * of those used to rebuild all the nameplates too.
+ */
+export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
   view,
   emoteReactions,
   chatMessages,
@@ -4151,4 +4160,4 @@ export function DesktopPokerRoom3D({
       </div>
     </div>
   )
-}
+})

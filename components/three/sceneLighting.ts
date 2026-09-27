@@ -206,6 +206,7 @@ export class FrameBudget {
   private upgradeBlockedUntil = 0
   private lastUpgradeAt = Number.NEGATIVE_INFINITY
   private fastWindows = 0
+  private slowWindows = 0
   private readonly window: number
 
   constructor(startTime = 0, private readonly warmupSeconds = 5, window = 120) {
@@ -230,11 +231,17 @@ export class FrameBudget {
     this.samples.length = 0
     const median = sorted[sorted.length >> 1]!
     const p80 = sorted[Math.floor(sorted.length * 0.8)]!
-    if (median > 22 && this.level < 2) {
-      if (time - this.lastUpgradeAt < 12) {
-        // The last upgrade didn't hold; stay down for a good while.
-        this.upgradeBlockedUntil = time + 60
-      }
+    // One slow window (a GC, a model load, a busy tab) is not a slow machine.
+    this.slowWindows = median > 22 ? this.slowWindows + 1 : 0
+    if (this.slowWindows >= 2 && this.level < 2) {
+      this.slowWindows = 0
+      // Every quality change reallocates the render targets (a visible hitch
+      // of its own), so settle on a level: after any step down, stay there for
+      // a while, and much longer if the last step up did not hold.
+      this.upgradeBlockedUntil = Math.max(
+        this.upgradeBlockedUntil,
+        time + (time - this.lastUpgradeAt < 20 ? 180 : 45)
+      )
       this.fastWindows = 0
       this.cooldownUntil = time + 1.5
       this.level = (this.level + 1) as RenderQuality
@@ -242,7 +249,7 @@ export class FrameBudget {
     }
     if (this.level > 0 && median < 17.5 && p80 < 18.5 && time >= this.upgradeBlockedUntil) {
       this.fastWindows += 1
-      if (this.fastWindows >= 3) {
+      if (this.fastWindows >= 5) {
         this.fastWindows = 0
         this.cooldownUntil = time + 1.5
         this.lastUpgradeAt = time
