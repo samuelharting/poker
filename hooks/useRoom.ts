@@ -32,6 +32,29 @@ const LOCAL_PARTYKIT_HOST_PATTERN = /^(localhost|127\.0\.0\.1)(:\d+)?$/i
 const BACKGROUND_RECONNECT_THRESHOLD_MS = 10_000
 const MAX_DRINK_EVENTS = 12
 const MAX_ROOM_NOTICES = 4
+/** How long a reconnecting tab keeps its last table while waiting for its own snapshot. */
+const REJOIN_SNAPSHOT_GRACE_MS = 4_000
+/** The same rejection twice in this window shows one toast. */
+const ERROR_TOAST_DEDUPE_MS = 4_000
+
+/**
+ * Server rejections that are expected noise, not news: races the UI already
+ * resolves (a double-clicked action, an auto-seat that was already done) or
+ * messages sent while the socket was still rejoining.
+ */
+const QUIET_REJECTIONS: RegExp[] = [
+  /^Join the room before/i,
+  /^Already seated$/i,
+  /not your turn/i,
+  /^Hand already in progress$/i,
+  /^Invalid message format$/i,
+  /^Unknown message type$/i,
+  /^Player profile not found$/i,
+]
+
+export function isQuietRejection(message: string): boolean {
+  return QUIET_REJECTIONS.some(pattern => pattern.test(message.trim()))
+}
 
 function buildConnectionIssue(): string {
   if (LOCAL_PARTYKIT_HOST_PATTERN.test(PARTYKIT_HOST)) {
@@ -119,7 +142,8 @@ export interface SessionEnded {
 
 export interface RoomNotice {
   id: string
-  kind: NoticeKind
+  /** Server notices, plus 'error' for an action the server turned down. */
+  kind: NoticeKind | 'error'
   message: string
   playerId?: string
 }
@@ -168,6 +192,16 @@ export function useRoom(
   const hasEverConnectedRef = useRef(false)
   const connectionIssueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const playerIdsRef = useRef<Set<string>>(new Set())
+  /** Last player id this tab spoke for: set means a reconnect is a rejoin. */
+  const knownPlayerIdRef = useRef('')
+  /** Rejoining: snapshots built for an anonymous socket are held back until ours arrives. */
+  const rejoinUntilRef = useRef(0)
+  const heldSnapshotRef = useRef<TableState | null>(null)
+  const lastSocialRawRef = useRef('')
+  const lastSnapshotKeyRef = useRef('')
+  const lastErrorRef = useRef<{ message: string; at: number } | null>(null)
+  /** The player id this tab last auto-seated (a new id after a server restart seats again). */
+  const autoSeatedIdRef = useRef<string | null>(null)
   const [tableState, setTableState] = useState<TableState | null>(null)
   const [socialState, setSocialState] = useState<SocialSnapshot>({ active: [], chatLog: [] })
   const [yourId, setYourId] = useState('')
@@ -241,6 +275,12 @@ export function useRoom(
     }
 
     hasSeated.current = false
+    autoSeatedIdRef.current = null
+    knownPlayerIdRef.current = ''
+    rejoinUntilRef.current = 0
+    heldSnapshotRef.current = null
+    lastSocialRawRef.current = ''
+    lastSnapshotKeyRef.current = ''
     hasEverConnectedRef.current = false
     sessionEndedRef.current = false
     setSessionEnded(null)
@@ -277,6 +317,11 @@ export function useRoom(
           room: roomCode.toLowerCase(),
           party: PARTY_NAME,
           startClosed: true,
+          // Back quickly after a server restart (a deploy): the default backoff
+          // (1-5s growing to 10s) left players staring at "Reconnecting" long
+          // after the table was back. Jittered so a full table does not stampede.
+          minReconnectionDelay: 400 + Math.random() * 800,
+          maxReconnectionDelay: 4_000,
         }) as unknown as RoomSocket
 
         socketRef.current = socket
@@ -336,6 +381,12 @@ export function useRoom(
           }
           setIsConnected(true)
           setConnectionIssue(null)
+          // A fresh socket gets an anonymous snapshot before our join lands;
+          // a returning player keeps showing their own table until theirs arrives.
+          rejoinUntilRef.current = knownPlayerIdRef.current ? Date.now() + REJOIN_SNAPSHOT_GRACE_MS : 0
+          heldSnapshotRef.current = null
+          lastSnapshotKeyRef.current = ''
+          lastSocialRawRef.current = ''
           const latestProfile = latestProfileRef.current
           const joinMsg: C2SMessage = {
             type: 'join_room',
@@ -355,6 +406,21 @@ export function useRoom(
 
           switch (msg.type) {
             case 'room_snapshot': {
+              if (msg.state.viewerId === '' && rejoinUntilRef.current > Date.now()) {
+                heldSnapshotRef.current = msg.state
+                break
+              }
+              rejoinUntilRef.current = 0
+              heldSnapshotRef.current = null
+              // A broadcast that changes nothing for this viewer (other than the
+              // server clock) would still re-render the whole table.
+              const snapshotKey = typeof payload.data === 'string'
+                ? payload.data.replace(/"serverNow":\d+,?/, '')
+                : ''
+              if (snapshotKey && snapshotKey === lastSnapshotKeyRef.current) {
+                break
+              }
+              lastSnapshotKeyRef.current = snapshotKey
               setTableState(msg.state)
               playerIdsRef.current = new Set(
                 (msg.state.lobbyPlayers?.length
@@ -365,6 +431,12 @@ export function useRoom(
             }
 
             case 'social_snapshot': {
+              // Sent with every table broadcast; most are unchanged.
+              const socialRaw = typeof payload.data === 'string' ? payload.data : ''
+              if (socialRaw && socialRaw === lastSocialRawRef.current) {
+                break
+              }
+              lastSocialRawRef.current = socialRaw
               const playerIds = playerIdsRef.current
               setSocialState(previous => {
                 const sanitized = sanitizeSocialSnapshot(msg.social, playerIds)
@@ -377,6 +449,14 @@ export function useRoom(
             }
 
             case 'private_session': {
+              knownPlayerIdRef.current = msg.yourId
+              if (heldSnapshotRef.current) {
+                // Joined, but our own snapshot has not come yet: the held one is
+                // better than nothing (e.g. the server lost the table and made us new).
+                setTableState(heldSnapshotRef.current)
+                heldSnapshotRef.current = null
+              }
+              rejoinUntilRef.current = 0
               setYourId(msg.yourId)
               setIsHost(msg.isHost)
               reconnectTokenRef.current = msg.reconnectToken
@@ -440,9 +520,25 @@ export function useRoom(
               break
             }
 
-            case 'action_result':
             case 'action_failed':
-            case 'error':
+            case 'error': {
+              // Every rejection used to vanish silently; show the ones that matter.
+              const message = msg.message.trim()
+              if (!message || isQuietRejection(message)) break
+              const now = Date.now()
+              const last = lastErrorRef.current
+              if (last && last.message === message && now - last.at < ERROR_TOAST_DEDUPE_MS) break
+              lastErrorRef.current = { message, at: now }
+              const notice: RoomNotice = {
+                id: `error_${now}_${Math.random().toString(36).slice(2, 7)}`,
+                kind: 'error',
+                message,
+              }
+              setNotices(previous => [...previous, notice].slice(-MAX_ROOM_NOTICES))
+              break
+            }
+
+            case 'action_result':
               break
           }
         })
@@ -491,19 +587,24 @@ export function useRoom(
     const lobbySelf = tableState.lobbyPlayers?.find(player => player.id === yourId)
     if (lobbySelf?.isSpectator) {
       hasSeated.current = false
+      autoSeatedIdRef.current = yourId
       return
     }
 
     if (tableState.players.some(player => player.id === yourId)) {
       hasSeated.current = true
+      autoSeatedIdRef.current = yourId
       return
     }
 
-    if (hasSeated.current) {
+    // Keyed by player id: if the table server restarted without our seat and
+    // handed out a new identity, sit that new player down once as well.
+    if (hasSeated.current && autoSeatedIdRef.current === yourId) {
       return
     }
 
     hasSeated.current = true
+    autoSeatedIdRef.current = yourId
     sendMessage({ type: 'seat_me' })
   }, [isConnected, sendMessage, tableState, yourId])
 

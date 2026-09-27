@@ -306,6 +306,11 @@ function describeChipAdjustment(playerName: string, delta: number): string {
     : `Removed ${amount} from ${playerName}.`
 }
 
+/** Durable copy of RoomData (a JSON string), restored by onStart. */
+const ROOM_STORAGE_KEY = 'room-data-v1'
+/** Durable Object values cap at 128 KiB; leave headroom. */
+const ROOM_STORAGE_MAX_CHARS = 120_000
+
 export default class PokerRoom implements PartyServer {
   private data: RoomData
   private autoFoldTimeout: ReturnType<typeof setTimeout> | null = null
@@ -324,6 +329,7 @@ export default class PokerRoom implements PartyServer {
    */
   allInRunoutPacing = true
   private hostTransferTimeout: ReturnType<typeof setTimeout> | null = null
+  private persistTimeout: ReturnType<typeof setTimeout> | null = null
   private revealSettleTimeout: ReturnType<typeof setTimeout> | null = null
   private disconnectedHostId: string | null = null
   /** Drink state lives beside, not inside, the game engine. */
@@ -407,6 +413,59 @@ export default class PokerRoom implements PartyServer {
       ledger: createLedger(),
     }
     this.mushrooms = createMushroomTable(this.mushroomRandom)
+  }
+
+  /**
+   * Restores the table after the room restarts (deploy, crash, dev reload): the
+   * seats, stacks, hand, ledger and reconnect tokens come back from durable
+   * storage, so returning clients are re-seated as if they had just dropped.
+   */
+  async onStart() {
+    const storage = this.room.storage as Partial<Room['storage']> | undefined
+    if (typeof storage?.get !== 'function') return
+    try {
+      const saved = await storage.get<string>(ROOM_STORAGE_KEY)
+      if (typeof saved !== 'string') return
+      const restored = JSON.parse(saved) as Partial<RoomData>
+      if (!restored?.gameState || !Array.isArray(restored.gameState.players)) return
+      this.data = {
+        ...this.data,
+        ...restored,
+        // Every socket died with the old instance.
+        connectionToPlayer: {},
+        playerToConnection: {},
+        social: { activeByPlayer: {}, chatLog: restored.social?.chatLog ?? [] },
+        membership: { ...createMembershipData(), ...restored.membership },
+      }
+      for (const player of this.data.gameState.players) {
+        if (!this.isBotPlayer(player.id)) player.isConnected = false
+      }
+      this.finalizeState()
+      this.syncActionTimer()
+    } catch (error) {
+      console.warn('Could not restore the saved table; starting fresh.', error)
+    }
+  }
+
+  /** Debounced write of the table to durable storage (see onStart). */
+  private schedulePersist() {
+    const storage = this.room.storage as Partial<Room['storage']> | undefined
+    if (typeof storage?.put !== 'function' || this.persistTimeout) return
+    this.persistTimeout = setTimeout(() => {
+      this.persistTimeout = null
+      try {
+        let serialized = JSON.stringify(this.data)
+        if (serialized.length > ROOM_STORAGE_MAX_CHARS) {
+          // Stay under the storage value limit: history and chat are the expendable parts.
+          serialized = JSON.stringify({ ...this.data, handHistory: [], social: { activeByPlayer: {}, chatLog: [] } })
+        }
+        if (serialized.length <= ROOM_STORAGE_MAX_CHARS) {
+          void storage.put!(ROOM_STORAGE_KEY, serialized)?.catch?.(() => {})
+        }
+      } catch (error) {
+        console.warn('Could not save the table.', error)
+      }
+    }, 300)
   }
 
   onConnect(conn: Connection) {
@@ -3527,6 +3586,7 @@ export default class PokerRoom implements PartyServer {
       type: 'room_snapshot',
       state: {
         ...publicState,
+        viewerId: playerId,
         cardRevealRequests: currentCardRevealRequests,
         players: publicState.players.map(player => this.withPublicPlayerMetadata(player)),
         winners,
@@ -3981,6 +4041,7 @@ export default class PokerRoom implements PartyServer {
         this.sendMessage(conn, session)
       }
     }
+    this.schedulePersist()
   }
 
   private syncActionTimer(resetCurrentTimer = false) {

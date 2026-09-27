@@ -77,8 +77,16 @@ export function MembershipLayer({
   return (
     <>
       {latestNotice && (
-        <div className="membership-notice" role="status" aria-live="polite" key={latestNotice.id}>
-          <span className="membership-notice-icon" aria-hidden="true">{latestNotice.kind === 'ledger' ? '$' : '★'}</span>
+        <div
+          className="membership-notice"
+          data-kind={latestNotice.kind}
+          role="status"
+          aria-live="polite"
+          key={latestNotice.id}
+        >
+          <span className="membership-notice-icon" aria-hidden="true">
+            {latestNotice.kind === 'ledger' ? '$' : latestNotice.kind === 'error' ? '!' : '★'}
+          </span>
           <span>{getNoticeText(latestNotice, yourId)}</span>
         </div>
       )}

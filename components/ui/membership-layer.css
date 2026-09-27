@@ -26,6 +26,23 @@
   color: var(--c-brass-400, #f2c766);
 }
 
+/* A server rejection (e.g. "Table is full"): same small pill, ember accent. */
+.membership-notice[data-kind='error'] {
+  border-color: rgba(255, 122, 61, 0.6);
+}
+
+.membership-notice[data-kind='error'] .membership-notice-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(255, 122, 61, 0.9);
+  color: #1a0d06;
+  font-size: 12px;
+  font-weight: 900;
+}
+
 @keyframes membership-notice-in {
   from {
     opacity: 0;

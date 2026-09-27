@@ -178,6 +178,12 @@ export interface TableState {
   roomCode: string
   phase: GamePhase
   serverNow: number
+  /**
+   * Who this snapshot was built for ('' before the connection has joined). A
+   * reconnecting client ignores the anonymous one so its own hole cards never
+   * blink out for a round trip.
+   */
+  viewerId?: string
   autoStartEnabled?: boolean
   autoStartDelay?: number
   round: BettingRound | null
