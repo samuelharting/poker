@@ -83,6 +83,7 @@ import {
   type PrankRuntime,
   type SeatPrankInput,
 } from './prankEffects'
+import { popIconSvg } from './popIcons'
 import type { PrankEvent } from '@/lib/pranks'
 import { SHOT_DOWN_AT, SHOT_SHUDDER_END } from './prankTimeline'
 import type { DrinkEvent } from '@/lib/drinks'
@@ -250,6 +251,8 @@ interface SeatRuntime {
   wagerIntensity: number
   /** Blackout bonk / dazed / hangover / trip pose inputs (set each frame by FunFx). */
   funPose?: FunPoseInput
+  /** The lips, in the Head bone's local space (measured from the rig). */
+  mouthInHead?: THREE.Vector3
 }
 
 interface WagerRuntime {
@@ -812,6 +815,14 @@ function measureRigAnchors(seat: SeatRuntime) {
   if (chin) seat.anchors.chin = chin
   if (shoulderR) seat.anchors.shoulderR = shoulderR
   if (shoulderL) seat.anchors.shoulderL = shoulderL
+  const head = bones.get('Head')
+  if (head) {
+    // Lips sit ~0.05 up and ~0.24 forward of the head bone (top of the neck)
+    // on every model; kept in head space so drinks follow the head's tilt.
+    const headLocal = seat.root.worldToLocal(head.getWorldPosition(new THREE.Vector3()))
+    const mouthWorld = seat.root.localToWorld(headLocal.add(new THREE.Vector3(0, 0.05, -0.24)))
+    seat.mouthInHead = head.worldToLocal(mouthWorld)
+  }
   seat.anchorsFromRig = true
 }
 
@@ -2041,6 +2052,12 @@ function animatePot(runtime: SceneRuntime, time: number, reducedMotion: boolean,
 
 const ikTarget = new THREE.Vector3()
 const ikPole = new THREE.Vector3()
+const raiseUp = new THREE.Vector3()
+const raiseSide = new THREE.Vector3()
+const faceGuardCenter = new THREE.Vector3()
+const faceGuardOffset = new THREE.Vector3()
+/** Skull radius (seat units) the wrists are kept outside of. */
+const FACE_GUARD_RADIUS = 0.2
 
 const flipUp = new THREE.Vector3()
 const flipSide = new THREE.Vector3()
@@ -2080,20 +2097,54 @@ function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | n
     seat.avatar?.model.updateMatrixWorld(true)
   }
   const splay = THREE.MathUtils.clamp(pose.elbowOut, 0, 1)
+  const raise = THREE.MathUtils.clamp(pose.elbowUp, 0, 1)
+  // Face guard: the live skull, as a sphere a little above the head bone
+  // (which sits at the top of the neck), in seat space. A wrist target that
+  // would pass through it (hands travelling to or from behind the head, a rub
+  // on the crown) is slid out sideways, toward its own shoulder, so the hand
+  // goes round the side of the head and never in front of the face.
+  const headBone = bones.get('Head')
+  let guardRadius = 0
+  if (headBone) {
+    seat.root.worldToLocal(headBone.getWorldPosition(faceGuardCenter))
+    faceGuardCenter.y += 0.13
+    guardRadius = FACE_GUARD_RADIUS
+  }
   for (const { side, hand, shoulder, out } of sides) {
     const chain = getArmChain(bones.get(`UpperArm${side}`), bones.get(`LowerArm${side}`), bones.get(`Wrist${side}`))
     if (!chain) continue
     ikTarget.set(hand[0], hand[1], hand[2])
+    if (guardRadius > 0) {
+      faceGuardOffset.subVectors(ikTarget, faceGuardCenter)
+      const across = guardRadius * guardRadius - faceGuardOffset.y * faceGuardOffset.y - faceGuardOffset.z * faceGuardOffset.z
+      if (across > 0) {
+        const clearX = Math.sqrt(across)
+        if (faceGuardOffset.x * out < clearX) ikTarget.x = faceGuardCenter.x + out * clearX
+      }
+    }
     seat.root.localToWorld(ikTarget)
     // Elbows swing out to the side and down/back, like arms resting on a rail;
     // folded on the rail (passed out) they splay out level with the hands.
     ikPole.set(
-      shoulder[0] + out * (0.7 + 0.5 * splay),
-      shoulder[1] - 0.7 * (1 - splay) - 0.12 * splay,
-      shoulder[2] + 0.45 * (1 - splay) + 0.05 * splay
+      shoulder[0] + out * (0.7 + 0.5 * splay + 0.3 * raise),
+      shoulder[1] - (0.7 * (1 - splay) + 0.12 * splay) * (1 - raise) + 0.5 * raise,
+      shoulder[2] + (0.45 * (1 - splay) + 0.05 * splay) * (1 - raise) + 0.15 * raise
     )
     seat.root.localToWorld(ikPole)
     solveArmIK(chain, ikTarget, ikPole)
+
+    if (raise > 0.01) {
+      // Raised arms: fingers up and back over the skull, palms to the head,
+      // instead of the hands jutting straight inward across the face.
+      const middle = bones.get(`Middle2${side}`)
+      const index = bones.get(`Index2${side}`)
+      const pinky = bones.get(`Pinky2${side}`)
+      if (middle && index && pinky) {
+        raiseUp.set(0, 0.75, 0.66).transformDirection(seat.root.matrixWorld)
+        raiseSide.set(0, -0.6, 0.8).transformDirection(seat.root.matrixWorld)
+        orientBoneFrame(chain.hand, middle, index, pinky, raiseUp, raiseSide, raise)
+      }
+    }
 
     if (flipTarget && side === getFlipOffHand(flipTarget) && pose.middleFinger > 0.01) {
       const middle = bones.get(`Middle2${side}`)
@@ -2194,32 +2245,54 @@ function getDealerPuckTexture() {
   return dealerPuckTexture
 }
 
+const IDENTITY_QUATERNION = new THREE.Quaternion()
 const drinkWristWorld = new THREE.Vector3()
 const drinkKnuckleWorld = new THREE.Vector3()
 const drinkForward = new THREE.Vector3()
 
-/** Keeps the drink in the right hand and tips it toward the mouth as it rises. */
+const drinkMouthWorld = new THREE.Vector3()
+const drinkRestWorld = new THREE.Vector3()
+const drinkAxis = new THREE.Vector3()
+const drinkUp = new THREE.Vector3(0, 1, 0)
+const drinkTilt = new THREE.Quaternion()
+const drinkYaw = new THREE.Quaternion()
+/** Glass height (rim above base) at prop scale 1. */
+const DRINK_RIM_HEIGHT = 0.23
+
+/**
+ * The drink's whole life on the table: it lands on the felt beside the
+ * drinker with a little bounce, the hand takes it, the rim goes to the
+ * actual mouth (tipped along the hand-to-mouth line), it is set back down on
+ * the same spot, and shrinks away once the hand has left it.
+ */
 function placeDrinkProp(seat: SeatRuntime, pose: AvatarPose, time: number) {
   const prop = seat.drinkProp
   if (!prop) return
-  // The glass lives on the felt beside the drinker; it's only in hand mid-sip.
   prop.group.visible = seat.root.visible
   if (!seat.root.visible) return
   const elapsed = time - seat.drinkStartedAt
-  // Glasses only exist while someone drinks: they pop into the hand on the
-  // reach and pop out as it is set down.
-  const inStart = 0.3
-  const inEnd = DRINK_DURATION - 0.28
-  if (elapsed < inStart || elapsed > inEnd || seat.passedOut) {
+  const END = DRINK_DURATION + 0.3
+  if (elapsed < 0 || elapsed > END || seat.passedOut) {
     prop.group.visible = false
     return
   }
-  const pop = Math.min(1, (elapsed - inStart) / 0.14, (inEnd - elapsed) / 0.14)
-  const popScale = 1 - Math.pow(1 - pop, 3)
+  const scale = seat.root.scale.x
+  // Arrives with a small overshoot, leaves with a quick shrink.
+  const arrive = THREE.MathUtils.clamp(elapsed / 0.22, 0, 1)
+  const arriveScale = arrive >= 1 ? 1 : 1 + 2.4 * Math.pow(arrive - 1, 3) + 1.4 * Math.pow(arrive - 1, 2)
+  const leave = THREE.MathUtils.smoothstep(elapsed, DRINK_DURATION - 0.05, END)
+  const size = scale * 0.95 * Math.max(0.001, arriveScale * (1 - leave))
+
+  const rest = seat.anchors.drinkRest
+  seat.root.localToWorld(drinkRestWorld.set(rest[0], rest[1] - 0.02, rest[2]))
+  const inHand = THREE.MathUtils.smoothstep(elapsed, 0.26, 0.4) * (1 - THREE.MathUtils.smoothstep(elapsed, 2.14, 2.3))
   const wrist = seat.avatar?.bones.get('WristR')
   const knuckle = seat.avatar?.bones.get('Middle1R')
-  if (!wrist) {
-    prop.group.visible = false
+  drinkYaw.setFromAxisAngle(drinkUp, seat.root.rotation.y)
+  if (!wrist || inHand <= 0.001) {
+    prop.group.position.copy(drinkRestWorld)
+    prop.group.quaternion.copy(drinkYaw)
+    prop.group.scale.setScalar(size)
     return
   }
   wrist.getWorldPosition(drinkWristWorld)
@@ -2227,15 +2300,37 @@ function placeDrinkProp(seat: SeatRuntime, pose: AvatarPose, time: number) {
     knuckle.getWorldPosition(drinkKnuckleWorld)
     drinkWristWorld.lerp(drinkKnuckleWorld, 0.7)
   }
-  const scale = seat.root.scale.x
-  // Sit the glass in front of the palm (toward the table) so fingers wrap it.
+  // Base of the glass in the fist, just in front of the palm.
   drinkForward.set(0, 0, -1).applyQuaternion(seat.root.quaternion)
-  prop.group.position.copy(drinkWristWorld).addScaledVector(drinkForward, 0.07 * scale)
-  prop.group.position.y -= 0.14 * scale * (1 - pose.drinkLift * 0.6)
-  prop.group.rotation.set(0, seat.root.rotation.y, 0)
-  prop.group.rotateX(pose.drinkLift * 1.35)
-  // Hand-sized, not head-sized.
-  prop.group.scale.setScalar(scale * 0.95 * popScale)
+  drinkWristWorld.addScaledVector(drinkForward, 0.06 * scale)
+  drinkWristWorld.y -= 0.12 * scale
+  prop.group.position.lerpVectors(drinkRestWorld, drinkWristWorld, inHand)
+  prop.group.quaternion.copy(drinkYaw)
+
+  const lift = THREE.MathUtils.clamp(pose.drinkLift, 0, 1)
+  const head = seat.avatar?.bones.get('Head')
+  const mouth = seat.mouthInHead
+  if (lift > 0.001 && head && mouth) {
+    // Tip the glass so its rim meets the lips: the glass axis swings from
+    // upright to the line from the fist to the mouth.
+    head.localToWorld(drinkMouthWorld.copy(mouth))
+    const rim = DRINK_RIM_HEIGHT * size
+    drinkAxis.subVectors(drinkMouthWorld, prop.group.position)
+    const reach = drinkAxis.length()
+    if (reach > 1e-4) {
+      drinkAxis.divideScalar(reach)
+      // Past vertical: the glass tips over the lips as the head goes back.
+      drinkAxis.addScaledVector(drinkForward, 0.35 * lift).normalize()
+      drinkTilt.setFromUnitVectors(drinkUp, drinkAxis)
+      prop.group.quaternion.premultiply(drinkTilt.slerp(IDENTITY_QUATERNION, 1 - lift))
+      const at = THREE.MathUtils.smoothstep(lift, 0.25, 1)
+      // Base where it has to be for the rim to touch the mouth.
+      drinkAxis.copy(drinkUp).applyQuaternion(prop.group.quaternion)
+      drinkRestWorld.copy(drinkMouthWorld).addScaledVector(drinkAxis, -rim)
+      prop.group.position.lerp(drinkRestWorld, at)
+    }
+  }
+  prop.group.scale.setScalar(size)
 }
 
 /** Rosy cheeks creep in as the beers go down. */
@@ -2450,7 +2545,9 @@ function animateSeat(
   }
 
   if (seat.hadCards) {
-    const actionCardsVisible = playback.cue === 'fold' ? tablePose.cards.visible : true
+    const actionCardsVisible = playback.cue === 'fold'
+      ? (seat.avatar && !reducedMotion ? playback.isActive : tablePose.cards.visible)
+      : true
     seat.cards.visible = seat.keepFoldedCardsVisible || (
       actionCardsVisible && (!seat.folded || playback.isActive)
     )
@@ -2459,16 +2556,26 @@ function animateSeat(
     // Cards fly in from the dealer (table centre) and slide into place. A peek
     // tilts the near edge up (hinged on the far edge) so only the owner sees the faces.
     const peekTilt = peekLift * 0.78
-    seat.cards.position.set(
-      tablePose.cards.position[0],
-      restY + tablePose.cards.position[1] + Math.sin(peekTilt) * 0.13 + peekLift * 0.015,
-      seat.cardLocalZ + tablePose.cards.position[2] * 0.6 - (1 - Math.cos(peekTilt)) * 0.13
-    )
-    seat.cards.rotation.set(
-      tablePose.cards.rotation[0] - peekTilt,
-      tablePose.cards.rotation[1],
-      tablePose.cards.rotation[2]
-    )
+    const foldToss = seat.avatar && playback.cue === 'fold' && playback.isActive && !seat.keepFoldedCardsVisible && !reducedMotion
+      ? getFoldTossPose(seat, playback.elapsedMs / ACTION_ANIMATION_DURATION_MS, restY)
+      : null
+    if (foldToss) {
+      seat.cards.position.set(...foldToss.position)
+      seat.cards.rotation.set(...foldToss.rotation)
+    } else {
+      seat.cards.position.set(
+        tablePose.cards.position[0],
+        restY + tablePose.cards.position[1] + Math.sin(peekTilt) * 0.13 + peekLift * 0.015,
+        seat.cardLocalZ + tablePose.cards.position[2] * 0.6 - (1 - Math.cos(peekTilt)) * 0.13
+      )
+      seat.cards.rotation.set(
+        tablePose.cards.rotation[0] - peekTilt,
+        tablePose.cards.rotation[1],
+        tablePose.cards.rotation[2]
+      )
+    }
+    if (!foldToss) seat.cards.userData.foldRelease = undefined
+    setHoleCardFade(seat, foldToss?.fade ?? 0)
     const dealFrom = (seat.cards.userData.dealFrom as Vec3 | undefined) ?? [0, 0.3, -1.5]
     seat.cards.scale.setScalar(1)
     seat.cardMeshes.forEach((card, index) => {
@@ -2501,6 +2608,94 @@ function animateSeat(
     })
   } else {
     seat.cards.visible = false
+  }
+}
+
+const foldWrist = new THREE.Vector3()
+
+/**
+ * A rigged player's fold, in the cards group's (seat-local) space: the hand
+ * reaches the cards, they rise with the fingers as the wrist cocks, then they
+ * are released on the flick and sail in a low arc toward the middle, skid
+ * flat on the felt and fade out. Timed against the animator's fold (reach by
+ * ~0.2, cock to ~0.36, flick ~0.34-0.44 of the cue).
+ */
+function getFoldTossPose(seat: SeatRuntime, t: number, restY: number): { position: Vec3; rotation: Vec3; fade: number } {
+  const rest: Vec3 = [0, restY, seat.cardLocalZ]
+  const board = seat.anchors.board
+  // Landing spot: a good way toward the middle, flat on the felt.
+  const land: Vec3 = [
+    rest[0] + (board[0] - rest[0]) * 0.34,
+    restY,
+    rest[2] + (board[2] - rest[2]) * 0.34,
+  ]
+  const skid: Vec3 = [
+    rest[0] + (board[0] - rest[0]) * 0.42,
+    restY,
+    rest[2] + (board[2] - rest[2]) * 0.42,
+  ]
+  const wrist = seat.avatar?.bones.get('WristR')
+  let held: Vec3 = rest
+  if (wrist) {
+    seat.root.worldToLocal(wrist.getWorldPosition(foldWrist))
+    // Cards pinched under the fingertips, a little ahead of and below the wrist.
+    held = [foldWrist.x - 0.04, Math.max(restY, foldWrist.y - 0.07), foldWrist.z - 0.1]
+  }
+  const RELEASE = 0.42
+  const LAND = 0.68
+  if (t < RELEASE) {
+    const grip = THREE.MathUtils.smoothstep(t, 0.17, 0.27)
+    const position: Vec3 = [
+      rest[0] + (held[0] - rest[0]) * grip,
+      rest[1] + (held[1] - rest[1]) * grip,
+      rest[2] + (held[2] - rest[2]) * grip,
+    ]
+    // Near edge lifts as they come up off the felt.
+    return { position, rotation: [-0.35 * grip, 0, 0.08 * grip], fade: 0 }
+  }
+  // Release point: where the fingers let go (remembered for the flight).
+  const from = (seat.cards.userData.foldRelease as Vec3 | undefined) ?? held
+  if (!seat.cards.userData.foldRelease) seat.cards.userData.foldRelease = [...held]
+  if (t < LAND) {
+    const f = (t - RELEASE) / (LAND - RELEASE)
+    const ease = 1 - (1 - f) * (1 - f)
+    const arc = Math.sin(f * Math.PI) * 0.1
+    return {
+      position: [
+        from[0] + (land[0] - from[0]) * ease,
+        from[1] + (land[1] - from[1]) * f + arc,
+        from[2] + (land[2] - from[2]) * ease,
+      ],
+      // Sails flat with a lazy spin, settling level as it lands.
+      rotation: [-0.35 * (1 - f), 0.9 * ease, 0.08 * (1 - f)],
+      fade: 0,
+    }
+  }
+  const k = THREE.MathUtils.smoothstep(t, LAND, 0.82)
+  return {
+    position: [land[0] + (skid[0] - land[0]) * k, restY, land[2] + (skid[2] - land[2]) * k],
+    rotation: [0, 0.9 + 0.15 * k, 0],
+    fade: THREE.MathUtils.smoothstep(t, 0.76, 0.97),
+  }
+}
+
+/** Fades both hole cards (0 = solid). Materials only go transparent while fading. */
+function setHoleCardFade(seat: SeatRuntime, fade: number) {
+  const fading = fade > 0.001
+  if (!fading && !seat.cards.userData.faded) return
+  seat.cards.userData.faded = fading
+  for (const card of seat.holeCards) {
+    card.group.traverse(object => {
+      const mesh = object as THREE.Mesh
+      if (!mesh.isMesh || Array.isArray(mesh.material)) return
+      const material = mesh.material as THREE.MeshStandardMaterial
+      if (material.transparent !== fading) {
+        material.transparent = fading
+        material.depthWrite = !fading
+        material.needsUpdate = true
+      }
+      material.opacity = fading ? 1 - fade : 1
+    })
   }
 }
 
@@ -3298,6 +3493,10 @@ function createSceneRuntime(
   return runtime
 }
 
+// Static, module-owned SVG strings (no user input): see popIcons.ts.
+const SHOT_ICON_HTML = { __html: popIconSvg('shot') }
+const BEER_ICON_HTML = { __html: popIconSvg('beer') }
+
 const NO_HIGHLIGHTED_CARDS: ReadonlyArray<{ rank: string; suit: ThreeCardView['suit'] }> = []
 const NO_PRANK_EVENTS: readonly PrankEvent[] = []
 const NO_DRINK_EVENTS: readonly DrinkEvent[] = []
@@ -3356,6 +3555,17 @@ export function DesktopPokerRoom3D({
         // Development-only handle for inspecting the live scene from devtools.
         ;(host as HTMLDivElement & { __pokerRuntime?: SceneRuntime }).__pokerRuntime = runtime
         // Development-only: replay a prank locally (e.g. a house cheers) for visual checks.
+        // Development-only: make a seat drink locally (animation review).
+        ;(host as HTMLDivElement & { __playDrink?: (playerId: string, kind?: 'beer' | 'water') => void }).__playDrink = (playerId, kind = 'beer') => {
+          const seat = runtime.seats.get(playerId)
+          if (!seat) return
+          seat.drinkStartedAt = (performance.now() - runtime.startTime) / 1000
+          if (!seat.drinkProp || seat.drinkProp.kind !== kind) {
+            disposeDrinkProp(seat.drinkProp)
+            seat.drinkProp = createDrinkProp(kind)
+            seat.root.parent?.add(seat.drinkProp.group)
+          }
+        }
         ;(host as HTMLDivElement & { __playPrank?: (event: PrankEvent) => void }).__playPrank = event => queuePrank(runtime.pranks, event, {
           time: (performance.now() - runtime.startTime) / 1000,
           reducedMotion: runtime.reducedMotion,
@@ -3393,9 +3603,9 @@ export function DesktopPokerRoom3D({
     for (const event of drinkEvents) {
       if (Date.now() - event.at > 6_000) continue
       if (event.kind === 'house_beer') {
-        queueSeatPop(runtime.pranks, event.id, event.playerId, (event.amount ?? 1) >= 2 ? '🍺🍺' : '🍺', 'beer', context)
+        queueSeatPop(runtime.pranks, event.id, event.playerId, (event.amount ?? 1) >= 2 ? 'beer2' : 'beer', context)
       } else if (event.kind === 'house_water') {
-        queueSeatPop(runtime.pranks, event.id, event.playerId, '💧', 'water', context)
+        queueSeatPop(runtime.pranks, event.id, event.playerId, 'water', context)
       }
     }
   }, [prankEvents, drinkEvents])
@@ -3550,7 +3760,9 @@ export function DesktopPokerRoom3D({
                   <strong>{player.nickname}</strong>
                   {player.shotsWaiting > 0 && (
                     // A shot is lined up for them, poured once they're out of the hand.
-                    <em className="cinematic-shot-waiting" aria-label="Shot waiting" title="Shot waiting">🥃</em>
+                    <em className="cinematic-shot-waiting" aria-label="Shot waiting" title="Shot waiting">
+                      <i className="plate-icon" aria-hidden="true" dangerouslySetInnerHTML={SHOT_ICON_HTML} />
+                    </em>
                   )}
                   {player.drinks?.passedOut ? (
                     <em className="cinematic-drink-badge is-passed-out" aria-label="Blacked out">💤</em>
@@ -3562,7 +3774,8 @@ export function DesktopPokerRoom3D({
                     <em className="cinematic-drink-badge is-dd" aria-label="Sober: designated driver" title="Designated driver">🚗 DD</em>
                   ) : Math.round(player.drinks?.level ?? 0) > 0 ? (
                     <em className="cinematic-drink-badge" aria-label={`Buzz ${Math.round(player.drinks.level)}`}>
-                      🍺{Math.round(player.drinks.level)}
+                      <i className="plate-icon" aria-hidden="true" dangerouslySetInnerHTML={BEER_ICON_HTML} />
+                      {Math.round(player.drinks.level)}
                     </em>
                   ) : null}
                   {(player.drinks?.soberTax ?? 0) > 0 && (

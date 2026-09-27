@@ -45,10 +45,12 @@ test('desktop players flick a chip and buy a shot at each other', async ({ brows
     await expect(panel.getByRole('group', { name: 'Mess with PrankAlex' })).toBeVisible()
     await panel.getByRole('button', { name: /Flick a chip at PrankAlex/ }).click()
     await expect.poll(() => alexPranks.some(event => event.kind === 'chip_flick'), { message: 'Alex receives the flick' }).toBe(true)
-    // Alex sees a 💥 pop (hero-target first-person hit); Sam sees one over Alex's seat.
+    // Alex sees a bonk pop (hero-target first-person hit); Sam sees one over Alex's seat.
+    // Pops live ~1.3s, so assert on the stage's persistent pop counter rather
+    // than racing the transient element (the old source of flakes under load).
     await Promise.all([
-      expect(alex.page.locator('.prank-pop-3d.is-bonk').first()).toBeAttached({ timeout: 5_000 }),
-      expect(sam.page.locator('.prank-pop-3d.is-bonk').first()).toBeAttached({ timeout: 5_000 }),
+      expect(alex.page.locator('.desktop-3d-stage[data-pops-bonk]')).toBeAttached({ timeout: 8_000 }),
+      expect(sam.page.locator('.desktop-3d-stage[data-pops-bonk]')).toBeAttached({ timeout: 8_000 }),
     ])
     expect(sam.tap.snapshot.players.map((player: any) => player.stack)).toEqual(stacksBefore)
 
@@ -60,7 +62,7 @@ test('desktop players flick a chip and buy a shot at each other', async ({ brows
     await expect(alex.page.locator('.drink-button.is-water.is-chaser')).toBeVisible()
     await expect(alex.page.locator('.drink-chaser-ring')).toBeVisible()
     // First-person: the warm burn once the glass is slammed.
-    await expect(alex.page.locator('.prank-hit-flash.is-shot')).toBeAttached({ timeout: 6_000 })
+    await expect(alex.page.locator('.desktop-3d-stage[data-flashes-shot]')).toBeAttached({ timeout: 10_000 })
     await snap(alex.page, 'pranks-alex-after-shot')
 
     // Buyer cooldown: the shot button is disabled with a hands-left badge.

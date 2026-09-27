@@ -122,7 +122,8 @@
   50% { transform: translateY(-2px) rotate(-8deg); }
 }
 
-/* Icon pops over a seat's head: 💥 bonk, 🥃 shot, 🍺/🍺🍺 house beers, 💧 free water */
+/* Icon pops over a seat's head: bonk star, shot glass, beer mug(s), water drop.
+   Icons are inline SVG (components/three/popIcons.ts), never emoji glyphs. */
 .prank-pop-3d {
   position: absolute;
   left: 0;
@@ -133,41 +134,71 @@
 }
 
 .prank-pop-3d > span {
-  display: grid;
-  place-items: center;
-  min-width: 52px;
-  height: 52px;
-  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  height: 58px;
+  padding: 0 9px;
   border-radius: 999px;
   translate: -50% -50%;
-  background: radial-gradient(circle at 35% 30%, #fff3c4, #ffb347 55%, #e0632b);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45), 0 0 0 3px rgba(255, 255, 255, 0.9);
-  font-size: 30px;
-  line-height: 1;
-  white-space: nowrap;
-  animation: prank-pop-3d 1.3s var(--ease-pop, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
+  background: radial-gradient(circle at 35% 28%, #fff8dc, #ffc062 58%, #e9772f);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.42), 0 0 0 3px rgba(255, 255, 255, 0.92), inset 0 -4px 8px rgba(120, 40, 0, 0.25);
+  transform-origin: 50% 60%;
+  animation: prank-pop-3d 1.3s linear both;
+  will-change: transform, opacity;
+}
+
+.prank-pop-3d .pop-icon {
+  display: block;
+  width: 40px;
+  height: 40px;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.18));
+}
+
+.prank-pop-3d .pop-icon svg {
+  display: block;
+}
+
+.prank-pop-3d.is-double .pop-icon {
+  width: 34px;
+  height: 34px;
+}
+
+.prank-pop-3d.is-double .pop-icon.is-back {
+  margin-right: -12px;
+  rotate: -10deg;
+  translate: 0 2px;
+}
+
+.prank-pop-3d.is-double .pop-icon:not(.is-back) {
+  rotate: 8deg;
 }
 
 .prank-pop-3d.is-bonk > span {
-  background: radial-gradient(circle at 35% 30%, #fff6d8, #ff9f43 50%, #ff4d6d);
-  font-size: 32px;
+  background: radial-gradient(circle at 35% 28%, #fff8e0, #ff9f43 52%, #ff4d6d);
+}
+
+.prank-pop-3d.is-bonk .pop-icon {
+  width: 46px;
+  height: 46px;
 }
 
 .prank-pop-3d.is-beer > span {
-  background: radial-gradient(circle at 35% 30%, #fff5d6, #ffc94d 55%, #d98a1c);
-  font-size: 26px;
+  background: radial-gradient(circle at 35% 28%, #fff8e0, #ffd166 55%, #e0931f);
 }
 
 .prank-pop-3d.is-water > span {
-  background: radial-gradient(circle at 35% 30%, #effbff, #7fd0ff 55%, #2b86b8);
+  background: radial-gradient(circle at 35% 28%, #f2fbff, #8fd6ff 55%, #2b86b8);
 }
 
+/* Snappy overshoot in, a short hang, then drift up and fade. */
 @keyframes prank-pop-3d {
-  0% { opacity: 0; transform: scale(0.2) rotate(-18deg); }
-  16% { opacity: 1; transform: scale(1.3) rotate(6deg); }
-  30% { transform: scale(1) rotate(-3deg); }
-  78% { opacity: 1; transform: translateY(-12px); }
-  100% { opacity: 0; transform: translateY(-30px) scale(0.9); }
+  0% { opacity: 0; transform: scale(0.3) rotate(-16deg); animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1.25); }
+  14% { opacity: 1; transform: scale(1.12) rotate(5deg); animation-timing-function: cubic-bezier(0.4, 0, 0.3, 1); }
+  26% { opacity: 1; transform: scale(1) rotate(0deg); animation-timing-function: ease-in-out; }
+  70% { opacity: 1; transform: translateY(-8px) scale(1) rotate(0deg); animation-timing-function: cubic-bezier(0.4, 0, 1, 1); }
+  100% { opacity: 0; transform: translateY(-26px) scale(0.86) rotate(0deg); }
 }
 
 /* First-person hits */

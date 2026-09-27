@@ -741,3 +741,20 @@
 .desktop-3d-stage .cinematic-seat.is-edge-pinned .cinematic-seat-bet {
   display: none;
 }
+
+/* Drawn plate icons (shot glass, beer mug): SVG from popIcons.ts, never emoji. */
+.desktop-3d-stage .cinematic-seat .plate-icon {
+  display: block;
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-shot-waiting .plate-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.desktop-3d-stage .cinematic-seat .plate-icon svg {
+  display: block;
+}

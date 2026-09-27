@@ -46,8 +46,9 @@ export function createDrinkProp(kind: DrinkKind): DrinkProp {
   if (kind === 'beer') {
     // Clear glass so the beer reads golden rather than muddy.
     const glass = toon({ color: '#fffaf0', transparent: true, opacity: 0.26, depthWrite: false })
-    const beer = toon({ color: '#ffb52e', emissive: '#c46f00', emissiveIntensity: 0.55 })
-    const foam = toon({ color: '#ffffff', emissive: '#fff1d6', emissiveIntensity: 0.4 })
+    // Gentle emissive only: brighter reads as a light bulb under the bloom pass.
+    const beer = toon({ color: '#ffb52e', emissive: '#c46f00', emissiveIntensity: 0.22 })
+    const foam = toon({ color: '#fff8ea', emissive: '#fff1d6', emissiveIntensity: 0.08 })
     add(new THREE.CylinderGeometry(0.1, 0.09, 0.24, 18), glass, [0, 0.12, 0])
     add(new THREE.CylinderGeometry(0.088, 0.08, 0.19, 18), beer, [0, 0.105, 0])
     const head = add(new THREE.SphereGeometry(0.1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), foam, [0, 0.22, 0])
@@ -56,7 +57,7 @@ export function createDrinkProp(kind: DrinkKind): DrinkProp {
     handle.rotation.z = -Math.PI / 2
   } else {
     const glass = toon({ color: '#eefaff', transparent: true, opacity: 0.26, depthWrite: false })
-    const water = toon({ color: '#9fe0ff', emissive: '#2b86b8', emissiveIntensity: 0.45, transparent: true, opacity: 0.8 })
+    const water = toon({ color: '#9fe0ff', emissive: '#2b86b8', emissiveIntensity: 0.2, transparent: true, opacity: 0.8 })
     add(new THREE.CylinderGeometry(0.075, 0.065, 0.22, 18), glass, [0, 0.11, 0])
     add(new THREE.CylinderGeometry(0.066, 0.058, 0.16, 18), water, [0, 0.085, 0])
     const lemon = add(new THREE.TorusGeometry(0.045, 0.012, 6, 14), toon({ color: '#ffe066' }), [0.07, 0.2, 0])

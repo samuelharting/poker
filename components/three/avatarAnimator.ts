@@ -79,6 +79,8 @@ export interface AvatarPose {
   middleFinger: number
   /** 0..1 elbows splayed out level with the hands (arms folded on the rail). */
   elbowOut: number
+  /** 0..1 elbows raised up and out (hands laced behind the head). */
+  elbowUp: number
 }
 
 export interface AvatarAnimatorInput {
@@ -173,7 +175,7 @@ export interface AvatarAnimatorState {
 const BONE_CHANNELS = ANIMATED_BONES.length * 3
 /** Channel index of bodyPosition in writeChannels (after bones, hands and fingers). */
 const BODY_CHANNEL_START = BONE_CHANNELS + 3 + 3 + 2
-const CHANNEL_COUNT = BONE_CHANNELS + 3 + 3 + 2 + 3 + 3 + 1 + 1 + 1 + 1
+const CHANNEL_COUNT = BONE_CHANNELS + 3 + 3 + 2 + 3 + 3 + 1 + 1 + 1 + 1 + 1
 /** Wind-up, thrust + jab, a readable ~1.4s hold, and a relaxed return. */
 export const FLIP_OFF_SECONDS = 3.2
 const DRINK_SECONDS = 2.6
@@ -240,6 +242,7 @@ function emptyPose(): AvatarPose {
     drinkLift: 0,
     middleFinger: 0,
     elbowOut: 0,
+    elbowUp: 0,
   }
 }
 
@@ -281,6 +284,26 @@ function blendTo(target: Vec3, goal: Vec3, weight: number) {
 
 function offset(base: Vec3, x: number, y: number, z: number): Vec3 {
   return [base[0] + x, base[1] + y, base[2] + z]
+}
+
+/**
+ * Wrist target for hands laced behind the head. The chin anchor sits in front
+ * of the face, so the target goes up and well back past the skull; the arm IK
+ * raises the elbows (pose.elbowUp) so the forearms frame the head instead of
+ * crossing the face.
+ */
+function behindHead(anchors: AvatarAnchors, side: 1 | -1): Vec3 {
+  return offset(anchors.chin, 0.12 * side, 0.3, 0.42)
+}
+
+/**
+ * Hands travelling between the rail and behind the head swing out wide around
+ * the shoulders (peaking mid-way) so they never sweep through the face.
+ */
+function aroundHead(target: Vec3, weight: number, side: 1 | -1) {
+  const bulge = 4 * weight * (1 - weight)
+  target[0] += 0.3 * side * bulge
+  target[2] -= 0.06 * bulge
 }
 
 function clamp01(value: number) {
@@ -338,7 +361,7 @@ function getLivePeekWeights(state: AvatarAnimatorState, input: AvatarAnimatorInp
   if (!Number.isFinite(state.livePeekEndedAt) || !input.hasCards) return { reach: 0, lift: 0 }
   const after = time - state.livePeekEndedAt
   const lift = state.livePeekReleaseLift * (1 - smoothStep(after / 0.24))
-  const reach = state.livePeekReleaseReach * (1 - smoothStep((after - 0.12) / 0.42))
+  const reach = state.livePeekReleaseReach * (1 - smoothStep((after - 0.14) / 0.5))
   if (reach <= 0.001) state.livePeekEndedAt = Number.NEGATIVE_INFINITY
   return { reach, lift }
 }
@@ -433,8 +456,8 @@ export function computeAvatarTargetPose(
       state.nextPeekAt = time + 6 + state.random() * 8
     }
     const lifted = smoothStep((elapsed - 0.45) / 0.35) * peek
-    add(bones.Chest, 0.14, 0.02, 0, peek)
-    add(bones.Head, 0.36, 0.03, 0, peek)
+    add(bones.Chest, 0.09, 0.02, 0, peek)
+    add(bones.Head, 0.26, 0.03, 0, peek)
     blendTo(pose.handR, offset(anchors.cards, 0.1, 0.05 + 0.08 * lifted, 0.14), peek)
     blendTo(pose.handL, offset(anchors.cards, -0.16, 0.06 + 0.04 * lifted, 0.2), peek * 0.85)
     pose.fingerCurlR += 0.2 * peek
@@ -527,13 +550,15 @@ export function computeAvatarTargetPose(
     const lift = livePeek.lift * Math.max(motion, 0.6)
     const wiggle = Math.sin(time * 5.3 + seed * 9) * 0.012 * lift * motion
     state.nextPeekAt = Math.max(state.nextPeekAt, time + 4)
-    add(bones.Torso, 0.06, 0, 0, reach)
-    add(bones.Chest, 0.2, 0, 0, reach)
+    // A small lean and a look down: enough to read as "checking my cards"
+    // from across the table without the face disappearing under the hat.
+    add(bones.Torso, 0.03, 0, 0, reach)
+    add(bones.Chest, 0.1, 0, 0, reach)
     // Face the cards: yaw back to centre, pitch down to look.
     bones.Neck[1] -= bones.Neck[1] * reach
     bones.Head[1] -= bones.Head[1] * reach
-    bones.Neck[0] += (0.2 - bones.Neck[0]) * reach
-    bones.Head[0] += (0.5 + 0.06 * lift - bones.Head[0]) * reach
+    bones.Neck[0] += (0.1 - bones.Neck[0]) * reach
+    bones.Head[0] += (0.26 + 0.05 * lift - bones.Head[0]) * reach
     add(bones.Head, 0, 0, 0.05 * Math.sin(time * 0.9 + seed), lift)
     blendTo(pose.handR, offset(anchors.cards, 0.09, 0.03 + 0.085 * lift + wiggle, 0.13 - 0.035 * lift), reach)
     blendTo(pose.handL, offset(anchors.cards, -0.09, 0.03 + 0.085 * lift - wiggle, 0.13 - 0.035 * lift), reach)
@@ -723,28 +748,43 @@ export function computeAvatarTargetPose(
       state.nextBigIdleAt = time + 16 + state.random() * 22
     }
     switch (state.bigIdleKind) {
-      case 0: // stretch
-        blendTo(pose.handR, offset(anchors.shoulderR, 0.1, 0.62, 0.05), w)
-        blendTo(pose.handL, offset(anchors.shoulderL, -0.1, 0.62, 0.05), w)
+      case 0: { // stretch: arms right up over the head, fingers reaching
+        const reachUp = smoothStep((elapsed - 0.35) / 0.6) * w
+        blendTo(pose.handR, offset(anchors.shoulderR, 0.06, 0.66 + 0.06 * reachUp, 0.08), w)
+        blendTo(pose.handL, offset(anchors.shoulderL, -0.06, 0.66 + 0.06 * reachUp, 0.08), w)
+        aroundHead(pose.handR, w, 1)
+        aroundHead(pose.handL, w, -1)
+        pose.elbowUp = Math.max(pose.elbowUp, w)
         add(bones.Chest, -0.2, 0, 0, w)
         add(bones.Head, -0.2, 0, 0, w)
         pose.fingerCurlR *= 1 - w
         pose.fingerCurlL *= 1 - w
         break
-      case 1: // lean back, hands behind the head
-        blendTo(pose.handR, offset(anchors.chin, 0.1, 0.22, 0.28), w)
-        blendTo(pose.handL, offset(anchors.chin, -0.1, 0.22, 0.28), w)
+      }
+      case 1: // lean back, hands laced behind the head, elbows up and out
+        blendTo(pose.handR, behindHead(anchors, 1), w)
+        blendTo(pose.handL, behindHead(anchors, -1), w)
+        aroundHead(pose.handR, w, 1)
+        aroundHead(pose.handL, w, -1)
+        pose.elbowUp = Math.max(pose.elbowUp, w)
+        // Fingers loosely laced, not splayed, on the way up and back.
+        pose.fingerCurlR = pose.fingerCurlR * (1 - w) + 0.5 * w
+        pose.fingerCurlL = pose.fingerCurlL * (1 - w) + 0.5 * w
         add(bones.Chest, -0.22, 0, 0, w)
         add(bones.Head, -0.08, 0.05, 0, w)
         pose.bodyPosition[2] += 0.1 * w
         break
       case 2: { // interlace and crack the knuckles
         const pushOut = Math.sin(clamp01((elapsed - 0.8) / 1.2) * Math.PI)
+        // Fists pressed together knuckle to knuckle (never one hand through
+        // the other), pushed out as the wrists roll.
         const mid = offset(anchors.chest, 0, -0.05, -0.28 - 0.14 * pushOut)
-        blendTo(pose.handR, offset(mid, 0.05, 0, 0), w)
-        blendTo(pose.handL, offset(mid, -0.05, 0, 0), w)
-        add(bones.WristR, 0, 0, -0.6 * pushOut, w)
-        add(bones.WristL, 0, 0, 0.6 * pushOut, w)
+        blendTo(pose.handR, offset(mid, 0.085, 0, 0), w)
+        blendTo(pose.handL, offset(mid, -0.085, 0, 0), w)
+        add(bones.WristR, 0, 0, -0.45 * pushOut, w)
+        add(bones.WristL, 0, 0, 0.45 * pushOut, w)
+        pose.fingerCurlR = pose.fingerCurlR * (1 - w) + 0.8 * w
+        pose.fingerCurlL = pose.fingerCurlL * (1 - w) + 0.8 * w
         add(bones.Chest, 0.06, 0, 0, w)
         break
       }
@@ -896,8 +936,11 @@ export function computeAvatarTargetPose(
         const up = rise * (1 - lounge)
         blendTo(pose.handR, offset(anchors.shoulderR, 0.22, 0.7 + 0.05 * Math.sin(beat) * motion, -0.08), up)
         blendTo(pose.handL, offset(anchors.shoulderL, -0.22, 0.7 + 0.05 * Math.sin(beat + 1) * motion, -0.08), up)
-        blendTo(pose.handR, offset(anchors.chin, 0.12, 0.24, 0.3), lounge)
-        blendTo(pose.handL, offset(anchors.chin, -0.12, 0.24, 0.3), lounge)
+        blendTo(pose.handR, behindHead(anchors, 1), lounge)
+        blendTo(pose.handL, behindHead(anchors, -1), lounge)
+        aroundHead(pose.handR, lounge, 1)
+        aroundHead(pose.handL, lounge, -1)
+        pose.elbowUp = Math.max(pose.elbowUp, lounge)
         add(bones.Head, 0.06 * Math.sin(beat * 0.5) * up * motion, 0, 0)
         pose.fingerCurlR = 0.12 + 0.3 * lounge
         pose.fingerCurlL = 0.12 + 0.3 * lounge
@@ -910,7 +953,11 @@ export function computeAvatarTargetPose(
         const punch = (phase < 0.22 ? smoothStep(phase / 0.22) : 1 - smoothStep((phase - 0.22) / 0.78)) * motion
         const pumping = rise * (1 - lounge)
         blendTo(pose.handR, offset(anchors.shoulderR, 0.2, 0.3 + 0.42 * punch, -0.24), pumping)
-        blendTo(pose.handR, offset(anchors.chin, 0.12, 0.24, 0.3), lounge)
+        blendTo(pose.handR, behindHead(anchors, 1), lounge)
+        blendTo(pose.handL, behindHead(anchors, -1), lounge)
+        aroundHead(pose.handR, lounge, 1)
+        aroundHead(pose.handL, lounge, -1)
+        pose.elbowUp = Math.max(pose.elbowUp, lounge)
         blendTo(pose.handL, offset(anchors.chest, 0.08, -0.08, -0.26), pumping * 0.6)
         add(bones.Chest, 0.1 * punch * pumping, 0.06 * punch * pumping, 0)
         add(bones.Head, -0.08 * punch * pumping, 0, 0)
@@ -1259,6 +1306,7 @@ function writeChannels(pose: AvatarPose, out: number[]) {
   out[index++] = pose.drinkLift
   out[index++] = pose.middleFinger
   out[index++] = pose.elbowOut
+  out[index++] = pose.elbowUp
 }
 
 function readChannels(values: readonly number[]): AvatarPose {
@@ -1277,6 +1325,7 @@ function readChannels(values: readonly number[]): AvatarPose {
   pose.drinkLift = values[index++]!
   pose.middleFinger = values[index++]!
   pose.elbowOut = values[index++]!
+  pose.elbowUp = values[index++]!
   return pose
 }
 

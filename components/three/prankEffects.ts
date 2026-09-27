@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { PrankEvent } from '@/lib/pranks'
+import { popIconMarkup, type PopIconKind } from './popIcons'
 import { FELT_TOP_Y } from './tableArt'
 import {
   CHIP_BONK_REACT_SECONDS,
@@ -28,7 +29,8 @@ import {
  *   head (💥), bounces, spins and settles on the felt; aimed at the hero it
  *   flies at the lens with a jolt and a star-crack flash (kept small and in
  *   the corner while it is the hero's turn);
- * - icon pops over a seat for house-rule drinks (🍺, 🍺🍺, 💧, 🥃).
+ * - icon pops over a seat for house-rule drinks (beer, double beer, water,
+ *   shot), drawn as SVG (see popIcons.ts) so they never depend on emoji fonts.
  * Everything is driven by server events; nothing here changes game state.
  */
 
@@ -364,13 +366,25 @@ function updateFirstPersonShot(runtime: PrankRuntime, time: number, colors: { sk
 // DOM overlays: icon pops and hit flashes (pictures only, no words)
 // ---------------------------------------------------------------------------
 
-function addPop(runtime: PrankRuntime, icon: string, kind: string, time: number, anchor: Pick<Pop, 'seatId' | 'world' | 'screen'>) {
+/**
+ * Pops and flashes are short-lived DOM nodes; each one also bumps a counter on
+ * the stage (`data-pops-bonk="2"`) so tests can check that it played without
+ * racing its fade-out.
+ */
+function countOnHost(runtime: PrankRuntime, key: string) {
+  const dataset = runtime.host.dataset
+  dataset[key] = String(Number(dataset[key] ?? 0) + 1)
+}
+
+function addPop(runtime: PrankRuntime, kind: PopIconKind, time: number, anchor: Pick<Pop, 'seatId' | 'world' | 'screen'>) {
   const element = document.createElement('div')
-  element.className = `prank-pop-3d is-${kind}`
+  const cssKind = kind === 'beer2' ? 'beer is-double' : kind
+  element.className = `prank-pop-3d is-${cssKind}`
   element.setAttribute('aria-hidden', 'true')
   const inner = document.createElement('span')
-  inner.textContent = icon
+  inner.innerHTML = popIconMarkup(kind)
   element.append(inner)
+  countOnHost(runtime, `pops${kind[0].toUpperCase()}${kind.slice(1)}`)
   element.style.setProperty('--pop-x', '-999px')
   element.style.setProperty('--pop-y', '-999px')
   runtime.host.append(element)
@@ -381,6 +395,7 @@ function addFlash(runtime: PrankRuntime, kind: 'shot' | 'bonk', time: number, po
   const element = document.createElement('div')
   element.className = `prank-hit-flash is-${kind}${peripheral ? ' is-peripheral' : ''}`
   element.setAttribute('aria-hidden', 'true')
+  countOnHost(runtime, kind === 'shot' ? 'flashesShot' : 'flashesBonk')
   if (point && !peripheral) {
     element.style.setProperty('--hit-x', `${(point.x * 100).toFixed(1)}%`)
     element.style.setProperty('--hit-y', `${(point.y * 100).toFixed(1)}%`)
@@ -477,7 +492,7 @@ export function queuePrank(runtime: PrankRuntime, event: PrankEvent, context: Pr
   if (event.kind === 'shot' || event.kind === 'house_shot') {
     const cheers = event.kind === 'house_shot' && event.rule === 'cheers'
     if (context.reducedMotion) {
-      addPop(runtime, '🥃', 'shot', time, target.isHero ? { seatId: null, world: null, screen: { x: 0.5, y: 0.62 } } : { seatId: target.playerId, world: null, screen: null })
+      addPop(runtime, 'shot', time, target.isHero ? { seatId: null, world: null, screen: { x: 0.5, y: 0.62 } } : { seatId: target.playerId, world: null, screen: null })
       return
     }
     const sender = event.kind === 'shot' ? context.seats.get(event.fromId) : undefined
@@ -509,7 +524,7 @@ export function queuePrank(runtime: PrankRuntime, event: PrankEvent, context: Pr
   // Chip flick.
   const peripheral = target.isHero && context.heroActing
   if (context.reducedMotion) {
-    addPop(runtime, '💥', 'bonk', time, target.isHero
+    addPop(runtime, 'bonk', time, target.isHero
       ? { seatId: null, world: null, screen: peripheral ? { x: 0.9, y: 0.14 } : { x: 0.5, y: 0.3 } }
       : { seatId: target.playerId, world: null, screen: null })
     return
@@ -538,13 +553,13 @@ export function queuePrank(runtime: PrankRuntime, event: PrankEvent, context: Pr
   })
 }
 
-/** Icon pop over a seat for house-rule drinks (🍺, 🍺🍺, 💧). */
-export function queueSeatPop(runtime: PrankRuntime, id: string, playerId: string, icon: string, kind: string, context: PrankQueueContext) {
+/** Icon pop over a seat for house-rule drinks (beer, double beer, water). */
+export function queueSeatPop(runtime: PrankRuntime, id: string, playerId: string, kind: PopIconKind, context: PrankQueueContext) {
   if (runtime.seen.has(id)) return
   runtime.seen.add(id)
   const seat = context.seats.get(playerId)
   if (!seat) return
-  addPop(runtime, icon, kind, context.time, seat.isHero
+  addPop(runtime, kind, context.time, seat.isHero
     ? { seatId: null, world: null, screen: { x: 0.5, y: 0.6 } }
     : { seatId: playerId, world: null, screen: null })
 }
@@ -663,7 +678,7 @@ function updateShot(runtime: PrankRuntime, shot: ShotPrank, frame: PrankFrame) {
   if (!shot.popped && local >= SHOT_SLAM_AT) {
     shot.popped = true
     if (!shot.toHero) {
-      addPop(runtime, '🥃', 'shot', time, { seatId: seat.playerId, world: null, screen: null })
+      addPop(runtime, 'shot', time, { seatId: seat.playerId, world: null, screen: null })
     }
   }
   if (shot.toHero && !shot.flashed && local >= SHOT_SLAM_AT) {
@@ -740,12 +755,12 @@ function updateFlick(runtime: PrankRuntime, flick: FlickPrank, frame: PrankFrame
         const screen = project(runtime, end, 1, 1)
         addFlash(runtime, 'bonk', time, { x: screen.x, y: screen.y }, flick.peripheral)
         startShake(runtime, time, flick.peripheral ? 0.25 : 1, flick.peripheral ? 0.2 : 0.4)
-        addPop(runtime, '💥', 'bonk', time, { seatId: null, world: null, screen: flick.peripheral ? { x: 0.88, y: 0.12 } : { x: screen.x, y: Math.max(0.12, screen.y - 0.08) } })
+        addPop(runtime, 'bonk', time, { seatId: null, world: null, screen: flick.peripheral ? { x: 0.88, y: 0.12 } : { x: screen.x, y: Math.max(0.12, screen.y - 0.08) } })
         // Drops away out of view, down onto the felt in front of the hero.
         runtime.camera.getWorldDirection(flick.velocity).multiplyScalar(0.6)
         flick.velocity.y = 0.4
       } else {
-        addPop(runtime, '💥', 'bonk', time, { seatId: flick.targetId, world: null, screen: null })
+        addPop(runtime, 'bonk', time, { seatId: flick.targetId, world: null, screen: null })
         // Ricochet off the skull back toward the middle of the table.
         flick.velocity.set(-flick.position.x, 0, -flick.position.z).setY(0)
         if (flick.velocity.lengthSq() < 1e-6) flick.velocity.set(0, 0, -1)
