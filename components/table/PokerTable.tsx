@@ -491,6 +491,8 @@ function MobileEdgeSeat({
 }) {
   const isFolded = player.status === 'folded'
   const isDisconnected = player.status === 'disconnected' || !player.isConnected
+  // Benched after missed hands (or by choice): keeps the seat, not dealt in.
+  const isSittingOut = !isDisconnected && (player.isAway || (player.status === 'sitting_out' && player.stack > 0))
   const isAllIn = player.status === 'all_in'
   const blindRole = player.isBB ? 'big' : player.isSB ? 'small' : null
   const mobileSeatName = getMobileSeatName(player)
@@ -504,7 +506,7 @@ function MobileEdgeSeat({
   const actionChip = getSeatActionChip(player)
   const statusTone = isWinner && typeof winnerAmount === 'number' && winnerAmount > 0
     ? 'win'
-    : isDisconnected && !isFolded
+    : (isDisconnected || isSittingOut) && !isFolded
       ? 'away'
       : actionChip?.tone ?? (blindRole ? 'blind' : 'idle')
   const classes = [
@@ -612,7 +614,7 @@ function MobileEdgeSeat({
         {statusTone === 'win' ? (
           <span className="mobile-seat-action">+{formatAmount(winnerAmount ?? 0)}</span>
         ) : statusTone === 'away' ? (
-          <span className="mobile-seat-action">Away</span>
+          <span className="mobile-seat-action">{isSittingOut ? 'Sitting out' : 'Away'}</span>
         ) : actionChip ? (
           <span
             key={`${actionChip.tone}-${player.lastActionId ?? actionChip.label}`}
@@ -906,6 +908,8 @@ export function buildPlayerManagementTags(
   }
   if (!player.isConnected) {
     tags.push('Away')
+  } else if (player.isAway) {
+    tags.push('Sitting out')
   }
   return tags
 }
@@ -3804,7 +3808,7 @@ export function SettingsModal({
                           aria-label={`Kick ${player.nickname} from the table`}
                           onClick={() => onRemovePlayer(player.id)}
                         >
-                          {state.phase === 'in_hand' ? 'Kick after hand' : 'Kick player'}
+                          {state.phase === 'in_hand' ? 'Kick (folds now)' : 'Kick player'}
                         </button>
                       ) : (
                         <span className="table-chip table-chip-soft">Self removal blocked</span>

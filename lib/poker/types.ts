@@ -88,6 +88,8 @@ export interface SeatPlayer {
   drinks?: PlayerDrinkState
   /** True while the player is privately looking at their own hole cards. Never carries card values. */
   isPeeking?: boolean
+  /** Sitting out (missed hands or chose to): keeps seat and chips, not dealt in. */
+  isAway?: boolean
 }
 
 export interface Pot {
@@ -132,6 +134,8 @@ export interface LobbyPlayer {
   isBot?: boolean
   isSeated: boolean
   isSpectator: boolean
+  /** Sitting out until they say they are back. */
+  isAway?: boolean
 }
 
 /** Public summary of a completed hand for the "Last hands" view. */

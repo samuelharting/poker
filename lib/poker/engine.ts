@@ -732,6 +732,41 @@ function advanceAction(state: InternalGameState): InternalGameState {
 }
 
 /**
+ * Fold a player who is leaving the hand (kicked, left, moved to the rail),
+ * whether or not it is their turn. The acting player folds through the normal
+ * flow; anyone else is folded in place, and the pot is awarded at once when
+ * that leaves a single contender. All-in players are untouched: their chips
+ * are already committed and they can still win what they are eligible for.
+ */
+export function foldLeavingPlayer(
+  state: InternalGameState,
+  playerId: string
+): InternalGameState {
+  if (state.phase !== 'in_hand') return state
+
+  const playerIdx = findPlayerIndex(state.players, playerId)
+  if (playerIdx < 0 || state.players[playerIdx]!.status !== 'active') return state
+
+  if (state.actingPlayerId === playerId) {
+    return processAction(state, playerId, 'fold')
+  }
+
+  const s = cloneState(state)
+  const player = s.players[playerIdx]!
+  player.status = 'folded'
+  player.hasActedThisRound = true
+  setPlayerLastAction(s, player, 'Folded')
+  addAction(s, `${player.nickname} folds`)
+
+  const playersLeft = getActivePlayers(s)
+  if (playersLeft.length === 1) {
+    return awardLastPlayer(s, playersLeft[0]!.id)
+  }
+
+  return s
+}
+
+/**
  * Advance to the next betting round (flop → turn → river → showdown).
  * Deals community cards and resets bets.
  */

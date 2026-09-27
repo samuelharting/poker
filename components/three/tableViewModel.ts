@@ -65,6 +65,8 @@ export interface ThreePlayerView {
   isWinner: boolean
   winnerHandDescription?: string
   isOutOfHand: boolean
+  /** Seat tag for players who are not at the table right now. */
+  awayLabel?: 'Away' | 'Sitting out'
   isDealer: boolean
   blindRole: ThreeBlindRole
   hasCards: boolean
@@ -352,6 +354,11 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
         isWinner: Boolean(winner),
         winnerHandDescription: winner?.handDescription,
         isOutOfHand,
+        awayLabel: !player.isConnected || player.status === 'disconnected'
+          ? 'Away'
+          : player.isAway || (player.status === 'sitting_out' && player.stack > 0)
+            ? 'Sitting out'
+            : undefined,
         isDealer: player.isDealer,
         blindRole: getBlindRole(player),
         hasCards: player.hasCards,

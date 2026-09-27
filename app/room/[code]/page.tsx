@@ -33,6 +33,7 @@ import { DrinkProvider } from '@/components/table/DrinkContext'
 import { DrinkControls } from '@/components/table/DrinkControls'
 import { DrinkToasts } from '@/components/table/DrinkToasts'
 import { DrunkVisionLayer } from '@/components/table/DrunkVisionLayer'
+import { MembershipLayer } from '@/components/ui/MembershipLayer'
 
 const ignoreFeedback = () => {}
 
@@ -146,7 +147,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
   })
   const [soundPreferencesReady, setSoundPreferencesReady] = useState(false)
 
-  const { tableState, socialState, yourId, isHost, sendAction, seatMe, sendMessage, isConnected, connectionIssue, drinkEvents, orderDrink } = useRoom(
+  const { tableState, socialState, yourId, isHost, sendAction, seatMe, sendMessage, isConnected, connectionIssue, drinkEvents, orderDrink, sessionEnded, notices, dismissNotice } = useRoom(
     roomCode,
     currentProfile
   )
@@ -416,6 +417,16 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           <DrinkToasts />
         </>
       )}
+
+      <MembershipLayer
+        tableState={tableState}
+        yourId={yourId}
+        isConnected={isConnected}
+        sessionEnded={sessionEnded}
+        notices={notices}
+        onDismissNotice={dismissNotice}
+        onSetSittingOut={sittingOut => sendMessage({ type: 'set_sitting_out', sittingOut })}
+      />
     </div>
     </DrinkProvider>
   )

@@ -16,6 +16,7 @@ import { buildHandHistoryEntry, upsertHandHistory } from '../lib/poker/handHisto
 import { normalizePlayerUsername, type PlayerAvatarCustomization } from '../lib/profile'
 import {
   createInitialGameState,
+  foldLeavingPlayer,
   processAction,
   resolveRunItTwiceDecision,
   runRabbitHunt,
@@ -105,6 +106,45 @@ interface RoomData {
   autoStartEnabled: boolean
   ladyLuck: LadyLuckTracker
   handHistory: HandHistoryEntry[]
+  membership: MembershipData
+}
+
+/**
+ * Seat bookkeeping that survives people coming and going: who joined when
+ * (host succession), chips carried out by departed players (so leaving and
+ * rejoining never mints a fresh stack), and the away / sitting-out tracker.
+ */
+interface MembershipData {
+  joinedAt: Record<string, number>
+  /** Stack a departed human walked away with, keyed by normalized nickname. */
+  departedStacks: Record<string, number>
+  /** Humans sitting out until they tap "I'm back". */
+  awayIds: Record<string, true>
+  /** Consecutive hands missed (timed out or disconnected at the deal). */
+  missedHands: Record<string, number>
+  /** Players dealt into the current / most recent hand. */
+  dealtIn: string[]
+  timedOutThisHand: Record<string, true>
+  actedThisHand: Record<string, true>
+  /** Hand number the missed-hand check last ran for. */
+  countedForHand?: number
+  /** Nicknames the host kicked: if they come back they start on the rail, not in a seat. */
+  kickedNames: Record<string, true>
+}
+
+export const MISSED_HANDS_BEFORE_SIT_OUT = 2
+
+function createMembershipData(): MembershipData {
+  return {
+    joinedAt: {},
+    departedStacks: {},
+    awayIds: {},
+    missedHands: {},
+    dealtIn: [],
+    timedOutThisHand: {},
+    actedThisHand: {},
+    kickedNames: {},
+  }
 }
 
 function generateId(length = 8): string {
@@ -143,7 +183,7 @@ const CHAT_BUBBLE_DURATION = 9000
 const EMOTE_DURATION = 6000
 const MAX_CHAT_HISTORY = 18
 export const AUTO_START_DELAY = DEFAULT_SETTINGS.autoStartDelay
-export const HOST_DISCONNECT_GRACE_MS = 30_000
+export const HOST_DISCONNECT_GRACE_MS = 20_000
 const BOT_NAMES = ['Maverick', 'River', 'Bluff', 'Ace', 'Nova', 'Dealer Dan', 'Pocket', 'Lucky', 'Tilt', 'Rook']
 
 function formatCurrency(amount: number): string {
@@ -182,6 +222,7 @@ export default class PokerRoom implements PartyServer {
   private runItTwiceTimeout: ReturnType<typeof setTimeout> | null = null
   private runItTwiceDeadline: number | null = null
   private hostTransferTimeout: ReturnType<typeof setTimeout> | null = null
+  private revealSettleTimeout: ReturnType<typeof setTimeout> | null = null
   private disconnectedHostId: string | null = null
   /** Drink state lives beside, not inside, the game engine. */
   private drinkLedger: Record<string, DrinkLedgerEntry> = {}
@@ -229,6 +270,7 @@ export default class PokerRoom implements PartyServer {
       autoStartEnabled: true,
       ladyLuck: createLadyLuckTracker(),
       handHistory: [],
+      membership: createMembershipData(),
     }
   }
 
@@ -318,6 +360,9 @@ export default class PokerRoom implements PartyServer {
           break
         case 'companion_mute':
           this.handleCompanionMute(sender)
+          break
+        case 'set_sitting_out':
+          this.handleSetSittingOut(sender, msg.sittingOut)
           break
         case 'peek_cards':
           this.handlePeekCards(sender, msg.peeking)
@@ -416,30 +461,47 @@ export default class PokerRoom implements PartyServer {
       : undefined
 
     if (reconnectPlayerId) {
-      this.bindConnection(conn, reconnectPlayerId)
-      this.cancelDisconnectedHostTransfer(reconnectPlayerId)
-      if (!this.data.hostId) {
-        this.data.hostId = reconnectPlayerId
-      }
-      if (!this.data.playerProfiles[reconnectPlayerId]) {
-        this.data.playerProfiles[reconnectPlayerId] = { email, venmoUsername, avatar }
-      } else if (avatar) {
-        this.data.playerProfiles[reconnectPlayerId].avatar = avatar
-      }
-      this.ensureStats(trimmed)
+      this.resumePlayer(conn, reconnectPlayerId, email, venmoUsername, avatar)
+      return
+    }
 
-      const player = this.getPlayer(reconnectPlayerId)
-      if (player) {
-        player.isConnected = true
-        if (player.status === 'disconnected') {
-          player.status = player.stack > 0 ? 'waiting' : 'sitting_out'
-        }
+    // Without a token the nickname is the identity at a friends' table: the
+    // same name coming back reclaims its seat, chips and stats.
+    const namedPlayerId = this.findHumanByNickname(trimmed)
+    if (namedPlayerId) {
+      if (this.isPlayerLive(namedPlayerId)) {
+        this.sendSessionEnded(
+          conn,
+          'name_taken',
+          `${this.data.playerNicknames[namedPlayerId] ?? trimmed} is already playing at this table. ` +
+          'Close it on your other device, or join with a different nickname.'
+        )
+        return
       }
+      this.resumePlayer(conn, namedPlayerId, email, venmoUsername, avatar)
+      return
+    }
 
-      this.finalizeState()
-      // Reconnecting resumes the same deadline rather than restarting it.
-      this.syncActionTimer()
-      this.broadcastState()
+    // Left (or was removed) mid-hand and came straight back: the seat is
+    // still finishing the hand, so take it back instead of minting a new one.
+    const leavingSeat = this.data.gameState.players.find(player => (
+      this.data.pendingRemovals[player.id] &&
+      !player.isBot &&
+      !this.data.playerNicknames[player.id] &&
+      normalizePlayerUsername(player.nickname) === normalizePlayerUsername(trimmed)
+    ))
+    if (leavingSeat) {
+      delete this.data.pendingRemovals[leavingSeat.id]
+      const kickedKey = normalizePlayerUsername(leavingSeat.nickname)
+      if (this.data.membership.kickedNames[kickedKey]) {
+        // Kicked, then straight back: watch from the rail once this hand ends.
+        delete this.data.membership.kickedNames[kickedKey]
+        this.data.pendingSpectators[leavingSeat.id] = true
+        this.data.spectatorIds[leavingSeat.id] = true
+      }
+      this.data.playerNicknames[leavingSeat.id] = leavingSeat.nickname
+      this.data.reconnectTokens[leavingSeat.id] = generateReconnectToken()
+      this.resumePlayer(conn, leavingSeat.id, email, venmoUsername, avatar)
       return
     }
 
@@ -448,13 +510,106 @@ export default class PokerRoom implements PartyServer {
     this.data.reconnectTokens[playerId] = generateReconnectToken()
     this.data.playerNicknames[playerId] = trimmed
     this.data.playerProfiles[playerId] = { email, venmoUsername, avatar }
+    this.data.membership.joinedAt[playerId] = Date.now()
     this.ensureStats(trimmed)
+
+    // Chips walk out with a player and walk back in with them.
+    const carriedKey = normalizePlayerUsername(trimmed)
+    const carriedStack = this.data.membership.departedStacks[carriedKey]
+    if (carriedStack !== undefined) {
+      delete this.data.membership.departedStacks[carriedKey]
+      this.data.spectatorStacks[playerId] = carriedStack
+      if (carriedStack <= 0) {
+        this.data.spectatorIds[playerId] = true
+      }
+    }
+    if (this.data.membership.kickedNames[carriedKey]) {
+      // A kicked player may come back, but only to the rail: the host (or
+      // they, deliberately) can seat them again.
+      delete this.data.membership.kickedNames[carriedKey]
+      this.data.spectatorIds[playerId] = true
+      this.data.spectatorStacks[playerId] ??= this.data.tableSettings.startingStack
+    }
 
     if (!this.data.hostId) {
       this.data.hostId = playerId
     }
 
     this.broadcastState()
+  }
+
+  /** Re-attach a known player (token or nickname) to a fresh connection. */
+  private resumePlayer(
+    conn: Connection,
+    playerId: string,
+    email: string,
+    venmoUsername: string,
+    avatar?: PlayerAvatarCustomization
+  ) {
+    const previousConnId = this.data.playerToConnection[playerId]
+    if (previousConnId && previousConnId !== conn.id) {
+      const previousConn = this.room.getConnection(previousConnId)
+      if (previousConn) {
+        this.sendSessionEnded(
+          previousConn,
+          'replaced',
+          'Your seat was opened in another tab or device, so this one stopped following the table.'
+        )
+      }
+    }
+
+    this.bindConnection(conn, playerId)
+    this.cancelDisconnectedHostTransfer(playerId)
+    this.data.membership.joinedAt[playerId] ??= Date.now()
+    if (!this.data.hostId || this.isBotPlayer(this.data.hostId)) {
+      this.data.hostId = playerId
+    }
+    if (!this.data.playerProfiles[playerId]) {
+      this.data.playerProfiles[playerId] = { email, venmoUsername, avatar }
+    } else if (avatar) {
+      this.data.playerProfiles[playerId].avatar = avatar
+    }
+    this.ensureStats(this.data.playerNicknames[playerId] ?? '')
+
+    const player = this.getPlayer(playerId)
+    if (player) {
+      player.isConnected = true
+      if (player.status === 'disconnected') {
+        player.status = player.stack > 0 ? 'waiting' : 'sitting_out'
+      }
+    }
+
+    this.finalizeState()
+    // Reconnecting resumes the same deadline rather than restarting it.
+    this.syncActionTimer()
+    this.broadcastState()
+  }
+
+  private findHumanByNickname(nickname: string): string | undefined {
+    const key = normalizePlayerUsername(nickname)
+    return Object.entries(this.data.playerNicknames).find(([playerId, name]) => (
+      !this.isBotPlayer(playerId) && normalizePlayerUsername(name) === key
+    ))?.[0]
+  }
+
+  /** True when the player has a socket that is still open. */
+  private isPlayerLive(playerId: string): boolean {
+    const connId = this.data.playerToConnection[playerId]
+    return Boolean(connId && this.room.getConnection(connId))
+  }
+
+  private sendSessionEnded(
+    conn: Connection,
+    reason: Extract<S2CMessage, { type: 'session_ended' }>['reason'],
+    message: string
+  ) {
+    this.sendMessage(conn, { type: 'session_ended', reason, message })
+  }
+
+  private broadcastNotice(notice: Omit<Extract<S2CMessage, { type: 'notice' }>, 'type'>) {
+    for (const conn of Array.from(this.room.getConnections())) {
+      this.sendMessage(conn, { type: 'notice', ...notice })
+    }
   }
 
   private handleSeatMe(conn: Connection, preferredSeat?: number) {
@@ -563,6 +718,7 @@ export default class PokerRoom implements PartyServer {
 
     this.data.gameState.players.push(newPlayer)
     this.data.gameState.players.sort((a, b) => a.seatIndex - b.seatIndex)
+    this.syncActingPlayerIndex()
     delete this.data.spectatorIds[playerId]
     delete this.data.spectatorStacks[playerId]
     delete this.data.pendingSpectators[playerId]
@@ -608,12 +764,13 @@ export default class PokerRoom implements PartyServer {
     this.flushPendingRemovals()
     this.flushPendingSpectators()
     this.moveZeroStackPlayersToSpectators()
+    this.updateMissedHands()
 
     const seatedPlayers = this.data.gameState.players.filter(
-      player => player.stack > 0 && player.status !== 'disconnected'
+      player => player.stack > 0 && player.status !== 'disconnected' && player.status !== 'sitting_out'
     )
     if (seatedPlayers.length < 2) {
-      this.sendActionFailed(conn, 'Need at least 2 players with chips')
+      this.sendActionFailed(conn, 'Need at least 2 players with chips who are at the table')
       this.broadcastState()
       return
     }
@@ -622,6 +779,7 @@ export default class PokerRoom implements PartyServer {
       this.clearAutoStart()
       this.data.cardRevealRequests = {}
       this.data.gameState = startHand(this.data.gameState)
+      this.recordDealtIn()
       this.recordHandsPlayedForCurrentHand()
       this.wakeRestedDrinkers()
       this.scheduleBotPeeks()
@@ -639,11 +797,8 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
-    if (this.data.gameState.phase === 'in_hand') {
-      this.sendActionFailed(conn, 'Cannot add bots during a hand')
-      return
-    }
-
+    // Mid-hand bots take their seat as 'waiting' and are dealt in next hand.
+    const addedMidHand = this.data.gameState.phase === 'in_hand'
     const occupiedSeats = new Set(this.data.gameState.players.map(player => player.seatIndex))
     const openSeats = Array.from({ length: this.data.tableSettings.maxPlayers }, (_, index) => index)
       .filter(index => !occupiedSeats.has(index))
@@ -682,7 +837,11 @@ export default class PokerRoom implements PartyServer {
     }
 
     this.data.gameState.players.sort((a, b) => a.seatIndex - b.seatIndex)
-    this.sendActionResult(conn, `Added ${toAdd} bot${toAdd === 1 ? '' : 's'}`)
+    this.syncActingPlayerIndex()
+    this.sendActionResult(
+      conn,
+      `Added ${toAdd} bot${toAdd === 1 ? '' : 's'}${addedMidHand ? '. They join next hand.' : ''}`
+    )
     this.broadcastState()
   }
 
@@ -715,6 +874,7 @@ export default class PokerRoom implements PartyServer {
     try {
       this.clearAutoFold()
       this.data.gameState = processAction(this.data.gameState, playerId, action, amount)
+      this.markPlayerPresent(playerId)
       if (action === 'fold') {
         this.recordFold(playerId)
       }
@@ -983,6 +1143,12 @@ export default class PokerRoom implements PartyServer {
       'That player'
     const seatedPlayer = this.getPlayer(targetId)
     const removedMidHand = this.data.gameState.phase === 'in_hand' && Boolean(seatedPlayer)
+    const wasAllIn = seatedPlayer?.status === 'all_in'
+    const targetConnId = this.data.playerToConnection[targetId]
+    const targetConn = targetConnId ? this.room.getConnection(targetConnId) : undefined
+    if (targetConn) {
+      this.sendSessionEnded(targetConn, 'kicked', 'The host removed you from the table.')
+    }
 
     if (this.data.gameState.phase === 'in_hand' && !seatedPlayer) {
       this.removeSessionMetadata(targetId)
@@ -994,11 +1160,16 @@ export default class PokerRoom implements PartyServer {
     }
 
     this.evictPlayer(targetId)
+    if (seatedPlayer && !seatedPlayer.isBot && !this.isBotPlayer(targetId)) {
+      this.data.membership.kickedNames[normalizePlayerUsername(targetName)] = true
+    }
     this.sendActionResult(
       conn,
-      removedMidHand
-        ? `Kicked ${targetName}. They fold now and leave the table after this hand.`
-        : `Kicked ${targetName} from the table.`
+      !removedMidHand
+        ? `Kicked ${targetName} from the table.`
+        : wasAllIn
+          ? `Kicked ${targetName}. Their all-in plays out, then they leave the table.`
+          : `Kicked ${targetName}. They fold now and leave the table after this hand.`
     )
     this.broadcastState()
   }
@@ -1098,22 +1269,7 @@ export default class PokerRoom implements PartyServer {
         const wasActingPlayer = this.data.gameState.actingPlayerId === targetId
         this.data.pendingSpectators[targetId] = true
         this.data.spectatorIds[targetId] = true
-        if (seatedPlayer.status === 'active' && this.data.gameState.actingPlayerId === targetId) {
-          try {
-            this.clearAutoFold()
-            this.data.gameState = processAction(this.data.gameState, targetId, 'fold')
-            this.recordFold(targetId)
-            this.recordCompletedHandStats()
-          } catch {
-            seatedPlayer.status = 'folded'
-            setPlayerLastAction(this.data.gameState, seatedPlayer, 'Folded')
-            this.recordFold(targetId)
-          }
-        } else if (seatedPlayer.status === 'active') {
-          seatedPlayer.status = 'folded'
-          setPlayerLastAction(this.data.gameState, seatedPlayer, 'Folded')
-          this.recordFold(targetId)
-        }
+        this.foldDepartingPlayer(targetId)
         this.finalizeState()
         this.syncActionTimer(wasActingPlayer)
         this.sendActionResult(conn, `Moved ${targetName} to spectator mode. They fold now and watch the rest of this hand.`)
@@ -1516,28 +1672,83 @@ export default class PokerRoom implements PartyServer {
 
     if (this.data.gameState.phase === 'in_hand') {
       this.data.pendingRemovals[playerId] = true
-
-      if (wasActingPlayer && player.status === 'active') {
-        try {
-          this.clearAutoFold()
-          this.data.gameState = processAction(this.data.gameState, playerId, 'fold')
-          this.recordFold(playerId)
-          this.recordCompletedHandStats()
-        } catch {
-          // Ignore impossible forced-fold transitions.
-        }
-      }
+      // Out of turn too: nobody should wait on a player who already left.
+      this.foldDepartingPlayer(playerId)
 
       const remainingPlayer = this.getPlayer(playerId)
       if (remainingPlayer) {
         remainingPlayer.isConnected = false
       }
     } else {
+      this.recordDepartedStack(player)
       this.removePlayerFromTable(playerId)
     }
 
     this.finalizeState()
     this.syncActionTimer(wasActingPlayer)
+  }
+
+  /**
+   * Fold a player who is leaving the hand right now, on turn or not, and
+   * settle a run-it-twice vote they can no longer answer (one board).
+   */
+  private foldDepartingPlayer(playerId: string) {
+    if (this.data.gameState.phase !== 'in_hand') {
+      return
+    }
+
+    const player = this.getPlayer(playerId)
+    if (player?.status === 'active') {
+      try {
+        if (this.data.gameState.actingPlayerId === playerId) {
+          this.clearAutoFold()
+        }
+        this.data.gameState = foldLeavingPlayer(this.data.gameState, playerId)
+        this.recordFold(playerId)
+        this.recordCompletedHandStats()
+      } catch {
+        // Ignore impossible forced-fold transitions.
+      }
+    }
+
+    const runItTwice = this.data.gameState.runItTwice
+    if (
+      runItTwice?.status === 'voting' &&
+      runItTwice.eligiblePlayerIds.includes(playerId) &&
+      !runItTwice.votes[playerId]
+    ) {
+      try {
+        this.data.gameState = resolveRunItTwiceDecision(this.data.gameState, false)
+        this.recordCompletedHandStats()
+      } catch {
+        // The vote already resolved.
+      }
+    }
+
+    this.syncActingPlayerIndex()
+  }
+
+  /** Remember what a departing human carried out so rejoining restores it. */
+  private recordDepartedStack(player: Pick<InternalPlayer, 'id' | 'nickname' | 'stack' | 'isBot'>) {
+    if (player.isBot || this.isBotPlayer(player.id)) {
+      return
+    }
+    this.data.membership.departedStacks[normalizePlayerUsername(player.nickname)] = Math.max(0, player.stack)
+  }
+
+  /**
+   * Seat order is by seatIndex, so anyone inserted or removed mid-hand shifts
+   * array positions; keep the engine's acting index pointing at the actor.
+   */
+  private syncActingPlayerIndex() {
+    const state = this.data.gameState
+    if (!state.actingPlayerId) {
+      return
+    }
+    const index = state.players.findIndex(player => player.id === state.actingPlayerId)
+    if (index >= 0) {
+      state.actingPlayerIndex = index
+    }
   }
 
   private isBotPlayer(playerId: string): boolean {
@@ -1607,17 +1818,32 @@ export default class PokerRoom implements PartyServer {
       delete this.data.connectionToPlayer[connId]
     }
 
+    const nickname = this.data.playerNicknames[playerId]
+    const spectatorStack = this.data.spectatorStacks[playerId]
+    if (nickname && !this.getPlayer(playerId) && spectatorStack !== undefined) {
+      this.recordDepartedStack({ id: playerId, nickname, stack: spectatorStack })
+    }
+
     delete this.data.playerToConnection[playerId]
     delete this.data.reconnectTokens[playerId]
     delete this.data.playerNicknames[playerId]
     delete this.data.spectatorIds[playerId]
     delete this.data.spectatorStacks[playerId]
     delete this.data.pendingSpectators[playerId]
+    delete this.data.membership.joinedAt[playerId]
+    delete this.data.membership.awayIds[playerId]
+    delete this.data.membership.missedHands[playerId]
+    for (const [key, request] of Object.entries(this.data.cardRevealRequests)) {
+      if (request.requesterId === playerId) {
+        delete this.data.cardRevealRequests[key]
+      }
+    }
     this.clearPlayerSocialState(playerId)
     this.forgetDrinks(playerId)
 
     if (this.data.hostId === playerId) {
-      this.data.hostId = this.selectNextHost()
+      this.cancelDisconnectedHostTransfer(playerId)
+      this.assignHost(this.selectNextHost(playerId))
     }
   }
 
@@ -1657,13 +1883,174 @@ export default class PokerRoom implements PartyServer {
           player.status = player.stack > 0 ? 'waiting' : 'sitting_out'
         }
       }
+
+      if (isPostHandRevealWindow) {
+        this.scheduleRevealSettle()
+      } else {
+        this.applyAwayStatuses()
+      }
+    } else {
+      this.syncActingPlayerIndex()
     }
 
-    if (this.data.hostId && !this.data.playerNicknames[this.data.hostId]) {
-      this.data.hostId = this.selectNextHost()
+    if (
+      this.data.hostId &&
+      (!this.data.playerNicknames[this.data.hostId] || this.isBotPlayer(this.data.hostId))
+    ) {
+      this.assignHost(this.selectNextHost(this.data.hostId))
+    } else if (!this.data.hostId) {
+      const nextHostId = this.selectNextHost()
+      if (nextHostId) {
+        this.assignHost(nextHostId)
+      }
     }
 
     this.syncAutoStart()
+  }
+
+  /**
+   * Departing, benched and busted players stay in their chairs through the
+   * showdown reveal. If no next hand comes along to clear them (the table is
+   * down to one player), clear them once the reveal is over so nobody lingers
+   * as a ghost seat.
+   */
+  private scheduleRevealSettle() {
+    const hasSomethingToSettle = (
+      Object.keys(this.data.pendingRemovals).length > 0 ||
+      Object.keys(this.data.pendingSpectators).length > 0 ||
+      this.data.gameState.players.some(player => player.stack <= 0)
+    )
+    if (!hasSomethingToSettle || this.revealSettleTimeout) {
+      return
+    }
+
+    const handNumber = this.data.gameState.handNumber
+    this.revealSettleTimeout = setTimeout(() => {
+      this.revealSettleTimeout = null
+      if (this.data.gameState.phase === 'in_hand' || this.data.gameState.handNumber !== handNumber) {
+        return
+      }
+      this.flushPendingRemovals()
+      this.flushPendingSpectators()
+      this.moveZeroStackPlayersToSpectators()
+      this.broadcastState()
+    }, this.getAutoStartDelayMs() + 250)
+  }
+
+  private assignHost(nextHostId: string | null) {
+    const previousHostId = this.data.hostId
+    this.data.hostId = nextHostId
+    if (nextHostId && nextHostId !== previousHostId) {
+      const nickname = this.data.playerNicknames[nextHostId] ?? 'A player'
+      this.broadcastNotice({
+        kind: 'host_changed',
+        playerId: nextHostId,
+        message: `${nickname} is now the host`,
+      })
+    }
+  }
+
+  /** Mark a player as here: any real action clears their missed-hand streak. */
+  private markPlayerPresent(playerId: string) {
+    this.data.membership.actedThisHand[playerId] = true
+    delete this.data.membership.missedHands[playerId]
+  }
+
+  /** Away players keep their seat and chips but are not dealt in. */
+  private applyAwayStatuses() {
+    const away = this.data.membership.awayIds
+    for (const player of this.data.gameState.players) {
+      if (away[player.id] && player.isConnected && player.stack > 0) {
+        player.status = 'sitting_out'
+      }
+    }
+  }
+
+  /**
+   * Run right before a deal: a human who timed out of the last hand without
+   * acting, or who is disconnected for this deal, has missed a hand. Two in a
+   * row and they sit out until they tap "I'm back".
+   */
+  private updateMissedHands() {
+    const membership = this.data.membership
+    // A failed or retried deal must not count the same hand twice.
+    const upcomingHand = this.data.gameState.handNumber + 1
+    if (membership.countedForHand === upcomingHand) {
+      this.applyAwayStatuses()
+      return
+    }
+    membership.countedForHand = upcomingHand
+    const seated = new Map(this.data.gameState.players.map(player => [player.id, player]))
+    const missedNow = new Set<string>()
+
+    for (const playerId of membership.dealtIn) {
+      if (!seated.has(playerId) || membership.actedThisHand[playerId]) continue
+      if (membership.timedOutThisHand[playerId]) missedNow.add(playerId)
+    }
+    for (const player of this.data.gameState.players) {
+      if (
+        !player.isBot &&
+        !this.isBotPlayer(player.id) &&
+        player.stack > 0 &&
+        !membership.awayIds[player.id] &&
+        (!player.isConnected || player.status === 'disconnected')
+      ) {
+        missedNow.add(player.id)
+      }
+    }
+
+    for (const playerId of missedNow) {
+      const missed = (membership.missedHands[playerId] ?? 0) + 1
+      membership.missedHands[playerId] = missed
+      if (missed >= MISSED_HANDS_BEFORE_SIT_OUT && !membership.awayIds[playerId]) {
+        membership.awayIds[playerId] = true
+        const player = seated.get(playerId)
+        if (player?.isConnected) {
+          player.status = 'sitting_out'
+        }
+      }
+    }
+
+    membership.timedOutThisHand = {}
+    membership.actedThisHand = {}
+    this.applyAwayStatuses()
+  }
+
+  /** Call after startHand: remember who was dealt in for the missed-hand check. */
+  private recordDealtIn() {
+    this.data.membership.dealtIn = this.data.gameState.players
+      .filter(player => player.holeCards.length === 2)
+      .map(player => player.id)
+  }
+
+  private handleSetSittingOut(conn: Connection, sittingOut: boolean) {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    const player = playerId ? this.getPlayer(playerId) : undefined
+    if (!playerId || !player) {
+      this.sendActionFailed(conn, 'Take a seat first')
+      return
+    }
+
+    const membership = this.data.membership
+    const dealtIntoLiveHand = this.data.gameState.phase === 'in_hand' && player.holeCards.length === 2
+    if (sittingOut) {
+      membership.awayIds[playerId] = true
+      if (!dealtIntoLiveHand && player.stack > 0) {
+        player.status = 'sitting_out'
+      }
+      this.sendActionResult(conn, dealtIntoLiveHand ? 'You will sit out from the next hand.' : 'You are sitting out.')
+    } else {
+      delete membership.awayIds[playerId]
+      delete membership.missedHands[playerId]
+      membership.actedThisHand[playerId] = true
+      if (!dealtIntoLiveHand && player.status === 'sitting_out' && player.stack > 0) {
+        player.status = 'waiting'
+      }
+      this.sendActionResult(conn, 'Welcome back. You are dealt in next hand.')
+    }
+
+    this.finalizeState()
+    this.broadcastState()
   }
 
   private moveZeroStackPlayersToSpectators() {
@@ -1690,6 +2077,11 @@ export default class PokerRoom implements PartyServer {
     }
 
     const pendingSet = new Set(pendingIds)
+    for (const player of this.data.gameState.players) {
+      if (pendingSet.has(player.id)) {
+        this.recordDepartedStack(player)
+      }
+    }
     this.data.gameState.players = this.data.gameState.players.filter(player => !pendingSet.has(player.id))
     for (const playerId of pendingIds) {
       delete this.data.pendingRemovals[playerId]
@@ -1713,27 +2105,31 @@ export default class PokerRoom implements PartyServer {
     }
   }
 
+  /**
+   * The next host is a connected human: seated before spectating, then
+   * whoever has been at the table longest. Never a bot, never someone
+   * offline; with nobody eligible the room has no host until a human returns.
+   */
   private selectNextHost(excludedPlayerId?: string): string | null {
-    const joinedIds = new Set(
-      Object.keys(this.data.playerNicknames).filter(playerId => playerId !== excludedPlayerId)
+    const seatedIds = new Set(
+      this.data.gameState.players
+        .filter(player => !this.data.pendingSpectators[player.id])
+        .map(player => player.id)
     )
-    const seatedIds = this.data.gameState.players
-      .map(player => player.id)
-      .filter(playerId => playerId !== excludedPlayerId)
-    const connectedIds = Object.keys(this.data.playerToConnection).filter(
-      playerId => joinedIds.has(playerId) && playerId !== excludedPlayerId && !this.isBotPlayer(playerId)
-    )
+    const joinedAt = (playerId: string) => this.data.membership.joinedAt[playerId] ?? Number.MAX_SAFE_INTEGER
+    const candidates = Object.keys(this.data.playerNicknames).filter(playerId => (
+      playerId !== excludedPlayerId &&
+      !this.isBotPlayer(playerId) &&
+      !this.data.pendingRemovals[playerId] &&
+      Boolean(this.data.playerToConnection[playerId])
+    ))
 
-    const preferredOrder = [
-      ...seatedIds.filter(playerId => connectedIds.includes(playerId)),
-      ...connectedIds.filter(playerId => !seatedIds.includes(playerId)),
-      ...seatedIds.filter(playerId => joinedIds.has(playerId)),
-      ...Object.keys(this.data.playerNicknames).filter(
-        playerId => joinedIds.has(playerId) && !seatedIds.includes(playerId)
-      ),
-    ]
+    candidates.sort((a, b) => (
+      Number(seatedIds.has(b)) - Number(seatedIds.has(a)) ||
+      joinedAt(a) - joinedAt(b)
+    ))
 
-    return preferredOrder[0] ?? null
+    return candidates[0] ?? null
   }
 
   private scheduleDisconnectedHostTransfer(playerId: string) {
@@ -1747,7 +2143,7 @@ export default class PokerRoom implements PartyServer {
         return
       }
 
-      this.data.hostId = this.selectNextHost(playerId)
+      this.assignHost(this.selectNextHost(playerId))
       this.finalizeState()
       this.broadcastState()
     }, HOST_DISCONNECT_GRACE_MS)
@@ -1861,6 +2257,7 @@ export default class PokerRoom implements PartyServer {
           isBot: seatedPlayer?.isBot ?? id.startsWith('bot_'),
           isSeated,
           isSpectator,
+          ...(this.data.membership.awayIds[id] ? { isAway: true } : {}),
         } satisfies LobbyPlayer
       })
       .sort((a, b) => {
@@ -1896,6 +2293,7 @@ export default class PokerRoom implements PartyServer {
       stats: this.getPublicStats(player.id),
       drinks: toPublicDrinkState(this.drinkLedger[player.id]),
       ...(this.isPlayerPeeking(player.id) ? { isPeeking: true } : {}),
+      ...(this.data.membership.awayIds[player.id] ? { isAway: true } : {}),
     }
   }
 
@@ -2293,6 +2691,10 @@ export default class PokerRoom implements PartyServer {
       const shouldCheck = !forceFold && (actingPlayer ? actingPlayer.bet >= gameState.currentBet : false)
       const action = shouldCheck ? 'check' : 'fold'
       this.data.gameState = processAction(gameState, playerId, action)
+      if (!forceFold) {
+        // The clock ran out: count toward sitting them out if it keeps happening.
+        this.data.membership.timedOutThisHand[playerId] = true
+      }
       if (action === 'fold') {
         this.recordFold(playerId)
       }
@@ -2539,12 +2941,14 @@ export default class PokerRoom implements PartyServer {
         this.flushPendingRemovals()
         this.flushPendingSpectators()
         this.moveZeroStackPlayersToSpectators()
+        this.updateMissedHands()
         if (!this.shouldAutoStartNow()) {
           this.broadcastState()
           return
         }
         this.data.cardRevealRequests = {}
         this.data.gameState = startHand(this.data.gameState)
+        this.recordDealtIn()
         this.recordHandsPlayedForCurrentHand()
         this.wakeRestedDrinkers()
         this.scheduleBotPeeks()

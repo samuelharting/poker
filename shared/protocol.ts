@@ -80,6 +80,8 @@ export type C2SMessage =
   | { type: 'companion_mute' }
   /** The sender is privately looking at (squeezing) their own hole cards. */
   | { type: 'peek_cards'; peeking: boolean }
+  /** Sit out of upcoming hands (false = I'm back). */
+  | { type: 'set_sitting_out'; sittingOut: boolean }
 
 // Server -> Client messages
 export type S2CMessage =
@@ -90,6 +92,12 @@ export type S2CMessage =
   | { type: 'action_failed'; message: string }
   | { type: 'error'; message: string }
   | { type: 'drink_event'; event: DrinkEvent }
+  /** This connection no longer speaks for a player (kicked, opened elsewhere, name in use). */
+  | { type: 'session_ended'; reason: SessionEndedReason; message: string }
+  /** Table-wide heads-up, e.g. a new host. */
+  | { type: 'notice'; kind: 'host_changed'; message: string; playerId?: string }
+
+export type SessionEndedReason = 'kicked' | 'replaced' | 'name_taken'
 
 export const MAX_CHAT_LENGTH = 140
 const ALLOWED_CHAT_MESSAGE_RE = /\s+/g
@@ -322,6 +330,9 @@ export function parseC2S(raw: string): C2SMessage | null {
       case 'peek_cards':
         return typeof parsed.peeking === 'boolean' ? { type, peeking: parsed.peeking } : null
 
+      case 'set_sitting_out':
+        return typeof parsed.sittingOut === 'boolean' ? { type, sittingOut: parsed.sittingOut } : null
+
       default:
         return null
     }
@@ -377,6 +388,22 @@ export function parseS2C(raw: string): S2CMessage | null {
         return isValidDrinkEvent(parsed.event)
           ? { type, event: { ...parsed.event, nickname: sanitizeText(parsed.event.nickname, 40) } }
           : null
+
+      case 'session_ended': {
+        const reason = parsed.reason
+        const message = typeof parsed.message === 'string' ? sanitizeText(parsed.message, 240) : ''
+        return (reason === 'kicked' || reason === 'replaced' || reason === 'name_taken')
+          ? { type, reason, message }
+          : null
+      }
+
+      case 'notice': {
+        const message = typeof parsed.message === 'string' ? sanitizeText(parsed.message, 160) : ''
+        const playerId = typeof parsed.playerId === 'string' ? parsed.playerId : undefined
+        return parsed.kind === 'host_changed' && message
+          ? { type, kind: 'host_changed', message, ...(playerId ? { playerId } : {}) }
+          : null
+      }
 
       default:
         return null

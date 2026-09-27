@@ -13,6 +13,7 @@ import {
   type DrinkEvent,
   type DrinkKind,
   type PlayerSocialState,
+  type SessionEndedReason,
   type SocialSnapshot,
   type S2CMessage,
   type TableChatEntry,
@@ -25,6 +26,7 @@ const PARTY_NAME = process.env.NEXT_PUBLIC_PARTY_NAME ?? 'main'
 const LOCAL_PARTYKIT_HOST_PATTERN = /^(localhost|127\.0\.0\.1)(:\d+)?$/i
 const BACKGROUND_RECONNECT_THRESHOLD_MS = 10_000
 const MAX_DRINK_EVENTS = 12
+const MAX_ROOM_NOTICES = 4
 
 function buildConnectionIssue(): string {
   if (LOCAL_PARTYKIT_HOST_PATTERN.test(PARTYKIT_HOST)) {
@@ -104,6 +106,19 @@ interface RoomSocket {
   ) => void
 }
 
+/** Why this tab stopped speaking for a player (kicked, opened elsewhere, name in use). */
+export interface SessionEnded {
+  reason: SessionEndedReason
+  message: string
+}
+
+export interface RoomNotice {
+  id: string
+  kind: 'host_changed'
+  message: string
+  playerId?: string
+}
+
 export interface RoomState {
   tableState: TableState | null
   socialState: SocialSnapshot
@@ -120,6 +135,11 @@ export interface RoomState {
   /** Most recent drink events (beers, waters, pass-outs), oldest first. */
   drinkEvents: DrinkEvent[]
   orderDrink: (kind: DrinkKind) => void
+  /** Set once the server ends this tab's session; the socket is closed and stays closed. */
+  sessionEnded: SessionEnded | null
+  /** Table-wide notices (e.g. a new host), newest last. */
+  notices: RoomNotice[]
+  dismissNotice: (id: string) => void
 }
 
 export function useRoom(
@@ -141,6 +161,12 @@ export function useRoom(
   const [isConnected, setIsConnected] = useState(false)
   const [connectionIssue, setConnectionIssue] = useState<string | null>(null)
   const [drinkEvents, setDrinkEvents] = useState<DrinkEvent[]>([])
+  const [sessionEnded, setSessionEnded] = useState<SessionEnded | null>(null)
+  const [notices, setNotices] = useState<RoomNotice[]>([])
+  const sessionEndedRef = useRef(false)
+  const dismissNotice = useCallback((id: string) => {
+    setNotices(previous => previous.filter(notice => notice.id !== id))
+  }, [])
   const sendMessage = useCallback((msg: C2SMessage) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(msg))
@@ -176,6 +202,9 @@ export function useRoom(
 
     hasSeated.current = false
     hasEverConnectedRef.current = false
+    sessionEndedRef.current = false
+    setSessionEnded(null)
+    setNotices([])
     setTableState(null)
     setSocialState({ active: [], chatLog: [] })
     setDrinkEvents([])
@@ -215,7 +244,7 @@ export function useRoom(
           inactiveAt ??= Date.now()
         }
         const refreshConnection = (force = false) => {
-          if (!active || socketRef.current !== socket) {
+          if (!active || socketRef.current !== socket || sessionEndedRef.current) {
             return
           }
 
@@ -322,6 +351,31 @@ export function useRoom(
               break
             }
 
+            case 'session_ended': {
+              // Stop following the table: no auto-reconnect, no stale seat.
+              sessionEndedRef.current = true
+              if (msg.reason === 'kicked') {
+                clearStoredReconnectToken(roomCode)
+                reconnectTokenRef.current = null
+              }
+              setSessionEnded({ reason: msg.reason, message: msg.message })
+              setYourId('')
+              setIsHost(false)
+              socket.close()
+              break
+            }
+
+            case 'notice': {
+              const notice: RoomNotice = {
+                id: `notice_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                kind: msg.kind,
+                message: msg.message,
+                playerId: msg.playerId,
+              }
+              setNotices(previous => [...previous, notice].slice(-MAX_ROOM_NOTICES))
+              break
+            }
+
             case 'action_result':
             case 'action_failed':
             case 'error':
@@ -401,6 +455,9 @@ export function useRoom(
     sendMessage,
     drinkEvents,
     orderDrink,
+    sessionEnded,
+    notices,
+    dismissNotice,
   }
 }
 

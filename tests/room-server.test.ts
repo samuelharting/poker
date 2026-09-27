@@ -833,13 +833,16 @@ describe('PokerRoom timer handling', () => {
   it('shows every hand to a player once they move into spectator mode', () => {
     const { room, server } = createHarness()
 
-    // Heads-up the button (seat 1) acts first; seat the guest out of turn so
-    // moving them to the rail does not end the hand.
+    // Three-handed so the guest folding onto the rail leaves a live hand
+    // (heads-up, their fold would end it on the spot).
     const host = joinPlayer(server, room, 'host', 'Alice')
     seatPlayer(server, host.connection, 1)
 
     const guest = joinPlayer(server, room, 'guest', 'Bob')
     seatPlayer(server, guest.connection, 0)
+
+    const third = joinPlayer(server, room, 'third', 'Cara')
+    seatPlayer(server, third.connection, 2)
 
     send(server, host.connection, { type: 'start_game' })
     send(server, host.connection, { type: 'set_player_spectator', targetId: guest.playerId, spectator: true })
@@ -852,7 +855,7 @@ describe('PokerRoom timer handling', () => {
     expect(guestSeatForSpectator?.holeCards).toHaveLength(2)
     expect(hostSeatForSpectator?.showCards).toBe('both')
     expect(guestSeatForSpectator?.showCards).toBe('both')
-    expect(hostSeatForSpectator?.equityPercent).toBeUndefined()
+    // The guest folded on the way to the rail, so only live seats carry odds.
     expect(guestSeatForSpectator?.equityPercent).toBeUndefined()
 
     const hostSnapshot = lastMessage(host.connection, 'room_snapshot')
