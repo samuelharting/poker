@@ -1,8 +1,10 @@
 'use client'
 
 import { useEffect, useState, type CSSProperties } from 'react'
-import { DRINK_COOLDOWN_MS, DRUNK_LEVEL_MAX, type DrunkTier } from '@/lib/drinks'
-import { useDrinks } from './DrinkContext'
+import { CHASER_WINDOW_MS, DRINK_COOLDOWN_MS, DRUNK_LEVEL_MAX, type DrunkTier } from '@/lib/drinks'
+import { useChaserSecondsLeft, useDrinks } from './DrinkContext'
+
+const CHASER_WINDOW_SECONDS = CHASER_WINDOW_MS / 1000
 
 const TIER_LABELS: Record<DrunkTier, string> = {
   sober: 'Sober',
@@ -40,6 +42,7 @@ function useCooldownActive(lastOrderAt: number | null): boolean {
 export function DrinkControls({ variant }: { variant: 'desktop' | 'mobile' }) {
   const drinks = useDrinks()
   const isCooling = useCooldownActive(drinks?.lastOrderAt ?? null)
+  const chaserSeconds = useChaserSecondsLeft()
 
   if (!drinks || !drinks.isSeated) {
     return null
@@ -57,7 +60,9 @@ export function DrinkControls({ variant }: { variant: 'desktop' | 'mobile' }) {
     : `Crack a beer (${myDrinks.beers} so far)`
   const waterTitle = myDrinks.passedOut
     ? 'You are passed out'
-    : 'Drink a water. Sobers you up one level.'
+    : chaserSeconds > 0
+      ? `Chaser: a water now takes 2 off at once (${chaserSeconds}s)`
+      : 'Drink a water. Sobers you up one level.'
 
   return (
     <div
@@ -84,7 +89,7 @@ export function DrinkControls({ variant }: { variant: 'desktop' | 'mobile' }) {
         </button>
         <button
           type="button"
-          className="drink-button is-water"
+          className={`drink-button is-water ${chaserSeconds > 0 ? 'is-chaser' : ''}`}
           onClick={() => order('water')}
           disabled={disabled}
           aria-label={waterTitle}
@@ -92,6 +97,20 @@ export function DrinkControls({ variant }: { variant: 'desktop' | 'mobile' }) {
         >
           <span className="drink-button-glyph" aria-hidden="true">💧</span>
           <span className="drink-button-label">Water</span>
+          {chaserSeconds > 0 && (
+            // Chaser window after a shot: a ring that drains over 20s, no words.
+            <svg className="drink-chaser-ring" viewBox="0 0 36 36" aria-hidden="true" data-seconds={chaserSeconds}>
+              <circle className="drink-chaser-ring-track" cx="18" cy="18" r="15.5" />
+              <circle
+                className="drink-chaser-ring-fill"
+                cx="18"
+                cy="18"
+                r="15.5"
+                pathLength={100}
+                strokeDasharray={`${(chaserSeconds / CHASER_WINDOW_SECONDS) * 100} 100`}
+              />
+            </svg>
+          )}
         </button>
         {isCooling && lastOrderAt !== null && (
           <span key={lastOrderAt} className="drink-cooldown" aria-hidden="true" />

@@ -171,7 +171,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     setIsRejoining(Boolean(loadStoredReconnectToken(roomCode)))
   }, [roomCode])
 
-  const { tableState, socialState, yourId, isHost, sendAction, seatMe, sendMessage, isConnected, connectionIssue, drinkEvents, orderDrink, sessionEnded, notices, dismissNotice } = useRoom(
+  const { tableState, socialState, yourId, isHost, sendAction, seatMe, sendMessage, isConnected, connectionIssue, drinkEvents, orderDrink, prankEvents, buyShot, flickChip, sessionEnded, notices, dismissNotice } = useRoom(
     roomCode,
     currentProfile
   )
@@ -186,6 +186,12 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     muted: soundPreferences.muted,
     volume: soundPreferences.volume,
   })
+
+  // Only the desktop 3D table has drink controls; phones get none of the drinking or prank features.
+  useEffect(() => {
+    if (!yourId || !isConnected) return
+    sendMessage({ type: 'set_drink_capable', capable: !isTwoDLayout })
+  }, [isConnected, isTwoDLayout, sendMessage, yourId])
 
   const handleLeaveGame = useCallback(() => {
     if (!window.confirm('Leave this game and return home?')) {
@@ -327,6 +333,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
       yourId={yourId}
       players={tableState?.players ?? []}
       events={drinkEvents}
+      serverNow={tableState?.serverNow}
       isConnected={isConnected}
       onOrder={orderDrink}
     >
@@ -403,6 +410,9 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
             }
             sendMessage({ type: 'table_emote', targetId, emote })
           }}
+          prankEvents={prankEvents}
+          onBuyShot={buyShot}
+          onFlickChip={flickChip}
           onFeedback={ignoreFeedback}
         />
       ) : (

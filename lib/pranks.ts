@@ -1,14 +1,23 @@
 /**
  * "Mess with your friends" table pranks: buying someone a shot and flicking a
  * chip at their head. The server validates and broadcasts a PrankEvent; the
- * clients turn it into a toast, a 3D animation or a 2D pop. Pure module so
- * the room, the hooks and the tests share one source of truth.
+ * desktop client turns it into pictures only (a shot glass sliding across the
+ * felt, icon pops), never sentences. Pure module shared by room, hooks, tests.
  */
-import { SHOT_LEVEL_BOOST } from './drinks'
+import { HOUSE_SHOT_RULES, type HouseShotRule } from './houseRules'
 
-export type PrankKind = 'shot' | 'chip_flick'
+/**
+ * `shot_queued`: bought for someone still live in a hand, waiting;
+ * `shot`: poured (delivered) - the animation, +3 and chaser start now;
+ * `house_shot`: the house pours one (lost to the 7-2), fromId HOUSE_ID;
+ * `chip_flick`: purely cosmetic bonk.
+ */
+export type PrankKind = 'shot' | 'shot_queued' | 'house_shot' | 'chip_flick'
 
-export const PRANK_KINDS: readonly PrankKind[] = ['shot', 'chip_flick']
+export const PRANK_KINDS: readonly PrankKind[] = ['shot', 'shot_queued', 'house_shot', 'chip_flick']
+
+/** Sender id for house shots (the bartender, not a player). */
+export const HOUSE_ID = 'house'
 
 /** One chip flick per sender every this many milliseconds. Purely cosmetic. */
 export const CHIP_FLICK_COOLDOWN_MS = 8_000
@@ -27,6 +36,8 @@ export interface PrankEvent {
   levelAdded?: number
   /** Shots: the shot knocked the target out. */
   passedOut?: boolean
+  /** house_shot: which house rule poured it. */
+  rule?: HouseShotRule
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -51,21 +62,7 @@ export function isValidPrankEvent(raw: unknown): raw is PrankEvent {
     typeof event.at === 'number' && Number.isFinite(event.at) &&
     (event.level === undefined || (Number.isInteger(event.level) && event.level >= 0 && event.level <= 10)) &&
     (event.levelAdded === undefined || (Number.isInteger(event.levelAdded) && event.levelAdded >= 0 && event.levelAdded <= 10)) &&
-    (event.passedOut === undefined || typeof event.passedOut === 'boolean')
+    (event.passedOut === undefined || typeof event.passedOut === 'boolean') &&
+    (event.rule === undefined || (HOUSE_SHOT_RULES as readonly string[]).includes(event.rule))
   )
-}
-
-/** Toast copy, from the point of view of `viewerId`. */
-export function describePrankEvent(
-  event: Pick<PrankEvent, 'kind' | 'fromId' | 'fromNickname' | 'targetId' | 'targetNickname' | 'levelAdded' | 'passedOut'>,
-  viewerId = ''
-): { icon: string; text: string } {
-  const from = event.fromId === viewerId ? 'You' : event.fromNickname
-  const target = event.targetId === viewerId ? 'you' : event.targetNickname
-  if (event.kind === 'shot') {
-    const added = event.levelAdded ?? SHOT_LEVEL_BOOST
-    const knockout = event.passedOut ? ' Lights out.' : ''
-    return { icon: '🥃', text: `${from} bought ${target} a shot 🥃 (+${added})${knockout}` }
-  }
-  return { icon: '🪙', text: `${from} flicked a chip at ${target}. Bonk!` }
 }

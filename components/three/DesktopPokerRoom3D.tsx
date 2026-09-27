@@ -74,6 +74,19 @@ import {
 } from './companion3D'
 import { DESKTOP_CAMERA_FRAMING } from './cameraFraming'
 import {
+  createPrankRuntime,
+  disposePrankRuntime,
+  getSeatPrankInput,
+  queuePrank,
+  queueSeatPop,
+  updatePranks,
+  type PrankRuntime,
+  type SeatPrankInput,
+} from './prankEffects'
+import type { PrankEvent } from '@/lib/pranks'
+import { SHOT_DOWN_AT, SHOT_SHUDDER_END } from './prankTimeline'
+import type { DrinkEvent } from '@/lib/drinks'
+import {
   animateBoardRuntime,
   createBoardRuntime,
   createCardMesh,
@@ -157,6 +170,10 @@ interface DesktopPokerRoom3DProps {
   onSelectPlayer: (playerId: string) => void
   cardRevealActions: CardRevealSeatAction[]
   onRequestCardReveal: (playerId: string) => void
+  /** Shots poured and chips flicked (server events, newest last). */
+  prankEvents?: readonly PrankEvent[]
+  /** Drink events: house-rule beers and free waters pop an icon over the seat. */
+  drinkEvents?: readonly DrinkEvent[]
   /** Winning board cards to glow during the showdown highlight. */
   highlightedCards?: ReadonlyArray<{ rank: string; suit: ThreeCardView['suit'] }>
 }
@@ -291,6 +308,8 @@ interface SceneRuntime {
   companion: CompanionRuntime | null
   /** The local player's own drink, seen first-person (their avatar is hidden). */
   firstPersonDrink: FirstPersonDrink
+  /** Shots, chip flicks and house-rule icon pops. */
+  pranks: PrankRuntime
   effects: { cone: LightCone; confetti: Confetti; shockwave: Shockwave; winnerKey: string; allInKey: string }
   /** Scene time when community cards last landed. */
   boardRevealAt: number
@@ -2237,7 +2256,8 @@ function animateSeat(
   tableHeat = 0,
   runtimeSeats: ReadonlyMap<string, SeatRuntime> = new Map(),
   boardRevealAge = Number.POSITIVE_INFINITY,
-  anyWinner = false
+  anyWinner = false,
+  prank: SeatPrankInput | null = null
 ) {
   // Furniture and table props stay grounded. Only the player breathes, shifts,
   // and reacts to action playback.
@@ -2290,6 +2310,10 @@ function animateSeat(
     flipOff,
     boardRevealAge,
     otherWinner: anyWinner && !seat.winner,
+    shotElapsed: prank?.shotElapsed ?? null,
+    cheersRaise: prank?.cheersRaise ?? 0,
+    bonkElapsed: prank?.bonkElapsed ?? null,
+    chipFlick: prank?.chipFlick ?? null,
   })
   seat.lastPose = pose
 
@@ -2345,7 +2369,14 @@ function animateSeat(
     placeDrinkProp(seat, pose, time)
     flushCheeks(seat)
     if (seat.face) {
-      const mood: FaceMood = seat.winner
+      // A bonk startles; the shot's burn scrunches the face.
+      const bonked = prank?.bonkElapsed !== null && prank?.bonkElapsed !== undefined && prank.bonkElapsed < 1.2
+      const burning = prank?.shotElapsed !== null && prank?.shotElapsed !== undefined && prank.shotElapsed > SHOT_DOWN_AT && prank.shotElapsed < SHOT_SHUDDER_END
+      const mood: FaceMood = bonked
+        ? 'surprised'
+        : burning
+          ? 'sad'
+          : seat.winner
         ? 'happy'
         : seat.loser
           ? 'sad'
@@ -2911,6 +2942,16 @@ function createSceneRuntime(
   // The camera joins the scene so the first-person drink can ride on it.
   scene.add(camera)
   const firstPersonDrink = createFirstPersonDrink(camera)
+  // One loose chip for flicks: the shared chip look, a touch oversized so it reads.
+  const pranks = createPrankRuntime(scene, camera, host, () => {
+    const chipMaterials = getSharedChipMaterials()
+    const edge = chipMaterials[4] ?? chipMaterials[0]!
+    const face = chipMaterials[5] ?? chipMaterials[1]!
+    const chip = new THREE.Mesh(getChipGeometry(), [edge, face, face])
+    chip.name = 'prank-chip'
+    chip.castShadow = true
+    return chip
+  })
   try {
     companion = createCompanion(scene)
   } catch (error) {
@@ -2946,6 +2987,7 @@ function createSceneRuntime(
     overlayElements: new Map<string, HTMLElement>(),
     companion,
     firstPersonDrink,
+    pranks,
     effects,
     boardRevealAt: Number.NEGATIVE_INFINITY,
     anyWinner: false,
@@ -3029,7 +3071,11 @@ function createSceneRuntime(
     const { heat, sourceId } = getTableHeat(runtime, time)
     let winnerSeat: SeatRuntime | null = null
     for (const seat of runtime.seats.values()) {
-      animateSeat(seat, time, delta, actingSeat, reducedMotion, seat.playerId === sourceId ? 0 : heat, runtime.seats, time - runtime.boardRevealAt, runtime.anyWinner)
+      animateSeat(
+        seat, time, delta, actingSeat, reducedMotion, seat.playerId === sourceId ? 0 : heat, runtime.seats,
+        time - runtime.boardRevealAt, runtime.anyWinner,
+        reducedMotion ? null : getSeatPrankInput(runtime.pranks, seat, time, runtime.seats)
+      )
       if (seat.winner && seat.root.visible && !winnerSeat) winnerSeat = seat
     }
     animateWagers(runtime, time, reducedMotion)
@@ -3123,6 +3169,25 @@ function createSceneRuntime(
     const headTilt = updateHeroDrink(runtime, viewRef.current, time, reducedMotion)
     // Tip the head back with the sip.
     if (headTilt > 0 && !runtime.debugCamera) camera.rotateX(headTilt * 0.13)
+    const heroProfile = viewRef.current.players.find(player => player.isHero)?.avatarProfile
+    const kick = updatePranks(runtime.pranks, {
+      time,
+      delta,
+      width: viewportWidth,
+      height: viewportHeight,
+      reducedMotion,
+      seats: runtime.seats,
+      heroColors: { skin: heroProfile?.skinColor ?? '#d9a27c', sleeve: heroProfile?.sleeveColor ?? '#2b2f3a' },
+    })
+    if (!runtime.debugCamera) {
+      // Throw your own shot back; jolt on a slam or a chip to the face.
+      if (kick.headTilt > 0) camera.rotateX(kick.headTilt * 0.2)
+      if (kick.pitch || kick.yaw || kick.roll) {
+        camera.rotateX(kick.pitch)
+        camera.rotateY(kick.yaw)
+        camera.rotateZ(kick.roll)
+      }
+    }
     camera.updateMatrixWorld()
 
     updateLadyLuck(runtime, viewRef.current, host, time, delta, reducedMotion, viewportWidth, viewportHeight)
@@ -3184,6 +3249,7 @@ function createSceneRuntime(
     runtime.board.slots.forEach(slot => disposeCardMesh(slot.card))
     if (runtime.companion) disposeCompanion(runtime.companion)
     disposeFirstPersonDrink(runtime.firstPersonDrink)
+    disposePrankRuntime(runtime.pranks)
     disposeLightCone(runtime.effects.cone)
     disposeConfetti(runtime.effects.confetti)
     disposeShockwave(runtime.effects.shockwave)
@@ -3205,6 +3271,8 @@ function createSceneRuntime(
 }
 
 const NO_HIGHLIGHTED_CARDS: ReadonlyArray<{ rank: string; suit: ThreeCardView['suit'] }> = []
+const NO_PRANK_EVENTS: readonly PrankEvent[] = []
+const NO_DRINK_EVENTS: readonly DrinkEvent[] = []
 
 export function DesktopPokerRoom3D({
   view,
@@ -3214,6 +3282,8 @@ export function DesktopPokerRoom3D({
   onSelectPlayer,
   cardRevealActions,
   onRequestCardReveal,
+  prankEvents = NO_PRANK_EVENTS,
+  drinkEvents = NO_DRINK_EVENTS,
   highlightedCards = NO_HIGHLIGHTED_CARDS,
 }: DesktopPokerRoom3DProps) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -3257,6 +3327,13 @@ export function DesktopPokerRoom3D({
       if (process.env.NODE_ENV !== 'production') {
         // Development-only handle for inspecting the live scene from devtools.
         ;(host as HTMLDivElement & { __pokerRuntime?: SceneRuntime }).__pokerRuntime = runtime
+        // Development-only: replay a prank locally (e.g. a house cheers) for visual checks.
+        ;(host as HTMLDivElement & { __playPrank?: (event: PrankEvent) => void }).__playPrank = event => queuePrank(runtime.pranks, event, {
+          time: (performance.now() - runtime.startTime) / 1000,
+          reducedMotion: runtime.reducedMotion,
+          seats: runtime.seats,
+          heroActing: false,
+        })
       }
       setWebGLStatus('ready')
     } catch (error) {
@@ -3273,6 +3350,27 @@ export function DesktopPokerRoom3D({
       runtimeRef.current = null
     }
   }, [])
+
+  // Pranks and house-rule drinks: each server event plays exactly once.
+  useEffect(() => {
+    const runtime = runtimeRef.current
+    if (!runtime) return
+    const context = {
+      time: (performance.now() - runtime.startTime) / 1000,
+      reducedMotion: runtime.reducedMotion,
+      seats: runtime.seats,
+      heroActing: viewRef.current.players.some(player => player.isHero && player.isActing),
+    }
+    for (const event of prankEvents) queuePrank(runtime.pranks, event, context)
+    for (const event of drinkEvents) {
+      if (Date.now() - event.at > 6_000) continue
+      if (event.kind === 'house_beer') {
+        queueSeatPop(runtime.pranks, event.id, event.playerId, (event.amount ?? 1) >= 2 ? '🍺🍺' : '🍺', 'beer', context)
+      } else if (event.kind === 'house_water') {
+        queueSeatPop(runtime.pranks, event.id, event.playerId, '💧', 'water', context)
+      }
+    }
+  }, [prankEvents, drinkEvents])
 
   const seenGesturesRef = useRef(new Set<string>())
   useEffect(() => {
@@ -3416,6 +3514,10 @@ export function DesktopPokerRoom3D({
                 <span className="cinematic-seat-panel">
                 <span className="cinematic-seat-topline">
                   <strong>{player.nickname}</strong>
+                  {player.shotsWaiting > 0 && (
+                    // A shot is lined up for them, poured once they're out of the hand.
+                    <em className="cinematic-shot-waiting" aria-label="Shot waiting" title="Shot waiting">🥃</em>
+                  )}
                   {player.drinks?.passedOut ? (
                     <em className="cinematic-drink-badge is-passed-out" aria-label="Passed out">💤</em>
                   ) : (player.drinks?.level ?? 0) > 0 ? (

@@ -11,21 +11,18 @@
  *   the normal fold path when action reaches them; they wake up at the start of
  *   the next hand they did not pass out in, at WAKE_UP_LEVEL (6).
  * - Rate limit: one drink per DRINK_COOLDOWN_MS (3s) per player.
- * - Shots: another seated player can buy you a shot: +SHOT_LEVEL_BOOST (3)
- *   levels at once. Anti-cheat rules, so a shot can never be used to knock
- *   someone out of a pot:
- *   - only for a player who is NOT live in the current hand (folded, sitting
- *     out, or the table is between hands), never someone still holding cards
- *     (all-in included);
- *   - a shot is capped at SHOT_LEVEL_CAP (9): shots can never pass anyone out,
- *     only a player's own beers can. (Safer than timing the pass-out around the
- *     next deal: there is no window where a shot lands and a hand starts.)
- *   - each buyer may buy one shot every SHOT_COOLDOWN_HANDS (5) hands;
- *   - each target may receive one shot every SHOT_RECEIVE_COOLDOWN_HANDS (3)
- *     hands, so a table can't gang up on one player.
- * - Chaser: a water ordered within CHASER_WINDOW_MS (20s) of receiving a shot
- *   takes CHASER_LEVELS (2) of the shot's levels back off when it kicks in,
- *   instead of the usual 1.
+ * - Shots: any seated player can buy another seated player a shot, any time:
+ *   +SHOT_LEVEL_BOOST (3) levels, uncapped (it can black them out). So a shot
+ *   can never interfere with a live hand, it is queued on the server and only
+ *   DELIVERED while the target is not live (folded, sitting out, or between
+ *   hands); the animation, the +3 and the chaser window all start at delivery.
+ *   - each buyer may buy one shot every SHOT_COOLDOWN_HANDS (5) hands (counted
+ *     when bought);
+ *   - each target receives at most one shot every SHOT_RECEIVE_COOLDOWN_HANDS
+ *     (3) hands (counted when delivered); extra queued shots wait their turn.
+ * - Chaser: a water ordered within CHASER_WINDOW_MS (20s) of a delivered shot
+ *   applies INSTANTLY and takes CHASER_LEVELS (2) off. It is never also queued
+ *   as an ordinary water (no double-apply); the window closes on any water.
  */
 import type { Card, Rank, Suit } from './poker/types'
 
@@ -43,11 +40,9 @@ export const SHOT_LEVEL_BOOST = 3
 export const SHOT_COOLDOWN_HANDS = 5
 /** Each player may be bought one shot every this many hands. */
 export const SHOT_RECEIVE_COOLDOWN_HANDS = 3
-/** Shots never take anyone past this level: they can't cause a pass-out. */
-export const SHOT_LEVEL_CAP = PASS_OUT_LEVEL - 1
 /** After a shot, a water within this window is a chaser. */
 export const CHASER_WINDOW_MS = 20_000
-/** Levels a chaser water takes off (never more than the shot added). */
+/** Levels a chaser water takes off, instantly. */
 export const CHASER_LEVELS = 2
 /** How long a passed-out player "slumps" before their hand is folded. */
 export const PASS_OUT_FOLD_DELAY_MS = 900
@@ -79,6 +74,8 @@ export interface PlayerDrinkState {
   shotReceivableAtHand: number
   /** Server time (ms) until which a water counts as a chaser (0 = no chaser window). */
   chaserUntil: number
+  /** Shots bought for this player that are waiting for them to leave the hand. */
+  shotsWaiting: number
 }
 
 export const EMPTY_DRINK_STATE: Readonly<PlayerDrinkState> = Object.freeze({
@@ -92,6 +89,7 @@ export const EMPTY_DRINK_STATE: Readonly<PlayerDrinkState> = Object.freeze({
   shotReadyAtHand: 0,
   shotReceivableAtHand: 0,
   chaserUntil: 0,
+  shotsWaiting: 0,
 })
 
 export function createEmptyDrinkState(): PlayerDrinkState {
@@ -135,6 +133,7 @@ export function normalizeDrinkState(raw: unknown): PlayerDrinkState {
     shotReadyAtHand: nonNegativeInt(candidate.shotReadyAtHand),
     shotReceivableAtHand: nonNegativeInt(candidate.shotReceivableAtHand),
     chaserUntil: nonNegativeInt(candidate.chaserUntil),
+    shotsWaiting: nonNegativeInt(candidate.shotsWaiting),
   }
 }
 
@@ -145,8 +144,6 @@ export function normalizeDrinkState(raw: unknown): PlayerDrinkState {
 export interface PendingWater {
   id: string
   dueAt: number
-  /** Chaser water: levels it takes off when it kicks in (default 1). */
-  levels?: number
 }
 
 /** Server-only bookkeeping on top of the public state. */
@@ -167,9 +164,8 @@ export interface DrinkLedgerEntry {
   lastShotBoughtHand: number | null
   /** Hand number when this player was last bought a shot. */
   lastShotReceivedHand: number | null
-  /** Open chaser window after a shot (server ms), and how many levels it can take back. */
+  /** Open chaser window after a delivered shot (server ms). */
   chaserUntil: number | null
-  chaserLevels: number
 }
 
 export function createDrinkLedgerEntry(): DrinkLedgerEntry {
@@ -187,7 +183,6 @@ export function createDrinkLedgerEntry(): DrinkLedgerEntry {
     lastShotBoughtHand: null,
     lastShotReceivedHand: null,
     chaserUntil: null,
-    chaserLevels: 0,
   }
 }
 
@@ -209,6 +204,8 @@ export function toPublicDrinkState(entry: DrinkLedgerEntry | undefined): PlayerD
       ? 0
       : entry.lastShotReceivedHand + SHOT_RECEIVE_COOLDOWN_HANDS,
     chaserUntil: entry.chaserUntil ?? 0,
+    // Filled in by the room from its delivery queue.
+    shotsWaiting: 0,
   }
 }
 
@@ -241,16 +238,17 @@ export function orderDrink(entry: DrinkLedgerEntry, context: DrinkOrderContext):
 
   if (context.kind === 'water') {
     entry.waters += 1
-    const water: PendingWater = { id: context.drinkId, dueAt: context.now + WATER_KICK_IN_MS }
+    // Chaser: inside the window after a delivered shot the water hits at once
+    // (-2) and is NOT also queued as an ordinary water. One per shot.
     const chaser = entry.chaserUntil !== null && context.now <= entry.chaserUntil
-    if (chaser) {
-      water.levels = Math.max(1, entry.chaserLevels)
-    }
-    // One chaser per shot; the window closes once any water is ordered.
     entry.chaserUntil = null
-    entry.chaserLevels = 0
+    if (chaser) {
+      entry.level = clampLevel(entry.level - CHASER_LEVELS)
+      return { ok: true, passedOut: false, chaser: true }
+    }
+    const water: PendingWater = { id: context.drinkId, dueAt: context.now + WATER_KICK_IN_MS }
     entry.pendingWaters.push(water)
-    return { ok: true, passedOut: false, water, ...(chaser ? { chaser: true } : {}) }
+    return { ok: true, passedOut: false, water }
   }
 
   entry.beers += 1
@@ -303,8 +301,6 @@ export function formatShotCooldown(handsRemaining: number): string {
   return `Next shot in ${handsRemaining} hand${handsRemaining === 1 ? '' : 's'}`
 }
 
-export const SHOT_LIVE_TARGET_REASON = "You can only buy shots for players who've folded"
-
 /**
  * True while a player still has a stake in the current hand: the hand is
  * live and they hold cards they have not folded (all-in counts as live).
@@ -317,73 +313,137 @@ export function isLiveInHand(target: {
   return target.phase === 'in_hand' && target.holdsCards && target.status !== 'folded'
 }
 
-export interface ShotContext {
-  handNumber: number
-  /** The target is still live in the current hand (see isLiveInHand). */
-  targetIsLive: boolean
-  /** Server time, for the chaser window (defaults to Date.now()). */
-  now?: number
-}
-
-export type ShotResult =
-  | { ok: true; levelAdded: number }
-  | { ok: false; reason: string }
-
 /**
  * Why `buyer` can't buy `target` a shot right now, or null when they can.
- * Seat, self-targeting and fun-mode checks belong to the caller.
+ * Seat, self-targeting and fun-mode checks belong to the caller. A live
+ * target is fine: the shot waits for them (see canDeliverShot).
  */
 export function getShotBlockReason(
-  buyer: DrinkLedgerEntry | undefined,
-  target: DrinkLedgerEntry | undefined,
-  context: ShotContext,
+  buyer: Pick<DrinkLedgerEntry, 'lastShotBoughtHand'> | undefined,
+  target: Pick<DrinkLedgerEntry, 'passedOut'> | undefined,
+  handNumber: number,
   targetName = 'They'
 ): string | null {
-  if (context.targetIsLive) {
-    return SHOT_LIVE_TARGET_REASON
-  }
-  const remaining = getShotHandsRemaining(buyer, context.handNumber)
+  const remaining = getShotHandsRemaining(buyer, handNumber)
   if (remaining > 0) {
     return `${formatShotCooldown(remaining)}.`
   }
   if (target?.passedOut) {
-    return `${targetName} already passed out. Let them sleep.`
-  }
-  const receiving = getShotReceiveHandsRemaining(target, context.handNumber)
-  if (receiving > 0) {
-    return `${targetName} just had a shot. Try again in ${receiving} hand${receiving === 1 ? '' : 's'}.`
-  }
-  if ((target?.level ?? 0) >= SHOT_LEVEL_CAP) {
-    return `${targetName} is wrecked enough. Shots can't knock anyone out.`
+    return `${targetName} already blacked out. Let them sleep.`
   }
   return null
 }
 
+/** Counts a bought shot against the buyer's one-per-five-hands limit. */
+export function recordShotBought(buyer: DrinkLedgerEntry, handNumber: number) {
+  buyer.lastShotBoughtHand = handNumber
+}
+
+export interface ShotDeliveryContext {
+  handNumber: number
+  /** The target is still live in the current hand (see isLiveInHand). */
+  targetIsLive: boolean
+  /** Server time: the chaser window and a blackout start now. */
+  now: number
+}
+
+/** A queued shot can land only outside a live hand, on someone awake, once per 3 hands. */
+export function canDeliverShot(
+  target: DrinkLedgerEntry | undefined,
+  context: Pick<ShotDeliveryContext, 'handNumber' | 'targetIsLive'>
+): boolean {
+  if (context.targetIsLive || target?.passedOut) {
+    return false
+  }
+  return getShotReceiveHandsRemaining(target, context.handNumber) === 0
+}
+
+export type ShotDeliveryResult =
+  | { ok: true; levelAdded: number; passedOut: boolean }
+  | { ok: false }
+
 /**
- * `buyer` buys `target` a shot. Mutates both entries when accepted. The shot
- * adds up to SHOT_LEVEL_BOOST levels but never past SHOT_LEVEL_CAP, so it can
- * never pass anyone out.
+ * Pours a queued shot for `target`: +3 levels (it can black them out, which is
+ * fine because they are out of the hand), opens the chaser window and starts
+ * the receive cooldown. Mutates `target` when delivered.
  */
-export function buyShot(
-  buyer: DrinkLedgerEntry,
-  target: DrinkLedgerEntry,
-  context: ShotContext,
-  targetName?: string
-): ShotResult {
-  const blocked = getShotBlockReason(buyer, target, context, targetName)
-  if (blocked) {
-    return { ok: false, reason: blocked }
+export function deliverShot(target: DrinkLedgerEntry, context: ShotDeliveryContext): ShotDeliveryResult {
+  if (!canDeliverShot(target, context)) {
+    return { ok: false }
   }
 
   const before = target.level
-  buyer.lastShotBoughtHand = context.handNumber
   target.lastShotReceivedHand = context.handNumber
   target.shots += 1
-  target.level = Math.min(SHOT_LEVEL_CAP, clampLevel(target.level + SHOT_LEVEL_BOOST))
+  const passedOut = raiseLevel(target, SHOT_LEVEL_BOOST, {
+    handNumber: context.handNumber,
+    isDealtIntoLiveHand: false,
+  })
   const levelAdded = target.level - before
-  target.chaserUntil = (context.now ?? Date.now()) + CHASER_WINDOW_MS
-  target.chaserLevels = Math.min(CHASER_LEVELS, Math.max(1, levelAdded))
-  return { ok: true, levelAdded }
+  if (!passedOut) {
+    target.chaserUntil = context.now + CHASER_WINDOW_MS
+  }
+  return { ok: true, levelAdded, passedOut }
+}
+
+// ---------------------------------------------------------------------------
+// House rules: forced drinks after the hand ends (never mid-hand)
+// ---------------------------------------------------------------------------
+
+/** Lose more than this share of your hand-start stack in one hand: drink one. */
+export const BIG_LOSS_ONE_BEER_FRACTION = 0.1
+/** More than this share: drink two. */
+export const BIG_LOSS_TWO_BEERS_FRACTION = 0.25
+
+/**
+ * Forced beers for a big loss: 1 when the stack dropped by more than 10% of
+ * what they started the hand with, 2 when it dropped by more than 25%.
+ * Measured on final stacks, so returned uncalled bets and split-pot shares
+ * never count as losses.
+ */
+export function computeBigLossBeers(startStack: number, endStack: number): 0 | 1 | 2 {
+  if (!(startStack > 0) || !Number.isFinite(endStack)) return 0
+  const lost = startStack - endStack
+  if (lost > startStack * BIG_LOSS_TWO_BEERS_FRACTION) return 2
+  if (lost > startStack * BIG_LOSS_ONE_BEER_FRACTION) return 1
+  return 0
+}
+
+/**
+ * House rule beers: counted as beers, animated like one, but forced, so they
+ * ignore the one-beer-per-hand and order cooldowns. Returns true on a blackout.
+ */
+export function forceBeers(entry: DrinkLedgerEntry, count: number, context: { drinkId: string; now: number; handNumber: number }): boolean {
+  if (entry.passedOut || count <= 0) return false
+  entry.beers += count
+  entry.lastDrink = { kind: 'beer', id: context.drinkId, at: context.now }
+  return raiseLevel(entry, count, { handNumber: context.handNumber, isDealtIntoLiveHand: false })
+}
+
+/** The big-win free water takes this much off, at once. */
+export const FREE_WATER_LEVELS = 2
+
+/** Big-win house rule: a free water that lands at once (-2), not the slow kind. */
+export function pourFreeWater(entry: DrinkLedgerEntry): number {
+  if (entry.passedOut) return 0
+  const before = entry.level
+  entry.level = clampLevel(entry.level - FREE_WATER_LEVELS)
+  return before - entry.level
+}
+
+/**
+ * A house shot (see lib/houseRules): like a delivered shot (+3, chaser
+ * window) but it bypasses every shot limit and never touches the cooldowns.
+ */
+export function pourHouseShot(target: DrinkLedgerEntry, context: Omit<ShotDeliveryContext, 'targetIsLive'>): ShotDeliveryResult {
+  if (target.passedOut) return { ok: false }
+  const before = target.level
+  target.shots += 1
+  const passedOut = raiseLevel(target, SHOT_LEVEL_BOOST, { handNumber: context.handNumber, isDealtIntoLiveHand: false })
+  if (!passedOut) {
+    target.chaserUntil = context.now + CHASER_WINDOW_MS
+  }
+  return { ok: true, levelAdded: target.level - before, passedOut }
 }
 
 /**
@@ -392,24 +452,16 @@ export function buyShot(
  */
 export function getShotBlockReasonFromState(
   buyer: Pick<PlayerDrinkState, 'shotReadyAtHand'> | undefined,
-  target: Pick<PlayerDrinkState, 'shotReceivableAtHand' | 'passedOut' | 'level'> | undefined,
-  context: ShotContext,
+  target: Pick<PlayerDrinkState, 'passedOut'> | undefined,
+  handNumber: number,
   targetName = 'They'
 ): string | null {
-  // A "ready at hand N" of 0 means no cooldown; otherwise N = last + window.
-  const lastHand = (readyAt: number | undefined, window: number) => (readyAt ? readyAt - window : null)
+  // A "ready at hand N" of 0 means no cooldown; otherwise N = last + 5.
+  const readyAt = buyer?.shotReadyAtHand ?? 0
   return getShotBlockReason(
-    {
-      ...createDrinkLedgerEntry(),
-      lastShotBoughtHand: lastHand(buyer?.shotReadyAtHand, SHOT_COOLDOWN_HANDS),
-    },
-    {
-      ...createDrinkLedgerEntry(),
-      level: target?.level ?? 0,
-      passedOut: target?.passedOut ?? false,
-      lastShotReceivedHand: lastHand(target?.shotReceivableAtHand, SHOT_RECEIVE_COOLDOWN_HANDS),
-    },
-    context,
+    { lastShotBoughtHand: readyAt ? readyAt - SHOT_COOLDOWN_HANDS : null },
+    { passedOut: target?.passedOut ?? false },
+    handNumber,
     targetName
   )
 }
@@ -421,9 +473,9 @@ export function applyWaterKickIn(entry: DrinkLedgerEntry, waterId: string): bool
     return false
   }
 
-  const [water] = entry.pendingWaters.splice(index, 1)
+  entry.pendingWaters.splice(index, 1)
   if (!entry.passedOut) {
-    entry.level = clampLevel(entry.level - (water?.levels ?? 1))
+    entry.level = clampLevel(entry.level - 1)
   }
   return true
 }
@@ -467,7 +519,16 @@ export function wakeIfRested(entry: DrinkLedgerEntry, startedHandNumber: number)
 // Events shared with clients
 // ---------------------------------------------------------------------------
 
-export type DrinkEventKind = 'beer' | 'water' | 'water_kicked_in' | 'passed_out' | 'woke_up' | 'chaser'
+export type DrinkEventKind =
+  | 'beer'
+  | 'water'
+  | 'water_kicked_in'
+  | 'passed_out'
+  | 'woke_up'
+  | 'chaser'
+  /** House rules: forced beers (amount 1 or 2) and the big-win free water. */
+  | 'house_beer'
+  | 'house_water'
 
 export const DRINK_EVENT_KINDS: readonly DrinkEventKind[] = [
   'beer',
@@ -476,6 +537,8 @@ export const DRINK_EVENT_KINDS: readonly DrinkEventKind[] = [
   'passed_out',
   'woke_up',
   'chaser',
+  'house_beer',
+  'house_water',
 ]
 
 export interface DrinkEvent {
@@ -486,9 +549,11 @@ export interface DrinkEvent {
   level: number
   beers: number
   at: number
+  /** house_beer: how many forced beers (1 or 2). */
+  amount?: number
 }
 
-export function describeDrinkEvent(event: Pick<DrinkEvent, 'kind' | 'nickname' | 'beers' | 'level'>, isSelf = false): {
+export function describeDrinkEvent(event: Pick<DrinkEvent, 'kind' | 'nickname' | 'beers' | 'level' | 'amount'>, isSelf = false): {
   icon: string
   text: string
 } {
@@ -507,6 +572,11 @@ export function describeDrinkEvent(event: Pick<DrinkEvent, 'kind' | 'nickname' |
       return { icon: '💤', text: `${who} passed out` }
     case 'woke_up':
       return { icon: '☀️', text: isSelf ? 'You came to. Ow.' : `${event.nickname} woke up` }
+    // House rules are shown as pictures on the table only (never toasted).
+    case 'house_beer':
+      return { icon: (event.amount ?? 1) >= 2 ? '🍺🍺' : '🍺', text: '' }
+    case 'house_water':
+      return { icon: '💧', text: '' }
     case 'chaser':
       return {
         icon: '💧',

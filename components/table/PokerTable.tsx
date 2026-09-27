@@ -16,6 +16,10 @@ import { OwnHand } from './OwnHand'
 import { PotDisplay } from './PotDisplay'
 import { ShowdownCinematic, useShowdownPresentation } from './ShowdownCinematic'
 import { SeatDrinkBadge } from './SeatDrinkBadge'
+import { useDrinks } from './DrinkContext'
+import { PrankControls } from './PrankControls'
+import { getShotBlockReasonFromState, isLiveInHand, type DrinkEvent } from '@/lib/drinks'
+import { CHIP_FLICK_COOLDOWN_MS, type PrankEvent } from '@/lib/pranks'
 import { CompanionBadge, CompanionMuteButton, CompanionToast } from './CompanionBadge'
 import { BountyToast } from './BountyToast'
 import { ChipStack } from '@/components/ui/ChipStack'
@@ -131,6 +135,10 @@ interface PokerTableProps {
   onSendTargetChat?: (targetId: string, message: string) => void
   onSendEmote: (emote: string) => void
   onSendTargetEmote: (targetId: string, emote: string) => void
+  /** Shots bought and chips flicked at this table (newest last). */
+  prankEvents?: readonly PrankEvent[]
+  onBuyShot?: (targetId: string) => void
+  onFlickChip?: (targetId: string) => void
   onFeedback: (message: string, tone?: FeedbackTone) => void
 }
 
@@ -282,8 +290,12 @@ interface CardRevealSeatAction {
   disabled: boolean
 }
 
+const NO_PRANK_EVENTS: readonly PrankEvent[] = []
+
 interface DesktopPokerRoom3DProps {
   view: ThreeTableViewModel
+  prankEvents?: readonly PrankEvent[]
+  drinkEvents?: readonly DrinkEvent[]
   emoteReactions: ThreeEmoteReaction[]
   chatMessages: ThreeChatMessage[]
   selectedTargetId: string | null
@@ -1194,11 +1206,15 @@ export function PokerTable({
   onSendTargetChat = () => {},
   onSendEmote,
   onSendTargetEmote,
+  prankEvents = NO_PRANK_EVENTS,
+  onBuyShot,
+  onFlickChip,
   onFeedback,
 }: PokerTableProps) {
   // Narrow screens and touch-first devices (phones, tablets, iPad landscape)
   // use the simple 2D table; wide mouse-driven screens get the 3D room.
   const isMobileViewport = useMediaQuery(TWO_D_LAYOUT_QUERY)
+  const drinkContext = useDrinks()
   const isDesktopWidth = useMediaQuery('(min-width: 1024px)')
   const shouldRenderDesktopThree = isDesktopWidth && !isMobileViewport
   const showdownView = useShowdownPresentation(state)
@@ -1442,6 +1458,7 @@ export function PokerTable({
   const [socialTick, setSocialTick] = useState(() => Date.now())
   const [targetEmotePlayerId, setTargetEmotePlayerId] = useState<string | null>(null)
   const [targetEmotePickerOpen, setTargetEmotePickerOpen] = useState(false)
+  const [flickReadyAt, setFlickReadyAt] = useState(0)
   const [targetQuickEmotes, setTargetQuickEmotes] = useState<string[]>(() => (
     [...DEFAULT_TARGETED_QUICK_EMOTES]
   ))
@@ -2244,6 +2261,50 @@ export function PokerTable({
     closeTargetedEmote()
   }, [closeTargetedEmote, onFeedback, onSendTargetChat, targetedPlayer])
 
+  const handleBuyShot = useCallback(() => {
+    if (!targetedPlayer || !onBuyShot) return
+    onBuyShot(targetedPlayer.id)
+    closeTargetedEmote()
+  }, [closeTargetedEmote, onBuyShot, targetedPlayer])
+
+  const handleFlickChip = useCallback(() => {
+    if (!targetedPlayer || !onFlickChip) return
+    onFlickChip(targetedPlayer.id)
+    setFlickReadyAt(Date.now() + CHIP_FLICK_COOLDOWN_MS)
+    closeTargetedEmote()
+  }, [closeTargetedEmote, onFlickChip, targetedPlayer])
+
+  // Pranks: desktop only (phones have none of it, either direction), fun mode
+  // on, you are seated, and the target is someone else at the table.
+  const canPrankTarget = Boolean(
+    !isMobileViewport &&
+    targetedPlayer &&
+    me &&
+    targetedPlayer.id !== yourId &&
+    targetedPlayer.drinkCapable === true &&
+    state.funModeEnabled !== false &&
+    (onBuyShot || onFlickChip)
+  )
+  const canShootTarget = Boolean(canPrankTarget && onBuyShot)
+  const shotBlockReason = targetedPlayer && canShootTarget
+    ? getShotBlockReasonFromState(me?.drinks, targetedPlayer.drinks, state.handNumber, targetedPlayer.nickname)
+    : null
+  const targetIsLive = Boolean(targetedPlayer && isLiveInHand({
+    phase: state.phase,
+    status: targetedPlayer.status,
+    holdsCards: targetedPlayer.hasCards,
+  }))
+  const shotsAlreadyWaiting = targetedPlayer?.drinks?.shotsWaiting ?? 0
+  const shotCooldownHands = Math.max(0, (me?.drinks?.shotReadyAtHand ?? 0) - state.handNumber)
+  // Tooltip only: the table itself stays wordless.
+  const shotNote = shotBlockReason ?? (
+    shotsAlreadyWaiting > 0
+      ? `${shotsAlreadyWaiting} already waiting; they land one at a time`
+      : targetIsLive
+        ? '+3, poured after this hand'
+        : '+3, one every 5 hands'
+  )
+
   const handleSelectEmoteTarget = useCallback((playerId: string) => {
     if (!playerIdSet.has(playerId)) {
       return
@@ -2312,6 +2373,8 @@ export function PokerTable({
       {threeTableView ? (
         <DesktopPokerRoom3D
           view={presentedThreeTableView ?? threeTableView}
+          prankEvents={prankEvents}
+          drinkEvents={drinkContext?.events}
           emoteReactions={threeEmoteReactions}
           chatMessages={threeChatMessages}
           selectedTargetId={targetEmotePlayerId}
@@ -3163,6 +3226,19 @@ export function PokerTable({
             <TargetedEmotePanel
               target={targetedPlayer}
               isConnected={isConnected}
+              prankControls={canPrankTarget ? (
+                <PrankControls
+                  targetName={targetedPlayer.nickname}
+                  showShot={canShootTarget}
+                  shotBlocked={Boolean(shotBlockReason)}
+                  shotNote={shotNote}
+                  shotBadge={shotCooldownHands > 0 ? shotCooldownHands : null}
+                  flickReadyAt={flickReadyAt}
+                  isConnected={isConnected}
+                  onBuyShot={handleBuyShot}
+                  onFlickChip={handleFlickChip}
+                />
+              ) : null}
               onSendEmote={handleTargetedEmote}
               onSendMessage={handleTargetedMessage}
               onClose={closeTargetedEmote}
@@ -3509,9 +3585,11 @@ function TargetedEmotePanel({
   fullPickerOpen,
   onToggleFullPicker,
   quickEmotes,
+  prankControls = null,
 }: {
   target: SeatPlayer
   isConnected: boolean
+  prankControls?: React.ReactNode
   onSendEmote: (emote: string) => void
   onSendMessage: (message: string) => void
   onClose: () => void
@@ -3584,6 +3662,8 @@ function TargetedEmotePanel({
               </div>
             ))}
           </div>
+
+          {prankControls}
 
           <div className="targeted-message-compose">
             <input

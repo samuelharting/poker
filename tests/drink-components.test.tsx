@@ -6,7 +6,7 @@ import { DrinkControls } from '@/components/table/DrinkControls'
 import { DrinkToasts } from '@/components/table/DrinkToasts'
 import { DrunkVisionLayer } from '@/components/table/DrunkVisionLayer'
 import { SeatDrinkBadge } from '@/components/table/SeatDrinkBadge'
-import type { PlayerDrinkState } from '@/lib/drinks'
+import { EMPTY_DRINK_STATE, type PlayerDrinkState } from '@/lib/drinks'
 import type { SeatPlayer } from '@/lib/poker/types'
 
 function seat(id: string, drinks?: PlayerDrinkState): SeatPlayer {
@@ -30,7 +30,7 @@ function seat(id: string, drinks?: PlayerDrinkState): SeatPlayer {
 }
 
 function drinks(overrides: Partial<PlayerDrinkState> = {}): PlayerDrinkState {
-  return { level: 0, beers: 0, waters: 0, lastDrink: null, passedOut: false, sobering: 0, shots: 0, shotReadyAtHand: 0, shotReceivableAtHand: 0, chaserUntil: 0, ...overrides }
+  return { ...EMPTY_DRINK_STATE, ...overrides }
 }
 
 function renderWithDrinks(node: React.ReactNode, me: PlayerDrinkState | undefined, seated = true) {

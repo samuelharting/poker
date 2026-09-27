@@ -5,6 +5,16 @@ import {
   type Vec3,
 } from './pokerActionPose'
 import type { ThreeActionCue } from './tableViewModel'
+import {
+  CHIP_BONK_REACT_SECONDS,
+  CHIP_FLICK_GESTURE_SECONDS,
+  CHIP_LAUNCH_AT,
+  SHOT_ARRIVE_AT,
+  SHOT_DOWN_AT,
+  SHOT_MOUTH_AT,
+  SHOT_SHUDDER_END,
+  SHOT_SLAM_AT,
+} from './prankTimeline'
 
 /**
  * Procedural performance layer for seated rigged avatars.
@@ -107,6 +117,14 @@ export interface AvatarAnimatorInput {
   otherWinner?: boolean
   /** The player is really looking at their hole cards right now (server-driven peek). */
   peeking?: boolean
+  /** Someone bought them a shot: seconds on the shot timeline (see prankTimeline). */
+  shotElapsed?: number | null
+  /** 0..1 glass raised to the middle for a group cheers. */
+  cheersRaise?: number
+  /** A flicked chip bonked them: seconds since impact. */
+  bonkElapsed?: number | null
+  /** They are flicking a chip at another seat: seconds elapsed and the target (seat space). */
+  chipFlick?: { elapsed: number; target: Vec3 } | null
 }
 
 interface Spring {
@@ -1041,6 +1059,101 @@ export function computeAvatarTargetPose(
     pose.bodyPosition[2] -= (0.05 * extend + 0.05 * jab) * w
   }
 
+  // 16. Buy-a-shot: watch the glass slide in, grab it, throw it back with the
+  // head snapping up, slam it upside down, then a full-body shudder.
+  if (input.shotElapsed !== null && input.shotElapsed !== undefined && !input.passedOut && input.shotElapsed >= 0) {
+    const e = input.shotElapsed
+    const watch = smoothStep(e / 0.35) * (1 - smoothStep((e - SHOT_ARRIVE_AT) / 0.25))
+    const reach = smoothStep((e - (SHOT_ARRIVE_AT - 0.15)) / 0.28) * (1 - smoothStep((e - SHOT_SLAM_AT - 0.2) / 0.4))
+    const lift = smoothStep((e - (SHOT_MOUTH_AT - 0.24)) / 0.22) * (1 - smoothStep((e - SHOT_DOWN_AT) / 0.16))
+    const tip = smoothStep((e - (SHOT_MOUTH_AT - 0.08)) / 0.14) * (1 - smoothStep((e - SHOT_DOWN_AT - 0.02) / 0.16))
+    const slam = pulse(e, SHOT_SLAM_AT - 0.04, 0.06, 0.3) * motion
+    const shudder = envelope(e - SHOT_SLAM_AT, SHOT_SHUDDER_END - SHOT_SLAM_AT, 0.08, 0.45)
+    // Eyes down on the glass skidding toward them.
+    add(bones.Head, 0.16 * watch, 0, 0)
+    add(bones.Chest, 0.06 * watch, 0, 0)
+    const glassSpot = offset(anchors.drinkRest, 0.02, 0.08, 0.02)
+    blendTo(pose.handR, glassSpot, reach)
+    // Glass to the lips (the chin anchor sits out in front of the face).
+    blendTo(pose.handR, offset(anchors.chin, 0.05, -0.12, 0.08), lift)
+    // Throw it back: head and chest tip well back while the glass is up.
+    add(bones.Head, -0.62 * tip, 0, 0)
+    add(bones.Neck, -0.22 * tip, 0, 0)
+    add(bones.Chest, -0.16 * tip + 0.16 * slam, 0, 0)
+    pose.bodyPosition[2] += 0.05 * tip - 0.05 * slam
+    pose.handR[1] -= 0.04 * slam
+    pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + 0.9 * reach
+    // Brrr: a fast head shake, shoulders up around the ears, chin tucked.
+    const buzz = Math.sin(e * 44) * motion
+    add(bones.Head, 0.12 * shudder, 0.14 * buzz * shudder, 0.07 * Math.sin(e * 31) * shudder * motion)
+    add(bones.Neck, 0.06 * shudder, 0, 0)
+    add(bones.ShoulderR, 0, 0, 0.18 * shudder)
+    add(bones.ShoulderL, 0, 0, -0.18 * shudder)
+    add(bones.Torso, 0, 0.05 * buzz * shudder, 0)
+    blendTo(pose.handL, offset(anchors.chest, 0.02, 0.02, -0.18), shudder * 0.7)
+    pose.fingerCurlL = pose.fingerCurlL * (1 - shudder) + shudder
+    pose.drinkLift = Math.max(pose.drinkLift, tip)
+    // Cheers: glass held high out over the table, a little clink bump, chin up.
+    const raise = input.cheersRaise ?? 0
+    if (raise > 0) {
+      const clink = Math.sin(Math.min(1, raise) * Math.PI) * 0.04 * motion
+      blendTo(pose.handR, offset(anchors.chest, 0.04, 0.46 + clink, -0.62 - clink), raise)
+      add(bones.Head, -0.12 * raise, 0, 0)
+      add(bones.Chest, 0.08 * raise, 0, 0)
+      pose.bodyPosition[2] -= 0.06 * raise
+    }
+  }
+
+  // 17. Chip flick (sender): hand cocks at the rail edge, fingers curled,
+  // then the fingertip snaps at the chip while the head turns toward the mark.
+  if (input.chipFlick && !input.passedOut) {
+    const { elapsed: f, target } = input.chipFlick
+    const w = envelope(f, CHIP_FLICK_GESTURE_SECONDS, 0.16, 0.4)
+    const cock = smoothStep(f / 0.26) * (1 - smoothStep((f - CHIP_LAUNCH_AT + 0.02) / 0.05))
+    const snap = pulse(f, CHIP_LAUNCH_AT - 0.03, 0.05, 0.3) * motion
+    const shoulder = anchors.shoulderR
+    const dx = target[0] - shoulder[0]
+    const dz = target[2] - shoulder[2]
+    const flat = Math.hypot(dx, dz) || 1
+    const turn = Math.max(-1.2, Math.min(1.2, Math.atan2(-dx, -dz)))
+    const flickSpot = offset(anchors.tap, 0.02, 0.1, 0.04)
+    blendTo(pose.handR, flickSpot, w)
+    add(pose.handR, (dx / flat) * 0.12 * snap, 0.04 * snap, (dz / flat) * 0.12 * snap, w)
+    add(bones.WristR, -0.55 * cock + 0.9 * snap, 0, 0, w)
+    pose.fingerCurlR = pose.fingerCurlR * (1 - w) + (0.95 * (1 - snap) + 0.05 * snap) * w
+    blendAxis(bones.Head, 1, turn * 0.34, w)
+    blendAxis(bones.Neck, 1, turn * 0.16, w)
+    blendAxis(bones.Chest, 1, turn * 0.2, w)
+    add(bones.Head, 0.08 * cock - 0.05 * snap, 0, 0, w)
+    add(bones.Chest, 0.08 * w, 0, 0)
+    pose.bodyPosition[2] -= 0.05 * w
+  }
+
+  // 18. Bonked by a chip: the head snaps back and away, shoulders jump, then
+  // a hand comes up to rub the sore spot on top of the head.
+  if (input.bonkElapsed !== null && input.bonkElapsed !== undefined && input.bonkElapsed >= 0 && !input.passedOut) {
+    const b = input.bonkElapsed
+    const flinch = pulse(b, 0, 0.05, 0.45) * motion
+    const rub = envelope(b - 0.28, CHIP_BONK_REACT_SECONDS - 0.28, 0.3, 0.45)
+    const circle = b * 10
+    add(bones.Head, -0.38 * flinch, 0, 0.26 * flinch)
+    add(bones.Neck, -0.12 * flinch, 0, 0.08 * flinch)
+    add(bones.Chest, -0.1 * flinch, 0, 0)
+    add(bones.ShoulderR, 0, 0, 0.12 * flinch)
+    add(bones.ShoulderL, 0, 0, -0.12 * flinch)
+    pose.bodyPosition[2] += 0.07 * flinch
+    const sore: Vec3 = offset(
+      anchors.chin,
+      0.1 + Math.cos(circle) * 0.035 * motion,
+      0.2 + Math.sin(circle) * 0.02 * motion,
+      0.2
+    )
+    blendTo(pose.handR, sore, rub)
+    pose.fingerCurlR = pose.fingerCurlR * (1 - rub) + 0.2 * rub
+    // Head bows into the rub, wincing side to side.
+    add(bones.Head, 0.14 * rub, 0.06 * Math.sin(b * 5) * rub * motion, -0.08 * rub)
+  }
+
   // Keep faces visible: clamp the stacked downward pitch of neck + head, and
   // keep the body close to the chair no matter what stacks up.
   // Leaning in, people keep their eyes up: counter a deep chest lean at the head.
@@ -1124,7 +1237,10 @@ export function updateAvatarAnimator(
   // Semi-implicit spring integration with fixed substeps: unconditionally
   // stable at any frame rate (a slow frame can never launch an avatar).
   // Flick-offs and hiccups need snap; passing out sinks slowly.
-  const omega = input.cueActive ? 18 : input.flipOff ? 14 : input.winner ? 12 : input.passedOut ? 5 : 9
+  const prankActive = Boolean(input.chipFlick) ||
+    (input.shotElapsed !== null && input.shotElapsed !== undefined) ||
+    (input.bonkElapsed !== null && input.bonkElapsed !== undefined)
+  const omega = input.cueActive ? 18 : input.flipOff || prankActive ? 14 : input.winner ? 12 : input.passedOut ? 5 : 9
   const dt = Math.min(0.1, Math.max(0.0001, input.delta))
   const steps = Math.max(1, Math.ceil(dt / (1 / 120)))
   const h = dt / steps

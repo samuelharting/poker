@@ -13,6 +13,7 @@ import {
   type DrinkEvent,
   type DrinkKind,
   type PlayerSocialState,
+  type PrankEvent,
   type SessionEndedReason,
   type SocialSnapshot,
   type S2CMessage,
@@ -135,6 +136,10 @@ export interface RoomState {
   /** Most recent drink events (beers, waters, pass-outs), oldest first. */
   drinkEvents: DrinkEvent[]
   orderDrink: (kind: DrinkKind) => void
+  /** Most recent pranks (shots bought, chips flicked), oldest first. */
+  prankEvents: PrankEvent[]
+  buyShot: (targetId: string) => void
+  flickChip: (targetId: string) => void
   /** Set once the server ends this tab's session; the socket is closed and stays closed. */
   sessionEnded: SessionEnded | null
   /** Table-wide notices (e.g. a new host), newest last. */
@@ -161,6 +166,7 @@ export function useRoom(
   const [isConnected, setIsConnected] = useState(false)
   const [connectionIssue, setConnectionIssue] = useState<string | null>(null)
   const [drinkEvents, setDrinkEvents] = useState<DrinkEvent[]>([])
+  const [prankEvents, setPrankEvents] = useState<PrankEvent[]>([])
   const [sessionEnded, setSessionEnded] = useState<SessionEnded | null>(null)
   const [notices, setNotices] = useState<RoomNotice[]>([])
   const sessionEndedRef = useRef(false)
@@ -186,6 +192,14 @@ export function useRoom(
 
   const orderDrink = useCallback((kind: DrinkKind) => {
     sendMessage({ type: 'order_drink', kind })
+  }, [sendMessage])
+
+  const buyShot = useCallback((targetId: string) => {
+    sendMessage({ type: 'buy_shot', targetId })
+  }, [sendMessage])
+
+  const flickChip = useCallback((targetId: string) => {
+    sendMessage({ type: 'flick_chip', targetId })
   }, [sendMessage])
 
   // Lady Luck's "shut up" button dispatches a window event (see lib/ladyLuckLines).
@@ -351,6 +365,15 @@ export function useRoom(
               break
             }
 
+            case 'prank_event': {
+              const event = msg.event
+              setPrankEvents(previous => [
+                ...previous.filter(entry => entry.id !== event.id),
+                event,
+              ].slice(-MAX_DRINK_EVENTS))
+              break
+            }
+
             case 'session_ended': {
               // Stop following the table: no auto-reconnect, no stale seat.
               sessionEndedRef.current = true
@@ -455,6 +478,9 @@ export function useRoom(
     sendMessage,
     drinkEvents,
     orderDrink,
+    prankEvents,
+    buyShot,
+    flickChip,
     sessionEnded,
     notices,
     dismissNotice,

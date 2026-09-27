@@ -90,6 +90,11 @@ export interface SeatPlayer {
   isPeeking?: boolean
   /** Sitting out (missed hands or chose to): keeps seat and chips, not dealt in. */
   isAway?: boolean
+  /**
+   * The player's client has drink controls (the desktop 3D table). Phones and
+   * the touch 2D layout can't drink, so they can't be bought shots. Bots: true.
+   */
+  drinkCapable?: boolean
 }
 
 export interface Pot {

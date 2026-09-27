@@ -41,11 +41,15 @@ import {
 import {
   applyHandCompleted as applyDrinkHandCompleted,
   applyWaterKickIn,
-  buyShot,
   createDrinkLedgerEntry,
+  deliverShot,
   getShotBlockReason,
   getShotHandsRemaining,
   isLiveInHand,
+  recordShotBought,
+  forceBeers,
+  pourFreeWater,
+  pourHouseShot,
   orderDrink,
   PASS_OUT_FOLD_DELAY_MS,
   toPublicDrinkState,
@@ -55,7 +59,8 @@ import {
   type DrinkKind,
   type DrinkLedgerEntry,
 } from '../lib/drinks'
-import { CHIP_FLICK_COOLDOWN_MS, type PrankEvent, type PrankKind } from '../lib/pranks'
+import { CHIP_FLICK_COOLDOWN_MS, HOUSE_ID, type PrankEvent, type PrankKind } from '../lib/pranks'
+import { computeHouseRules } from '../lib/houseRules'
 import { MAX_CHAT_LENGTH, parseC2S } from '../shared/protocol'
 
 interface TableSettings {
@@ -190,6 +195,13 @@ const EMOTE_DURATION = 6000
 const BOT_SHOT_BIG_POT_BLINDS = 15
 const BOT_SHOT_CHANCE = 0.5
 const BOT_SHOT_DELAY_MS = 2_200
+
+interface QueuedShot {
+  id: string
+  fromId: string
+  fromNickname: string
+  targetId: string
+}
 const MAX_CHAT_HISTORY = 18
 export const AUTO_START_DELAY = DEFAULT_SETTINGS.autoStartDelay
 export const HOST_DISCONNECT_GRACE_MS = 20_000
@@ -242,6 +254,12 @@ export default class PokerRoom implements PartyServer {
   botDrinkRandom: () => number = Math.random
   /** Last chip flick per sender (cosmetic prank rate limit). */
   private lastChipFlickAt = new Map<string, number>()
+  /** Bought shots waiting for their target to be out of the hand, oldest first. */
+  private shotQueue: QueuedShot[] = []
+  /** Clients that reported drink controls (desktop 3D). Unknown = false. */
+  private drinkCapableByPlayer = new Map<string, boolean>()
+  /** Stack (plus blinds posted) of every dealt-in player when the hand started. */
+  private handStartStacks = new Map<string, number>()
   private botShotTimers = new Set<ReturnType<typeof setTimeout>>()
   /** Injectable so tests can make bots buying shots deterministic. */
   botShotRandom: () => number = Math.random
@@ -380,6 +398,9 @@ export default class PokerRoom implements PartyServer {
           break
         case 'flick_chip':
           this.handleFlickChip(sender, msg.targetId)
+          break
+        case 'set_drink_capable':
+          this.handleSetDrinkCapable(sender, msg.capable)
           break
         case 'companion_mute':
           this.handleCompanionMute(sender)
@@ -1035,6 +1056,7 @@ export default class PokerRoom implements PartyServer {
     for (const timer of this.botShotTimers) clearTimeout(timer)
     this.botShotTimers.clear()
     this.lastChipFlickAt.clear()
+    this.shotQueue = []
     this.data.ladyLuck = createLadyLuckTracker()
   }
 
@@ -1622,6 +1644,16 @@ export default class PokerRoom implements PartyServer {
       this.sendActionFailed(conn, 'That player is not at the table')
       return null
     }
+    // Phones (the 2D layout) have none of the drinking or prank features,
+    // in either direction.
+    if (!this.isDrinkCapable({ id: playerId })) {
+      this.sendActionFailed(conn, 'Pranks are only at the desktop table')
+      return null
+    }
+    if (!this.isDrinkCapable({ id: targetId })) {
+      this.sendActionFailed(conn, "They're on their phone — no bar service")
+      return null
+    }
     return playerId
   }
 
@@ -1637,26 +1669,88 @@ export default class PokerRoom implements PartyServer {
     this.broadcastState()
   }
 
-  private buyShotFor(buyerId: string, targetId: string): { ok: true } | { ok: false; reason: string } {
+  /** Phones have no bar service: only players who can actually drink can be bought shots. */
+  private isDrinkCapable(player: Pick<InternalPlayer, 'id'>): boolean {
+    return this.isBotPlayer(player.id) || this.drinkCapableByPlayer.get(player.id) === true
+  }
+
+  private handleSetDrinkCapable(conn: Connection, capable: boolean) {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    if (!playerId || this.drinkCapableByPlayer.get(playerId) === capable) return
+    this.drinkCapableByPlayer.set(playerId, capable)
+    this.broadcastState()
+  }
+
+  /**
+   * Buys the shot now (the buyer's one-per-five-hands limit is spent) and
+   * queues it; it is poured only once the target is out of the hand.
+   */
+  private buyShotFor(buyerId: string, targetId: string): { ok: true; queued: boolean } | { ok: false; reason: string } {
     const target = this.getPlayer(targetId)
     if (!target || !this.getPlayer(buyerId) || buyerId === targetId) {
       return { ok: false, reason: 'That player is not at the table' }
     }
+    if (!this.isDrinkCapable(target)) {
+      return { ok: false, reason: "They're on their phone — no bar service" }
+    }
     const buyerEntry = this.drinkLedger[buyerId] ??= createDrinkLedgerEntry()
-    const targetEntry = this.drinkLedger[targetId] ??= createDrinkLedgerEntry()
-    // Anti-cheat rules live in buyShot: never a live player, never a pass-out,
-    // buyer and target cooldowns. Bots come through here too.
-    const result = buyShot(buyerEntry, targetEntry, { ...this.getShotContext(target), now: Date.now() }, target.nickname)
-    if (!result.ok) {
-      return result
+    const blocked = getShotBlockReason(buyerEntry, this.drinkLedger[targetId], this.data.gameState.handNumber, target.nickname)
+    if (blocked) {
+      return { ok: false, reason: blocked }
     }
 
-    this.broadcastPrankEvent('shot', buyerId, targetId, {
-      level: targetEntry.level,
-      levelAdded: result.levelAdded,
-      passedOut: false,
+    recordShotBought(buyerEntry, this.data.gameState.handNumber)
+    const shot: QueuedShot = {
+      id: generateId(10),
+      fromId: buyerId,
+      fromNickname: this.getPlayer(buyerId)?.nickname ?? 'Player',
+      targetId,
+    }
+    this.shotQueue.push(shot)
+    const delivered = this.deliverQueuedShots()
+    const queued = !delivered.has(shot.id)
+    if (queued) {
+      this.broadcastPrankEvent('shot_queued', buyerId, targetId)
+    }
+    return { ok: true, queued }
+  }
+
+  /**
+   * Pours every queued shot whose target is out of the hand, awake and off
+   * their 3-hand receive cooldown: at most one per target at a time, the rest
+   * keep waiting. Runs before every broadcast, so a fold or the end of a hand
+   * delivers straight away. Returns the delivered shot ids.
+   */
+  private deliverQueuedShots(): Set<string> {
+    const delivered = new Set<string>()
+    if (this.shotQueue.length === 0) return delivered
+    if (!this.isFunModeEnabled()) {
+      this.shotQueue = []
+      return delivered
+    }
+    const servedTargets = new Set<string>()
+    const now = Date.now()
+    this.shotQueue = this.shotQueue.filter(shot => {
+      const target = this.getPlayer(shot.targetId)
+      if (!target || !this.isDrinkCapable(target)) return false
+      if (servedTargets.has(target.id)) return true
+      const entry = this.drinkLedger[target.id] ??= createDrinkLedgerEntry()
+      const result = deliverShot(entry, { ...this.getShotContext(target), now })
+      if (!result.ok) return true
+      servedTargets.add(target.id)
+      delivered.add(shot.id)
+      this.broadcastPrankEvent('shot', shot.fromId, target.id, {
+        level: entry.level,
+        levelAdded: result.levelAdded,
+        passedOut: result.passedOut,
+      }, shot.fromNickname)
+      if (result.passedOut) {
+        // Out of the hand, so the blackout never starts mid-hand for them.
+        this.handlePassedOut(target.id)
+      }
+      return false
     })
-    return { ok: true }
+    return delivered
   }
 
   private getShotContext(target: InternalPlayer) {
@@ -1691,14 +1785,15 @@ export default class PokerRoom implements PartyServer {
     kind: PrankKind,
     fromId: string,
     targetId: string,
-    extra: Pick<PrankEvent, 'level' | 'levelAdded' | 'passedOut'> = {}
+    extra: Pick<PrankEvent, 'level' | 'levelAdded' | 'passedOut' | 'rule'> = {},
+    fromNickname?: string
   ) {
     const nameOf = (id: string) => this.getPlayer(id)?.nickname ?? this.data.playerNicknames[id] ?? 'Player'
     const event: PrankEvent = {
       id: generateId(12),
       kind,
       fromId,
-      fromNickname: nameOf(fromId),
+      fromNickname: fromNickname ?? nameOf(fromId),
       targetId,
       targetNickname: nameOf(targetId),
       at: Date.now(),
@@ -1706,6 +1801,58 @@ export default class PokerRoom implements PartyServer {
     }
     for (const conn of Array.from(this.room.getConnections())) {
       this.sendMessage(conn, { type: 'prank_event', event })
+    }
+  }
+
+  /**
+   * House rules (see lib/houseRules), applied once the hand is over (never
+   * mid-hand) to drink-capable players with fun mode on. Per player: house
+   * shots, then forced beers (max 2), then the big-win free water.
+   */
+  private applyHouseRules(winnerAmounts: ReadonlyMap<string, number>) {
+    const starts = this.handStartStacks
+    this.handStartStacks = new Map()
+    if (!this.isFunModeEnabled()) return
+    const state = this.data.gameState
+    if (state.phase !== 'between_hands') return
+    const runBoards = state.runItTwice?.status === 'accepted'
+      ? (state.runItTwice.boards ?? []).map(board => board.cards)
+      : []
+    const outcomes = computeHouseRules({
+      showdown: isTrueShowdown(state),
+      boards: runBoards.length > 0 ? runBoards : [state.communityCards],
+      players: state.players.map(player => ({
+        id: player.id,
+        drinkCapable: this.isDrinkCapable(player),
+        holeCards: player.holeCards,
+        folded: player.status === 'folded',
+        startStack: starts.get(player.id),
+        endStack: player.stack,
+        won: winnerAmounts.get(player.id) ?? 0,
+      })),
+    })
+    const now = Date.now()
+    for (const outcome of outcomes) {
+      const entry = this.drinkLedger[outcome.playerId] ??= createDrinkLedgerEntry()
+      for (const rule of outcome.shots) {
+        const result = pourHouseShot(entry, { handNumber: state.handNumber, now })
+        if (!result.ok) break
+        this.broadcastPrankEvent('house_shot', HOUSE_ID, outcome.playerId, {
+          level: entry.level,
+          levelAdded: result.levelAdded,
+          passedOut: result.passedOut,
+          rule,
+        }, 'The house')
+        if (result.passedOut) this.handlePassedOut(outcome.playerId)
+      }
+      if (outcome.beers > 0 && !entry.passedOut) {
+        const blackedOut = forceBeers(entry, outcome.beers, { drinkId: generateId(10), now, handNumber: state.handNumber })
+        this.broadcastDrinkEvent(outcome.playerId, 'house_beer', outcome.beers)
+        if (blackedOut) this.handlePassedOut(outcome.playerId)
+      }
+      if (outcome.freeWater && pourFreeWater(entry) > 0) {
+        this.broadcastDrinkEvent(outcome.playerId, 'house_water')
+      }
     }
   }
 
@@ -1723,14 +1870,15 @@ export default class PokerRoom implements PartyServer {
       if (this.botShotRandom() > BOT_SHOT_CHANCE) continue
       const humans = this.data.gameState.players.filter(player =>
         !this.isBotPlayer(player.id) &&
-        getShotBlockReason(this.drinkLedger[botId], this.drinkLedger[player.id], this.getShotContext(player)) === null
+        this.isDrinkCapable(player) &&
+        getShotBlockReason(this.drinkLedger[botId], this.drinkLedger[player.id], handNumber) === null
       )
       if (humans.length === 0) return
       const target = humans[Math.min(humans.length - 1, Math.floor(this.botShotRandom() * humans.length))]!
       const timer = setTimeout(() => {
         this.botShotTimers.delete(timer)
         if (!this.isFunModeEnabled()) return
-        // Re-validated when it lands: if the next hand dealt the target in, no shot.
+        // Same path as a human purchase: queued, delivered only outside a live hand.
         if (this.buyShotFor(botId, target.id).ok) this.broadcastState()
       }, BOT_SHOT_DELAY_MS)
       this.botShotTimers.add(timer)
@@ -1833,7 +1981,7 @@ export default class PokerRoom implements PartyServer {
     }, PASS_OUT_FOLD_DELAY_MS)
   }
 
-  private broadcastDrinkEvent(playerId: string, kind: DrinkEventKind) {
+  private broadcastDrinkEvent(playerId: string, kind: DrinkEventKind, amount?: number) {
     const entry = this.drinkLedger[playerId]
     const event: DrinkEvent = {
       id: generateId(12),
@@ -1843,6 +1991,7 @@ export default class PokerRoom implements PartyServer {
       level: entry?.level ?? 0,
       beers: entry?.beers ?? 0,
       at: Date.now(),
+      ...(amount !== undefined ? { amount } : {}),
     }
 
     for (const conn of Array.from(this.room.getConnections())) {
@@ -2231,6 +2380,11 @@ export default class PokerRoom implements PartyServer {
     this.data.membership.dealtIn = this.data.gameState.players
       .filter(player => player.holeCards.length === 2)
       .map(player => player.id)
+    // House rules measure losses against what each player started the hand with
+    // (blinds already posted count as still theirs).
+    this.handStartStacks = new Map(this.data.gameState.players
+      .filter(player => player.holeCards.length === 2)
+      .map(player => [player.id, player.stack + player.totalInPot]))
   }
 
   private handleSetSittingOut(conn: Connection, sittingOut: boolean) {
@@ -2501,7 +2655,11 @@ export default class PokerRoom implements PartyServer {
       avatar: this.data.playerProfiles[player.id]?.avatar,
       venmoUsername: this.data.playerProfiles[player.id]?.venmoUsername,
       stats: this.getPublicStats(player.id),
-      drinks: toPublicDrinkState(this.drinkLedger[player.id]),
+      drinkCapable: this.isDrinkCapable(player),
+      drinks: {
+        ...toPublicDrinkState(this.drinkLedger[player.id]),
+        shotsWaiting: this.shotQueue.filter(shot => shot.targetId === player.id).length,
+      },
       ...(this.isPlayerPeeking(player.id) ? { isPeeking: true } : {}),
       ...(this.data.membership.awayIds[player.id] ? { isAway: true } : {}),
     }
@@ -2718,6 +2876,7 @@ export default class PokerRoom implements PartyServer {
       }
     }
     this.maybeScheduleBotShot(winnerAmounts)
+    this.applyHouseRules(winnerAmounts)
 
     this.data.gameState.winners = this.data.gameState.winners.map(winner => {
       const profile = this.data.playerProfiles[winner.playerId]
@@ -2825,6 +2984,7 @@ export default class PokerRoom implements PartyServer {
   private broadcastState() {
     this.finalizeState()
     this.syncRunItTwiceVote()
+    this.deliverQueuedShots()
     const socialSnapshot = this.buildSocialSnapshotMessage()
 
     for (const conn of Array.from(this.room.getConnections())) {

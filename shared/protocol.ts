@@ -83,6 +83,8 @@ export type C2SMessage =
   | { type: 'buy_shot'; targetId: string }
   /** Flick a (cosmetic) chip at another seated player's head. */
   | { type: 'flick_chip'; targetId: string }
+  /** This client can (desktop 3D) or cannot (phone / 2D layout) order drinks. */
+  | { type: 'set_drink_capable'; capable: boolean }
   | { type: 'companion_mute' }
   /** The sender is privately looking at (squeezing) their own hole cards. */
   | { type: 'peek_cards'; peeking: boolean }
@@ -336,6 +338,9 @@ export function parseC2S(raw: string): C2SMessage | null {
         const targetId = typeof parsed.targetId === 'string' ? parsed.targetId.trim() : ''
         return targetId && targetId.length <= 64 ? { type, targetId } : null
       }
+
+      case 'set_drink_capable':
+        return typeof parsed.capable === 'boolean' ? { type, capable: parsed.capable } : null
 
       case 'companion_mute':
         return { type }

@@ -162,6 +162,7 @@ describe('drink state normalization and copy', () => {
       shotReadyAtHand: 0,
       shotReceivableAtHand: 0,
       chaserUntil: 0,
+      shotsWaiting: 0,
     })
     expect(normalizeDrinkState(null)).toEqual(toPublicDrinkState(undefined))
   })

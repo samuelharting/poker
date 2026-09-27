@@ -1,0 +1,336 @@
+/* ==========================================================================
+   Pranks and house rules (desktop 3D table only). Pictures, never sentences.
+   ========================================================================== */
+
+/* Buttons in the targeted player panel */
+.prank-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.prank-controls > :only-child {
+  grid-column: 1 / -1;
+}
+
+.prank-button {
+  --prank-accent: var(--line-brass);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 10px 6px 6px;
+  border: 1px solid var(--prank-accent);
+  border-radius: var(--r-sm);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--c-brass-500) 16%, var(--c-ink-800)), var(--c-ink-800) 75%);
+  color: var(--c-text-1);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.prank-button.is-flick {
+  --prank-accent: rgba(127, 208, 255, 0.45);
+  background: linear-gradient(90deg, rgba(127, 208, 255, 0.12), var(--c-ink-800) 75%);
+}
+
+.prank-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--c-brass-300, #f2c766);
+}
+
+.prank-button:active:not(:disabled) {
+  transform: translateY(1px) scale(0.99);
+}
+
+.prank-button:disabled {
+  cursor: not-allowed;
+  background: var(--c-ink-800);
+  border-style: dashed;
+  border-color: var(--line-soft);
+}
+
+.prank-button:disabled .prank-button-icon {
+  filter: grayscale(0.8);
+  opacity: 0.55;
+}
+
+.prank-button:disabled strong {
+  color: var(--c-text-2);
+}
+
+.prank-button-icon {
+  position: relative;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.prank-button-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.prank-button-copy strong {
+  font: 800 var(--fs-14) / 1.15 var(--font-ui);
+}
+
+/* Cooldown / queued state as a small badge on the icon (a number, no words). */
+.prank-button-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--c-ink-900, #111);
+  box-shadow: 0 0 0 1px var(--line);
+  color: var(--c-text-1);
+  font: 800 10px / 18px var(--font-ui);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 3D nameplate: a shot is lined up for this player */
+.desktop-3d-stage .cinematic-seat .cinematic-shot-waiting {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 18px;
+  border-radius: var(--r-pill);
+  background: rgba(216, 134, 28, 0.28);
+  box-shadow: 0 0 0 1px rgba(255, 190, 90, 0.55);
+  font-size: 11px;
+  font-style: normal;
+  animation: shot-waiting-bob 1.4s ease-in-out infinite;
+}
+
+@keyframes shot-waiting-bob {
+  50% { transform: translateY(-2px) rotate(-8deg); }
+}
+
+/* Icon pops over a seat's head: 💥 bonk, 🥃 shot, 🍺/🍺🍺 house beers, 💧 free water */
+.prank-pop-3d {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 6;
+  translate: var(--pop-x, -999px) var(--pop-y, -999px);
+  pointer-events: none;
+}
+
+.prank-pop-3d > span {
+  display: grid;
+  place-items: center;
+  min-width: 52px;
+  height: 52px;
+  padding: 0 8px;
+  border-radius: 999px;
+  translate: -50% -50%;
+  background: radial-gradient(circle at 35% 30%, #fff3c4, #ffb347 55%, #e0632b);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45), 0 0 0 3px rgba(255, 255, 255, 0.9);
+  font-size: 30px;
+  line-height: 1;
+  white-space: nowrap;
+  animation: prank-pop-3d 1.3s var(--ease-pop, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
+}
+
+.prank-pop-3d.is-bonk > span {
+  background: radial-gradient(circle at 35% 30%, #fff6d8, #ff9f43 50%, #ff4d6d);
+  font-size: 32px;
+}
+
+.prank-pop-3d.is-beer > span {
+  background: radial-gradient(circle at 35% 30%, #fff5d6, #ffc94d 55%, #d98a1c);
+  font-size: 26px;
+}
+
+.prank-pop-3d.is-water > span {
+  background: radial-gradient(circle at 35% 30%, #effbff, #7fd0ff 55%, #2b86b8);
+}
+
+@keyframes prank-pop-3d {
+  0% { opacity: 0; transform: scale(0.2) rotate(-18deg); }
+  16% { opacity: 1; transform: scale(1.3) rotate(6deg); }
+  30% { transform: scale(1) rotate(-3deg); }
+  78% { opacity: 1; transform: translateY(-12px); }
+  100% { opacity: 0; transform: translateY(-30px) scale(0.9); }
+}
+
+/* First-person hits */
+.prank-hit-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0;
+}
+
+/* The shot's warm burn. */
+.prank-hit-flash.is-shot {
+  background:
+    radial-gradient(ellipse at 50% 115%, rgba(255, 150, 40, 0.6), transparent 62%),
+    radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(255, 90, 30, 0.4) 100%);
+  animation: prank-warm-flash 1.6s ease-out both;
+}
+
+/* A chip to the lens: white star and crack lines at the impact point. */
+.prank-hit-flash.is-bonk {
+  background: radial-gradient(circle at var(--hit-x, 50%) var(--hit-y, 42%), rgba(255, 255, 255, 0.95) 0 10px, rgba(255, 244, 200, 0.5) 11px 38px, transparent 96px);
+  animation: prank-bonk-flash 700ms ease-out both;
+}
+
+.prank-hit-flash.is-bonk::before {
+  content: '';
+  position: absolute;
+  left: var(--hit-x, 50%);
+  top: var(--hit-y, 42%);
+  width: 280px;
+  height: 280px;
+  translate: -50% -50%;
+  background:
+    linear-gradient(28deg, transparent 49.2%, rgba(255, 255, 255, 0.9) 49.6% 50.4%, transparent 50.8%),
+    linear-gradient(-38deg, transparent 49.3%, rgba(255, 255, 255, 0.85) 49.7% 50.3%, transparent 50.7%),
+    linear-gradient(96deg, transparent 49.4%, rgba(255, 255, 255, 0.7) 49.8% 50.2%, transparent 50.6%),
+    linear-gradient(152deg, transparent 49.4%, rgba(255, 255, 255, 0.75) 49.8% 50.2%, transparent 50.6%);
+  -webkit-mask-image: radial-gradient(circle, #000 0 26%, transparent 62%);
+  mask-image: radial-gradient(circle, #000 0 26%, transparent 62%);
+}
+
+.prank-hit-flash.is-bonk::after {
+  content: '✦';
+  position: absolute;
+  left: var(--hit-x, 50%);
+  top: var(--hit-y, 42%);
+  translate: -50% -50%;
+  color: #fff6c9;
+  font-size: 64px;
+  text-shadow: 0 0 18px rgba(255, 220, 120, 0.9);
+}
+
+/* On your turn a flick stays in the top corner, clear of your cards and buttons. */
+.prank-hit-flash.is-bonk.is-peripheral {
+  --hit-x: 92%;
+  --hit-y: 12%;
+  animation-duration: 500ms;
+}
+
+.prank-hit-flash.is-bonk.is-peripheral::before {
+  width: 120px;
+  height: 120px;
+}
+
+.prank-hit-flash.is-bonk.is-peripheral::after {
+  font-size: 34px;
+}
+
+@keyframes prank-warm-flash {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes prank-bonk-flash {
+  0% { opacity: 0; }
+  8% { opacity: 1; }
+  45% { opacity: 0.8; }
+  100% { opacity: 0; }
+}
+
+/* Chaser window after a shot: a ring round the Water button drains over 20s. */
+.drink-button.is-water.is-chaser {
+  border-color: rgba(127, 208, 255, 0.95);
+  background: linear-gradient(180deg, rgba(127, 208, 255, 0.4), rgba(127, 208, 255, 0.12));
+  box-shadow: 0 0 0 3px rgba(127, 208, 255, 0.25), 0 0 18px rgba(127, 208, 255, 0.55);
+  animation: chaser-water-glow 1s ease-in-out infinite;
+}
+
+.drink-chaser-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 36px;
+  height: 36px;
+  translate: -50% -50%;
+  pointer-events: none;
+  rotate: -90deg;
+}
+
+.drink-button.is-water .drink-chaser-ring {
+  /* Centered on the droplet glyph. */
+  left: 18px;
+}
+
+.drink-chaser-ring-track {
+  fill: none;
+  stroke: rgba(127, 208, 255, 0.2);
+  stroke-width: 3;
+}
+
+.drink-chaser-ring-fill {
+  fill: none;
+  stroke: #9fe0ff;
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.25s linear;
+  filter: drop-shadow(0 0 4px rgba(127, 208, 255, 0.8));
+}
+
+@keyframes chaser-water-glow {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(127, 208, 255, 0.25), 0 0 14px rgba(127, 208, 255, 0.45); }
+  50% { box-shadow: 0 0 0 5px rgba(127, 208, 255, 0.12), 0 0 24px rgba(127, 208, 255, 0.7); }
+}
+
+/* Seat badge (desktop fallback ring): shots next to beers */
+.seat-drink-shots {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.seat-drink-sip.is-shot {
+  font-size: 30px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prank-pop-3d > span {
+    animation: prank-fade 1.2s ease-out both;
+  }
+
+  .prank-hit-flash {
+    display: none;
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-shot-waiting,
+  .drink-button.is-water.is-chaser {
+    animation: none;
+  }
+
+  .prank-button,
+  .prank-button:hover:not(:disabled),
+  .prank-button:active:not(:disabled) {
+    transform: none;
+    transition: none;
+  }
+}
+
+@keyframes prank-fade {
+  0% { opacity: 0; }
+  15% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}

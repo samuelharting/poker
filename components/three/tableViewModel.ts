@@ -85,6 +85,8 @@ export interface ThreePlayerView {
   /** Nameplate chip: only this street's action (or All-in), so old streets don't linger. */
   statusAction?: string
   drinks: ThreePlayerDrinks
+  /** Shots bought for them, waiting until they're out of the hand. */
+  shotsWaiting: number
   /** Privately looking at their hole cards right now (drives the 3D peek animation). */
   isPeeking: boolean
 }
@@ -381,6 +383,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
           : state.phase === 'in_hand' && !player.hasActedThisRound
             ? undefined
             : player.lastAction,
+        shotsWaiting: normalizeDrinkState(player.drinks).shotsWaiting,
         drinks: toThreePlayerDrinks(player.drinks),
         isPeeking: Boolean(player.isPeeking) && player.hasCards && !isOutOfHand,
       }
