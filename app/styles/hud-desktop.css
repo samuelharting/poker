@@ -1021,3 +1021,21 @@
   display: none;
 }
 
+/* "See / Ask" for a folded viewer: one quiet control per plate that only
+   appears on the plate you point at (or focus). A running request keeps its
+   Waiting / Shown / Hidden pill visible. */
+@media (min-width: 1024px) {
+  .desktop-3d-stage .cinematic-seat .cinematic-card-reveal-control:not(.is-pending):not(.is-approved):not(.is-denied) {
+    opacity: 0;
+    transform: scale(0.85);
+    transition: opacity var(--dur-fast, 140ms) ease-out, transform var(--dur-fast, 140ms) ease-out;
+  }
+
+  .desktop-3d-stage .cinematic-seat:hover .cinematic-card-reveal-control,
+  .desktop-3d-stage .cinematic-seat:focus-within .cinematic-card-reveal-control,
+  .desktop-3d-stage .cinematic-seat.is-selected .cinematic-card-reveal-control {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
