@@ -2695,6 +2695,64 @@ const SHADOW_CASTER_MIN_VERTICES = 300
  * accessory parts are switched off (each caster is another draw every
  * shadow refresh). Skinned avatar parts are pruned in stylizeAvatar.
  */
+const mergedAccessorySets = new WeakSet<AvatarAccessorySet>()
+const accessoryInverse = new THREE.Matrix4()
+const accessoryRelative = new THREE.Matrix4()
+
+/**
+ * Draw-call budget: procedural accessories (glasses, hats, jackets) are built
+ * from many small static meshes that share a few materials. Bake each
+ * accessory group's static meshes into one mesh per material (glasses: 9
+ * draws -> 2). Disposal is unaffected (the set still traverses its groups).
+ */
+function mergeAccessoryMeshes(set: AvatarAccessorySet | null) {
+  if (!set || mergedAccessorySets.has(set)) return
+  mergedAccessorySets.add(set)
+  for (const group of set.groups) {
+    group.updateMatrixWorld(true)
+    accessoryInverse.copy(group.matrixWorld).invert()
+    const byMaterial = new Map<THREE.Material, THREE.Mesh[]>()
+    group.traverse(object => {
+      const mesh = object as THREE.Mesh
+      if (!mesh.isMesh || (mesh as THREE.SkinnedMesh).isSkinnedMesh || Array.isArray(mesh.material)) return
+      if (mesh.morphTargetInfluences || !mesh.geometry.getAttribute('normal')) return
+      for (let node: THREE.Object3D | null = mesh; node && node !== group; node = node.parent) {
+        if (!node.visible) return
+      }
+      const list = byMaterial.get(mesh.material) ?? []
+      list.push(mesh)
+      byMaterial.set(mesh.material, list)
+    })
+    for (const [material, meshes] of byMaterial) {
+      if (meshes.length < 2) continue
+      const parts = meshes.map(mesh => {
+        const part = (mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone())
+        for (const name of Object.keys(part.attributes)) {
+          if (name !== 'position' && name !== 'normal' && name !== 'uv') part.deleteAttribute(name)
+        }
+        accessoryRelative.multiplyMatrices(accessoryInverse, mesh.matrixWorld)
+        part.applyMatrix4(accessoryRelative)
+        return part
+      })
+      const hasUv = parts.every(part => part.getAttribute('uv'))
+      if (!hasUv) parts.forEach(part => part.deleteAttribute('uv'))
+      const merged = mergeGeometries(parts, false)
+      parts.forEach(part => part.dispose())
+      if (!merged) continue
+      const combined = new THREE.Mesh(merged, material)
+      combined.name = `${group.name || 'accessory'}-merged`
+      combined.castShadow = meshes.some(mesh => mesh.castShadow)
+      combined.receiveShadow = meshes.some(mesh => mesh.receiveShadow)
+      combined.renderOrder = meshes[0]!.renderOrder
+      group.add(combined)
+      for (const mesh of meshes) {
+        mesh.removeFromParent()
+        mesh.geometry.dispose()
+      }
+    }
+  }
+}
+
 function pruneShadowCasters(root: THREE.Object3D) {
   root.traverse(object => {
     const mesh = object as THREE.Mesh
@@ -3243,7 +3301,11 @@ export function DesktopPokerRoom3D({
       (performance.now() - runtimeRef.current.startTime) / 1000
     )
     // New seats, avatars and accessories arrive with every sync.
-    for (const seat of runtimeRef.current.seats.values()) pruneShadowCasters(seat.root)
+    for (const seat of runtimeRef.current.seats.values()) {
+      mergeAccessoryMeshes(seat.fallbackAccessories)
+      mergeAccessoryMeshes(seat.riggedAccessories)
+      pruneShadowCasters(seat.root)
+    }
   }, [view, highlightedCards])
 
   return (
