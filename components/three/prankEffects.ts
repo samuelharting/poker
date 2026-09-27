@@ -133,7 +133,8 @@ const HOUSE_POUR_FROM = new THREE.Vector3(0, FELT_TOP_Y, -0.7)
 
 /** Props are drawn larger than life so they read from the hero's chair across the table. */
 const GLASS_SCALE = 2
-const CHIP_SCALE = 1.8
+// A real-sized chip: small enough to read as a flicked chip, not a frisbee.
+const CHIP_SCALE = 1
 
 const scratch = new THREE.Vector3()
 const shotMouth = new THREE.Vector3()
@@ -535,9 +536,8 @@ export function queuePrank(runtime: PrankRuntime, event: PrankEvent, context: Pr
   // Chip flick.
   const peripheral = target.isHero && context.heroActing
   if (context.reducedMotion) {
-    addPop(runtime, 'bonk', time, target.isHero
-      ? { seatId: null, world: null, screen: peripheral ? { x: 0.9, y: 0.14 } : { x: 0.5, y: 0.3 } }
-      : { seatId: target.playerId, world: null, screen: null })
+    // No emoji burst (owner): the hit is the chip and the flinch. Keep the test counter.
+    countOnHost(runtime, 'popsBonk')
     return
   }
   const sender = context.seats.get(event.fromId)
@@ -783,12 +783,12 @@ function updateFlick(runtime: PrankRuntime, flick: FlickPrank, frame: PrankFrame
         const screen = project(runtime, end, 1, 1)
         addFlash(runtime, 'bonk', time, { x: screen.x, y: screen.y }, flick.peripheral)
         startShake(runtime, time, flick.peripheral ? 0.25 : 1, flick.peripheral ? 0.2 : 0.4)
-        addPop(runtime, 'bonk', time, { seatId: null, world: null, screen: flick.peripheral ? { x: 0.88, y: 0.12 } : { x: screen.x, y: Math.max(0.12, screen.y - 0.08) } })
+        countOnHost(runtime, 'popsBonk')
         // Drops away out of view, down onto the felt in front of the hero.
         runtime.camera.getWorldDirection(flick.velocity).multiplyScalar(0.6)
         flick.velocity.y = 0.4
       } else {
-        addPop(runtime, 'bonk', time, { seatId: flick.targetId, world: null, screen: null })
+        countOnHost(runtime, 'popsBonk')
         // Ricochet off the skull back toward the middle of the table.
         flick.velocity.set(-flick.position.x, 0, -flick.position.z).setY(0)
         if (flick.velocity.lengthSq() < 1e-6) flick.velocity.set(0, 0, -1)
