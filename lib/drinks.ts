@@ -23,6 +23,9 @@
  *   - each buyer may buy one shot every SHOT_COOLDOWN_HANDS (5) hands;
  *   - each target may receive one shot every SHOT_RECEIVE_COOLDOWN_HANDS (3)
  *     hands, so a table can't gang up on one player.
+ * - Chaser: a water ordered within CHASER_WINDOW_MS (20s) of receiving a shot
+ *   takes CHASER_LEVELS (2) of the shot's levels back off when it kicks in,
+ *   instead of the usual 1.
  */
 import type { Card, Rank, Suit } from './poker/types'
 
@@ -42,6 +45,10 @@ export const SHOT_COOLDOWN_HANDS = 5
 export const SHOT_RECEIVE_COOLDOWN_HANDS = 3
 /** Shots never take anyone past this level: they can't cause a pass-out. */
 export const SHOT_LEVEL_CAP = PASS_OUT_LEVEL - 1
+/** After a shot, a water within this window is a chaser. */
+export const CHASER_WINDOW_MS = 20_000
+/** Levels a chaser water takes off (never more than the shot added). */
+export const CHASER_LEVELS = 2
 /** How long a passed-out player "slumps" before their hand is folded. */
 export const PASS_OUT_FOLD_DELAY_MS = 900
 
@@ -70,6 +77,8 @@ export interface PlayerDrinkState {
   shotReadyAtHand: number
   /** First hand number at which this player may be bought another shot (0 = any time). */
   shotReceivableAtHand: number
+  /** Server time (ms) until which a water counts as a chaser (0 = no chaser window). */
+  chaserUntil: number
 }
 
 export const EMPTY_DRINK_STATE: Readonly<PlayerDrinkState> = Object.freeze({
@@ -82,6 +91,7 @@ export const EMPTY_DRINK_STATE: Readonly<PlayerDrinkState> = Object.freeze({
   shots: 0,
   shotReadyAtHand: 0,
   shotReceivableAtHand: 0,
+  chaserUntil: 0,
 })
 
 export function createEmptyDrinkState(): PlayerDrinkState {
@@ -124,6 +134,7 @@ export function normalizeDrinkState(raw: unknown): PlayerDrinkState {
     shots: nonNegativeInt(candidate.shots),
     shotReadyAtHand: nonNegativeInt(candidate.shotReadyAtHand),
     shotReceivableAtHand: nonNegativeInt(candidate.shotReceivableAtHand),
+    chaserUntil: nonNegativeInt(candidate.chaserUntil),
   }
 }
 
@@ -134,6 +145,8 @@ export function normalizeDrinkState(raw: unknown): PlayerDrinkState {
 export interface PendingWater {
   id: string
   dueAt: number
+  /** Chaser water: levels it takes off when it kicks in (default 1). */
+  levels?: number
 }
 
 /** Server-only bookkeeping on top of the public state. */
@@ -154,6 +167,9 @@ export interface DrinkLedgerEntry {
   lastShotBoughtHand: number | null
   /** Hand number when this player was last bought a shot. */
   lastShotReceivedHand: number | null
+  /** Open chaser window after a shot (server ms), and how many levels it can take back. */
+  chaserUntil: number | null
+  chaserLevels: number
 }
 
 export function createDrinkLedgerEntry(): DrinkLedgerEntry {
@@ -170,6 +186,8 @@ export function createDrinkLedgerEntry(): DrinkLedgerEntry {
     shots: 0,
     lastShotBoughtHand: null,
     lastShotReceivedHand: null,
+    chaserUntil: null,
+    chaserLevels: 0,
   }
 }
 
@@ -190,6 +208,7 @@ export function toPublicDrinkState(entry: DrinkLedgerEntry | undefined): PlayerD
     shotReceivableAtHand: entry.lastShotReceivedHand === null
       ? 0
       : entry.lastShotReceivedHand + SHOT_RECEIVE_COOLDOWN_HANDS,
+    chaserUntil: entry.chaserUntil ?? 0,
   }
 }
 
@@ -204,7 +223,7 @@ export interface DrinkOrderContext {
 }
 
 export type DrinkOrderResult =
-  | { ok: true; passedOut: boolean; water?: PendingWater }
+  | { ok: true; passedOut: boolean; water?: PendingWater; chaser?: boolean }
   | { ok: false; reason: string }
 
 /** Mutates `entry` when the order is accepted. */
@@ -222,9 +241,16 @@ export function orderDrink(entry: DrinkLedgerEntry, context: DrinkOrderContext):
 
   if (context.kind === 'water') {
     entry.waters += 1
-    const water = { id: context.drinkId, dueAt: context.now + WATER_KICK_IN_MS }
+    const water: PendingWater = { id: context.drinkId, dueAt: context.now + WATER_KICK_IN_MS }
+    const chaser = entry.chaserUntil !== null && context.now <= entry.chaserUntil
+    if (chaser) {
+      water.levels = Math.max(1, entry.chaserLevels)
+    }
+    // One chaser per shot; the window closes once any water is ordered.
+    entry.chaserUntil = null
+    entry.chaserLevels = 0
     entry.pendingWaters.push(water)
-    return { ok: true, passedOut: false, water }
+    return { ok: true, passedOut: false, water, ...(chaser ? { chaser: true } : {}) }
   }
 
   entry.beers += 1
@@ -295,6 +321,8 @@ export interface ShotContext {
   handNumber: number
   /** The target is still live in the current hand (see isLiveInHand). */
   targetIsLive: boolean
+  /** Server time, for the chaser window (defaults to Date.now()). */
+  now?: number
 }
 
 export type ShotResult =
@@ -352,7 +380,10 @@ export function buyShot(
   target.lastShotReceivedHand = context.handNumber
   target.shots += 1
   target.level = Math.min(SHOT_LEVEL_CAP, clampLevel(target.level + SHOT_LEVEL_BOOST))
-  return { ok: true, levelAdded: target.level - before }
+  const levelAdded = target.level - before
+  target.chaserUntil = (context.now ?? Date.now()) + CHASER_WINDOW_MS
+  target.chaserLevels = Math.min(CHASER_LEVELS, Math.max(1, levelAdded))
+  return { ok: true, levelAdded }
 }
 
 /**
@@ -390,9 +421,9 @@ export function applyWaterKickIn(entry: DrinkLedgerEntry, waterId: string): bool
     return false
   }
 
-  entry.pendingWaters.splice(index, 1)
+  const [water] = entry.pendingWaters.splice(index, 1)
   if (!entry.passedOut) {
-    entry.level = clampLevel(entry.level - 1)
+    entry.level = clampLevel(entry.level - (water?.levels ?? 1))
   }
   return true
 }
@@ -436,7 +467,7 @@ export function wakeIfRested(entry: DrinkLedgerEntry, startedHandNumber: number)
 // Events shared with clients
 // ---------------------------------------------------------------------------
 
-export type DrinkEventKind = 'beer' | 'water' | 'water_kicked_in' | 'passed_out' | 'woke_up'
+export type DrinkEventKind = 'beer' | 'water' | 'water_kicked_in' | 'passed_out' | 'woke_up' | 'chaser'
 
 export const DRINK_EVENT_KINDS: readonly DrinkEventKind[] = [
   'beer',
@@ -444,6 +475,7 @@ export const DRINK_EVENT_KINDS: readonly DrinkEventKind[] = [
   'water_kicked_in',
   'passed_out',
   'woke_up',
+  'chaser',
 ]
 
 export interface DrinkEvent {
@@ -475,6 +507,11 @@ export function describeDrinkEvent(event: Pick<DrinkEvent, 'kind' | 'nickname' |
       return { icon: '💤', text: `${who} passed out` }
     case 'woke_up':
       return { icon: '☀️', text: isSelf ? 'You came to. Ow.' : `${event.nickname} woke up` }
+    case 'chaser':
+      return {
+        icon: '💧',
+        text: isSelf ? 'Nice chaser! 💧 That takes the edge off.' : `${event.nickname} chased the shot with water. Nice chaser! 💧`,
+      }
   }
 }
 

@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Connection } from 'partykit/server'
 import {
   buyShot,
+  CHASER_LEVELS,
+  CHASER_WINDOW_MS,
   createDrinkLedgerEntry,
   DRINK_COOLDOWN_MS,
   getShotBlockReasonFromState,
@@ -12,6 +14,7 @@ import {
   SHOT_LIVE_TARGET_REASON,
   SHOT_RECEIVE_COOLDOWN_HANDS,
   toPublicDrinkState,
+  WATER_KICK_IN_MS,
 } from '@/lib/drinks'
 import { CHIP_FLICK_COOLDOWN_MS, describePrankEvent, isValidPrankEvent, type PrankEvent } from '@/lib/pranks'
 import { parseC2S, parseS2C, type C2SMessage, type S2CMessage } from '@/shared/protocol'
@@ -420,5 +423,67 @@ describe('PokerRoom flick_chip', () => {
     expect(lastFailure(sam)).toBe('Nice try. Pick someone else.')
     sam.send({ type: 'flick_chip', targetId: 'nobody' })
     expect(lastFailure(sam)).toBe('That player is not at the table')
+  })
+})
+
+describe('PokerRoom shot chaser', () => {
+  it('a water within 20s of a shot is a chaser: it takes 2 of the shot levels back off', () => {
+    vi.useFakeTimers()
+    const { join } = createTable()
+    const sam = join('sam', 'Sam', 0)
+    const alex = join('alex', 'Alex', 1)
+
+    sam.send({ type: 'buy_shot', targetId: alex.playerId })
+    const chaserUntil = drinksOf(alex, alex.playerId)?.chaserUntil ?? 0
+    expect(chaserUntil).toBeGreaterThan(Date.now())
+    expect(chaserUntil - Date.now()).toBeLessThanOrEqual(CHASER_WINDOW_MS)
+
+    vi.advanceTimersByTime(CHASER_WINDOW_MS - 2_000)
+    alex.send({ type: 'order_drink', kind: 'water' })
+    const events = messagesOf(sam.connection)
+      .filter((message): message is TypedMessage<'drink_event'> => message.type === 'drink_event')
+      .map(message => message.event)
+    expect(events.at(-1)).toMatchObject({ kind: 'chaser', playerId: alex.playerId })
+    expect(drinksOf(sam, alex.playerId)?.chaserUntil).toBe(0)
+
+    vi.advanceTimersByTime(WATER_KICK_IN_MS + 10)
+    expect(drinksOf(sam, alex.playerId)?.level).toBe(SHOT_LEVEL_BOOST - CHASER_LEVELS)
+  })
+
+  it('a water after the window is an ordinary -1 water', () => {
+    vi.useFakeTimers()
+    const { join } = createTable()
+    const sam = join('sam', 'Sam', 0)
+    const alex = join('alex', 'Alex', 1)
+
+    sam.send({ type: 'buy_shot', targetId: alex.playerId })
+    vi.advanceTimersByTime(CHASER_WINDOW_MS + 1)
+    alex.send({ type: 'order_drink', kind: 'water' })
+    vi.advanceTimersByTime(WATER_KICK_IN_MS + 10)
+    expect(drinksOf(sam, alex.playerId)?.level).toBe(SHOT_LEVEL_BOOST - 1)
+  })
+
+  it('only the first water counts as the chaser', () => {
+    vi.useFakeTimers()
+    const { join } = createTable()
+    const sam = join('sam', 'Sam', 0)
+    const alex = join('alex', 'Alex', 1)
+
+    sam.send({ type: 'buy_shot', targetId: alex.playerId })
+    alex.send({ type: 'order_drink', kind: 'water' })
+    vi.advanceTimersByTime(DRINK_COOLDOWN_MS)
+    alex.send({ type: 'order_drink', kind: 'water' })
+    vi.advanceTimersByTime(WATER_KICK_IN_MS + 10)
+    // 3 - 2 (chaser) - 1 (plain water) = 0
+    expect(drinksOf(sam, alex.playerId)?.level).toBe(0)
+  })
+
+  it('never takes back more than the shot added', () => {
+    const buyer = createDrinkLedgerEntry()
+    const target = createDrinkLedgerEntry()
+    target.level = 8
+    buyShot(buyer, target, { handNumber: 1, targetIsLive: false, now: 1_000 })
+    expect(target.level).toBe(9)
+    expect(target.chaserLevels).toBe(1)
   })
 })

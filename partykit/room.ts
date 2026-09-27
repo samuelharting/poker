@@ -1573,7 +1573,7 @@ export default class PokerRoom implements PartyServer {
       return { ok: false, reason: result.reason }
     }
 
-    this.broadcastDrinkEvent(playerId, kind)
+    this.broadcastDrinkEvent(playerId, result.chaser ? 'chaser' : kind)
 
     if (result.water) {
       this.scheduleWaterKickIn(playerId, result.water.id, result.water.dueAt - now)
@@ -1646,7 +1646,7 @@ export default class PokerRoom implements PartyServer {
     const targetEntry = this.drinkLedger[targetId] ??= createDrinkLedgerEntry()
     // Anti-cheat rules live in buyShot: never a live player, never a pass-out,
     // buyer and target cooldowns. Bots come through here too.
-    const result = buyShot(buyerEntry, targetEntry, this.getShotContext(target), target.nickname)
+    const result = buyShot(buyerEntry, targetEntry, { ...this.getShotContext(target), now: Date.now() }, target.nickname)
     if (!result.ok) {
       return result
     }
