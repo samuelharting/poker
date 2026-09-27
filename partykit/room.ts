@@ -28,7 +28,6 @@ import { withVisibleHandOdds } from '../lib/poker/odds'
 import {
   getShowdownMinimumDurationMs,
   isTrueShowdown,
-  RUN_IT_TWICE_PRESENTATION_DURATION_MS,
 } from '../lib/poker/showdown'
 import {
   advanceLadyLuckForNewHand,
@@ -341,7 +340,9 @@ export default class PokerRoom implements PartyServer {
     }
 
     this.finalizeState()
-    this.syncActionTimer(this.data.gameState.actingPlayerId === playerId)
+    // Keep the acting player's original deadline: dropping the socket must not
+    // buy a fresh clock.
+    this.syncActionTimer()
     this.broadcastState()
   }
 
@@ -423,7 +424,8 @@ export default class PokerRoom implements PartyServer {
       }
 
       this.finalizeState()
-      this.syncActionTimer(this.data.gameState.actingPlayerId === reconnectPlayerId)
+      // Reconnecting resumes the same deadline rather than restarting it.
+      this.syncActionTimer()
       this.broadcastState()
       return
     }
@@ -2462,6 +2464,12 @@ export default class PokerRoom implements PartyServer {
     const presentationDuration = this.getShowdownPresentationDurationMs()
     const elapsed = Math.max(0, Date.now() - state.showdownAt)
 
+    // Run it twice is the long cinematic: play both runouts, then give the
+    // table the full configured pause (showdownAt is when both accepted).
+    if (state.runItTwice?.status === 'accepted') {
+      return Math.max(0, presentationDuration + configuredDelay - elapsed)
+    }
+
     return Math.max(0, Math.max(configuredDelay, presentationDuration) - elapsed)
   }
 
@@ -2490,13 +2498,12 @@ export default class PokerRoom implements PartyServer {
   }
 
   private getShowdownPresentationDurationMs(): number {
-    const standardDuration = getShowdownMinimumDurationMs(
-      this.getShowdownParticipantCount()
-    )
-
-    return this.data.gameState.runItTwice?.status === 'accepted'
-      ? Math.max(standardDuration, RUN_IT_TWICE_PRESENTATION_DURATION_MS)
-      : standardDuration
+    const runItTwice = this.data.gameState.runItTwice
+    return getShowdownMinimumDurationMs(this.getShowdownParticipantCount(), {
+      runItTwiceSharedCardCount: runItTwice?.status === 'accepted'
+        ? runItTwice.sharedCardCount ?? 0
+        : null,
+    })
   }
 
   private clearAutoStart() {

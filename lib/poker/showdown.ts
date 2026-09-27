@@ -10,7 +10,14 @@ export const SHOWDOWN_WINNING_HAND_HOLD_MS = 420
 export const SHOWDOWN_PAYOUT_TRAVEL_MS = 850
 export const SHOWDOWN_RESULT_HOLD_MS = 650
 export const SHOWDOWN_AUTO_START_BUFFER_MS = 400
-export const RUN_IT_TWICE_PRESENTATION_DURATION_MS = 7_200
+// Run it twice: run 1 deals, a beat, then run 2. Both the DOM boards and the
+// shared showdown clock read these so the payout never lands mid-runout.
+export const RUN_IT_TWICE_SHARED_CARD_STEP_MS = 55
+export const RUN_IT_TWICE_FIRST_CARD_MS = 360
+export const RUN_IT_TWICE_CARD_STEP_MS = 240
+export const RUN_IT_TWICE_SECOND_BOARD_DELAY_MS = 1_500
+export const RUN_IT_TWICE_CARD_DEAL_MS = 540
+export const RUN_IT_TWICE_RESULT_PAUSE_MS = 300
 
 export type ShowdownStage =
   | 'idle'
@@ -52,6 +59,7 @@ export interface ShowdownPresentationInput extends ShowdownStateLike {
   serverNow?: number | null
   timeSinceSnapshotMs?: number
   participantIds: readonly string[]
+  runItTwiceSharedCardCount?: number | null
 }
 
 export interface ShowdownPresentation {
@@ -120,7 +128,38 @@ export function getSynchronizedShowdownElapsedMs(
   return Math.max(0, (serverNow as number) - (showdownAt as number) + safeTimeSinceSnapshot)
 }
 
-export function getShowdownTiming(participantCount: number): ShowdownTiming {
+/** Deal delay for one card of a run-it-twice board (shared cards land first). */
+export function getRunItTwiceCardDelayMs(
+  boardIndex: number,
+  cardIndex: number,
+  sharedCardCount: number
+): number {
+  if (cardIndex < sharedCardCount) {
+    return 80 + cardIndex * RUN_IT_TWICE_SHARED_CARD_STEP_MS
+  }
+
+  const newCardIndex = cardIndex - sharedCardCount
+  return RUN_IT_TWICE_FIRST_CARD_MS +
+    boardIndex * RUN_IT_TWICE_SECOND_BOARD_DELAY_MS +
+    newCardIndex * RUN_IT_TWICE_CARD_STEP_MS
+}
+
+/** When a run-it-twice board has fully landed and its result can show. */
+export function getRunItTwiceBoardResultMs(boardIndex: number, sharedCardCount: number): number {
+  const safeShared = Math.max(0, Math.min(5, Math.floor(sharedCardCount)))
+  const lastCardDelay = getRunItTwiceCardDelayMs(boardIndex, 4, safeShared)
+  return lastCardDelay + RUN_IT_TWICE_CARD_DEAL_MS + RUN_IT_TWICE_RESULT_PAUSE_MS
+}
+
+export interface ShowdownTimingOptions {
+  /** Set for an accepted run it twice: the payout waits for run 2 to land. */
+  runItTwiceSharedCardCount?: number | null
+}
+
+export function getShowdownTiming(
+  participantCount: number,
+  options: ShowdownTimingOptions = {}
+): ShowdownTiming {
   const safeParticipantCount = Number.isFinite(participantCount)
     ? Math.max(0, Math.floor(participantCount))
     : 0
@@ -138,7 +177,14 @@ export function getShowdownTiming(participantCount: number): ShowdownTiming {
   const lastRevealMs = cardCount === 0
     ? SHOWDOWN_INTRO_DURATION_MS
     : SHOWDOWN_INTRO_DURATION_MS + intervalCount * revealStepMs
-  const highlightAtMs = lastRevealMs + SHOWDOWN_POST_REVEAL_PAUSE_MS
+  const runItTwiceShared = options.runItTwiceSharedCardCount
+  const runoutDoneMs = typeof runItTwiceShared === 'number' && Number.isFinite(runItTwiceShared)
+    ? getRunItTwiceBoardResultMs(1, runItTwiceShared)
+    : 0
+  const highlightAtMs = Math.max(
+    lastRevealMs + SHOWDOWN_POST_REVEAL_PAUSE_MS,
+    runoutDoneMs
+  )
   const payoutAtMs = highlightAtMs + SHOWDOWN_WINNING_HAND_HOLD_MS
   const resultAtMs = payoutAtMs + SHOWDOWN_PAYOUT_TRAVEL_MS
   const completeAtMs = resultAtMs + SHOWDOWN_RESULT_HOLD_MS
@@ -158,8 +204,11 @@ export function getShowdownTiming(participantCount: number): ShowdownTiming {
 }
 
 /** The minimum between-hands hold PartyKit should use for this showdown. */
-export function getShowdownMinimumDurationMs(participantCount: number): number {
-  return getShowdownTiming(participantCount).totalDurationMs + SHOWDOWN_AUTO_START_BUFFER_MS
+export function getShowdownMinimumDurationMs(
+  participantCount: number,
+  options: ShowdownTimingOptions = {}
+): number {
+  return getShowdownTiming(participantCount, options).totalDurationMs + SHOWDOWN_AUTO_START_BUFFER_MS
 }
 
 export function getShowdownRevealOffsets(
@@ -202,7 +251,9 @@ export function getShowdownPresentation(
   input: ShowdownPresentationInput
 ): ShowdownPresentation {
   const participantIds = normalizeParticipantIds(input.participantIds)
-  const timing = getShowdownTiming(participantIds.length)
+  const timing = getShowdownTiming(participantIds.length, {
+    runItTwiceSharedCardCount: input.runItTwiceSharedCardCount,
+  })
   const isShowdown = isTrueShowdown(input)
   const hasSynchronizedAnchor = (
     Number.isFinite(input.showdownAt) &&

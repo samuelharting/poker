@@ -67,6 +67,9 @@ export function useShowdownPresentation(state: TableState): ShowdownPresentation
     serverNow: anchorRef.current.serverNow,
     timeSinceSnapshotMs: Math.max(0, clock - anchorRef.current.receivedAt),
     participantIds,
+    runItTwiceSharedCardCount: state.runItTwice?.status === 'accepted'
+      ? state.runItTwice.sharedCardCount ?? 0
+      : null,
   })
 
   useEffect(() => {

@@ -692,7 +692,7 @@ describe('PokerRoom player profiles and stats', () => {
 })
 
 describe('PokerRoom timer handling', () => {
-  it('resets the action timer on reconnect and clears it after the hand ends', () => {
+  it('keeps the original action deadline across a reconnect and clears it after the hand ends', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-03-31T12:00:00.000Z'))
 
@@ -721,12 +721,13 @@ describe('PokerRoom timer handling', () => {
     const reconnect = joinPlayer(server, room, 'reconnect', actingPlayerId === alice.playerId ? 'Alice' : 'Bob', acting.reconnectToken)
     expect(reconnect.playerId).toBe(acting.playerId)
 
-    vi.advanceTimersByTime(AUTO_FOLD_DELAY - 1_000)
+    // Reconnecting does not buy a fresh clock: the fold lands on the original deadline.
+    vi.advanceTimersByTime(AUTO_FOLD_DELAY - 6_000 - 1)
 
     const midHandSnapshot = lastMessage(reconnect.connection, 'room_snapshot') ?? lastMessage(waiting.connection, 'room_snapshot')
     expect(midHandSnapshot?.state.phase).toBe('in_hand')
 
-    vi.advanceTimersByTime(1_001)
+    vi.advanceTimersByTime(2)
 
     const endedSnapshot = lastMessage(reconnect.connection, 'room_snapshot') ?? lastMessage(waiting.connection, 'room_snapshot')
     expect(endedSnapshot?.state.phase).toBe('between_hands')

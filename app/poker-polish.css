@@ -981,7 +981,7 @@ input:focus-visible {
   justify-items: end;
   gap: 4px;
   opacity: 0;
-  animation: runItTwiceResultIn 360ms ease-out 2.05s both;
+  animation: runItTwiceResultIn 360ms ease-out var(--runout-result-delay, 2.05s) both;
 }
 
 .run-it-twice-board-result span {

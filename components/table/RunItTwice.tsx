@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 
 import type { Card, RunItTwiceState, SeatPlayer } from '@/lib/poker/types'
 import { PlayingCard } from '@/components/ui/PlayingCard'
+import { getRunItTwiceBoardResultMs, getRunItTwiceCardDelayMs } from '@/lib/poker/showdown'
 
 interface RunItTwicePromptProps {
   runItTwice: RunItTwiceState
@@ -15,6 +16,10 @@ interface RunItTwicePromptProps {
 
 type RunoutCardStyle = CSSProperties & {
   '--runout-card-delay': string
+}
+
+type RunoutResultStyle = CSSProperties & {
+  '--runout-result-delay': string
 }
 
 function formatAmount(amount: number): string {
@@ -159,10 +164,7 @@ export function RunItTwiceBoards({
             </div>
             <div className="run-it-twice-board-cards">
               {board.cards.map((card, cardIndex) => {
-                const newCardIndex = Math.max(0, cardIndex - sharedCardCount)
-                const delayMs = cardIndex < sharedCardCount
-                  ? 80 + cardIndex * 55
-                  : 360 + boardIndex * 720 + newCardIndex * 180
+                const delayMs = getRunItTwiceCardDelayMs(boardIndex, cardIndex, sharedCardCount)
                 const style: RunoutCardStyle = {
                   '--runout-card-delay': `${delayMs}ms`,
                 }
@@ -183,7 +185,13 @@ export function RunItTwiceBoards({
                 )
               })}
             </div>
-            <div className="run-it-twice-board-result" aria-live="polite">
+            <div
+              className="run-it-twice-board-result"
+              aria-live="polite"
+              style={{
+                '--runout-result-delay': `${getRunItTwiceBoardResultMs(boardIndex, sharedCardCount)}ms`,
+              } as RunoutResultStyle}
+            >
               {board.winners.map(winner => {
                 const player = players.find(candidate => candidate.id === winner.playerId)
                 return (
