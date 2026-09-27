@@ -911,7 +911,7 @@ describe('PokerTable desktop 3D gate', () => {
       'utf8'
     )
 
-    expect(tableSource).toContain('createThreeEmoteReactions(socialState, playerIds, socialTick, getEmoteGlyph)')
+    expect(tableSource).toMatch(/createThreeEmoteReactions\(\s*socialState,\s*playerIds,\s*socialTick,\s*getEmoteGlyph,/)
     expect(tableSource).toContain('emoteReactions={threeEmoteReactions}')
     expect(tableSource).toContain('selectedTargetId={targetEmotePlayerId}')
     expect(tableSource).toContain('onSelectPlayer={handleSelectEmoteTarget}')

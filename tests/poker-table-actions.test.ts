@@ -300,7 +300,23 @@ describe('settings and player management helpers', () => {
     }), true)).toEqual({
       canTakeSeat: true,
       actionLabel: 'Take seat',
-      message: 'You have chips again and can take the next open seat.',
+      message: 'A seat is open: sit in from the next hand.',
+    })
+  })
+
+  it('only offers a seat from the rail when one is free', () => {
+    const rail = makeLobbyPlayer({ stack: 500, isSeated: false, isSpectator: true, status: 'spectating' })
+    expect(getSpectatorRailState(rail, true, { openSeats: 0 })).toEqual({
+      canTakeSeat: false,
+      actionLabel: undefined,
+      message: 'Table is full. You are watching until a seat opens.',
+    })
+    expect(getSpectatorRailState(rail, true, { openSeats: 2 })?.canTakeSeat).toBe(true)
+    // Still in the chair (moving to the rail after this hand): no Take seat.
+    expect(getSpectatorRailState({ ...rail, isSeated: true }, true, { openSeats: 3 })).toEqual({
+      canTakeSeat: false,
+      actionLabel: undefined,
+      message: 'Moving to the rail after this hand.',
     })
   })
 

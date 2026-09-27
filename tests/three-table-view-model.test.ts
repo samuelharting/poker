@@ -662,7 +662,7 @@ describe('createThreeTableViewModel', () => {
     expect(turnCheck.actionKey).not.toBe(flopCheck.actionKey)
   })
 
-  it('creates only live 3D emote reactions for occupied seats', () => {
+  it('creates only live 3D emote reactions that land on occupied seats', () => {
     const now = 5000
     const socialState: SocialSnapshot = {
       active: [
@@ -699,7 +699,9 @@ describe('createThreeTableViewModel', () => {
       chatLog: [],
     }
 
-    expect(createThreeEmoteReactions(socialState, ['hero', 'villain'], now)).toEqual([
+    expect(createThreeEmoteReactions(socialState, ['hero', 'villain'], now, emote => emote, id => (
+      id === 'ghost' ? 'Rail Ghost' : undefined
+    ))).toEqual([
       {
         id: `hero:villain:\uD83D\uDE02:${now + 1400}`,
         senderId: 'hero',
@@ -715,6 +717,16 @@ describe('createThreeTableViewModel', () => {
         emote: '\uD83D\uDC4B',
         expiresAt: now + 900,
         targeted: false,
+      },
+      // A spectator on the rail reacting to a seated player lands on that seat.
+      {
+        id: `ghost:hero:\uD83D\uDC80:${now + 900}`,
+        senderId: 'ghost',
+        targetId: 'hero',
+        emote: '\uD83D\uDC80',
+        expiresAt: now + 900,
+        targeted: true,
+        senderName: 'Rail Ghost',
       },
     ])
   })

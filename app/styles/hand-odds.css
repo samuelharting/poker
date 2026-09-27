@@ -59,14 +59,15 @@
   to { opacity: 1; transform: none; }
 }
 
-/* Desktop 3D nameplate: the pill rides at the end of the name line, and the
-   plate widens a little so the name is not squeezed out by it. */
+/* Desktop 3D nameplate: the pill rides on the stack line, so the name keeps
+   its full width. */
 .desktop-3d-stage .cinematic-seat .cinematic-odds-pill {
-  margin-left: auto;
+  margin-left: 2px;
 }
 
-.desktop-3d-stage .cinematic-seat .cinematic-seat-panel:has(.cinematic-odds-pill) {
-  max-width: 236px;
+/* Full-table spectator: the near player's plate docks at the bottom centre. */
+.desktop-3d-stage .cinematic-seats .cinematic-seat.is-near-spectated .cinematic-seat-target {
+  transform: none;
 }
 
 /* 2D seat chips: a small badge pinned above the chip, clear of the cards. */
@@ -236,11 +237,12 @@
   to { opacity: 1; transform: none; }
 }
 
-/* Where the panel sits: under the top HUD on desktop, off the board and tray. */
+/* Where the panel sits: bottom left, above the table-talk button, clear of
+   the nameplates (which ride above the table), the board and the tray. */
 .hand-odds-dock {
   position: absolute;
-  top: 76px;
-  left: 16px;
+  bottom: 84px;
+  left: 20px;
   z-index: 6;
   pointer-events: none;
 }

@@ -1730,6 +1730,12 @@ export default class PokerRoom implements PartyServer {
   }
 
   private handleSetPlayerSpectator(conn: Connection, targetId: string, spectator: boolean) {
+    const senderId = this.data.connectionToPlayer[conn.id]
+    if (senderId && senderId === targetId) {
+      this.handleSelfSpectator(conn, senderId, spectator)
+      return
+    }
+
     if (!this.requireGameCreator(conn, 'seat or spectate players')) {
       return
     }
@@ -1757,6 +1763,10 @@ export default class PokerRoom implements PartyServer {
       if (seatedPlayer) {
         this.data.spectatorStacks[targetId] = seatedPlayer.stack
         this.removePlayerFromTable(targetId)
+      } else {
+        // Never seated yet: give them the buy-in a full-table newcomer gets,
+        // so "Take seat" works from the rail.
+        this.data.spectatorStacks[targetId] ??= this.issueBuyIn(targetId)
       }
       this.data.spectatorIds[targetId] = true
       this.sendActionResult(conn, `Moved ${targetName} to spectator mode.`)
@@ -1788,6 +1798,45 @@ export default class PokerRoom implements PartyServer {
 
     this.seatPlayerAt(targetId, seatIndex)
     this.sendActionResult(conn, `Seated ${targetName}.`)
+    this.broadcastState()
+  }
+
+  /**
+   * Anyone may stand up to watch, or sit back down, themselves. Standing up
+   * never folds a live hand: they play it out and move to the rail after it.
+   */
+  private handleSelfSpectator(conn: Connection, playerId: string, spectator: boolean) {
+    const seatedPlayer = this.getPlayer(playerId)
+    const inHand = this.data.gameState.phase === 'in_hand'
+
+    if (!spectator) {
+      if (seatedPlayer) {
+        delete this.data.pendingSpectators[playerId]
+        delete this.data.spectatorIds[playerId]
+        this.sendActionResult(conn, 'You stay in your seat.')
+        this.broadcastState()
+        return
+      }
+      this.handleSeatMe(conn)
+      return
+    }
+
+    if (seatedPlayer && inHand) {
+      this.data.pendingSpectators[playerId] = true
+      this.data.spectatorIds[playerId] = true
+      this.sendActionResult(conn, 'You move to the rail after this hand.')
+      this.broadcastState()
+      return
+    }
+
+    if (seatedPlayer) {
+      this.data.spectatorStacks[playerId] = seatedPlayer.stack
+      this.removePlayerFromTable(playerId)
+    } else {
+      this.data.spectatorStacks[playerId] ??= this.issueBuyIn(playerId)
+    }
+    this.data.spectatorIds[playerId] = true
+    this.sendActionResult(conn, 'You are watching from the rail.')
     this.broadcastState()
   }
 
@@ -1938,29 +1987,31 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
+    // Spectators react from the rail too: their emote lands on the seat they
+    // aim at (or just goes in the chat log when untargeted).
     const player = this.getPlayer(playerId)
-    if (!player) {
-      this.sendActionFailed(conn, 'Take a seat before emoting')
+    if (!player && !this.isKnownPlayer(playerId)) {
+      this.sendActionFailed(conn, 'Join the room before emoting')
       return
     }
 
     const normalizedTargetId = typeof targetId === 'string' && targetId.trim().length > 0
       ? targetId.trim()
-      : player.id
+      : playerId
 
-    if (normalizedTargetId !== player.id && !this.isKnownPlayer(normalizedTargetId)) {
+    if (normalizedTargetId !== playerId && !this.isKnownPlayer(normalizedTargetId)) {
       this.sendActionFailed(conn, 'That player is not available to receive a targeted emote')
       return
     }
 
-    const nickname = this.data.playerNicknames[playerId] ?? player.nickname ?? 'Player'
+    const nickname = this.data.playerNicknames[playerId] ?? player?.nickname ?? 'Player'
     const targetNickname =
-      normalizedTargetId === player.id
+      normalizedTargetId === playerId
         ? ''
         : this.getPlayer(normalizedTargetId)?.nickname ??
           this.data.playerNicknames[normalizedTargetId] ??
           'Player'
-    const message = normalizedTargetId === player.id
+    const message = normalizedTargetId === playerId
       ? emote
       : `to ${targetNickname}: ${emote}`
     const now = Date.now()
@@ -1969,7 +2020,7 @@ export default class PokerRoom implements PartyServer {
       ...this.data.social.activeByPlayer[playerId],
       emote,
       emoteExpiresAt: now + EMOTE_DURATION,
-      targetPlayerId: normalizedTargetId !== player.id ? normalizedTargetId : undefined,
+      targetPlayerId: normalizedTargetId !== playerId ? normalizedTargetId : undefined,
     }
 
     this.appendChatEntry(playerId, nickname, message, now)
@@ -3511,7 +3562,9 @@ export default class PokerRoom implements PartyServer {
           || this.data.pendingRemovals[id]
         )
         const isSeated = Boolean(seatedPlayer)
-        const isConnected = Boolean(
+        const isBot = seatedPlayer?.isBot ?? id.startsWith('bot_')
+        // Bots have no socket: benched ones are not "away".
+        const isConnected = isBot || Boolean(
           seatedPlayer?.isConnected ?? this.data.playerToConnection[id]
         )
 
@@ -3524,7 +3577,7 @@ export default class PokerRoom implements PartyServer {
           stack: seatedPlayer?.stack ?? this.data.spectatorStacks[id] ?? 0,
           status: isSpectator ? 'spectating' : seatedPlayer?.status ?? 'waiting',
           isConnected,
-          isBot: seatedPlayer?.isBot ?? id.startsWith('bot_'),
+          isBot,
           isSeated,
           isSpectator,
           ...(this.data.membership.awayIds[id] ? { isAway: true } : {}),

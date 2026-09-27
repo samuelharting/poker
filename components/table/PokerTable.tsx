@@ -561,6 +561,8 @@ function MobileEdgeSeat({
   cardRevealControl,
   onNameClick,
   odds,
+  isHandLive = false,
+  isSelf = false,
 }: {
   player: OpponentSeat
   visualSeat: number
@@ -574,12 +576,17 @@ function MobileEdgeSeat({
   cardRevealControl?: React.ReactNode
   onNameClick?: (playerId: string) => void
   odds?: SeatOddsView
+  isHandLive?: boolean
+  /** The viewer's own chair in the all-seats (rail) layout: not a reaction target. */
+  isSelf?: boolean
 }) {
   const isFolded = player.status === 'folded'
   const isDisconnected = player.status === 'disconnected' || !player.isConnected
   // Benched after missed hands (or by choice): keeps the seat, not dealt in.
   const isSittingOut = !isDisconnected && (player.isAway || (player.status === 'sitting_out' && player.stack > 0))
   const isAllIn = player.status === 'all_in'
+  // Sat down while a hand was running: dealt in from the next one.
+  const isJoiningNextHand = player.status === 'waiting' && !player.hasCards && isHandLive
   const blindRole = player.isBB ? 'big' : player.isSB ? 'small' : null
   const mobileSeatName = getMobileSeatName(player)
   const targetTitle = `Target ${player.nickname} for emojis`
@@ -630,7 +637,7 @@ function MobileEdgeSeat({
       data-tone={getSeatTone(player)}
       style={seatStyle}
     >
-      {onNameClick && (
+      {onNameClick && !isSelf && (
         <button
           type="button"
           className="mobile-seat-hit"
@@ -693,6 +700,8 @@ function MobileEdgeSeat({
       <div className={`mobile-seat-status is-${statusTone}`}>
         {statusTone === 'win' ? (
           <span className="mobile-seat-action">+{formatAmount(winnerAmount ?? 0)}</span>
+        ) : isJoiningNextHand ? (
+          <span className="mobile-seat-action">Next hand</span>
         ) : statusTone === 'away' ? (
           <span className="mobile-seat-action">{isSittingOut ? 'Sitting out' : 'Away'}</span>
         ) : actionChip ? (
@@ -1064,10 +1073,20 @@ export function buildPlayerManagementTags(
 
 export function getSpectatorRailState(
   lobbyPlayer: LobbyPlayer | undefined,
-  isConnected: boolean
+  isConnected: boolean,
+  table: { openSeats?: number } = {}
 ): { canTakeSeat: boolean; actionLabel?: string; message: string } | null {
   if (!lobbyPlayer?.isSpectator) {
     return null
+  }
+
+  if (lobbyPlayer.isSeated) {
+    // Standing up (or benched) mid-hand: still in the chair until it ends.
+    return {
+      canTakeSeat: false,
+      actionLabel: undefined,
+      message: 'Moving to the rail after this hand.',
+    }
   }
 
   if (lobbyPlayer.stack <= 0) {
@@ -1086,10 +1105,18 @@ export function getSpectatorRailState(
     }
   }
 
+  if (table.openSeats !== undefined && table.openSeats <= 0) {
+    return {
+      canTakeSeat: false,
+      actionLabel: undefined,
+      message: 'Table is full. You are watching until a seat opens.',
+    }
+  }
+
   return {
     canTakeSeat: true,
     actionLabel: 'Take seat',
-    message: 'You have chips again and can take the next open seat.',
+    message: 'A seat is open: sit in from the next hand.',
   }
 }
 
@@ -1234,9 +1261,17 @@ export function PokerTable({
   const showdownPresentation = showdownView.presentation
   const runItTwiceVote = state.runItTwice?.status === 'voting' ? state.runItTwice : null
   const acceptedRunItTwice = state.runItTwice?.status === 'accepted' ? state.runItTwice : null
+  // Someone moved to the rail mid-hand who is still live (all-in) keeps
+  // playing their hand until it ends; only then do they become a spectator.
+  const viewerSeat = state.players.find(player => player.id === yourId)
+  const viewerIsLive = Boolean(
+    state.phase === 'in_hand' &&
+    viewerSeat?.hasCards &&
+    (viewerSeat.status === 'active' || viewerSeat.status === 'all_in')
+  )
   const isSpectatorViewer = Boolean(
     state.lobbyPlayers.find(player => player.id === yourId)?.isSpectator
-  )
+  ) && !viewerIsLive
   const liveCardRevealTargetIds = useMemo(() => new Set(
     (state.cardRevealRequests ?? [])
       .filter(request => request.requesterId === yourId && request.status === 'approved')
@@ -1503,8 +1538,14 @@ export function PokerTable({
   const playerIds = useMemo(() => state.players.map(player => player.id), [state.players])
   const playerIdSet = useMemo(() => new Set(playerIds), [playerIds])
   const threeEmoteReactions = useMemo(
-    () => createThreeEmoteReactions(socialState, playerIds, socialTick, getEmoteGlyph),
-    [playerIds, socialState, socialTick]
+    () => createThreeEmoteReactions(
+      socialState,
+      playerIds,
+      socialTick,
+      getEmoteGlyph,
+      id => state.lobbyPlayers.find(player => player.id === id)?.nickname
+    ),
+    [playerIds, socialState, socialTick, state.lobbyPlayers]
   )
   const threeChatMessages = useMemo(
     () => createThreeChatMessages(socialState, playerIds, socialTick),
@@ -2044,7 +2085,11 @@ export function PokerTable({
   const isBustedViewer = !isSpectator && hasHandResult && Boolean(me) && me!.stack <= 0 &&
     (!showdownPresentation.isShowdown || showdownPresentation.complete)
   const isRailBusted = Boolean(lobbyMe?.isSpectator && lobbyMe.stack <= 0 && !me)
-  const canRetakeSeat = Boolean(getSpectatorRailState(lobbyMe, isConnected)?.canTakeSeat)
+  const openSeatCount = Math.max(0, 8 - state.players.length)
+  const spectatorRailState = getSpectatorRailState(lobbyMe, isConnected, { openSeats: openSeatCount })
+  const canRetakeSeat = Boolean(spectatorRailState?.canTakeSeat)
+  // On the rail (not in a chair): the watching bar / dock is always up.
+  const isOnRail = Boolean(lobbyMe?.isSpectator && !me)
 
   const tableCenterLabel = me
       ? me.nickname.toUpperCase()
@@ -2468,6 +2513,18 @@ export function PokerTable({
         />
       ) : null}
       {!isMobileViewport && showdownCinematic}
+      {!isMobileViewport && lobbyMe?.isSpectator && spectatorRailState && !settingsOpen ? (
+        <div className="spectator-watch-bar" role="status" aria-label="Watching">
+          <span className="spectator-watch-live" aria-hidden="true" />
+          <strong>Watching</strong>
+          <span className="spectator-watch-detail">{spectatorRailState.message}</span>
+          {spectatorRailState.canTakeSeat && (
+            <button type="button" className="btn-subtle btn-subtle-gold" onClick={onSeatMe}>
+              {spectatorRailState.actionLabel}
+            </button>
+          )}
+        </div>
+      ) : null}
       {!isMobileViewport && handOddsView && !settingsOpen ? (
         <div className="hand-odds-dock">
           <HandOddsPanel view={handOddsView} names={playerNamesById} yourId={yourId} />
@@ -2563,7 +2620,9 @@ export function PokerTable({
                         />
                       ) : null}
                       onNameClick={handleSelectEmoteTarget}
+                      isSelf={player.id === yourId}
                       odds={handOddsView?.byPlayer.get(player.id)}
+                      isHandLive={isInHand}
                     />
                     <CompanionBadge companion={presentedCompanion} playerId={player.id} />
                     {(seatSocial.message || seatSocial.emote) && (
@@ -2968,7 +3027,7 @@ export function PokerTable({
         />
       )}
 
-      {isMobileViewport && (showLobbyControls || isBustedViewer || isRailBusted || canRetakeSeat) && !settingsOpen && !hasActionTray && (
+      {isMobileViewport && (showLobbyControls || isBustedViewer || isRailBusted || canRetakeSeat || isOnRail) && !settingsOpen && !hasActionTray && (
         <MobileBetweenHandsDock
           state={state}
           me={me}
@@ -4744,6 +4803,21 @@ export function SettingsModal({
                         <strong>{formatAmount(player.stack)}</strong> {'\u00b7'} {getLobbyStatusLabel(state, player)}
                       </div>
                     </div>
+                    {!isHost && player.id === yourId && (
+                      <div className="settings-player-actions">
+                        <button
+                          type="button"
+                          className="btn-subtle"
+                          disabled={!isConnected || (player.isSpectator && !player.isSeated && player.stack <= 0)}
+                          aria-label={player.isSpectator ? 'Sit back down' : 'Stand up and watch'}
+                          onClick={() => onSetPlayerSpectator(player.id, !player.isSpectator)}
+                        >
+                          {player.isSpectator
+                            ? player.isSeated ? 'Stay seated' : 'Sit down'
+                            : state.phase === 'in_hand' ? 'Watch after this hand' : 'Stand up and watch'}
+                        </button>
+                      </div>
+                    )}
                     {isHost && <div className="settings-player-actions">
                       <label className="settings-field settings-player-chip-input">
                         <span>Chip amount</span>
@@ -4954,7 +5028,7 @@ function WaitingPanel({
   const canStart = isHost && seatedCount >= 2 && isConnected
   const canAddBots = isHost && isConnected && seatedCount < 8
   const openSeats = Math.max(0, 8 - seatedCount)
-  const spectatorRail = getSpectatorRailState(lobbyMe, isConnected)
+  const spectatorRail = getSpectatorRailState(lobbyMe, isConnected, { openSeats: Math.max(0, 8 - state.players.length) })
 
   return (
     <div className="table-panel status-panel">
@@ -4993,13 +5067,9 @@ function WaitingPanel({
               : 'Seat assignment is being restored.'}
       </div>
       {spectatorRail && (
+        // Take seat lives on the always-visible Watching bar.
         <div className="spectator-rail-actions">
           <span className="table-chip table-chip-soft">Rail stack {formatAmount(lobbyMe?.stack ?? 0)}</span>
-          {spectatorRail.canTakeSeat && (
-            <button type="button" className="btn-subtle btn-subtle-gold" onClick={onSeatMe}>
-              {spectatorRail.actionLabel}
-            </button>
-          )}
         </div>
       )}
       <div className="table-panel-actions status-panel-actions">
@@ -5077,10 +5147,10 @@ function MobileBetweenHandsDock({
   const canStart = isHost && seatedCount >= 2 && isConnected
   const canAddBots = isHost && isConnected && seatedCount < 8
   const openSeats = Math.max(0, 8 - seatedCount)
-  const spectatorRail = getSpectatorRailState(lobbyMe, isConnected)
+  const spectatorRail = getSpectatorRailState(lobbyMe, isConnected, { openSeats: Math.max(0, 8 - state.players.length) })
   // Rebuys are self-serve: any busted player can buy back in (host rules permitting).
   const canRebuy = isBusted && isConnected && !rebuyBlockedReason
-  const showDeal = isHost
+  const showDeal = isHost && state.phase !== 'in_hand'
   // Busted hosts still run the table; Fill seats steps aside for the rebuy.
   const showFillSeats = canAddBots && openSeats > 1 && !canRebuy
   const actionCount = (canAddBots ? (showFillSeats ? 2 : 1) : 0) + (showDeal ? 1 : 0) + (canRebuy ? 1 : 0)

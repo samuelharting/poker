@@ -230,6 +230,8 @@ export interface ThreeEmoteReaction {
   emote: string
   expiresAt: number
   targeted: boolean
+  /** Sender's name when they are not at the table (a spectator on the rail). */
+  senderName?: string
 }
 
 export interface ThreeChatMessage {
@@ -457,7 +459,8 @@ export function createThreeEmoteReactions(
   socialState: Pick<SocialSnapshot, 'active'>,
   playerIds: Iterable<string>,
   now = Date.now(),
-  mapEmote: (emote: string) => string | undefined = emote => emote
+  mapEmote: (emote: string) => string | undefined = emote => emote,
+  nameOf: (playerId: string) => string | undefined = () => undefined
 ): ThreeEmoteReaction[] {
   const knownPlayerIds = new Set(playerIds)
 
@@ -465,14 +468,15 @@ export function createThreeEmoteReactions(
     if (
       !entry.emote ||
       !entry.emoteExpiresAt ||
-      entry.emoteExpiresAt <= now ||
-      !knownPlayerIds.has(entry.playerId)
+      entry.emoteExpiresAt <= now
     ) {
       return acc
     }
 
+    // Lands on a seat; the sender may be seated or on the rail.
     const targetId = entry.targetPlayerId?.trim() || entry.playerId
-    if (!knownPlayerIds.has(targetId)) {
+    const senderSeated = knownPlayerIds.has(entry.playerId)
+    if (!knownPlayerIds.has(targetId) || (!senderSeated && targetId === entry.playerId)) {
       return acc
     }
 
@@ -488,6 +492,7 @@ export function createThreeEmoteReactions(
       emote,
       expiresAt: entry.emoteExpiresAt,
       targeted: targetId !== entry.playerId,
+      ...(!senderSeated && nameOf(entry.playerId) ? { senderName: nameOf(entry.playerId) } : {}),
     })
 
     return acc
@@ -505,14 +510,14 @@ export function createThreeChatMessages(
     if (
       !entry.message ||
       !entry.messageExpiresAt ||
-      entry.messageExpiresAt <= now ||
-      !knownPlayerIds.has(entry.playerId)
+      entry.messageExpiresAt <= now
     ) {
       return acc
     }
 
+    // A spectator's message shows only when aimed at someone in a seat.
     const targetId = entry.messageTargetPlayerId?.trim() || entry.playerId
-    if (!knownPlayerIds.has(targetId)) {
+    if (!knownPlayerIds.has(targetId) || (!knownPlayerIds.has(entry.playerId) && targetId === entry.playerId)) {
       return acc
     }
 

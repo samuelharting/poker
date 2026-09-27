@@ -2923,10 +2923,17 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
     const behind = scratch.z > 1
     const rawX = (scratch.x * 0.5 + 0.5) * width * (behind ? -1 : 1)
     const margin = 110
-    const x = THREE.MathUtils.clamp(rawX, margin, width - margin)
-    const y = THREE.MathUtils.clamp((-scratch.y * 0.5 + 0.5) * height, 150, height - 260)
-    const pinned = x !== rawX
+    // A spectator at a full table stands behind the near player: projected,
+    // that player's plate (and tabled cards) would land on the board, so it
+    // docks at the bottom of the screen like a hero bar instead.
+    const nearSpectated = seat.visualSeat === 0 && !seat.isHero
+    const x = nearSpectated ? width / 2 : THREE.MathUtils.clamp(rawX, margin, width - margin)
+    const y = nearSpectated
+      ? height - 18
+      : THREE.MathUtils.clamp((-scratch.y * 0.5 + 0.5) * height, 150, height - 260)
+    const pinned = !nearSpectated && x !== rawX
     element.classList.toggle('is-edge-pinned', pinned)
+    element.classList.toggle('is-near-spectated', nearSpectated)
     if (!element.classList.contains('is-local-player')) {
       // Revealed hole cards sit above the plate and need clearance too.
       const extra = element.querySelector('.has-revealed-cards') ? 62 : 0
@@ -3450,10 +3457,12 @@ function createSceneRuntime(
     targetCamera.copy(baseCameraPosition)
     targetLook.copy(baseCameraLookAt)
     if (viewRef.current.players.some(player => player.visualSeat === 0 && !player.isHero)) {
-      // Full-table spectator: stand up behind the near player instead of sitting in their head.
-      targetCamera.y += 1.35
-      targetCamera.z += 1.2
-      targetLook.y -= 0.2
+      // Full-table spectator: stand up behind the near player instead of sitting in their head,
+      // high enough to look over them onto the board (their plate docks at the bottom).
+      targetCamera.y += 2.2
+      targetCamera.z += 1.5
+      targetLook.y -= 0.55
+      targetLook.z -= 0.25
     }
     if (!reducedMotion) {
       // Seated breathing: a gentle head sway rather than a floating camera.
@@ -3853,7 +3862,7 @@ export function DesktopPokerRoom3D({
                     >
                       {reaction.targeted && (
                         <span className="cinematic-seat-reaction-from">
-                          {view.players.find(sender => sender.id === reaction.senderId)?.nickname ?? 'Someone'} →
+                          {view.players.find(sender => sender.id === reaction.senderId)?.nickname ?? reaction.senderName ?? 'Someone'} →
                         </span>
                       )}
                       <EmojiGlyph emoji={reaction.emote} />
@@ -3882,9 +3891,6 @@ export function DesktopPokerRoom3D({
                 <span className="cinematic-seat-panel">
                 <span className="cinematic-seat-topline">
                   <strong>{player.nickname}</strong>
-                  {player.odds && (
-                    <OddsPill odds={player.odds} playerName={player.nickname} className="cinematic-odds-pill" />
-                  )}
                   {player.shotsWaiting > 0 && (
                     // A shot is lined up for them, poured once they're out of the hand.
                     <em className="cinematic-shot-waiting" aria-label="Shot waiting" title="Shot waiting">
@@ -3920,6 +3926,9 @@ export function DesktopPokerRoom3D({
                 </span>
                 <span className="cinematic-seat-meta">
                   <b>${player.stack.toLocaleString()}</b>
+                  {player.odds && (
+                    <OddsPill odds={player.odds} playerName={player.nickname} className="cinematic-odds-pill" />
+                  )}
                   {player.isWinner ? (
                     <small
                       className="cinematic-winner-label"
