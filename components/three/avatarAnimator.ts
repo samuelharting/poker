@@ -893,8 +893,9 @@ export function computeAvatarTargetPose(
       }
       case 'slow_clap': {
         const clap = (0.5 + 0.5 * Math.sin(time * 5.4 + seed)) * motion
-        blendTo(pose.handR, offset(anchors.chest, 0.03 + 0.12 * clap, 0.14, -0.32), rise)
-        blendTo(pose.handL, offset(anchors.chest, -0.03 - 0.12 * clap, 0.14, -0.32), rise)
+        // Hands meet out in front of the chest (never crossing).
+        blendTo(pose.handR, offset(anchors.chest, 0.05 + 0.13 * clap, 0.16, -0.42), rise)
+        blendTo(pose.handL, offset(anchors.chest, -0.05 - 0.13 * clap, 0.16, -0.42), rise)
         add(bones.Head, 0.05 * clap, 0, 0, rise)
         pose.fingerCurlR = 0.12
         pose.fingerCurlL = 0.12
@@ -1010,7 +1011,7 @@ export function computeAvatarTargetPose(
     const flat = Math.hypot(dx, dz) || 1
     const turn = Math.max(-1.35, Math.min(1.35, Math.atan2(-dx, -dz)))
     const aimPitch = Math.max(-0.25, Math.min(0.3, Math.atan2(dy, flat)))
-    const reach = 0.62 + 0.08 * jab
+    const reach = 0.72 + 0.07 * jab
     const goal: Vec3 = [
       shoulder[0] + (dx / flat) * reach * Math.cos(aimPitch),
       shoulder[1] + 0.08 + reach * Math.sin(aimPitch) + 0.03 * jab + shake,
@@ -1035,7 +1036,8 @@ export function computeAvatarTargetPose(
     add(left ? bones.ShoulderL : bones.ShoulderR, 0, 0, 0.1 * extend * mirror, w)
     if (left) pose.fingerCurlL = pose.fingerCurlL * (1 - w) + w
     else pose.fingerCurlR = pose.fingerCurlR * (1 - w) + w
-    pose.middleFinger = w * smoothStep((elapsed - 0.18) / 0.22)
+    // The finger goes up as the arm is thrown and drops as it comes back.
+    pose.middleFinger = w * smoothStep((elapsed - 0.18) / 0.22) * smoothStep((FLIP_OFF_SECONDS - 0.45 - elapsed) / 0.35)
     pose.bodyPosition[2] -= (0.05 * extend + 0.05 * jab) * w
   }
 
