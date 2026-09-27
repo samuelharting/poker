@@ -1210,7 +1210,7 @@ async function requestRiggedAvatar(
     seat.fallbackAvatar.visible = false
     applySeatFoldVisualState(seat)
     startAvatarIdle(seat)
-    precompileScene(runtime.renderer, runtime.scene, runtime.camera)
+    precompileScene(runtime.renderer, runtime.scene, runtime.camera, runtime.postFx)
     // The load + compile is a one-off stall; keep it out of the frame budget.
     runtime.frameBudget.settle((performance.now() - runtime.startTime) / 1000)
     updateAvatarDiagnostics(runtime)
@@ -2998,7 +2998,7 @@ function pruneShadowCasters(root: THREE.Object3D) {
   })
 }
 
-function precompileScene(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
+function precompileScene(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, postFx: PostFx | null = null) {
   const hidden: THREE.Object3D[] = []
   scene.traverse(object => {
     // Lights keep their real state: toggling one changes every lit shader's variant.
@@ -3009,9 +3009,19 @@ function precompileScene(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
   })
   // Synchronous on purpose: compileAsync's readiness poll throws if an avatar
   // swap disposes a material mid-compile. This only runs at load time anyway.
+  const previousTarget = renderer.getRenderTarget()
   try {
+    // Direct-to-canvas variant (quality 2: no post)...
     renderer.compile(scene, camera)
+    // ...and the render-target variant the composer draws into (linear output,
+    // no tone mapping): a different program for every lit material, which
+    // otherwise compiled mid-hand (a ~1s freeze when the first cards landed).
+    if (postFx) {
+      renderer.setRenderTarget(postFx.composer.readBuffer)
+      renderer.compile(scene, camera)
+    }
   } finally {
+    renderer.setRenderTarget(previousTarget)
     hidden.forEach(object => { object.visible = false })
   }
 }
@@ -3492,7 +3502,7 @@ function createSceneRuntime(
   syncWagers(runtime, viewRef.current)
   syncPot(runtime, viewRef.current)
   syncBoardRuntime(runtime.board, viewRef.current.communityCards, highlightRef.current, 0)
-  precompileScene(renderer, scene, camera)
+  precompileScene(renderer, scene, camera, postFx)
   renderer.render(scene, camera)
   if (!runtime.suspended) animate()
   return runtime
