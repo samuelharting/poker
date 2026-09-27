@@ -59,6 +59,7 @@ import {
   orderDrink,
   BLACKOUT_MS,
   PASS_OUT_LEVEL,
+  CHASER_WINDOW_MS,
   WAKE_UP_LEVEL,
   WATER_KICK_IN_MS,
   toPublicDrinkState,
@@ -299,6 +300,8 @@ export default class PokerRoom implements PartyServer {
   private lastChipFlickAt = new Map<string, number>()
   /** Bought shots waiting for their target to be out of the hand, oldest first. */
   private shotQueue: QueuedShot[] = []
+  /** Shot took them to the edge mid-hand: blackout waits until they fold or the hand ends. */
+  private pendingBlackouts = new Set<string>()
   /** Clients that reported drink controls (desktop 3D). Unknown = false. */
   private drinkCapableByPlayer = new Map<string, boolean>()
   /** Stack (plus blinds posted) of every dealt-in player when the hand started. */
@@ -1819,8 +1822,23 @@ export default class PokerRoom implements PartyServer {
       if (!target || !this.isDrinkCapable(target)) return false
       if (servedTargets.has(target.id)) return true
       const entry = this.drinkLedger[target.id] ??= this.newSeatedDrinkEntry()
+      const pendingWatersBefore = [...entry.pendingWaters]
+      const hungoverBefore = entry.hungoverThroughHand
       const result = deliverShot(entry, { ...this.getShotContext(target), now })
       if (!result.ok) return true
+      if (result.passedOut && this.isHoldingLiveCards(target)) {
+        // Owner: a shot that would black them out mid-hand keeps them awake on
+        // the edge (9.5) until they fold or the hand ends; chasing it with
+        // water in time can still save them.
+        entry.passedOut = false
+        entry.passedOutAt = null
+        entry.level = PASS_OUT_LEVEL - 0.5
+        entry.pendingWaters = pendingWatersBefore
+        entry.hungoverThroughHand = hungoverBefore
+        entry.chaserUntil = now + CHASER_WINDOW_MS
+        this.pendingBlackouts.add(target.id)
+        result.passedOut = false
+      }
       servedTargets.add(target.id)
       delivered.add(shot.id)
       this.broadcastPrankEvent('shot', shot.fromId, target.id, {
@@ -1837,15 +1855,45 @@ export default class PokerRoom implements PartyServer {
     return delivered
   }
 
+  /** Holds unfolded cards in a live hand (all-in counts). */
+  private isHoldingLiveCards(target: InternalPlayer): boolean {
+    return isLiveInHand({
+      phase: this.data.gameState.phase,
+      status: target.status,
+      holdsCards: target.holeCards.length > 0,
+    })
+  }
+
+  /** Deferred shot blackouts land once the player is out of the hand (unless they chased it). */
+  private syncPendingBlackouts() {
+    for (const playerId of Array.from(this.pendingBlackouts)) {
+      const target = this.getPlayer(playerId)
+      const entry = this.drinkLedger[playerId]
+      if (!target || !entry || !this.isFunModeEnabled() || entry.passedOut) {
+        this.pendingBlackouts.delete(playerId)
+        continue
+      }
+      if (this.isHoldingLiveCards(target)) continue
+      this.pendingBlackouts.delete(playerId)
+      if (entry.level < PASS_OUT_LEVEL - 0.5) continue
+      entry.level = PASS_OUT_LEVEL
+      entry.passedOut = true
+      entry.passedOutAt = Date.now()
+      entry.pendingWaters = []
+      entry.hungoverThroughHand = null
+      entry.chaserUntil = null
+      this.handlePassedOut(playerId)
+    }
+  }
+
   private getShotContext(target: InternalPlayer) {
     const state = this.data.gameState
+    // Owner: a shot lands right away, even mid-hand. The one exception is the
+    // few seconds it's the target's turn: it pours the moment they act, so a
+    // shot never lands in the middle of a decision.
     return {
       handNumber: state.handNumber,
-      targetIsLive: isLiveInHand({
-        phase: state.phase,
-        status: target.status,
-        holdsCards: target.holeCards.length > 0,
-      }),
+      targetIsLive: state.phase === 'in_hand' && state.actingPlayerId === target.id,
     }
   }
 
@@ -3407,6 +3455,7 @@ export default class PokerRoom implements PartyServer {
     this.finalizeState()
     this.syncRunItTwiceVote()
     this.deliverQueuedShots()
+    this.syncPendingBlackouts()
     this.syncTrips()
     this.syncMushroomPrompt()
     const socialSnapshot = this.buildSocialSnapshotMessage()

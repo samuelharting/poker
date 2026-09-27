@@ -228,60 +228,80 @@ describe('PokerRoom buy_shot', () => {
     expect(prankEvents(sam.connection).at(-1)).toMatchObject({ kind: 'shot', targetId: target.playerId })
   })
 
-  it('keeps an all-in player protected until the hand is over', () => {
+  it('pours right away, even for a live player, but waits while it is their turn', () => {
     vi.useFakeTimers()
     const { join } = createTable()
     const sam = join('sam', 'Sam', 0)
     const alex = join('alex', 'Alex', 1)
-    const seats = [sam, alex]
+    const cy = join('cy', 'Cy', 2)
+    const seats = [sam, alex, cy]
     sam.send({ type: 'start_game' })
-    const shover = seats.find(seat => seat.playerId === state(sam).actingPlayerId)!
-    const other = seats.find(seat => seat !== shover)!
-    shover.send({ type: 'player_action', action: 'all_in' })
+    const actor = seats.find(seat => seat.playerId === state(sam).actingPlayerId)!
+    const bystander = seats.find(seat => seat !== actor)!
+    const buyer = seats.find(seat => seat !== actor && seat !== bystander)!
 
-    other.send({ type: 'buy_shot', targetId: shover.playerId })
-    expect(drinksOf(sam, shover.playerId)).toMatchObject({ level: 0, shotsWaiting: 1 })
+    // A live player who isn't deciding right now gets it at once.
+    buyer.send({ type: 'buy_shot', targetId: bystander.playerId })
+    expect(drinksOf(sam, bystander.playerId)).toMatchObject({ level: 3, shots: 1, shotsWaiting: 0 })
 
-    other.send({ type: 'player_action', action: 'call' })
-    runOutHand(sam)
-    expect(state(sam).phase).toBe('between_hands')
-    // The bought shot (+3) lands once the hand is over. The random runout can also
-    // fire house rules for the all-in player (big-loss beers, a rivered/7-2 house shot).
-    const settled = drinksOf(sam, shover.playerId)!
-    expect(settled.shotsWaiting).toBe(0)
-    expect(settled.shots).toBeGreaterThanOrEqual(1)
-    expect(settled.level).toBeGreaterThanOrEqual(3)
+    // The player on the clock gets it the moment they act.
+    bystander.send({ type: 'buy_shot', targetId: actor.playerId })
+    expect(drinksOf(sam, actor.playerId)).toMatchObject({ level: 0, shotsWaiting: 1 })
+    actor.send({ type: 'player_action', action: 'call' })
+    expect(drinksOf(sam, actor.playerId)).toMatchObject({ level: 3, shots: 1, shotsWaiting: 0 })
   })
 
-  it('can black someone out, but only once they are out of the hand', () => {
+  it('a mid-hand shot that would black them out keeps them on the edge until they fold', () => {
     vi.useFakeTimers()
     const { join, setLevel } = createTable()
     const sam = join('sam', 'Sam', 0)
     const alex = join('alex', 'Alex', 1)
     const cy = join('cy', 'Cy', 2)
     const seats = [sam, alex, cy]
-    setLevel(alex.playerId, 8)
     sam.send({ type: 'start_game' })
-    sam.send({ type: 'buy_shot', targetId: alex.playerId })
-    // Live: nothing happens to Alex yet.
-    expect(drinksOf(sam, alex.playerId)).toMatchObject({ passedOut: false, shotsWaiting: 1 })
-    const before = drinksOf(sam, alex.playerId)!.level
+    const target = seats.find(seat => seat.playerId !== state(sam).actingPlayerId)!
+    const buyer = seats.find(seat => seat !== target)!
+    setLevel(target.playerId, 8)
+    buyer.send({ type: 'buy_shot', targetId: target.playerId })
+    // Still in the hand: awake on the edge.
+    expect(drinksOf(sam, target.playerId)).toMatchObject({ level: PASS_OUT_LEVEL - 0.5, passedOut: false, shots: 1 })
 
-    // Everyone folds in turn; Alex never blacks out while still in the hand.
+    // Play on; the target folds on their turn and blacks out at once.
     let guard = 0
-    while (drinksOf(sam, alex.playerId)?.shotsWaiting && guard < 10) {
-      const alexSeat = state(sam).players.find(player => player.id === alex.playerId)!
-      if (state(sam).phase === 'in_hand' && alexSeat.status !== 'folded') {
-        expect(alexSeat.drinks?.passedOut).toBe(false)
-      }
-      seats.find(seat => seat.playerId === state(sam).actingPlayerId)?.send({ type: 'player_action', action: 'fold' })
+    while (state(sam).phase === 'in_hand' && !drinksOf(sam, target.playerId)?.passedOut && guard < 12) {
+      const actingId = state(sam).actingPlayerId
+      const actingSeat = seats.find(seat => seat.playerId === actingId)
+      if (!actingSeat) break
+      actingSeat.send({ type: 'player_action', action: actingSeat === target ? 'fold' : 'call' })
       guard += 1
     }
-    const alexNow = state(sam).players.find(player => player.id === alex.playerId)!
-    expect(before + SHOT_LEVEL_BOOST).toBeGreaterThanOrEqual(PASS_OUT_LEVEL)
-    expect(alexNow.drinks).toMatchObject({ level: PASS_OUT_LEVEL, passedOut: true, shots: 1 })
-    if (state(sam).phase === 'in_hand') expect(alexNow.status).toBe('folded')
+    expect(drinksOf(sam, target.playerId)).toMatchObject({ level: PASS_OUT_LEVEL, passedOut: true })
     expect(drinkEventKinds(sam.connection)).toContain('passed_out')
+  })
+
+  it('chasing an edge shot with water in time cancels the blackout', () => {
+    vi.useFakeTimers()
+    const { join, setLevel } = createTable()
+    const sam = join('sam', 'Sam', 0)
+    const alex = join('alex', 'Alex', 1)
+    const cy = join('cy', 'Cy', 2)
+    const seats = [sam, alex, cy]
+    sam.send({ type: 'start_game' })
+    const target = seats.find(seat => seat.playerId !== state(sam).actingPlayerId)!
+    const buyer = seats.find(seat => seat !== target)!
+    setLevel(target.playerId, 8)
+    buyer.send({ type: 'buy_shot', targetId: target.playerId })
+    target.send({ type: 'order_drink', kind: 'water' })
+    vi.advanceTimersByTime(3_100)
+    expect(drinksOf(sam, target.playerId)!.level).toBeLessThan(PASS_OUT_LEVEL - 0.5)
+    let guard = 0
+    while (state(sam).phase === 'in_hand' && guard < 12) {
+      const actingSeat = seats.find(seat => seat.playerId === state(sam).actingPlayerId)
+      if (!actingSeat) break
+      actingSeat.send({ type: 'player_action', action: actingSeat === target ? 'fold' : 'call' })
+      guard += 1
+    }
+    expect(drinksOf(sam, target.playerId)).toMatchObject({ passedOut: false })
   })
 
   it('limits each buyer to one shot every five hands', () => {
@@ -439,17 +459,21 @@ describe('PokerRoom bots buying shots', () => {
     expect(prankEvents(sam.connection)).toHaveLength(0)
   })
 
-  it("a bot's shot at a live human waits in the queue like anyone's", () => {
+  it("a bot's shot pours right away unless the human is on the clock", () => {
     vi.useFakeTimers()
     const { sam, bot, hooks } = tableWithBot()
     sam.send({ type: 'start_game' })
     expect(state(sam).phase).toBe('in_hand')
     const levelBefore = drinksOf(sam, sam.playerId)?.level ?? 0
+    const samActing = state(sam).actingPlayerId === sam.playerId
     expect(hooks.buyShotFor(bot.id, sam.playerId).ok).toBe(true)
     hooks.broadcastState()
-    expect(prankEvents(sam.connection).at(-1)).toMatchObject({ kind: 'shot_queued', fromId: bot.id })
-    expect(drinksOf(sam, sam.playerId)).toMatchObject({ level: levelBefore, shotsWaiting: 1 })
-    // Bot cooldown applies to a queued purchase too.
+    if (samActing) {
+      expect(drinksOf(sam, sam.playerId)).toMatchObject({ level: levelBefore, shotsWaiting: 1 })
+    } else {
+      expect(drinksOf(sam, sam.playerId)).toMatchObject({ level: levelBefore + 3, shotsWaiting: 0 })
+    }
+    // Bot cooldown applies either way.
     expect(hooks.buyShotFor(bot.id, sam.playerId).ok).toBe(false)
   })
 })
