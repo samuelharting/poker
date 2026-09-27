@@ -36,6 +36,8 @@ import { DrinkToasts } from '@/components/table/DrinkToasts'
 import { DrunkVisionLayer } from '@/components/table/DrunkVisionLayer'
 import { FunLayer } from '@/components/table/FunLayer'
 import { MembershipLayer } from '@/components/ui/MembershipLayer'
+import { LedgerLayer } from '@/components/ui/LedgerLayer'
+import type { LedgerC2SMessage } from '@/components/table/LedgerPanel'
 
 const ignoreFeedback = () => {}
 
@@ -314,6 +316,17 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     sendMessage({ type: 'update_avatar', avatar: normalizedAvatar })
   }, [currentProfile, sendMessage])
 
+  const handleLedgerMessage = useCallback((message: LedgerC2SMessage) => {
+    if (message.type === 'set_venmo') {
+      // Remember the handle on this device so the next table knows it too.
+      const savedProfile = saveStoredPlayerProfile({ ...currentProfile, venmoUsername: message.venmoUsername })
+      if (savedProfile) {
+        setCurrentProfile(savedProfile)
+      }
+    }
+    sendMessage(message)
+  }, [currentProfile, sendMessage])
+
   const handleSendChat = useCallback((message: string) => {
     const sanitized = sanitizeText(message)
     if (!sanitized) {
@@ -415,6 +428,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           onBuyShot={buyShot}
           onFlickChip={flickChip}
           onFeedback={ignoreFeedback}
+          onSendLedgerMessage={handleLedgerMessage}
         />
       ) : (
         <div className="room-loading-state" data-issue={connectionIssue ? 'true' : 'false'}>
@@ -466,6 +480,16 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           <DrinkToasts />
         </>
       )}
+
+      <LedgerLayer
+        tableState={tableState}
+        yourId={yourId}
+        roomCode={roomCode}
+        isConnected={isConnected}
+        isTwoDLayout={isTwoDLayout}
+        settingsOpen={settingsOpen}
+        onSendLedgerMessage={handleLedgerMessage}
+      />
 
       <MembershipLayer
         tableState={tableState}

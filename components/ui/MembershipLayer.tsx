@@ -78,7 +78,7 @@ export function MembershipLayer({
     <>
       {latestNotice && (
         <div className="membership-notice" role="status" aria-live="polite" key={latestNotice.id}>
-          <span className="membership-notice-icon" aria-hidden="true">★</span>
+          <span className="membership-notice-icon" aria-hidden="true">{latestNotice.kind === 'ledger' ? '$' : '★'}</span>
           <span>{getNoticeText(latestNotice, yourId)}</span>
         </div>
       )}

@@ -94,6 +94,26 @@ import {
 } from '../lib/mushroom'
 import { CHIP_FLICK_COOLDOWN_MS, HOUSE_ID, type PrankEvent, type PrankKind } from '../lib/pranks'
 import { computeHouseRules } from '../lib/houseRules'
+import {
+  DEFAULT_LEDGER_SETTINGS,
+  MAX_CHIP_VALUE,
+  MAX_REBUYS_LIMIT,
+  MIN_CHIP_VALUE,
+  buildLedgerPayments,
+  createLedger,
+  describeRebuyBlock,
+  ensureAccount,
+  getRebuyBlockReason,
+  recordBuyIn,
+  recordHostAdjustment,
+  recordRebuy,
+  totalBoughtIn,
+  type LedgerAccount,
+  type LedgerData,
+  type LedgerRow,
+  type LedgerSettings,
+  type LedgerSnapshot,
+} from '../lib/poker/ledger'
 import { MAX_CHAT_LENGTH, parseC2S } from '../shared/protocol'
 
 interface TableSettings {
@@ -108,6 +128,10 @@ interface TableSettings {
   sevenTwoBountyPercent: number
   /** Drinks and Lady Luck. Optional so rooms saved before it existed default to on. */
   funModeEnabled?: boolean
+  /** Self-serve rebuys (default on), cap per player (0 = unlimited) and $ per chip. */
+  allowRebuys?: boolean
+  maxRebuys?: number
+  chipValue?: number
 }
 
 interface PlayerProfileRecord {
@@ -150,6 +174,8 @@ interface RoomData {
   ladyLuck: LadyLuckTracker
   handHistory: HandHistoryEntry[]
   membership: MembershipData
+  /** Buy-ins, rebuys and host adjustments per player identity (see lib/poker/ledger). */
+  ledger: LedgerData
 }
 
 /**
@@ -364,6 +390,7 @@ export default class PokerRoom implements PartyServer {
       ladyLuck: createLadyLuckTracker(),
       handHistory: [],
       membership: createMembershipData(),
+      ledger: createLedger(),
     }
     this.mushrooms = createMushroomTable(this.mushroomRandom)
   }
@@ -423,7 +450,13 @@ export default class PokerRoom implements PartyServer {
           this.handleLeave(sender)
           break
         case 'rebuy':
-          this.handleRebuy(sender, msg.amount)
+          this.handleRebuy(sender)
+          break
+        case 'settle_up':
+          this.handleSettleUp(sender)
+          break
+        case 'set_venmo':
+          this.handleSetVenmo(sender, msg.venmoUsername)
           break
         case 'remove_player':
           this.handleRemovePlayer(sender, msg.targetId)
@@ -637,7 +670,7 @@ export default class PokerRoom implements PartyServer {
       // they, deliberately) can seat them again.
       delete this.data.membership.kickedNames[carriedKey]
       this.data.spectatorIds[playerId] = true
-      this.data.spectatorStacks[playerId] ??= this.data.tableSettings.startingStack
+      this.data.spectatorStacks[playerId] ??= this.issueBuyIn(playerId)
     }
 
     if (!this.data.hostId) {
@@ -675,8 +708,13 @@ export default class PokerRoom implements PartyServer {
     }
     if (!this.data.playerProfiles[playerId]) {
       this.data.playerProfiles[playerId] = { email, venmoUsername, avatar }
-    } else if (avatar) {
-      this.data.playerProfiles[playerId].avatar = avatar
+    } else {
+      if (avatar) {
+        this.data.playerProfiles[playerId].avatar = avatar
+      }
+      if (venmoUsername) {
+        this.data.playerProfiles[playerId].venmoUsername = venmoUsername
+      }
     }
     this.ensureStats(this.data.playerNicknames[playerId] ?? '')
 
@@ -746,7 +784,7 @@ export default class PokerRoom implements PartyServer {
 
     if (seatIndex < 0) {
       this.data.spectatorIds[playerId] = true
-      this.data.spectatorStacks[playerId] ??= this.data.tableSettings.startingStack
+      this.data.spectatorStacks[playerId] ??= this.issueBuyIn(playerId)
       delete this.data.pendingSpectators[playerId]
       this.sendActionResult(conn, 'Table is full. You are watching until a seat opens.')
       this.broadcastState()
@@ -804,7 +842,7 @@ export default class PokerRoom implements PartyServer {
     const nickname = this.data.playerNicknames[playerId] ?? 'Player'
     const stack = Math.max(
       0,
-      Math.floor(this.data.spectatorStacks[playerId] ?? this.data.tableSettings.startingStack)
+      Math.floor(this.data.spectatorStacks[playerId] ?? this.issueBuyIn(playerId))
     )
     const isBot = playerId.startsWith('bot_')
     const newPlayer: InternalPlayer = {
@@ -925,6 +963,7 @@ export default class PokerRoom implements PartyServer {
       const seatIndex = openSeats[i]!
       const nickname = this.generateBotNickname()
       this.data.playerNicknames[botId] = nickname
+      this.issueBuyIn(botId)
 
       const botPlayer: InternalPlayer = {
         id: botId,
@@ -1006,6 +1045,29 @@ export default class PokerRoom implements PartyServer {
   ) {
     if (!this.requireGameCreator(conn, 'change table settings')) {
       return
+    }
+
+    const ledgerSettingKeys = ['allowRebuys', 'maxRebuys', 'chipValue']
+    if (msg.allowRebuys !== undefined || msg.maxRebuys !== undefined || msg.chipValue !== undefined) {
+      // Money rules apply immediately: they never touch a hand in progress.
+      const maxRebuysValid = msg.maxRebuys === undefined || (
+        Number.isSafeInteger(msg.maxRebuys) && msg.maxRebuys >= 0 && msg.maxRebuys <= MAX_REBUYS_LIMIT
+      )
+      const chipValueValid = msg.chipValue === undefined || (
+        Number.isFinite(msg.chipValue) && msg.chipValue >= MIN_CHIP_VALUE && msg.chipValue <= MAX_CHIP_VALUE
+      )
+      if (!maxRebuysValid || !chipValueValid) {
+        this.sendActionFailed(conn, `Use 0-${MAX_REBUYS_LIMIT} max rebuys (0 = unlimited) and a chip value above $0.`)
+        return
+      }
+      if (msg.allowRebuys !== undefined) this.data.tableSettings.allowRebuys = msg.allowRebuys
+      if (msg.maxRebuys !== undefined) this.data.tableSettings.maxRebuys = msg.maxRebuys
+      if (msg.chipValue !== undefined) this.data.tableSettings.chipValue = msg.chipValue
+      if (Object.keys(msg).every(key => key === 'type' || ledgerSettingKeys.includes(key))) {
+        this.sendActionResult(conn, 'Rebuy and settle-up settings saved.')
+        this.broadcastState()
+        return
+      }
     }
 
     if (msg.funModeEnabled !== undefined) {
@@ -1212,30 +1274,277 @@ export default class PokerRoom implements PartyServer {
     this.broadcastState()
   }
 
-  private handleRebuy(conn: Connection, amount: number) {
-    const playerId = this.requireGameCreator(conn, 'change player chip counts')
-    if (!playerId) {
+  /**
+   * Self-serve rebuy: one full buy-in (the starting stack), allowed while you
+   * hold less than a starting stack. Chips never change under a live hand, so
+   * a rebuy asked for mid-hand is queued and lands the moment the hand ends.
+   */
+  private handleRebuy(conn: Connection) {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    if (!playerId || this.isBotPlayer(playerId)) {
+      this.sendActionFailed(conn, 'Join the room before rebuying')
       return
     }
 
-    if (this.data.gameState.phase === 'in_hand') {
-      this.sendActionFailed(conn, 'Cannot rebuy during a hand')
-      return
-    }
-
-    const player = this.getPlayer(playerId)
-    if (!player) {
+    const seated = this.getPlayer(playerId)
+    const onRail = !seated && (
+      Boolean(this.data.spectatorIds[playerId]) || this.data.spectatorStacks[playerId] !== undefined
+    )
+    if (!seated && !onRail) {
       this.sendActionFailed(conn, 'Take a seat before rebuying')
       return
     }
 
-    player.stack += Math.max(0, amount)
-    if (player.stack > 0 && player.status !== 'disconnected') {
-      player.status = 'waiting'
+    const account = this.ledgerAccountFor(playerId)
+    if (!account) {
+      this.sendActionFailed(conn, 'Take a seat before rebuying')
+      return
     }
 
-    this.sendActionResult(conn, `Rebuy added ${formatCurrency(amount)} to your stack.`)
+    const settings = this.getLedgerSettings()
+    const startingStack = this.data.tableSettings.startingStack
+    const chips = seated ? seated.stack : Math.max(0, this.data.spectatorStacks[playerId] ?? 0)
+    const blocked = getRebuyBlockReason({
+      settings,
+      rebuysUsed: account.rebuys,
+      chips,
+      startingStack,
+      queued: Boolean(this.data.ledger.pendingRebuys[account.key]),
+    })
+    if (blocked) {
+      this.sendActionFailed(conn, describeRebuyBlock(blocked, startingStack, settings.maxRebuys))
+      return
+    }
+
+    if (seated && this.isPlayerLiveInHand(playerId)) {
+      this.data.ledger.pendingRebuys[account.key] = true
+      this.sendActionResult(conn, `Rebuy queued: ${formatCurrency(startingStack)} lands when this hand ends.`)
+      this.broadcastState()
+      return
+    }
+
+    this.applyRebuy(playerId, account)
+    this.sendActionResult(conn, `Rebought ${formatCurrency(startingStack)}.`)
+    this.finalizeState()
     this.broadcastState()
+  }
+
+  private applyRebuy(playerId: string, account: LedgerAccount) {
+    const amount = this.data.tableSettings.startingStack
+    const seated = this.getPlayer(playerId)
+    if (seated) {
+      seated.stack += amount
+      if (this.data.gameState.phase === 'in_hand') {
+        if (seated.status === 'waiting' || seated.status === 'sitting_out') {
+          seated.status = 'waiting'
+        }
+      } else if (seated.status !== 'disconnected') {
+        seated.status = seated.isConnected ? 'waiting' : 'disconnected'
+      }
+    } else {
+      const previous = Math.max(0, Math.floor(this.data.spectatorStacks[playerId] ?? 0))
+      this.data.spectatorStacks[playerId] = previous + amount
+      // Busted onto the rail: the rebuy is a ticket straight back to a seat.
+      if (previous <= 0 && this.data.spectatorIds[playerId] && !this.data.pendingSpectators[playerId]) {
+        const seatIndex = this.findAvailableSeat()
+        if (seatIndex >= 0) {
+          this.seatPlayerAt(playerId, seatIndex)
+        }
+      }
+    }
+
+    recordRebuy(this.data.ledger, account, amount)
+    this.broadcastNotice({
+      kind: 'ledger',
+      playerId,
+      message: `${account.name} rebought ${formatCurrency(amount)}`,
+    })
+  }
+
+  /** Runs whenever no hand is live: land rebuys that were asked for mid-hand. */
+  private applyQueuedRebuys() {
+    const keys = Object.keys(this.data.ledger.pendingRebuys)
+    if (keys.length === 0) {
+      return
+    }
+
+    for (const key of keys) {
+      delete this.data.ledger.pendingRebuys[key]
+      const account = this.data.ledger.accounts[key]
+      const playerId = this.findPlayerIdForLedgerKey(key)
+      if (!account || !playerId) {
+        continue
+      }
+      const seated = this.getPlayer(playerId)
+      const chips = seated ? seated.stack : Math.max(0, this.data.spectatorStacks[playerId] ?? 0)
+      const settings = this.getLedgerSettings()
+      const blocked = getRebuyBlockReason({
+        settings,
+        rebuysUsed: account.rebuys,
+        chips,
+        startingStack: this.data.tableSettings.startingStack,
+        queued: false,
+      })
+      if (blocked) {
+        const connId = this.data.playerToConnection[playerId]
+        const conn = connId ? this.room.getConnection(connId) : undefined
+        if (conn) {
+          this.sendActionFailed(conn, `Rebuy skipped. ${describeRebuyBlock(blocked, this.data.tableSettings.startingStack, settings.maxRebuys)}`)
+        }
+        continue
+      }
+      this.applyRebuy(playerId, account)
+    }
+  }
+
+  private handleSettleUp(conn: Connection) {
+    if (!this.requireGameCreator(conn, 'call the settle-up')) {
+      return
+    }
+
+    this.data.ledger.settleUpAt = Date.now()
+    this.sendActionResult(conn, 'Settle-up shared with the table.')
+    this.broadcastState()
+  }
+
+  private handleSetVenmo(conn: Connection, venmoUsername: string) {
+    const playerId = this.data.connectionToPlayer[conn.id]
+    if (!playerId) {
+      this.sendActionFailed(conn, 'Join the room before adding your Venmo')
+      return
+    }
+
+    const profile = this.data.playerProfiles[playerId] ??= { email: '', venmoUsername: '' }
+    profile.venmoUsername = venmoUsername
+    const key = this.ledgerKeyFor(playerId)
+    const account = key ? this.data.ledger.accounts[key] : undefined
+    if (account) {
+      account.venmoUsername = venmoUsername || undefined
+    }
+    this.sendActionResult(conn, venmoUsername ? `Venmo set to ${venmoUsername}.` : 'Venmo removed.')
+    this.broadcastState()
+  }
+
+  private getLedgerSettings(): LedgerSettings {
+    const settings = this.data.tableSettings
+    return {
+      allowRebuys: settings.allowRebuys ?? DEFAULT_LEDGER_SETTINGS.allowRebuys,
+      maxRebuys: settings.maxRebuys ?? DEFAULT_LEDGER_SETTINGS.maxRebuys,
+      chipValue: settings.chipValue ?? DEFAULT_LEDGER_SETTINGS.chipValue,
+    }
+  }
+
+  /** Ledger identity: the stats identity (normalized nickname), or `bot:<id>`. */
+  private ledgerKeyFor(playerId: string, nickname?: string): string | null {
+    if (this.isBotPlayer(playerId)) {
+      return `bot:${playerId}`
+    }
+    const name = this.data.playerNicknames[playerId] ?? nickname ?? this.getPlayer(playerId)?.nickname
+    return name ? normalizePlayerUsername(name) : null
+  }
+
+  private ledgerAccountFor(playerId: string, nickname?: string): LedgerAccount | null {
+    const key = this.ledgerKeyFor(playerId, nickname)
+    if (!key) {
+      return null
+    }
+    const name = this.data.playerNicknames[playerId] ?? nickname ?? this.getPlayer(playerId)?.nickname ?? 'Player'
+    const account = ensureAccount(this.data.ledger, key, name, key.startsWith('bot:'))
+    const venmo = this.data.playerProfiles[playerId]?.venmoUsername
+    if (venmo) {
+      account.venmoUsername = venmo
+    }
+    return account
+  }
+
+  /** Mint a starting stack for a player sitting down fresh, on the books. */
+  private issueBuyIn(playerId: string): number {
+    const amount = this.data.tableSettings.startingStack
+    const account = this.ledgerAccountFor(playerId)
+    if (account) {
+      recordBuyIn(this.data.ledger, account, amount)
+    }
+    return amount
+  }
+
+  private findPlayerIdForLedgerKey(key: string): string | undefined {
+    if (key.startsWith('bot:')) {
+      const botId = key.slice(4)
+      return this.getPlayer(botId) || this.data.playerNicknames[botId] ? botId : undefined
+    }
+    const seated = this.data.gameState.players.find(player => (
+      !player.isBot && this.ledgerKeyFor(player.id, player.nickname) === key && !this.data.pendingRemovals[player.id]
+    ))
+    if (seated) {
+      return seated.id
+    }
+    return Object.keys(this.data.playerNicknames).find(playerId => (
+      !this.isBotPlayer(playerId) && this.ledgerKeyFor(playerId) === key
+    ))
+  }
+
+  /** Chips each ledger identity holds right now, wherever they sit (committed chips count). */
+  private ledgerChipsByKey(): Map<string, number> {
+    const chips = new Map<string, number>()
+    const add = (key: string | null, amount: number) => {
+      if (!key) return
+      chips.set(key, (chips.get(key) ?? 0) + Math.max(0, amount))
+    }
+    const inHand = this.data.gameState.phase === 'in_hand'
+    for (const player of this.data.gameState.players) {
+      add(this.ledgerKeyFor(player.id, player.nickname), player.stack + (inHand ? player.totalInPot : 0))
+    }
+    for (const [playerId, stack] of Object.entries(this.data.spectatorStacks)) {
+      add(this.ledgerKeyFor(playerId), stack)
+    }
+    for (const [key, stack] of Object.entries(this.data.membership.departedStacks)) {
+      add(key, stack)
+    }
+    for (const account of Object.values(this.data.ledger.accounts)) {
+      add(account.key, account.cashedOut)
+    }
+    return chips
+  }
+
+  private buildLedgerSnapshot(): LedgerSnapshot {
+    const settings = this.getLedgerSettings()
+    const chipsByKey = this.ledgerChipsByKey()
+    const rows: LedgerRow[] = Object.values(this.data.ledger.accounts).map(account => {
+      const playerId = this.findPlayerIdForLedgerKey(account.key)
+      const seated = playerId ? this.getPlayer(playerId) : undefined
+      const where: LedgerRow['where'] = seated && !this.data.pendingRemovals[seated.id]
+        ? 'seated'
+        : playerId
+          ? 'rail'
+          : 'left'
+      const venmoUsername = (playerId ? this.data.playerProfiles[playerId]?.venmoUsername : undefined) || account.venmoUsername
+      const boughtIn = totalBoughtIn(account)
+      const chips = chipsByKey.get(account.key) ?? 0
+      return {
+        key: account.key,
+        name: account.name,
+        isBot: account.isBot,
+        ...(playerId ? { playerId } : {}),
+        where,
+        ...(venmoUsername ? { venmoUsername } : {}),
+        boughtIn,
+        chips,
+        net: chips - boughtIn,
+        rebuys: account.rebuys,
+        rebuyQueued: Boolean(this.data.ledger.pendingRebuys[account.key]),
+      }
+    }).sort((a, b) => b.net - a.net || a.name.localeCompare(b.name))
+
+    return {
+      settings,
+      buyInAmount: this.data.tableSettings.startingStack,
+      rows,
+      payments: buildLedgerPayments(rows, settings.chipValue),
+      totalBoughtIn: rows.reduce((sum, row) => sum + row.boughtIn, 0),
+      totalChips: rows.reduce((sum, row) => sum + row.chips, 0),
+      events: this.data.ledger.events.slice(-20).reverse(),
+      settleUpAt: this.data.ledger.settleUpAt,
+    }
   }
 
   private handleRemovePlayer(conn: Connection, targetId: string) {
@@ -1306,7 +1615,9 @@ export default class PokerRoom implements PartyServer {
     if (player) {
       const message = describeChipAdjustment(player.nickname, delta)
       const wasActingPlayer = this.data.gameState.actingPlayerId === targetId
+      const stackBefore = player.stack
       player.stack = Math.max(0, player.stack + delta)
+      this.recordHostChipAdjustment(conn, targetId, player.stack - stackBefore, player.nickname)
       if (this.data.gameState.phase === 'in_hand') {
         if (player.status === 'disconnected') {
           player.status = player.stack > 0 ? 'disconnected' : 'sitting_out'
@@ -1359,14 +1670,38 @@ export default class PokerRoom implements PartyServer {
 
     if (this.data.spectatorIds[targetId] || this.data.playerNicknames[targetId]) {
       const playerName = this.data.playerNicknames[targetId] ?? 'That player'
-      const nextStack = Math.max(0, Math.floor((this.data.spectatorStacks[targetId] ?? 0) + delta))
+      const stackBefore = Math.max(0, Math.floor(this.data.spectatorStacks[targetId] ?? 0))
+      const nextStack = Math.max(0, Math.floor(stackBefore + delta))
       this.data.spectatorStacks[targetId] = nextStack
+      this.recordHostChipAdjustment(conn, targetId, nextStack - stackBefore, playerName)
       this.sendActionResult(conn, describeChipAdjustment(playerName, delta))
       this.broadcastState()
       return
     }
 
     this.sendActionFailed(conn, 'Player not found')
+  }
+
+  /** Every host add/remove goes on the books and is announced to the table. */
+  private recordHostChipAdjustment(conn: Connection, targetId: string, appliedDelta: number, targetName: string) {
+    if (appliedDelta === 0) {
+      return
+    }
+    const account = this.ledgerAccountFor(targetId, targetName)
+    if (!account) {
+      return
+    }
+    const hostId = this.data.connectionToPlayer[conn.id]
+    const hostName = (hostId && this.data.playerNicknames[hostId]) || 'Host'
+    recordHostAdjustment(this.data.ledger, account, appliedDelta, hostName)
+    const target = hostId === targetId ? 'their own stack' : account.name
+    this.broadcastNotice({
+      kind: 'ledger',
+      playerId: targetId,
+      message: appliedDelta > 0
+        ? `${hostName} added ${formatCurrency(appliedDelta)} to ${target}`
+        : `${hostName} removed ${formatCurrency(appliedDelta)} from ${target}`,
+    })
   }
 
   private handleSetPlayerSpectator(conn: Connection, targetId: string, spectator: boolean) {
@@ -2566,6 +2901,11 @@ export default class PokerRoom implements PartyServer {
   /** Remember what a departing human carried out so rejoining restores it. */
   private recordDepartedStack(player: Pick<InternalPlayer, 'id' | 'nickname' | 'stack' | 'isBot'>) {
     if (player.isBot || this.isBotPlayer(player.id)) {
+      // A bot never comes back: its chips leave with it, on the books.
+      const account = this.data.ledger.accounts[`bot:${player.id}`]
+      if (account) {
+        account.cashedOut += Math.max(0, player.stack)
+      }
       return
     }
     this.data.membership.departedStacks[normalizePlayerUsername(player.nickname)] = Math.max(0, player.stack)
@@ -2697,6 +3037,8 @@ export default class PokerRoom implements PartyServer {
 
   private finalizeState() {
     if (this.data.gameState.phase !== 'in_hand') {
+      // Before busted players are swept to the rail, so a queued rebuy keeps its seat.
+      this.applyQueuedRebuys()
       this.applyPendingTableSettings()
       this.clearAutoFold()
       this.data.gameState.actionTimerStart = null
@@ -3059,6 +3401,7 @@ export default class PokerRoom implements PartyServer {
         companion: this.isFunModeEnabled()
           ? getVisibleLadyLuck(this.data.ladyLuck, this.getSeatedPlayerIds())
           : null,
+        ledger: this.buildLedgerSnapshot(),
       },
     }
   }

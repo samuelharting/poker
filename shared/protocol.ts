@@ -78,9 +78,20 @@ export type C2SMessage =
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
     funModeEnabled?: boolean
+    /** Self-serve rebuys on/off (applies immediately). */
+    allowRebuys?: boolean
+    /** Rebuys each player may take tonight; 0 = unlimited. */
+    maxRebuys?: number
+    /** Dollars per chip for the settle-up. */
+    chipValue?: number
   }
   | { type: 'leave_room' }
-  | { type: 'rebuy'; amount: number }
+  /** Buy back in for one full buy-in (the table's starting stack). `amount` is ignored. */
+  | { type: 'rebuy'; amount?: number }
+  /** Host: show everyone the end-of-night settle-up card. */
+  | { type: 'settle_up' }
+  /** Set (or clear, with '') the Venmo handle shown on the settle-up. */
+  | { type: 'set_venmo'; venmoUsername: string }
   | { type: 'remove_player'; targetId: string }
   | { type: 'adjust_player_stack'; targetId: string; amount: number }
   | { type: 'set_player_spectator'; targetId: string; spectator: boolean }
@@ -128,9 +139,11 @@ export type S2CMessage =
   /** This connection no longer speaks for a player (kicked, opened elsewhere, name in use). */
   | { type: 'session_ended'; reason: SessionEndedReason; message: string }
   /** Table-wide heads-up, e.g. a new host. */
-  | { type: 'notice'; kind: 'host_changed'; message: string; playerId?: string }
+  | { type: 'notice'; kind: NoticeKind; message: string; playerId?: string }
 
 export type SessionEndedReason = 'kicked' | 'replaced' | 'name_taken'
+/** host_changed: a new host. ledger: someone rebought / the host moved chips. */
+export type NoticeKind = 'host_changed' | 'ledger'
 
 export const MAX_CHAT_LENGTH = 140
 const ALLOWED_CHAT_MESSAGE_RE = /\s+/g
@@ -294,15 +307,33 @@ export function parseC2S(raw: string): C2SMessage | null {
         if (typeof parsed.funModeEnabled === 'boolean') {
           next.funModeEnabled = parsed.funModeEnabled
         }
+        if (typeof parsed.allowRebuys === 'boolean') {
+          next.allowRebuys = parsed.allowRebuys
+        }
+        if (typeof parsed.maxRebuys === 'number' && Number.isFinite(parsed.maxRebuys)) {
+          next.maxRebuys = Math.max(0, Math.floor(parsed.maxRebuys))
+        }
+        if (typeof parsed.chipValue === 'number' && Number.isFinite(parsed.chipValue)) {
+          next.chipValue = parsed.chipValue
+        }
         return next
       }
 
       case 'leave_room':
         return { type }
 
-      case 'rebuy': {
-        const amount = Number(parsed.amount)
-        return Number.isFinite(amount) ? { type, amount } : null
+      case 'rebuy':
+        return { type }
+
+      case 'settle_up':
+        return { type }
+
+      case 'set_venmo': {
+        if (typeof parsed.venmoUsername !== 'string') return null
+        const venmoUsername = normalizeVenmoUsername(parsed.venmoUsername)
+        return !venmoUsername || /^@[A-Za-z0-9_-]{2,30}$/.test(venmoUsername)
+          ? { type, venmoUsername }
+          : null
       }
 
       case 'remove_player': {
@@ -482,8 +513,8 @@ export function parseS2C(raw: string): S2CMessage | null {
       case 'notice': {
         const message = typeof parsed.message === 'string' ? sanitizeText(parsed.message, 160) : ''
         const playerId = typeof parsed.playerId === 'string' ? parsed.playerId : undefined
-        return parsed.kind === 'host_changed' && message
-          ? { type, kind: 'host_changed', message, ...(playerId ? { playerId } : {}) }
+        return (parsed.kind === 'host_changed' || parsed.kind === 'ledger') && message
+          ? { type, kind: parsed.kind, message, ...(playerId ? { playerId } : {}) }
           : null
       }
 

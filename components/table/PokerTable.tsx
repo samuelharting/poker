@@ -45,6 +45,7 @@ import {
 } from '@/lib/poker/turnGuidance'
 import { PRE_ACTION_SHORTCUT_KEYS, PreActionBar } from './PreActionBar'
 import { PeekStylePicker } from './PeekStylePicker'
+import { LedgerPanel, getRebuyStatus, requestRebuy, type LedgerC2SMessage } from './LedgerPanel'
 import {
   AVATAR_CELEBRATION_OPTIONS,
   AVATAR_GLASSES_OPTIONS,
@@ -141,6 +142,8 @@ interface PokerTableProps {
   onBuyShot?: (targetId: string) => void
   onFlickChip?: (targetId: string) => void
   onFeedback: (message: string, tone?: FeedbackTone) => void
+  /** Rebuys, settle-up, Venmo and the host's money rules (Settings > Ledger). */
+  onSendLedgerMessage?: (message: LedgerC2SMessage) => void
 }
 
 interface SeatLayout {
@@ -1063,7 +1066,7 @@ export function getSpectatorRailState(
     return {
       canTakeSeat: false,
       actionLabel: undefined,
-      message: 'Add chips from the Players tab before you take a seat.',
+      message: 'Out of chips. Rebuy (Settings > Ledger) to take a seat.',
     }
   }
 
@@ -1211,6 +1214,7 @@ export function PokerTable({
   onBuyShot,
   onFlickChip,
   onFeedback,
+  onSendLedgerMessage,
 }: PokerTableProps) {
   // Narrow screens and touch-first devices (phones, tablets, iPad landscape)
   // use the simple 2D table; wide mouse-driven screens get the 3D room.
@@ -2911,6 +2915,7 @@ export function PokerTable({
           onShareRoom={onShareRoom}
           onLeaveGame={onLeaveGame}
           onFeedback={onFeedback}
+          onSendLedgerMessage={onSendLedgerMessage}
         />
       )}
 
@@ -2932,7 +2937,8 @@ export function PokerTable({
           isHost={isHost}
           isConnected={isConnected}
           isBusted={isBustedViewer || isRailBusted}
-          onRebuy={() => onAdjustPlayerStack(yourId, state.startingStack)}
+          rebuyBlockedReason={getRebuyStatus(state, yourId).reason}
+          onRebuy={requestRebuy}
           onStartGame={onStartGame}
           onAddBots={onAddBots}
           onSeatMe={onSeatMe}
@@ -3952,11 +3958,13 @@ export function SettingsModal({
   onShareRoom,
   onLeaveGame = () => {},
   onFeedback,
+  onSendLedgerMessage,
 }: {
   state: TableState
   yourId: string
   isHost: boolean
   isConnected: boolean
+  onSendLedgerMessage?: (message: LedgerC2SMessage) => void
   suitColorMode: 'two' | 'four'
   soundMuted?: boolean
   soundVolume?: number
@@ -3996,7 +4004,7 @@ export function SettingsModal({
     | 'autoStartDelaySeconds'
     | 'sevenTwoBountyPercent'
 
-  const [activeTab, setActiveTab] = useState<'general' | 'avatar' | 'players' | 'hands'>('general')
+  const [activeTab, setActiveTab] = useState<'general' | 'avatar' | 'players' | 'hands' | 'ledger'>('general')
   const [showSevenTwoCustomize, setShowSevenTwoCustomize] = useState(false)
   const [chipDrafts, setChipDrafts] = useState<Record<string, NumericDraftValue>>({})
   const [avatarDraft, setAvatarDraft] = useState<PlayerAvatarCustomization>(() => ({
@@ -4190,7 +4198,7 @@ export function SettingsModal({
           </button>
         </div>
 
-        <div className="settings-tabs" data-active={activeTab}>
+        <div className="settings-tabs" data-active={activeTab} data-count="5">
           <button
             type="button"
             className={`settings-tab ${activeTab === 'general' ? 'is-active' : ''}`}
@@ -4223,7 +4231,25 @@ export function SettingsModal({
           >
             Last hands
           </button>
+          <button
+            type="button"
+            className={`settings-tab ${activeTab === 'ledger' ? 'is-active' : ''}`}
+            aria-pressed={activeTab === 'ledger'}
+            onClick={() => setActiveTab('ledger')}
+          >
+            Ledger
+          </button>
         </div>
+
+        {activeTab === 'ledger' && (
+          <LedgerPanel
+            state={state}
+            yourId={yourId}
+            isHost={isHost}
+            isConnected={isConnected}
+            onSendLedgerMessage={onSendLedgerMessage}
+          />
+        )}
 
         {activeTab === 'hands' && (
           <div className="settings-modal-body">
@@ -4987,6 +5013,7 @@ function MobileBetweenHandsDock({
   isHost,
   isConnected,
   isBusted,
+  rebuyBlockedReason = null,
   onRebuy,
   onStartGame,
   onAddBots,
@@ -4999,6 +5026,8 @@ function MobileBetweenHandsDock({
   isHost: boolean
   isConnected: boolean
   isBusted: boolean
+  /** Why a self-serve rebuy is not available (rebuys off, cap reached), if so. */
+  rebuyBlockedReason?: string | null
   onRebuy: () => void
   onStartGame: () => void
   onAddBots: (count: number) => void
@@ -5010,7 +5039,8 @@ function MobileBetweenHandsDock({
   const canAddBots = isHost && isConnected && seatedCount < 8
   const openSeats = Math.max(0, 8 - seatedCount)
   const spectatorRail = getSpectatorRailState(lobbyMe, isConnected)
-  const canRebuy = isBusted && isHost && isConnected
+  // Rebuys are self-serve: any busted player can buy back in (host rules permitting).
+  const canRebuy = isBusted && isConnected && !rebuyBlockedReason
   const showDeal = isHost
   // Busted hosts still run the table; Fill seats steps aside for the rebuy.
   const showFillSeats = canAddBots && openSeats > 1 && !canRebuy
@@ -5027,9 +5057,9 @@ function MobileBetweenHandsDock({
             ? 'Ready to deal'
             : 'Waiting for the host to deal'
   const detail = isBusted
-    ? isHost
-      ? `Rebuy for ${formatAmount(state.startingStack)} to keep playing.`
-      : 'Ask the host for a rebuy to keep playing.'
+    ? rebuyBlockedReason
+      ? `${rebuyBlockedReason} Ask the host for chips to keep playing.`
+      : `Rebuy for ${formatAmount(state.startingStack)} to keep playing.`
     : [
         `${seatedCount} seated`,
         lobbyMe?.isSpectator ? 'Watching' : me ? `Stack ${formatAmount(me.stack)}` : null,

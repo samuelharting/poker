@@ -1,5 +1,6 @@
 import type { PlayerAvatarCustomization } from '../profile'
 import type { PlayerDrinkState } from '../drinks'
+import type { LedgerSnapshot } from './ledger'
 
 export type Suit = 'spades' | 'hearts' | 'diamonds' | 'clubs'
 export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | 'T' | 'J' | 'Q' | 'K' | 'A'
@@ -214,6 +215,8 @@ export interface TableState {
   funModeEnabled?: boolean
   /** "Lady Luck" win-streak companion; null/absent when nobody is hot. */
   companion?: LadyLuckCompanionState | null
+  /** Buy-ins, rebuys, host adjustments and the settle-up for the night. */
+  ledger?: LedgerSnapshot
 }
 
 export type LadyLuckReason = 'big_win' | 'streak'

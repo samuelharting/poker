@@ -1,0 +1,550 @@
+/* Ledger: rebuys, the night's books and the settle-up (Settings tab + overlays). */
+
+/* Five settings tabs once the Ledger tab is in. */
+.settings-tabs[data-count='5'] {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.settings-tabs[data-count='5']::before {
+  width: calc((100% - 8px) / 5);
+}
+
+.settings-tabs[data-count='5'][data-active='ledger']::before {
+  transform: translateX(400%);
+}
+
+.ledger-panel {
+  --ledger-up: var(--c-felt-300, #39c795);
+  --ledger-down: var(--c-ruby-500, #e2505c);
+}
+
+.ledger-you {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.ledger-you-copy {
+  display: grid;
+  gap: var(--sp-2, 8px);
+  min-width: 0;
+}
+
+.ledger-you-copy strong {
+  color: var(--c-text-1, #f4efe4);
+}
+
+.ledger-rule {
+  color: var(--c-text-3, #8a9792);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.ledger-you-action {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+  max-width: 220px;
+}
+
+.ledger-rebuy-btn {
+  min-height: 44px;
+  padding: 0 18px;
+  white-space: nowrap;
+}
+
+.ledger-rebuy-reason {
+  color: var(--c-text-3, #8a9792);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.ledger-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2, 8px);
+}
+
+.ledger-settle-btn {
+  min-height: 38px;
+}
+
+.ledger-net[data-sign='up'] {
+  color: var(--c-felt-300, #39c795);
+}
+
+.ledger-net[data-sign='down'] {
+  color: var(--c-ruby-500, #e2505c);
+}
+
+.ledger-net[data-sign='even'] {
+  color: var(--c-text-2, #bdc6c1);
+}
+
+.ledger-summary {
+  display: grid;
+  gap: var(--sp-4, 16px);
+  min-width: 0;
+}
+
+.ledger-empty,
+.ledger-even,
+.ledger-note {
+  color: var(--c-text-2, #bdc6c1);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.ledger-note {
+  color: var(--c-text-3, #8a9792);
+  font-size: 12px;
+}
+
+.ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-table th,
+.ledger-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.08));
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ledger-table thead th {
+  padding-top: 0;
+  color: var(--c-text-3, #8a9792);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ledger-table th:first-child {
+  padding-left: 0;
+  text-align: left;
+  white-space: normal;
+}
+
+.ledger-table td:last-child,
+.ledger-table th:last-child {
+  padding-right: 0;
+}
+
+.ledger-table tbody th {
+  font-weight: 600;
+}
+
+.ledger-table tbody tr[data-you='true'] th .ledger-name {
+  color: var(--c-brass-200, #ffe7ad);
+}
+
+.ledger-table tbody tr[data-where='left'] {
+  opacity: 0.78;
+}
+
+.ledger-table tfoot th,
+.ledger-table tfoot td {
+  border-bottom: 0;
+  color: var(--c-text-3, #8a9792);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ledger-table td.ledger-net {
+  font-weight: 800;
+}
+
+.ledger-name {
+  display: block;
+  overflow: hidden;
+  color: var(--c-text-1, #f4efe4);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ledger-name-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.ledger-name-meta:empty {
+  display: none;
+}
+
+.ledger-tag {
+  padding: 1px 6px;
+  border: 1px solid var(--line-soft, rgba(255, 255, 255, 0.1));
+  border-radius: 999px;
+  color: var(--c-text-3, #8a9792);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.ledger-tag.is-queued {
+  border-color: color-mix(in srgb, var(--c-brass-400, #f2c766) 55%, transparent);
+  color: var(--c-brass-400, #f2c766);
+}
+
+.ledger-payments {
+  display: grid;
+  gap: var(--sp-2, 8px);
+}
+
+.ledger-payments-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2, 8px);
+}
+
+.ledger-subtitle {
+  color: var(--c-text-1, #f4efe4);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.ledger-rate {
+  color: var(--c-text-3, #8a9792);
+  font-size: 12px;
+}
+
+.ledger-payment-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ledger-payment {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3, 12px);
+  min-height: 48px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid var(--line-soft, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--c-ink-900, #0a1112) 70%, transparent);
+  color: var(--c-text-2, #bdc6c1);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.ledger-payment[data-you='true'] {
+  border-color: color-mix(in srgb, var(--c-brass-400, #f2c766) 45%, transparent);
+}
+
+.ledger-payment-copy strong {
+  color: var(--c-text-1, #f4efe4);
+}
+
+.ledger-payment-amount {
+  color: var(--c-brass-200, #ffe7ad);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-payment-chips {
+  color: var(--c-text-3, #8a9792);
+  font-size: 12px;
+}
+
+.ledger-venmo {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, #3d95ce 70%, transparent);
+  border-radius: 999px;
+  color: #8cc8f0;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ledger-venmo.is-primary {
+  border-color: #3d95ce;
+  background: #3d95ce;
+  color: #fff;
+}
+
+.ledger-venmo:hover {
+  filter: brightness(1.12);
+}
+
+.ledger-venmo-missing {
+  flex: none;
+  color: var(--c-text-3, #8a9792);
+  font-size: 12px;
+}
+
+.ledger-copy {
+  justify-self: start;
+  min-height: 38px;
+}
+
+.ledger-venmo-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--sp-3, 12px);
+}
+
+.ledger-venmo-field {
+  flex: 1 1 200px;
+}
+
+.ledger-venmo-input {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ledger-venmo-input > span {
+  color: var(--c-text-3, #8a9792);
+  font-weight: 700;
+}
+
+.ledger-venmo-input input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ledger-venmo-input input[aria-invalid='true'] {
+  border-color: var(--c-ruby-500, #e2505c);
+}
+
+.ledger-events {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ledger-events li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3, 12px);
+  color: var(--c-text-2, #bdc6c1);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ledger-events li[data-kind='rebuy'] span {
+  color: var(--c-brass-200, #ffe7ad);
+}
+
+.ledger-events time {
+  flex: none;
+  color: var(--c-text-3, #8a9792);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Overlays: rebuy confirmation and the end-of-night card. */
+.ledger-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 320;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(5, 9, 10, 0.72);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  animation: ledger-fade 180ms ease-out both;
+}
+
+.ledger-dialog {
+  width: min(420px, 100%);
+  max-height: calc(100dvh - 32px);
+  padding: 22px;
+  overflow-y: auto;
+  border: 1px solid rgba(242, 199, 102, 0.4);
+  border-radius: 18px;
+  background: var(--c-ink-800, #101a1b);
+  color: var(--c-cream-50, #fff8ea);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  font-family: var(--font-ui, system-ui);
+  animation: ledger-rise 220ms ease-out both;
+}
+
+.ledger-dialog h2 {
+  margin: 0 0 8px;
+  font: 700 20px / 1.2 var(--font-display, var(--font-ui, system-ui));
+}
+
+.ledger-dialog p {
+  margin: 0 0 18px;
+  color: var(--c-cream-200, #efe3c8);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.ledger-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.ledger-dialog-actions button {
+  min-height: 44px;
+  padding: 0 18px;
+}
+
+.ledger-settle-card {
+  width: min(560px, 100%);
+  padding: 0;
+  --ledger-up: var(--c-felt-300, #39c795);
+}
+
+.ledger-settle-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 22px 12px;
+  background: var(--c-ink-800, #101a1b);
+}
+
+.ledger-settle-head h2 {
+  margin: 2px 0 0;
+}
+
+.ledger-settle-body {
+  padding: 4px 22px 22px;
+}
+
+.ledger-busted-card {
+  position: fixed;
+  bottom: 112px;
+  left: 50%;
+  z-index: 212;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 12px 12px 12px 18px;
+  border: 1px solid rgba(242, 199, 102, 0.5);
+  border-radius: 16px;
+  background: rgba(16, 26, 27, 0.95);
+  color: var(--c-cream-50, #fff8ea);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  font-family: var(--font-ui, system-ui);
+  transform: translateX(-50%);
+  animation: ledger-card-in 240ms ease-out both;
+}
+
+.ledger-busted-copy {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.ledger-busted-copy strong {
+  color: var(--c-brass-400, #f2c766);
+  font-size: 15px;
+}
+
+.ledger-busted-card .btn-gold {
+  min-height: 44px;
+  padding: 0 18px;
+  white-space: nowrap;
+}
+
+@keyframes ledger-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ledger-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ledger-card-in {
+  from { opacity: 0; transform: translate(-50%, 10px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ledger-overlay,
+  .ledger-dialog,
+  .ledger-busted-card {
+    animation: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .ledger-you {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ledger-you-action {
+    justify-items: stretch;
+    max-width: none;
+  }
+
+  .ledger-rebuy-reason {
+    text-align: left;
+  }
+
+  .ledger-table {
+    font-size: 13px;
+  }
+
+  .ledger-table th,
+  .ledger-table td {
+    padding: 8px 4px;
+  }
+
+  .ledger-payment {
+    flex-wrap: wrap;
+  }
+
+  .ledger-overlay {
+    place-items: end stretch;
+    padding: 12px 0 0;
+  }
+
+  .ledger-dialog {
+    width: 100%;
+    max-height: calc(100dvh - 12px);
+    border-bottom: 0;
+    border-radius: 22px 22px 0 0;
+    padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .ledger-settle-card {
+    padding-bottom: 0;
+  }
+
+  .ledger-settle-body {
+    padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .ledger-dialog-actions button {
+    flex: 1;
+  }
+}

@@ -1569,8 +1569,9 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
     send(server, nonHost.connection, { type: 'remove_player', targetId: host.playerId })
     expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
 
+    // Rebuys are self-serve now, but never a way to mint chips at a full stack.
     send(server, nonHost.connection, { type: 'rebuy', amount: 500 })
-    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')
+    expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('below the $1,000 buy-in')
 
     send(server, nonHost.connection, { type: 'start_game' })
     expect(lastMessage(nonHost.connection, 'action_failed')?.message).toContain('Only the game creator')

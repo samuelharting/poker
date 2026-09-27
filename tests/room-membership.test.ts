@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Connection } from 'partykit/server'
+import type { LedgerSnapshot } from '@/lib/poker/ledger'
 import { HOST_DISCONNECT_GRACE_MS, MISSED_HANDS_BEFORE_SIT_OUT } from '@/partykit/room'
 import {
   actingPlayer,
@@ -770,15 +771,25 @@ describe('chip conservation under random membership churn', () => {
           if (host && target) {
             send(table.server, host, { type: 'set_player_spectator', targetId: target, spectator: random() < 0.6 })
           }
+        } else if (roll < 0.91 && conn) {
+          // Self-serve rebuy: immediate, queued mid-hand, or refused.
+          send(table.server, conn, { type: 'rebuy' })
         } else {
           vi.advanceTimersByTime(pick([1_500, 11_000, 25_000]))
         }
 
         expectTurnIntegrity(internals)
         const chips = allChips(internals)
-        if (chips !== total) {
-          throw new Error(`run ${run} step ${step}: ${chips} chips on the books, expected ${total}`)
+        // Rebuys are the only chips minted mid-run, and every one is on the ledger.
+        const ledger = (internals as unknown as { buildLedgerSnapshot: () => LedgerSnapshot }).buildLedgerSnapshot()
+        const rebuyChips = ledger.rows.reduce((sum, row) => sum + row.rebuys, 0) * 1000
+        if (chips !== total + rebuyChips) {
+          throw new Error(`run ${run} step ${step}: ${chips} chips on the books, expected ${total + rebuyChips}`)
         }
+        // The ledger sees every chip and the house keeps nothing.
+        expect(ledger.totalChips).toBe(chips)
+        expect(ledger.totalBoughtIn).toBe(chips)
+        expect(ledger.rows.reduce((sum, row) => sum + row.net, 0)).toBe(0)
         const seatIndexes = internals.data.gameState.players.map(entry => entry.seatIndex)
         expect(new Set(seatIndexes).size).toBe(seatIndexes.length)
         const ids = internals.data.gameState.players.map(entry => entry.id)

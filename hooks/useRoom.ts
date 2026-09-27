@@ -14,6 +14,7 @@ import {
   type DrinkKind,
   type DevFunAction,
   type MushroomEvent,
+  type NoticeKind,
   type PrivateMushroomState,
   type PlayerSocialState,
   type PrankEvent,
@@ -118,7 +119,7 @@ export interface SessionEnded {
 
 export interface RoomNotice {
   id: string
-  kind: 'host_changed'
+  kind: NoticeKind
   message: string
   playerId?: string
 }
