@@ -67,11 +67,19 @@ describe('avatar animator', () => {
   it('varies the resting hands between players', () => {
     const styles = new Set<number>()
     for (let index = 0; index < 40; index += 1) styles.add(restingHands(anchors, index / 40).style)
-    expect(styles.size).toBe(3)
+    expect(styles.size).toBe(4)
     for (let index = 0; index < 40; index += 1) {
       const rest = restingHands(anchors, index / 40)
-      // Hands never cross or stack exactly: the right stays right of the left.
-      expect(rest.right[0] - rest.left[0]).toBeGreaterThan(0.12)
+      // Hands never overlap: the wrists stay well apart.
+      expect(rest.right[0] - rest.left[0]).toBeGreaterThan(0.26)
+      // Wrists on the player's side of the crown (never down its inner
+      // slope), with a relaxed curl.
+      for (const wrist of [rest.right, rest.left]) {
+        expect(wrist[2]).toBeLessThan(anchors.railR[2] - 0.04)
+        expect(wrist[2]).toBeGreaterThan(anchors.railR[2] - 0.2)
+      }
+      expect(rest.curlR).toBeLessThanOrEqual(0.2)
+      expect(rest.curlL).toBeLessThanOrEqual(0.2)
     }
   })
 

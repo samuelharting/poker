@@ -304,9 +304,11 @@ export function getChipFaceTexture(index: number) {
     context.stroke()
     context.setLineDash([])
 
+    // Ivory inlay (never paper white): it sits under the key spot on every
+    // chip on the table and was the brightest thing in the frame.
     const inlay = context.createRadialGradient(c - 6, c - 6, 2, c, c, c * 0.5)
-    inlay.addColorStop(0, '#ffffff')
-    inlay.addColorStop(1, style.spot)
+    inlay.addColorStop(0, '#eee3c6')
+    inlay.addColorStop(1, '#d8c9a4')
     context.fillStyle = inlay
     context.beginPath()
     context.arc(c, c, c * 0.44, 0, Math.PI * 2)

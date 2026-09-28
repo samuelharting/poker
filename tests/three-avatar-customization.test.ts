@@ -75,7 +75,8 @@ describe('3D avatar customization geometry', () => {
     expect(crownSize.x).toBeGreaterThan(0.1)
     expect(crownSize.x).toBeLessThan(0.5)
     expect(shades!.position.y).toBeCloseTo(0.26 * 0.0043, 6)
-    expect(shades!.position.z).toBeCloseTo(0.29 * 0.0043, 6)
+    // Lenses sit just in front of the face (eyeFront 0.255 + 0.024).
+    expect(shades!.position.z).toBeCloseTo(0.279 * 0.0043, 6)
 
     disposeAvatarAccessorySet(set)
   })

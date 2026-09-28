@@ -722,6 +722,20 @@
   animation: hero-bet-3d-in 300ms ease-out;
 }
 
+/*
+ * globals.css parks the pill at a fixed spot left of centre for the hero seat
+ * and tray states (a 2D-layout rule with more specificity than the one above),
+ * which left "BET $1,000" ~300px away from the actual 3D chips. In the 3D room
+ * the label always rides on the projected chip position.
+ */
+.table-scene[data-desktop-three='true'][data-hero-seat='true'] .hero-table-bet,
+.table-scene[data-desktop-three='true'][data-tray-open='true'] .hero-table-bet {
+  left: 0;
+  top: 0;
+  opacity: 1;
+  transform: translate3d(var(--hero-bet-x, 50vw), var(--hero-bet-y, 70vh), 0) translate(-50%, -100%);
+}
+
 @keyframes hero-bet-3d-in {
   from {
     opacity: 0;

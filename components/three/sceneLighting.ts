@@ -48,7 +48,9 @@ export function createStageLights(scene: THREE.Scene): StageLights {
   const fill = new THREE.HemisphereLight('#b9d8ff', '#1a0f08', 0.34)
   scene.add(fill)
 
-  const key = new THREE.SpotLight('#ffe2b0', 105, 30, 0.6, 0.7, 1.6)
+  // Hot enough to pool light on the felt, not so hot that chips, cards and
+  // brass clip to white under it (the front fill lifts the near side instead).
+  const key = new THREE.SpotLight('#ffe2b0', 88, 30, 0.6, 0.7, 1.6)
   key.position.set(0.6, 11, 2.4)
   key.target.position.set(0, 0.2, -0.2)
   key.castShadow = true
@@ -78,7 +80,7 @@ export function createStageLights(scene: THREE.Scene): StageLights {
   accent.position.set(0, 3.2, 0)
   scene.add(accent)
 
-  const front = new THREE.PointLight('#ffd9b0', 7, 11, 1.5)
+  const front = new THREE.PointLight('#ffd9b0', 8, 11, 1.5)
   front.position.set(0, 3.4, 6.2)
   scene.add(front)
 
@@ -126,6 +128,12 @@ export interface PostFx {
   setSize: (width: number, height: number, pixelRatio: number) => void
   /** Full-resolution bloom (false) or a half-resolution bloom chain (true). */
   setReducedBloom: (reduced: boolean) => void
+  /**
+   * Top quality tier only: multisample the composer's targets (true geometric
+   * antialiasing on card, chip and rail edges) and drop the FXAA blur. Lower
+   * tiers keep single-sample targets + FXAA.
+   */
+  setMultisample: (samples: number) => void
   dispose: () => void
 }
 
@@ -146,6 +154,7 @@ export function createPostFx(
   composer.addPass(new OutputPass())
   const fxaa = new ShaderPass(FXAAShader)
   composer.addPass(fxaa)
+  const maxSamples = renderer.capabilities.maxSamples ?? 0
 
   let reducedBloom = false
   const size = { width: 1, height: 1, pixelRatio: 1 }
@@ -175,6 +184,16 @@ export function createPostFx(
       if (reduced === reducedBloom) return
       reducedBloom = reduced
       applyBloomSize()
+    },
+    setMultisample(samples) {
+      const wanted = Math.max(0, Math.min(samples, maxSamples))
+      if (composer.renderTarget1.samples === wanted && composer.renderTarget2.samples === wanted) return
+      for (const target of [composer.renderTarget1, composer.renderTarget2]) {
+        target.samples = wanted
+        // Reallocated with the new sample count on next use.
+        target.dispose()
+      }
+      fxaa.enabled = wanted === 0
     },
     dispose() {
       composer.dispose()

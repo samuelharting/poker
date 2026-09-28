@@ -3214,7 +3214,8 @@ function placeTrayAndCocktail(runtime: CompanionRuntime, dt: number) {
   const toModel = (object: THREE.Object3D, x: number, y: number, z: number) =>
     rig.model.worldToLocal(object.localToWorld(new THREE.Vector3(x, y, z)))
   const hand = toModel(rig.arms[TRAY_ARM].hand, 0, -0.045, 0).add(new THREE.Vector3(0.05, 0.035, 0.06))
-  const head = toModel(rig.head, 0, HEAD_CENTER_Y + 0.31, -0.03)
+  // Resting on the crown of her hair (not hovering a hand's width above it).
+  const head = toModel(rig.head, 0, HEAD_CENTER_Y + 0.27, -0.03)
   rig.tray.position.copy(hand).lerp(head, w)
   rig.tray.position.y += Math.sin(w * Math.PI) * 0.18
   const wobble = w * Math.sin(anim.time * 3.4) * 0.07

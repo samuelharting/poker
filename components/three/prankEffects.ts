@@ -121,7 +121,7 @@ export interface PrankRuntime {
   firstPerson: FirstPersonShot
   shake: { startedAt: number; strength: number; duration: number }
   /** Chip hit you: head snaps back, then you glare at whoever threw it. */
-  glare: { startedAt: number; yaw: number; pitch: number }
+  glare: { startedAt: number; yaw: number; pitch: number; cancelledAt?: number; cancelFrom?: number }
   createChip: () => THREE.Mesh
   glassMaterials: THREE.Material[]
   glassGeometries: THREE.BufferGeometry[]
@@ -307,8 +307,9 @@ function buildFirstPersonShot(fp: FirstPersonShot, skinColor: string, sleeveColo
   palm.scale.set(0.03, 0.04, 0.044)
   const thumb = add(new THREE.CapsuleGeometry(0.011, 0.03, 4, 8), skin, [0.04, -0.05, 0.035])
   thumb.rotation.set(0.3, 0, -0.9)
-  // Just a cuff: a long forearm would sweep across the view as the glass tips.
-  const cuff = add(new THREE.CylinderGeometry(0.034, 0.04, 0.12, 12), sleeve, [0.1, -0.15, 0.03])
+  // Just a short cuff tucked under the fist: a forearm (or a long dark
+  // sleeve) would sweep across the middle of the view as the glass rises.
+  const cuff = add(new THREE.CylinderGeometry(0.032, 0.036, 0.06, 12), sleeve, [0.088, -0.128, 0.022])
   cuff.rotation.set(0.2, 0, 0.7)
   fp.root.traverse(object => { object.castShadow = false; object.receiveShadow = false })
 }
@@ -316,7 +317,8 @@ function buildFirstPersonShot(fp: FirstPersonShot, skinColor: string, sleeveColo
 const FP_OFF = new THREE.Vector3(0.24, -0.62, -0.62)
 const FP_HOLD = new THREE.Vector3(0.1, -0.16, -0.6)
 const FP_MOUTH = new THREE.Vector3(0.02, -0.2, -0.36)
-const FP_CHEERS = new THREE.Vector3(0.02, 0.02, -0.72)
+// Raised toward the middle but kept right of centre and below the board line.
+const FP_CHEERS = new THREE.Vector3(0.14, -0.04, -0.75)
 const FP_SLAM = new THREE.Vector3(0.12, -0.7, -0.55)
 
 const smooth = (value: number) => {
@@ -614,6 +616,8 @@ export interface PrankFrame {
   reducedMotion: boolean
   seats: ReadonlyMap<string, PrankSeat>
   heroColors: { skin: string; sleeve: string }
+  /** The hero's turn: any glare lets go so they can see the table. */
+  heroActing?: boolean
 }
 
 export interface PrankCameraKick {
@@ -794,8 +798,9 @@ function updateFlick(runtime: PrankRuntime, flick: FlickPrank, frame: PrankFrame
           const yaw = Math.atan2(-local.x, -local.z)
           runtime.glare = {
             startedAt: time,
-            yaw: THREE.MathUtils.clamp(yaw, -0.45, 0.45),
-            pitch: THREE.MathUtils.clamp(Math.atan2(local.y, Math.hypot(local.x, local.z)), -0.15, 0.2),
+            // A glance, not a head turn: the table stays in view.
+            yaw: THREE.MathUtils.clamp(yaw, -GLARE_MAX_YAW, GLARE_MAX_YAW),
+            pitch: THREE.MathUtils.clamp(Math.atan2(local.y, Math.hypot(local.x, local.z)), -GLARE_MAX_PITCH, GLARE_MAX_PITCH),
           }
         }
         countOnHost(runtime, 'popsBonk')
@@ -877,6 +882,38 @@ function updatePops(runtime: PrankRuntime, frame: PrankFrame) {
   })
 }
 
+const GLARE_MAX_YAW = 0.2
+const GLARE_MAX_PITCH = 0.08
+const GLARE_DELAY = 0.18
+const GLARE_IN = 0.3
+const GLARE_HOLD = 0.5
+const GLARE_OUT = 0.45
+const GLARE_CANCEL = 0.3
+
+/**
+ * Glare after a chip hit: once the head has snapped back, glance toward the
+ * thrower (easeOutCubic), hold briefly, ease back (easeInOutSine). Letting go
+ * early, over GLARE_CANCEL, as soon as it is the hero's turn to act.
+ */
+function getGlareAmount(glare: PrankRuntime['glare'], time: number, heroActing: boolean) {
+  const since = time - glare.startedAt - GLARE_DELAY
+  let amount = 0
+  if (since >= 0 && since <= GLARE_IN + GLARE_HOLD + GLARE_OUT) {
+    if (since < GLARE_IN) amount = 1 - Math.pow(1 - since / GLARE_IN, 3)
+    else if (since < GLARE_IN + GLARE_HOLD) amount = 1
+    else amount = 0.5 * (1 + Math.cos(Math.PI * (since - GLARE_IN - GLARE_HOLD) / GLARE_OUT))
+  }
+  if (heroActing && amount > 0 && glare.cancelledAt === undefined) {
+    glare.cancelledAt = time
+    glare.cancelFrom = amount
+  }
+  if (glare.cancelledAt !== undefined) {
+    const u = (time - glare.cancelledAt) / GLARE_CANCEL
+    amount = u >= 1 ? 0 : Math.min(amount, (glare.cancelFrom ?? 1) * 0.5 * (1 + Math.cos(Math.PI * Math.max(0, u))))
+  }
+  return amount
+}
+
 /** Advances every prank; returns the camera kick for this frame. */
 export function updatePranks(runtime: PrankRuntime, frame: PrankFrame): PrankCameraKick {
   for (const shot of Array.from(runtime.shots.values())) updateShot(runtime, shot, frame)
@@ -884,15 +921,7 @@ export function updatePranks(runtime: PrankRuntime, frame: PrankFrame): PrankCam
   updatePops(runtime, frame)
   const headTilt = updateFirstPersonShot(runtime, frame.time, frame.heroColors)
   if (frame.reducedMotion) return headTilt > 0 ? { ...NO_KICK, headTilt } : NO_KICK
-  // Glare: after the snap-back, turn toward the thrower, hold, turn back.
-  const glareSince = frame.time - runtime.glare.startedAt
-  const GLARE_IN = 0.3
-  const GLARE_HOLD = 0.9
-  const GLARE_OUT = 0.6
-  const glareAmount = glareSince < 0.18 || glareSince > 0.18 + GLARE_IN + GLARE_HOLD + GLARE_OUT
-    ? 0
-    : Math.min(1, (glareSince - 0.18) / GLARE_IN, (0.18 + GLARE_IN + GLARE_HOLD + GLARE_OUT - glareSince) / GLARE_OUT)
-  const glareEase = glareAmount * glareAmount * (3 - 2 * glareAmount)
+  const glareEase = getGlareAmount(runtime.glare, frame.time, Boolean(frame.heroActing))
   const glareYaw = runtime.glare.yaw * glareEase
   const glarePitch = runtime.glare.pitch * glareEase
   const shake = runtime.shake

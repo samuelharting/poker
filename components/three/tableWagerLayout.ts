@@ -43,7 +43,18 @@ export const TABLE_WAGER_SEMI_AXIS_Z = 1.63
 
 /** Matches FELT_TOP_Y in tableArt.ts: chip stacks sit directly on the felt. */
 export const TABLE_WAGER_Y = 0.4
-export const MAX_WAGER_CHIPS = 12
+/** Enough for a pushed all-in to read as a real pile (see getWagerChipCount). */
+export const MAX_WAGER_CHIPS = 30
+/** Chips per wager column before the pile spreads into another column. */
+export const WAGER_CHIPS_PER_COLUMN = 6
+
+/**
+ * The collected pot sits front-left of the board, between it and the hero's
+ * betting spot: it never covers a board card from the first-person camera
+ * (the camera looks over it, not through it at the board) and stays well clear
+ * of the hero's own committed chips on the betting line.
+ */
+export const TABLE_POT_POSITION: TableVec3 = [-1.5, TABLE_WAGER_Y, 1.3]
 
 const SEAT_EDGE_INSET = 0.88
 const DEFAULT_WAGER_ARC_HEIGHT = 0.34
@@ -71,6 +82,8 @@ export function getTableWagerStartPoint(visualSeat: TableVisualSeat): TableVec3 
 /**
  * Converts a monetary wager into a readable, bounded number of physical chips.
  * The displayed amount remains authoritative; this count is visual density.
+ * Log-scaled in big blinds so size reads at a glance: a blind is 3-5 chips, a
+ * pot-sized raise about a dozen, and a 50bb+ shove a spread pile of 20-30.
  */
 export function getWagerChipCount(
   bet: number,
@@ -84,7 +97,58 @@ export function getWagerChipCount(
     ? Math.max(1, Math.floor(maxChips))
     : MAX_WAGER_CHIPS
 
-  return Math.min(cap, Math.max(1, Math.ceil(bet / chipUnit)))
+  const count = Math.round(1 + 3.6 * Math.log2(1 + bet / chipUnit))
+  return Math.min(cap, Math.max(1, count))
+}
+
+export interface WagerChipSlot {
+  /** Local offsets: +x runs along the betting line, -z in toward the table centre. */
+  x: number
+  z: number
+  level: number
+  /** Index into CHIP_DENOMINATIONS (0 red, 1 blue, 2 green, 3 black, 4 purple). */
+  denomination: number
+}
+
+/**
+ * Column footprints (in chip pitches) for 1-5 columns: a row along the line,
+ * then a second row pushed further in (never back toward the player's cards).
+ */
+const WAGER_COLUMN_SPOTS: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = [
+  [[0, 0]],
+  [[-0.5, 0], [0.5, 0]],
+  [[-0.5, 0], [0.5, 0], [0, -0.86]],
+  [[-1, 0], [0, 0], [1, 0], [0.5, -0.86]],
+  [[-1, 0], [0, 0], [1, 0], [-0.5, -0.86], [0.5, -0.86]],
+]
+
+/**
+ * Physical layout for `count` wager chips: neat columns of up to six that
+ * spread along the betting line as the bet grows (a big bet or all-in is a
+ * pushed-out pile, not a taller tower). Bigger bets bring in bigger
+ * denominations, so the colours also hint at size.
+ */
+export function getWagerChipLayout(count: number, pitch: number): WagerChipSlot[] {
+  const total = Math.max(0, Math.min(MAX_WAGER_CHIPS, Math.floor(count)))
+  const columns = Math.max(1, Math.min(WAGER_COLUMN_SPOTS.length, Math.ceil(total / WAGER_CHIPS_PER_COLUMN)))
+  const spots = WAGER_COLUMN_SPOTS[columns - 1]!
+  // Denominations present grow with the bet: reds/blues for blinds, greens
+  // from a real raise, blacks for big bets and purple for a shove.
+  const palette = total <= 5 ? [0, 1] : total <= 12 ? [1, 0, 2] : total <= 20 ? [2, 1, 3, 0] : [3, 4, 2, 1, 3]
+  const slots: WagerChipSlot[] = []
+  for (let index = 0; index < total; index += 1) {
+    const column = index % columns
+    const level = Math.floor(index / columns)
+    const [spotX, spotZ] = spots[column]!
+    slots.push({
+      x: spotX * pitch,
+      z: spotZ * pitch,
+      level,
+      // Each column is mostly one colour with a contrasting cap every few chips.
+      denomination: palette[(column + (level >= 4 ? 1 : 0)) % palette.length]!,
+    })
+  }
+  return slots
 }
 
 /**

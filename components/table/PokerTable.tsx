@@ -1527,7 +1527,9 @@ export function PokerTable({
   const ownHandCards = visibleOwnPlayer?.holeCards ?? []
   const ownShowCardsMode: ShowCardsMode = canShowRevealedCards ? visibleOwnPlayer?.showCards ?? 'none' : 'none'
   const isOwnHandFolded = isInHand && visibleOwnPlayer?.status === 'folded'
-  const heroTableBetAmount = !isSpectator && me ? me.bet : 0
+  // A hand won by everyone folding ends with the street's bets still set on
+  // the players; those chips already went to the winner, so drop the label.
+  const heroTableBetAmount = !isSpectator && me && isInHand ? me.bet : 0
   const showHeroBottomSummary = Boolean(threeTableView && visibleOwnPlayer && !isSpectator)
   // A rabbit hunt deals the streets nobody played. They arrive separately in
   // state.rabbitCards, are drawn dimmed after the real board and never feed a

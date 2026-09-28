@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 /**
- * Toon-shaded drink props the avatars pick up: a foamy beer mug and a glass of
+ * Glass drink props the avatars pick up: a foamy beer mug and a glass of
  * water. Props live in world space and follow the drinker's right hand.
  */
 
@@ -14,26 +14,33 @@ export interface DrinkProp {
   geometries: THREE.BufferGeometry[]
 }
 
-function ramp() {
-  const data = new Uint8Array([90, 170, 255])
-  const texture = new THREE.DataTexture(data, data.length, 1, THREE.RedFormat)
-  texture.minFilter = THREE.NearestFilter
-  texture.magFilter = THREE.NearestFilter
-  texture.needsUpdate = true
-  return texture
-}
-
 export function createDrinkProp(kind: DrinkKind): DrinkProp {
   const group = new THREE.Group()
   group.name = `drink-${kind}`
-  const gradientMap = ramp()
   const materials: THREE.Material[] = []
   const geometries: THREE.BufferGeometry[] = []
-  const toon = (parameters: THREE.MeshToonMaterialParameters) => {
-    const material = new THREE.MeshToonMaterial({ gradientMap, ...parameters })
+  // Lit like the rest of the table (standard PBR under the key spot and the
+  // room environment), so glass catches real highlights instead of reading as
+  // a flat toon cylinder.
+  const lit = (parameters: THREE.MeshStandardMaterialParameters) => {
+    const material = new THREE.MeshStandardMaterial(parameters)
     materials.push(material)
     return material
   }
+  const glassMaterial = (tint: string) => lit({
+    color: tint,
+    transparent: true,
+    opacity: 0.32,
+    roughness: 0.08,
+    metalness: 0,
+    envMapIntensity: 1.6,
+    depthWrite: false,
+    // Both walls show through each other, like a real glass.
+    side: THREE.DoubleSide,
+  })
+  // A bright lip and a thick base: the two things that make a glass read as glass.
+  const rimMaterial = lit({ color: '#f4fbff', emissive: '#ffffff', emissiveIntensity: 0.12, roughness: 0.15, envMapIntensity: 1.4 })
+  const baseMaterial = lit({ color: '#d7ebe8', transparent: true, opacity: 0.7, roughness: 0.12, envMapIntensity: 1.4 })
   const add = (geometry: THREE.BufferGeometry, material: THREE.Material, position: [number, number, number]) => {
     geometries.push(geometry)
     const mesh = new THREE.Mesh(geometry, material)
@@ -45,23 +52,31 @@ export function createDrinkProp(kind: DrinkKind): DrinkProp {
 
   if (kind === 'beer') {
     // Clear glass so the beer reads golden rather than muddy.
-    const glass = toon({ color: '#fffaf0', transparent: true, opacity: 0.26, depthWrite: false })
+    const glass = glassMaterial('#fff6e4')
     // Gentle emissive only: brighter reads as a light bulb under the bloom pass.
-    const beer = toon({ color: '#ffb52e', emissive: '#c46f00', emissiveIntensity: 0.22 })
-    const foam = toon({ color: '#fff8ea', emissive: '#fff1d6', emissiveIntensity: 0.08 })
-    add(new THREE.CylinderGeometry(0.1, 0.09, 0.24, 18), glass, [0, 0.12, 0])
-    add(new THREE.CylinderGeometry(0.088, 0.08, 0.19, 18), beer, [0, 0.105, 0])
+    const beer = lit({ color: '#f29a12', emissive: '#b86200', emissiveIntensity: 0.3, roughness: 0.25, envMapIntensity: 0.9 })
+    const foam = lit({ color: '#fbf1dc', emissive: '#fff1d6', emissiveIntensity: 0.05, roughness: 0.92 })
+    // Order matters: glass, liquid, foam first (firstPersonDrink reads them by index).
+    add(new THREE.CylinderGeometry(0.1, 0.09, 0.24, 20, 1, true), glass, [0, 0.12, 0])
+    add(new THREE.CylinderGeometry(0.088, 0.08, 0.19, 20), beer, [0, 0.105, 0])
     const head = add(new THREE.SphereGeometry(0.1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), foam, [0, 0.22, 0])
     head.scale.y = 0.55
-    const handle = add(new THREE.TorusGeometry(0.055, 0.016, 8, 16, Math.PI), glass, [0.1, 0.12, 0])
+    const handle = add(new THREE.TorusGeometry(0.055, 0.016, 8, 16, Math.PI), glassMaterial('#fff6e4'), [0.1, 0.12, 0])
     handle.rotation.z = -Math.PI / 2
+    add(new THREE.CylinderGeometry(0.09, 0.09, 0.012, 20), baseMaterial, [0, 0.006, 0])
+    const lip = add(new THREE.TorusGeometry(0.1, 0.006, 6, 28), rimMaterial, [0, 0.24, 0])
+    lip.rotation.x = Math.PI / 2
   } else {
-    const glass = toon({ color: '#eefaff', transparent: true, opacity: 0.26, depthWrite: false })
-    const water = toon({ color: '#9fe0ff', emissive: '#2b86b8', emissiveIntensity: 0.2, transparent: true, opacity: 0.8 })
-    add(new THREE.CylinderGeometry(0.075, 0.065, 0.22, 18), glass, [0, 0.11, 0])
-    add(new THREE.CylinderGeometry(0.066, 0.058, 0.16, 18), water, [0, 0.085, 0])
-    const lemon = add(new THREE.TorusGeometry(0.045, 0.012, 6, 14), toon({ color: '#ffe066' }), [0.07, 0.2, 0])
+    const glass = glassMaterial('#eefaff')
+    const water = lit({ color: '#a9dcf0', emissive: '#1f6f9a', emissiveIntensity: 0.14, transparent: true, opacity: 0.62, roughness: 0.1, envMapIntensity: 1.2, depthWrite: false })
+    // Order matters: glass, liquid, lemon first (firstPersonDrink reads them by index).
+    add(new THREE.CylinderGeometry(0.075, 0.065, 0.22, 20, 1, true), glass, [0, 0.11, 0])
+    add(new THREE.CylinderGeometry(0.066, 0.058, 0.16, 20), water, [0, 0.085, 0])
+    const lemon = add(new THREE.TorusGeometry(0.045, 0.012, 6, 14), lit({ color: '#f2d24a', roughness: 0.6 }), [0.07, 0.2, 0])
     lemon.rotation.y = Math.PI / 2
+    add(new THREE.CylinderGeometry(0.065, 0.065, 0.012, 20), baseMaterial, [0, 0.006, 0])
+    const lip = add(new THREE.TorusGeometry(0.075, 0.005, 6, 28), rimMaterial, [0, 0.22, 0])
+    lip.rotation.x = Math.PI / 2
   }
 
   group.visible = false

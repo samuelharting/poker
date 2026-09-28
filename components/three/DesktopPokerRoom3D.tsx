@@ -57,6 +57,7 @@ import {
   createLightCone,
   createShockwave,
   disposeConfetti,
+  fadeOutConfetti,
   disposeLightCone,
   disposeShockwave,
   triggerShockwave,
@@ -93,6 +94,8 @@ import {
   createBoardRuntime,
   createCardMesh,
   cullHiddenCardSide,
+  DEAL_DECK_POINT,
+  DEAL_LAUNCH_SECONDS,
   disposeCardMesh,
   setCardFace,
   syncBoardRuntime,
@@ -144,7 +147,10 @@ import {
   getTableWagerAnchor,
   getTableWagerStartPoint,
   getWagerChipCount,
+  getWagerChipLayout,
   interpolateWagerArc,
+  MAX_WAGER_CHIPS,
+  TABLE_POT_POSITION,
   TABLE_SEAT_POSITIONS,
   TABLE_SEAT_SCALES,
   TABLE_WAGER_Y,
@@ -245,6 +251,12 @@ interface SeatRuntime {
   playback: ThreeActionPlaybackState
   hadCards: boolean
   dealStartedAt: number
+  /** Hand number the current hole cards were dealt in (a new hand re-deals). */
+  dealtHand?: number
+  /** Per-card launch delays for the current deal (clockwise, one card a round). */
+  dealDelays?: [number, number]
+  /** Showdown flip per card: when it started and which way it is heading. */
+  flipAnim?: Array<{ from: number; to: number; startedAt: number }>
   avatarGeneration: number
   requestedAvatarKey: ThreePlayerView['avatarProfile']['modelKey']
   avatarLoadStatus: 'idle' | 'loading' | 'loaded' | 'failed'
@@ -281,6 +293,10 @@ interface WagerRuntime {
   /** Where the sweep goes: the pot mid-hand, or the winner when the hand ends. */
   collectDest: THREE.Vector3 | null
   motionProfile: PokerActionMotionProfile
+  /** Faces the columns along the betting line (same yaw as the owner's seat). */
+  yaw: number
+  /** Chip count the columns are currently laid out for. */
+  layoutCount: number
 }
 
 interface PotRuntime {
@@ -301,6 +317,9 @@ interface PotRuntime {
   payoutAmount: number
   /** Last pot total seen before the payout began. */
   lastPotAmount: number
+  /** Chip count the mound grows to once the swept-in bets land (and when). */
+  pendingCount?: number
+  pendingGrowAt?: number
 }
 
 interface SceneRuntime {
@@ -779,7 +798,9 @@ function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
   // (the hands aim between the front columns of the stack's block, see
   // personalChipStack.ts). The hero has no body to reach with, so their stack
   // sits further right, clear of the pot and board in the first-person view.
-  const STACK_SIDE = seat.isHero ? HERO_STACK_SIDE : 0.44
+  // Opponents' block clears their own (slightly splayed) right hole card and
+  // the neighbour's cards; the gap differs per seat around the curve.
+  const STACK_SIDE = seat.isHero ? HERO_STACK_SIDE : OPPONENT_STACK_SIDES[safeSeat]
   const stackSpot = at(-0.1, FELT_TOP_Y)
   seat.anchors.stack = [(STACK_SIDE + 0.07) / scale, stackSpot[1] + 0.06, stackSpot[2]]
   // The stack is a world object (not a child of the seat) so the hero, whose
@@ -795,12 +816,15 @@ function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
   const betLocal = toSeatLocal(seat, betWorld[0], betWorld[1] + 0.05, betWorld[2])
   seat.anchors.betSpot = betLocal
   seat.anchors.board = toSeatLocal(seat, 0, FELT_TOP_Y + 0.1, BOARD_Z)
-  // Cards are dealt from the middle of the table (in the cards group's space).
-  const dealFrom = toSeatLocal(seat, 0, FELT_TOP_Y + 0.3, -0.2)
+  // Cards are dealt from the dealer's deck (in the cards group's space).
+  const dealFrom = toSeatLocal(seat, DEAL_DECK_POINT.x, DEAL_DECK_POINT.y, DEAL_DECK_POINT.z)
   seat.cards.userData.dealFrom = [dealFrom[0], dealFrom[1] - cardSpot[1], dealFrom[2] - cardSpot[2]]
   seat.anchors.drinkRest = [-0.66 / scale, stackSpot[1] + 0.02, stackSpot[2] + 0.08]
-  // Dealer puck lies on the felt to the left of the dealer's hole cards.
-  seat.dealerButton.position.set(-0.62, cardSpot[1] + 0.03 / scale, cardSpot[2] + 0.12)
+  // Dealer puck lies on open felt just in front (and a touch right) of the
+  // dealer's hole cards: clear of the rail, the drink spot, every stack (side
+  // seats sit only ~1.35 apart, so beside the cards is taken) and the betting
+  // line. Folded cards land front-left, away from it.
+  seat.dealerButton.position.set(0.34, cardSpot[1] + DEALER_PUCK_HEIGHT / 2 - 0.008, cardSpot[2] - 0.6)
   // Selection ring sits on the carpet under the chair.
   seat.ring.position.set(0, (-2 - position[1]) / scale + 0.03, 0.25)
   seat.cards.position.set(0, cardSpot[1], cardSpot[2])
@@ -920,7 +944,7 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
   const cardMeshes: THREE.Object3D[] = []
   const holeCards: CardMesh[] = []
   for (const [index, x] of [-0.17, 0.17].entries()) {
-    const card = createCardMesh(0.46)
+    const card = createCardMesh(HOLE_CARD_WIDTH)
     // Face down by default; showdown flips each card over its long edge.
     card.group.rotation.set(0, index === 0 ? -0.16 : 0.12, Math.PI)
     card.group.position.set(x, index * 0.014, 0)
@@ -932,14 +956,27 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     holeCards.push(card)
   }
 
-  const dealerMaterial = new THREE.MeshStandardMaterial({ color: '#fff8ea', roughness: 0.4, metalness: 0.05 })
-  const dealerFace = new THREE.MeshStandardMaterial({ map: getDealerPuckTexture(), roughness: 0.4 })
+  // Dark edge band with a faint warm glow so the puck reads at any seat, even
+  // in the rail's shadow; ivory face (not paper white) under the key light.
+  const dealerMaterial = new THREE.MeshStandardMaterial({
+    color: '#23262c',
+    roughness: 0.45,
+    metalness: 0.2,
+    emissive: '#d9a441',
+    emissiveIntensity: 0.16,
+  })
+  const dealerFace = new THREE.MeshStandardMaterial({
+    map: getDealerPuckTexture(),
+    roughness: 0.55,
+    emissive: '#fff1d6',
+    emissiveIntensity: 0.06,
+  })
   materials.push(dealerMaterial, dealerFace)
   const dealerButton = addMesh(
     root,
-    new THREE.CylinderGeometry(0.17, 0.17, 0.05, 36),
+    new THREE.CylinderGeometry(DEALER_PUCK_RADIUS, DEALER_PUCK_RADIUS * 1.04, DEALER_PUCK_HEIGHT, 40),
     [dealerMaterial, dealerFace, dealerMaterial],
-    [0.62, 0.5, -1.4]
+    [-0.7, 0.5, -1.4]
   )
   dealerButton.name = 'dealer-puck'
   dealerButton.visible = player.isDealer
@@ -1279,7 +1316,29 @@ function syncSeatAppearance(
   seat.appearanceKey = nextAppearanceKey
 }
 
-function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number) {
+/** Hole cards: each card's flight, the stagger between seats and the flip. */
+const DEAL_STEP_SECONDS = 0.05
+const DEAL_FLIGHT_SECONDS = 0.36
+const SHOWDOWN_FLIP_SECONDS = 0.35
+
+/** Seats in dealing order: clockwise, starting left of the button. */
+function getDealOrder(players: readonly ThreePlayerView[]) {
+  const dealer = players.find(player => player.isDealer)?.visualSeat ?? -1
+  const dealt = players
+    .filter(player => player.hasCards)
+    .map(player => ({ id: player.id, rank: (player.visualSeat - dealer - 1 + 16) % 8 }))
+    .sort((left, right) => left.rank - right.rank)
+  return new Map(dealt.map((entry, index) => [entry.id, index]))
+}
+
+interface SeatDealInfo {
+  handNumber?: number
+  /** This seat's place in the dealing order and how many seats are dealt in. */
+  order: number
+  count: number
+}
+
+function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number, deal: SeatDealInfo = { order: 0, count: 1 }) {
   if (seat.visualSeat !== player.visualSeat) setSeatPosition(seat, player.visualSeat)
   // Desktop is framed from the local player's chair. Their physical avatar would
   // sit between the camera and their DOM-rendered hole cards, so keep that seat
@@ -1317,7 +1376,21 @@ function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number) {
   )
   seat.actionKey = player.actionKey
 
-  if (!seat.hadCards && player.hasCards) seat.dealStartedAt = now
+  // A fresh deal: first cards, or a new hand while last hand's cards are still
+  // on the felt (they used to just flip face-down in place).
+  const newHand = deal.handNumber !== undefined && seat.dealtHand !== undefined && seat.dealtHand !== deal.handNumber
+  if (player.hasCards && (!seat.hadCards || newHand)) {
+    seat.dealStartedAt = now
+    // One card per seat per round, clockwise from the button.
+    seat.dealDelays = [
+      deal.order * DEAL_STEP_SECONDS,
+      (deal.order + deal.count) * DEAL_STEP_SECONDS,
+    ]
+    // The new cards arrive face down; never flip the old faces in place.
+    seat.flipAnim = undefined
+    seat.cardMeshes.forEach(card => { card.userData.flip = Math.PI })
+  }
+  if (player.hasCards && deal.handNumber !== undefined) seat.dealtHand = deal.handNumber
   seat.hadCards = player.hasCards
   seat.peeking = Boolean(player.isPeeking)
   seat.cards.visible = player.hasCards && (
@@ -1384,6 +1457,7 @@ function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
   }
 
   const hasWinner = view.players.some(player => player.isWinner)
+  const dealOrder = getDealOrder(view.players)
   const displayPlayers = withDistinctOutfits(view.players)
   for (const player of displayPlayers) {
     let seat = runtime.seats.get(player.id)
@@ -1393,7 +1467,11 @@ function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
       runtime.scene.add(seat.root)
       runtime.scene.add(seat.stack.group)
     }
-    syncSeat(seat, player, now)
+    syncSeat(seat, player, now, {
+      handNumber: view.handNumber,
+      order: dealOrder.get(player.id) ?? 0,
+      count: Math.max(1, dealOrder.size),
+    })
     // Personal chip stack: sized against the starting stack, from one short
     // column up to a chip tower. Winnings drop in once the payout has landed.
     const startingStack = view.startingStack > 0 ? view.startingStack : Math.max(1, view.bigBlind) * 100
@@ -1438,6 +1516,25 @@ const WAGER_CHIPS_PER_COLUMN = 6
 const HERO_STACK_MAX_LEVELS = 14
 /** How far right of the hero's chair their own stack sits. */
 const HERO_STACK_SIDE = 0.95
+/**
+ * Opponents' stack offset (right of the chair) per visual seat. Each seat's
+ * stack sits between its own right hole card and the next seat's cards; seat 2
+ * (right toward seat 1, where the table curves hardest) has the least room.
+ */
+const OPPONENT_STACK_SIDES: Record<TableVisualSeat, number> = {
+  0: HERO_STACK_SIDE,
+  1: 0.66,
+  2: 0.55,
+  3: 0.58,
+  4: 0.6,
+  5: 0.64,
+  6: 0.66,
+  7: 0.66,
+}
+/** Opponents' hole cards: closer to the board cards' size so they don't read as toys. */
+const HOLE_CARD_WIDTH = 0.48
+const DEALER_PUCK_RADIUS = 0.2
+const DEALER_PUCK_HEIGHT = 0.07
 let sharedChipGeometry: THREE.CylinderGeometry | null = null
 
 function getChipGeometry() {
@@ -1456,20 +1553,49 @@ const CHIP_PROXY_LAYER = 3
 const chipProxies = new Set<THREE.Mesh>()
 let sharedChipMaterials: THREE.MeshStandardMaterial[] | null = null
 
+/**
+ * Chips sit right under the key spot: their light is soft-clipped above a knee
+ * (like the cards' clamp, but gentler so the clay keeps its sheen) so ivory
+ * inlays and edge spots never blow out to white or feed the bloom. The gold
+ * "just won" flash rides on the instance tint and raises the ceiling with it.
+ */
+function softClipChipLighting(material: THREE.MeshStandardMaterial) {
+  material.onBeforeCompile = shader => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <opaque_fragment>',
+      /* glsl */ `{
+        float chipKnee = 0.62;
+        #if defined( USE_INSTANCING_COLOR )
+          chipKnee += max(vColor.r - 1.0, 0.0) * 1.6;
+        #endif
+        float chipLuma = dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722));
+        if (chipLuma > chipKnee) {
+          float over = chipLuma - chipKnee;
+          float compressed = chipKnee + over / (1.0 + over * 3.0);
+          outgoingLight *= compressed / chipLuma;
+        }
+      }
+      #include <opaque_fragment>`
+    )
+  }
+  material.customProgramCacheKey = () => 'poker-chip-soft-clip'
+  return material
+}
+
 function getSharedChipMaterials() {
   sharedChipMaterials ??= CHIP_DENOMINATIONS.flatMap((_, index) => [
-    new THREE.MeshStandardMaterial({
+    softClipChipLighting(new THREE.MeshStandardMaterial({
       map: getChipEdgeTexture(index),
-      roughness: 0.38,
-      metalness: 0.05,
-      envMapIntensity: 0.7,
-    }),
-    new THREE.MeshStandardMaterial({
+      roughness: 0.48,
+      metalness: 0.02,
+      envMapIntensity: 0.55,
+    })),
+    softClipChipLighting(new THREE.MeshStandardMaterial({
       map: getChipFaceTexture(index),
-      roughness: 0.34,
-      metalness: 0.05,
-      envMapIntensity: 0.7,
-    }),
+      roughness: 0.52,
+      metalness: 0.02,
+      envMapIntensity: 0.5,
+    })),
   ])
   sharedChipMaterials.forEach(material => { material.userData.shared = true })
   return sharedChipMaterials
@@ -1701,15 +1827,19 @@ function createWagerRuntime(
   player: ThreePlayerView,
   now: number
 ): WagerRuntime {
-  const chips = createChipSet(12, 'stack')
+  const chips = createChipSet(MAX_WAGER_CHIPS, 'stack')
   const visualSeat = toVisualSeat(player.visualSeat)
   const start = toVector3(getTableWagerStartPoint(visualSeat))
   const target = toVector3(getTableWagerAnchor(visualSeat))
   chips.group.name = `committed-wager-${player.id}`
   chips.group.position.copy(target)
+  const yaw = Math.atan2(target.x, target.z)
+  chips.group.rotation.set(0, yaw, 0)
   scene.add(chips.group)
 
   return {
+    yaw,
+    layoutCount: -1,
     playerId: player.id,
     ...chips,
     visualSeat,
@@ -1745,13 +1875,22 @@ function syncWagers(runtime: SceneRuntime, view: ThreeTableViewModel) {
     let wager = runtime.wagers.get(player.id)
     if (!wager) {
       wager = createWagerRuntime(runtime.scene, player, now)
+      // Starts empty so the first bet (usually a blind) slides in too.
+      wager.amount = 0
       runtime.wagers.set(player.id, wager)
     }
 
     const visualSeat = toVisualSeat(player.visualSeat)
     const seatChanged = wager.visualSeat !== visualSeat
     const actionChanged = Boolean(player.actionKey) && wager.actionKey !== player.actionKey
-    const amountIncreased = player.bet > wager.amount
+    // A hand won by everyone folding ends with the last street's bets still on
+    // the players (the engine only zeroes them when the next hand is prepared).
+    // Those chips are off the table the moment the hand is over: sweep them to
+    // the winner now, instead of hiding them and then replaying a stale sweep
+    // into the pot when the next hand zeroes the bets.
+    const bet = view.phase === 'in_hand' ? player.bet : 0
+    const amountIncreased = bet > wager.amount
+    let blindPost = false
     wager.visualSeat = visualSeat
     const ownerSeat = runtime.seats.get(player.id)
     if (ownerSeat) {
@@ -1762,14 +1901,18 @@ function syncWagers(runtime: SceneRuntime, view: ThreeTableViewModel) {
       wager.start.copy(toVector3(getTableWagerStartPoint(visualSeat)))
     }
     wager.target.copy(toVector3(getTableWagerAnchor(visualSeat)))
+    wager.yaw = Math.atan2(wager.target.x, wager.target.z)
 
     if (seatChanged) {
       wager.animating = false
       wager.group.position.copy(wager.target)
       resetChipTransforms(wager.chipMeshes, wager.chipBasePositions)
-    } else if (actionChanged && amountIncreased && isWagerAction(player.actionCue)) {
-      // Give the hand ~0.25s to reach the stack before the chips move.
-      wager.startedAt = now + 0.25
+    } else if (amountIncreased && (wager.amount === 0 || (actionChanged && isWagerAction(player.actionCue)))) {
+      // The street's first chips (blinds included) always slide out; later
+      // raises animate on their action. Give the hand ~0.25s to reach the
+      // stack first (a posted blind has no reach, so it goes almost at once).
+      blindPost = !isWagerAction(player.actionCue)
+      wager.startedAt = now + (blindPost ? 0.05 : 0.25)
       wager.animating = true
       wager.group.position.copy(wager.start)
       resetChipTransforms(wager.chipMeshes, wager.chipBasePositions)
@@ -1777,7 +1920,7 @@ function syncWagers(runtime: SceneRuntime, view: ThreeTableViewModel) {
       wager.group.position.copy(wager.target)
     }
 
-    if (wager.amount > 0 && player.bet === 0) {
+    if (wager.amount > 0 && bet === 0) {
       // The street closed: sweep this stack into the pot, or straight to the
       // winner when everyone else folded, instead of popping it away.
       const winner = view.players.find(candidate => candidate.isWinner)
@@ -1793,7 +1936,7 @@ function syncWagers(runtime: SceneRuntime, view: ThreeTableViewModel) {
       wager.collectCount = getWagerChipCount(wager.amount, view.bigBlind, wager.chipMeshes.length)
       wager.animating = false
     }
-    wager.amount = player.bet
+    wager.amount = bet
     wager.actionKey = player.actionKey
     if (actionChanged) {
       wager.motionProfile = getPokerActionMotionProfile(player.actionCue, {
@@ -1802,12 +1945,16 @@ function syncWagers(runtime: SceneRuntime, view: ThreeTableViewModel) {
         wagerIntensity: player.wagerIntensity,
       })
     }
+    // A posted blind is a calm push, never a flick.
+    if (blindPost) wager.motionProfile = { ...wager.motionProfile, wagerStyle: 'slide', wagerIntensity: 0 }
     const collecting = now - wager.collectStartedAt < WAGER_COLLECT_SECONDS
     const chipCount = collecting
       ? wager.collectCount
-      : view.phase === 'in_hand'
-        ? getWagerChipCount(player.bet, view.bigBlind, wager.chipMeshes.length)
-        : 0
+      : getWagerChipCount(bet, view.bigBlind, wager.chipMeshes.length)
+    if (chipCount > 0 && chipCount !== wager.layoutCount) {
+      layoutWagerChips(wager, chipCount)
+      if (!wager.animating && !collecting) resetChipTransforms(wager.chipMeshes, wager.chipBasePositions)
+    }
     wager.group.visible = chipCount > 0
     wager.chipMeshes.forEach((chip, index) => {
       chip.visible = index < chipCount
@@ -1834,6 +1981,17 @@ function resetChipTransforms(chips: THREE.Mesh[], basePositions: THREE.Vector3[]
 
 const WAGER_COLLECT_SECONDS = 0.55
 
+/** When the chips currently being swept off the betting line land (-inf if none). */
+function getWagerCollectEndsAt(runtime: SceneRuntime, now: number, potOnly = false) {
+  let endsAt = Number.NEGATIVE_INFINITY
+  for (const wager of runtime.wagers.values()) {
+    if (potOnly && wager.collectDest) continue
+    const end = wager.collectStartedAt + WAGER_COLLECT_SECONDS
+    if (end > now) endsAt = Math.max(endsAt, end)
+  }
+  return endsAt
+}
+
 function animateWagers(runtime: SceneRuntime, time: number, reducedMotion: boolean) {
   for (const wager of runtime.wagers.values()) {
     const collectProgress = (time - wager.collectStartedAt) / WAGER_COLLECT_SECONDS
@@ -1859,7 +2017,7 @@ function animateWagers(runtime: SceneRuntime, time: number, reducedMotion: boole
     if (reducedMotion) {
       wager.animating = false
       wager.group.position.copy(wager.target)
-      wager.group.rotation.set(0, 0, 0)
+      wager.group.rotation.set(0, wager.yaw, 0)
       resetChipTransforms(wager.chipMeshes, wager.chipBasePositions)
       continue
     }
@@ -1884,21 +2042,30 @@ function animateWagers(runtime: SceneRuntime, time: number, reducedMotion: boole
       arcHeight * 0.72
     )
     wager.group.position.set(position[0], position[1], position[2])
-    wager.group.rotation.set(0, 0, 0)
+    wager.group.rotation.set(0, wager.yaw, 0)
+    // Chip offsets are computed in world space; the columns' group is turned
+    // to face along the betting line, so rotate each offset into it.
+    const yawCos = Math.cos(wager.yaw)
+    const yawSin = Math.sin(wager.yaw)
 
-    const staggerStep = wagerStyle === 'flick'
+    // The stagger spans the chips actually thrown (a big bet's pile lands in
+    // the same time as a blind, just in a denser stream).
+    const thrown = Math.max(1, Math.min(wager.chipMeshes.length, wager.layoutCount))
+    const baseStagger = wagerStyle === 'flick'
       ? 0.038 + wagerIntensity * 0.008
       : wagerStyle === 'shove'
         ? 0.009
         : 0.015
-    const progressBoost = 1 + staggerStep * Math.min(11, wager.chipMeshes.length - 1)
+    const staggerStep = baseStagger * Math.min(1, 11 / Math.max(1, thrown - 1))
+    const progressBoost = 1 + staggerStep * Math.max(0, thrown - 1)
     wager.chipMeshes.forEach((chip, index) => {
       const base = wager.chipBasePositions[index]
       if (!base) return
+      if (index >= thrown) return
       const orderedIndex = variant === 1
-        ? (index * 5) % wager.chipMeshes.length
+        ? (index * 5) % thrown
         : variant === 2
-          ? wager.chipMeshes.length - index - 1
+          ? thrown - index - 1
           : index
       const chipProgress = THREE.MathUtils.clamp(
         progress * progressBoost - orderedIndex * staggerStep,
@@ -1914,10 +2081,12 @@ function animateWagers(runtime: SceneRuntime, time: number, reducedMotion: boole
       const landingBounce = chipProgress > 0.82
         ? Math.sin((chipProgress - 0.82) / 0.18 * Math.PI) * 0.035 * (1 - wagerIntensity * 0.35)
         : 0
+      const offsetX = chipWorld[0] - position[0]
+      const offsetZ = chipWorld[2] - position[2]
       chip.position.set(
-        base.x + chipWorld[0] - position[0],
+        base.x + offsetX * yawCos - offsetZ * yawSin,
         base.y + chipWorld[1] - position[1] + landingBounce,
-        base.z + chipWorld[2] - position[2]
+        base.z + offsetX * yawSin + offsetZ * yawCos
       )
       const spinDirection = (index + variant) % 2 === 0 ? 1 : -1
       const spinRate = wagerStyle === 'flick' ? 5.4 : wagerStyle === 'shove' ? 1.25 : 2.1
@@ -1931,17 +2100,68 @@ function animateWagers(runtime: SceneRuntime, time: number, reducedMotion: boole
     if (progress >= 1) {
       wager.animating = false
       wager.group.position.copy(wager.target)
-      wager.group.rotation.set(0, 0, 0)
+      wager.group.rotation.set(0, wager.yaw, 0)
       resetChipTransforms(wager.chipMeshes, wager.chipBasePositions)
     }
   }
 }
 
+/** Lays a wager's chips out as columns along the betting line (see getWagerChipLayout). */
+function layoutWagerChips(wager: WagerRuntime, count: number) {
+  wager.layoutCount = count
+  const slots = getWagerChipLayout(count, CHIP_RADIUS * 2 + 0.014)
+  slots.forEach((slot, index) => {
+    const chip = wager.chipMeshes[index]
+    const base = wager.chipBasePositions[index]
+    if (!chip || !base) return
+    // A millimetre of hand-stacked slop per chip, fixed so it never shimmers.
+    const jitter = ((index * 37) % 11) / 11 - 0.5
+    base.set(
+      slot.x + jitter * 0.005,
+      CHIP_HEIGHT / 2 + slot.level * (CHIP_HEIGHT + 0.002),
+      slot.z - jitter * 0.004
+    )
+    chip.userData.denomination = slot.denomination
+    chip.userData.level = slot.level
+  })
+}
+
+/**
+ * Pot mound column spots (x, z, levels): a low, wide pile rather than a tower,
+ * so it never rises into the board from the seated camera. Filled in order,
+ * so a small pot is one neat stack that spreads out as it grows.
+ */
+const POT_MOUND_COLUMNS: ReadonlyArray<readonly [number, number, number]> = (() => {
+  const columns: Array<readonly [number, number, number]> = [[0, 0, 4]]
+  const ring = [0.3, 1.35, 2.4, 3.45, 4.5, 5.55]
+  ring.forEach(angle => columns.push([Math.cos(angle) * 0.3, Math.sin(angle) * 0.25, 3]))
+  // Outer spill on the side away from the board and the hero's bet.
+  for (const angle of [3.0, 3.75, 2.25, 4.5]) columns.push([Math.cos(angle) * 0.56, Math.sin(angle) * 0.44, 2])
+  return columns
+})()
+
 function createPotRuntime(scene: THREE.Scene): PotRuntime {
-  const pot = createChipSet(30)
+  const pot = createChipSet(MAX_WAGER_CHIPS)
   pot.group.name = 'table-pot-chip-mound'
-  pot.group.position.set(0, FELT_TOP_Y, 1.28)
-  pot.group.scale.setScalar(1.15)
+  pot.group.position.set(...TABLE_POT_POSITION)
+  pot.group.position.y = FELT_TOP_Y
+  let chipIndex = 0
+  POT_MOUND_COLUMNS.forEach(([x, z, levels], column) => {
+    for (let level = 0; level < levels && chipIndex < pot.chipMeshes.length; level += 1) {
+      const chip = pot.chipMeshes[chipIndex]!
+      const jitter = ((chipIndex * 53) % 13) / 13 - 0.5
+      pot.chipBasePositions[chipIndex]!.set(
+        x + jitter * 0.014,
+        CHIP_HEIGHT / 2 + level * (CHIP_HEIGHT + 0.002),
+        z - jitter * 0.01
+      )
+      chip.position.copy(pot.chipBasePositions[chipIndex]!)
+      // Mostly one denomination per column, the odd contrasting chip on top.
+      chip.userData.denomination = (column + (level === levels - 1 && column % 3 === 1 ? 2 : 0)) % CHIP_DENOMINATIONS.length
+      chip.userData.level = level
+      chipIndex += 1
+    }
+  })
   scene.add(pot.group)
   return {
     ...pot,
@@ -2003,11 +2223,22 @@ function syncPot(runtime: SceneRuntime, view: ThreeTableViewModel) {
   if (!pot.payoutKey && winners.length === 0) {
     pot.lastPotAmount = Math.max(view.pot, view.collectedPot)
   }
-  if (count > pot.visibleChipCount && !pot.payoutKey) {
-    pot.bounceStartedAt = now
+  // Chips being swept in from the betting line: the mound keeps its old size
+  // until they arrive, then grows with the bounce (animatePot applies it).
+  const sweepLandsAt = count > pot.visibleChipCount && !pot.payoutKey
+    ? getWagerCollectEndsAt(runtime, now, true)
+    : Number.NEGATIVE_INFINITY
+  if (sweepLandsAt > now) {
+    pot.pendingCount = count
+    pot.pendingGrowAt = sweepLandsAt
+  } else {
+    if (count > pot.visibleChipCount && !pot.payoutKey) {
+      pot.bounceStartedAt = now
+    }
+    pot.visibleChipCount = count
+    pot.pendingGrowAt = undefined
   }
-  pot.visibleChipCount = count
-  const shown = pot.payoutKey ? pot.payoutCount : count
+  const shown = pot.payoutKey ? pot.payoutCount : pot.visibleChipCount
   pot.group.visible = shown > 0
   pot.chipMeshes.forEach((chip, index) => {
     chip.visible = index < shown
@@ -2109,6 +2340,13 @@ function animatePot(runtime: SceneRuntime, time: number, reducedMotion: boolean,
     return
   }
   updatePayoutReadout(host, null)
+  if (pot.pendingGrowAt !== undefined && time >= pot.pendingGrowAt) {
+    pot.pendingGrowAt = undefined
+    pot.visibleChipCount = pot.pendingCount ?? pot.visibleChipCount
+    pot.bounceStartedAt = time
+    pot.group.visible = pot.visibleChipCount > 0
+    pot.chipMeshes.forEach((chip, index) => { chip.visible = index < pot.visibleChipCount })
+  }
   if (pot.bounceStartedAt === Number.POSITIVE_INFINITY) return
 
   const progress = reducedMotion
@@ -2149,6 +2387,9 @@ const flipUp = new THREE.Vector3()
 const flipSide = new THREE.Vector3()
 const flipToward = new THREE.Vector3()
 const flipWrist = new THREE.Vector3()
+const flipForearm = new THREE.Vector3()
+/** Most the flick-off hand may bend off the forearm line (radians). */
+const FLIP_MAX_WRIST_BEND = 0.6
 const WORLD_UP = new THREE.Vector3(0, 1, 0)
 
 /**
@@ -2200,6 +2441,22 @@ function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | n
     const chain = getArmChain(bones.get(`UpperArm${side}`), bones.get(`LowerArm${side}`), bones.get(`Wrist${side}`))
     if (!chain) continue
     ikTarget.set(hand[0], hand[1], hand[2])
+    const raise = raiseAll * THREE.MathUtils.smoothstep(hand[1], shoulder[1] - 0.05, shoulder[1] + 0.2)
+    if (raise > 0.01 && guardRadius > 0) {
+      // Hands up at the head (laced behind it, rubbing it) go where the head
+      // is now: the targets are laid out against the upright rest pose, and a
+      // lounge or flinch moves the skull back by a hand's width.
+      const restHead = seat.anchors.chin
+      ikTarget.x += (faceGuardCenter.x - restHead[0]) * raise
+      ikTarget.y += (faceGuardCenter.y - 0.13 - (restHead[1] - 0.02)) * raise
+      ikTarget.z += (faceGuardCenter.z - (restHead[2] + 0.26)) * raise
+    }
+    // Never into the padded rail: over its cushion a wrist stays at least a
+    // forearm's thickness above the crown (the rail anchor sits there).
+    const railAnchor = out > 0 ? seat.anchors.railR : seat.anchors.railL
+    if (ikTarget.z < railAnchor[2] + 0.05 && ikTarget.z > railAnchor[2] - 0.4) {
+      ikTarget.y = Math.max(ikTarget.y, railAnchor[1] - 0.03)
+    }
     if (guardRadius > 0) {
       faceGuardOffset.subVectors(ikTarget, faceGuardCenter)
       const across = guardRadius * guardRadius - faceGuardOffset.y * faceGuardOffset.y - faceGuardOffset.z * faceGuardOffset.z
@@ -2212,11 +2469,12 @@ function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | n
     // Elbows swing out to the side and down/back, like arms resting on a rail;
     // folded on the rail (passed out) they splay out level with the hands;
     // a hand raised to or above the head (elbowUp) lifts its own elbow only.
-    const raise = raiseAll * THREE.MathUtils.smoothstep(hand[1], shoulder[1] - 0.05, shoulder[1] + 0.2)
+    // (Relaxed: out more than down, so the elbows sit a little away from the
+    // ribs instead of pinned to them with the forearms in a tight V.)
     ikPole.set(
-      shoulder[0] + out * (0.7 + 0.5 * splay + 0.3 * raise),
-      shoulder[1] - (0.7 * (1 - splay) + 0.12 * splay) * (1 - raise) + 0.5 * raise,
-      shoulder[2] + (0.45 * (1 - splay) + 0.05 * splay) * (1 - raise) + 0.15 * raise
+      shoulder[0] + out * (0.95 + 0.25 * splay + 0.1 * raise),
+      shoulder[1] - (0.5 * (1 - splay) + 0.12 * splay) * (1 - raise) + 0.5 * raise,
+      shoulder[2] + (0.25 * (1 - splay) + 0.05 * splay) * (1 - raise) + 0.15 * raise
     )
     seat.root.localToWorld(ikPole)
     solveArmIK(chain, ikTarget, ikPole)
@@ -2236,12 +2494,15 @@ function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | n
         restFingers.subVectors(restWrist, restElbow).setY(0)
         if (restFingers.lengthSq() > 1e-8) {
           restFingers.normalize()
-          // Curve in toward the middle (~15 degrees), tip a little down.
-          restInward.crossVectors(WORLD_UP, restFingers).multiplyScalar(out > 0 ? 1 : -1)
-          restFingers.addScaledVector(restInward, 0.27).normalize()
+          // Mostly straight ahead over the cushion, only angled a little in
+          // (the forearms come in from splayed elbows, and following them
+          // would lay one hand over the other); the palm lies flat on the
+          // crown and only the relaxed finger curl drops the tips onto it.
+          restInward.set(0, 0, -1).transformDirection(seat.root.matrixWorld).setY(0).normalize()
+          restFingers.multiplyScalar(0.25).addScaledVector(restInward, 0.75).normalize()
           restSide.crossVectors(restFingers, WORLD_UP).normalize().multiplyScalar(out)
-          restSide.addScaledVector(WORLD_UP, -0.3).normalize()
-          restFingers.addScaledVector(WORLD_UP, -0.22).normalize()
+          restSide.addScaledVector(WORLD_UP, -0.15).normalize()
+          restFingers.addScaledVector(WORLD_UP, -0.04).normalize()
           orientBoneFrame(chain.hand, middle, index, pinky, restFingers, restSide, restWeight)
         }
       }
@@ -2254,7 +2515,7 @@ function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | n
       const index = bones.get(`Index2${side}`)
       const pinky = bones.get(`Pinky2${side}`)
       if (middle && index && pinky) {
-        raiseUp.set(0, 0.75, 0.66).transformDirection(seat.root.matrixWorld)
+        raiseUp.set(0, 0.4, 0.92).transformDirection(seat.root.matrixWorld)
         raiseSide.set(0, -0.6, 0.8).transformDirection(seat.root.matrixWorld)
         orientBoneFrame(chain.hand, middle, index, pinky, raiseUp, raiseSide, raise)
       }
@@ -2274,6 +2535,24 @@ function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | n
           // Fingers up (tipped a touch toward the target), back of the hand to
           // them: index-to-pinky runs to the sender's left (right, for the left hand).
           flipUp.copy(WORLD_UP).addScaledVector(flipToward, 0.28).normalize()
+          // Keep the wrist bend believable (at most ~35 degrees off the
+          // forearm): a hand snapped 90 degrees up off a level forearm reads
+          // as a flat wedge instead of a raised finger.
+          chain.lower.getWorldPosition(restElbow)
+          flipForearm.subVectors(flipWrist, restElbow)
+          if (flipForearm.lengthSq() > 1e-8) {
+            flipForearm.normalize()
+            const cos = THREE.MathUtils.clamp(flipForearm.dot(flipUp), -1, 1)
+            if (Math.acos(cos) > FLIP_MAX_WRIST_BEND) {
+              flipUp.addScaledVector(flipForearm, -cos)
+              if (flipUp.lengthSq() > 1e-8) {
+                flipUp.normalize().multiplyScalar(Math.sin(FLIP_MAX_WRIST_BEND))
+                flipUp.addScaledVector(flipForearm, Math.cos(FLIP_MAX_WRIST_BEND)).normalize()
+              } else {
+                flipUp.copy(flipForearm)
+              }
+            }
+          }
           flipSide.crossVectors(WORLD_UP, flipToward).normalize().multiplyScalar(side === 'R' ? 1 : -1)
           orientBoneFrame(chain.hand, middle, index, pinky, flipUp, flipSide, pose.middleFinger)
         }
@@ -2341,20 +2620,26 @@ let dealerPuckTexture: THREE.CanvasTexture | null = null
 /** Cream puck face with a bold "D" (shared across seats). */
 function getDealerPuckTexture() {
   if (dealerPuckTexture) return dealerPuckTexture
-  dealerPuckTexture = createCanvasTexture(128, 128, context => {
+  dealerPuckTexture = createCanvasTexture(256, 256, context => {
     const font = getComputedStyle(document.documentElement).getPropertyValue('--font-unbounded').trim()
-    context.fillStyle = '#fff8ea'
-    context.fillRect(0, 0, 128, 128)
-    context.strokeStyle = '#d9a441'
-    context.lineWidth = 8
+    // Dark bevelled edge, gold ring, ivory face: reads against green felt and
+    // never clips to a white blob under the key light.
+    context.fillStyle = '#1f2228'
+    context.fillRect(0, 0, 256, 256)
+    context.fillStyle = '#efe5cd'
     context.beginPath()
-    context.arc(64, 64, 54, 0, Math.PI * 2)
+    context.arc(128, 128, 112, 0, Math.PI * 2)
+    context.fill()
+    context.strokeStyle = '#c8923a'
+    context.lineWidth = 10
+    context.beginPath()
+    context.arc(128, 128, 98, 0, Math.PI * 2)
     context.stroke()
     context.fillStyle = '#16191c'
     context.textAlign = 'center'
     context.textBaseline = 'middle'
-    context.font = `800 68px ${font ? `${font}, ` : ''}'Arial Black', sans-serif`
-    context.fillText('D', 64, 70)
+    context.font = `800 128px ${font ? `${font}, ` : ''}'Arial Black', sans-serif`
+    context.fillText('D', 128, 138)
   })
   return dealerPuckTexture
 }
@@ -2400,8 +2685,9 @@ function placeDrinkProp(seat: SeatRuntime, pose: AvatarPose, time: number) {
   const rest = seat.anchors.drinkRest
   seat.root.localToWorld(drinkRestWorld.set(rest[0], rest[1] - 0.02, rest[2]))
   const inHand = THREE.MathUtils.smoothstep(elapsed, 0.26, 0.4) * (1 - THREE.MathUtils.smoothstep(elapsed, 2.14, 2.3))
-  const wrist = seat.avatar?.bones.get('WristR')
-  const knuckle = seat.avatar?.bones.get('Middle1R')
+  // Held in the left hand: the glass sits on the felt to the player's left.
+  const wrist = seat.avatar?.bones.get('WristL')
+  const knuckle = seat.avatar?.bones.get('Middle1L')
   drinkYaw.setFromAxisAngle(drinkUp, seat.root.rotation.y)
   if (!wrist || inHand <= 0.001) {
     prop.group.position.copy(drinkRestWorld)
@@ -2442,10 +2728,39 @@ function placeDrinkProp(seat: SeatRuntime, pose: AvatarPose, time: number) {
       drinkAxis.copy(drinkUp).applyQuaternion(prop.group.quaternion)
       drinkRestWorld.copy(drinkMouthWorld).addScaledVector(drinkAxis, -rim)
       prop.group.position.lerp(drinkRestWorld, at)
+      // The fist goes with the glass: re-reach the arm so the grip (the same
+      // point the glass hangs from above) lands on the glass at the lips,
+      // instead of the glass floating up to the mouth out of a lower hand.
+      const chain = getArmChain(seat.avatar?.bones.get('UpperArmL'), seat.avatar?.bones.get('LowerArmL'), wrist)
+      if (chain && at > 0.001) {
+        // Elbow down and a little out/forward: the forearm comes up from
+        // below to the mouth instead of lying across the face.
+        const shoulderL = seat.anchors.shoulderL
+        drinkElbowPole.set(shoulderL[0] - 0.35, shoulderL[1] - 1, shoulderL[2] - 0.35)
+        seat.root.localToWorld(drinkElbowPole)
+        // Two passes: the grip-to-wrist offset depends on the solved forearm.
+        for (let pass = 0; pass < 2; pass += 1) {
+          wrist.getWorldPosition(drinkGripOffset)
+          drinkGripTarget.copy(drinkGripOffset)
+          if (knuckle) drinkGripTarget.lerp(knuckle.getWorldPosition(drinkKnuckleWorld), 0.7)
+          // Grip offset from the wrist bone, as measured on the live hand.
+          drinkGripOffset.subVectors(drinkGripTarget, drinkGripOffset)
+          // Where the grip should be on the (tipped) glass: low on its body.
+          // (The fist wraps the glass from its own, left, side.)
+          drinkGripTarget.copy(prop.group.position).addScaledVector(drinkAxis, 0.08 * size / 0.95).sub(drinkGripOffset)
+          drinkGripTarget.addScaledVector(drinkSide.set(-1, 0, 0).applyQuaternion(seat.root.quaternion), 0.045 * scale)
+          solveArmIK(chain, drinkGripTarget, drinkElbowPole, at)
+        }
+      }
     }
   }
   prop.group.scale.setScalar(size)
 }
+
+const drinkGripOffset = new THREE.Vector3()
+const drinkGripTarget = new THREE.Vector3()
+const drinkElbowPole = new THREE.Vector3()
+const drinkSide = new THREE.Vector3()
 
 /** Rosy cheeks creep in as the beers go down. */
 function flushCheeks(seat: SeatRuntime) {
@@ -2693,32 +3008,43 @@ function animateSeat(
     const dealFrom = (seat.cards.userData.dealFrom as Vec3 | undefined) ?? [0, 0.3, -1.5]
     seat.cards.scale.setScalar(1)
     seat.cardMeshes.forEach((card, index) => {
-      // Dealt clockwise from the dealer, one card per player per round.
-      const dealDelay = (seat.visualSeat + index * 8) * 0.075
+      // Dealt clockwise from the button, one card per player per round.
+      const dealDelay = seat.dealDelays?.[index] ?? (seat.visualSeat + index * 8) * DEAL_STEP_SECONDS
       const cardProgress = reducedMotion
         ? 1
-        : THREE.MathUtils.clamp((time - seat.dealStartedAt - dealDelay) / 0.46, 0, 1)
+        : THREE.MathUtils.clamp((time - seat.dealStartedAt - dealDelay) / DEAL_FLIGHT_SECONDS, 0, 1)
       const cardEase = 1 - Math.pow(1 - cardProgress, 3)
       card.visible = cardProgress > 0
       const baseX = Number(card.userData.baseX ?? (index === 0 ? -0.17 : 0.17))
       const baseYaw = Number(card.userData.baseYaw ?? 0)
-      // Showdown flips a card over its long edge once its face is known.
+      // Showdown flips a card over its long edge once its face is known: a
+      // timed ease with a small lift, not an exponential chase.
       const faceUp = Boolean(seat.holeCards[index]?.face)
       const flipTarget = faceUp ? 0 : Math.PI
       const currentFlip = Number(card.userData.flip ?? Math.PI)
-      const flip = reducedMotion
-        ? flipTarget
-        : currentFlip + (flipTarget - currentFlip) * (1 - Math.exp(-delta * 9))
+      const flips = seat.flipAnim ?? (seat.flipAnim = [])
+      let anim = flips[index]
+      if (!anim || anim.to !== flipTarget) {
+        anim = { from: currentFlip, to: flipTarget, startedAt: time }
+        flips[index] = anim
+      }
+      const flipT = reducedMotion ? 1 : THREE.MathUtils.clamp((time - anim.startedAt) / SHOWDOWN_FLIP_SECONDS, 0, 1)
+      const flipEase = flipT < 0.5 ? 4 * flipT * flipT * flipT : 1 - Math.pow(-2 * flipT + 2, 3) / 2
+      const flip = anim.from + (anim.to - anim.from) * flipEase
       card.userData.flip = flip
-      const flipArc = Math.sin(flip) * 0.12
+      const flipArc = anim.from === anim.to ? 0 : Math.sin(flipT * Math.PI) * 0.08
       const travel = 1 - cardEase
+      // Launch: a quick grow out of the deck so nothing pops into being.
+      const launch = reducedMotion ? 1 : THREE.MathUtils.clamp((time - seat.dealStartedAt - dealDelay) / DEAL_LAUNCH_SECONDS, 0, 1)
+      const baseScale = Number(card.userData.baseScale ?? (card.userData.baseScale = card.scale.x))
+      card.scale.setScalar(baseScale * Math.max(0.001, launch))
       card.position.set(
         baseX * cardEase + dealFrom[0] * travel,
-        index * 0.014 + flipArc + dealFrom[1] * travel + Math.sin(cardProgress * Math.PI) * 0.28,
+        index * 0.014 + flipArc + dealFrom[1] * travel + Math.sin(cardProgress * Math.PI) * 0.18,
         dealFrom[2] * travel
       )
-      // Cards skim in spinning and settle flat and square.
-      card.rotation.set(0, baseYaw * cardEase + travel * Math.PI * 2.5, flip)
+      // Cards skim in with a little spin and settle flat and square.
+      card.rotation.set(0, baseYaw * cardEase + travel * Math.PI * 0.6, flip)
     })
   } else {
     seat.cards.visible = false
@@ -2737,16 +3063,19 @@ const foldWrist = new THREE.Vector3()
 function getFoldTossPose(seat: SeatRuntime, t: number, restY: number): { position: Vec3; rotation: Vec3; fade: number } {
   const rest: Vec3 = [0, restY, seat.cardLocalZ]
   const board = seat.anchors.board
-  // Landing spot: a good way toward the middle, flat on the felt.
+  // Landing spot: a short way toward the middle and off to the player's left
+  // (the dealer puck sits front-right), flat on the felt, short of their own
+  // bet on the betting line.
+  const FOLD_SIDE = -0.3
   const land: Vec3 = [
-    rest[0] + (board[0] - rest[0]) * 0.34,
+    rest[0] + (board[0] - rest[0]) * 0.17 + FOLD_SIDE,
     restY,
-    rest[2] + (board[2] - rest[2]) * 0.34,
+    rest[2] + (board[2] - rest[2]) * 0.17,
   ]
   const skid: Vec3 = [
-    rest[0] + (board[0] - rest[0]) * 0.42,
+    rest[0] + (board[0] - rest[0]) * 0.2 + FOLD_SIDE * 1.1,
     restY,
-    rest[2] + (board[2] - rest[2]) * 0.42,
+    rest[2] + (board[2] - rest[2]) * 0.2,
   ]
   const wrist = seat.avatar?.bones.get('WristR')
   let held: Vec3 = rest
@@ -2801,7 +3130,8 @@ function setHoleCardFade(seat: SeatRuntime, fade: number) {
   for (const card of seat.holeCards) {
     card.group.traverse(object => {
       const mesh = object as THREE.Mesh
-      if (!mesh.isMesh || Array.isArray(mesh.material)) return
+      // The contact shadow is always transparent and fades itself (cardMeshes.ts).
+      if (!mesh.isMesh || Array.isArray(mesh.material) || mesh.userData.contactShadow) return
       const material = mesh.material as THREE.MeshStandardMaterial
       if (material.transparent !== fading) {
         material.transparent = fading
@@ -2898,7 +3228,9 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
   // property changed on the scene root is inherited by (and re-styles) the whole
   // table DOM every frame.
   scratch.copy(runtime.pot.group.position)
-  scratch.x += 0.42
+  // Just past the mound's left edge: the hero's bet (and its label) sits to
+  // the pot's right, so the two readouts never stack on each other.
+  scratch.x -= 0.74
   scratch.y += 0.12
   scratch.project(runtime.camera)
   const potX = (scratch.x * 0.5 + 0.5) * width
@@ -3093,6 +3425,9 @@ function animateEffects(runtime: SceneRuntime, time: number, delta: number, redu
       burstConfetti(effects.confetti, effectPoint, 110)
     }
   }
+  // The result is over (next deal): clear the paper instead of raining it
+  // over the new hand.
+  if (!winnerKey && effects.winnerKey) fadeOutConfetti(effects.confetti)
   effects.winnerKey = winnerKey
 
   for (const seat of runtime.seats.values()) {
@@ -3222,6 +3557,11 @@ function precompileScene(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
       renderer.setRenderTarget(postFx.composer.readBuffer)
       renderer.compile(scene, camera)
     }
+    // compile() only links programs; the first draw with each one still
+    // blocks on the link and reads back every uniform location (three's
+    // onFirstUse). Pay that here too, or the first deal stalls on the card,
+    // chip and board programs that were hidden until then.
+    for (const program of renderer.info.programs ?? []) program.getUniforms()
   } finally {
     renderer.setRenderTarget(previousTarget)
     hidden.forEach(object => { object.visible = false })
@@ -3456,6 +3796,9 @@ function createSceneRuntime(
     const pixelRatio = Math.max(0.75, Math.min(window.devicePixelRatio || 1, pixelRatioCap) * (quality >= 1 ? 0.85 : 1))
     renderer.setPixelRatio(pixelRatio)
     renderer.setSize(width, height, false)
+    // Top tier: 4x MSAA on the composer (crisp card, chip and rail edges);
+    // lower tiers keep single-sample targets and the cheap FXAA pass.
+    runtime.postFx?.setMultisample(quality === 0 ? 4 : 0)
     runtime.postFx?.setSize(width, height, pixelRatio)
     runtime.postFx?.setReducedBloom(quality >= 1)
     host.dataset.postFx = !runtime.postFx || quality >= 2 ? 'off' : quality === 1 ? 'reduced' : 'on'
@@ -3652,6 +3995,7 @@ function createSceneRuntime(
       reducedMotion,
       seats: runtime.seats,
       heroColors: { skin: heroProfile?.skinColor ?? '#d9a27c', sleeve: heroProfile?.sleeveColor ?? '#2b2f3a' },
+      heroActing: viewRef.current.isHeroTurn,
     })
     // Tip the head back with a sip or a shot, eased so a low frame rate never
     // turns it into a one-frame snap of the whole view.
@@ -3951,11 +4295,15 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
     const runtimeNow = (performance.now() - runtimeRef.current.startTime) / 1000
     if (view.communityCards.length > runtimeRef.current.board.visibleCount) runtimeRef.current.boardRevealAt = runtimeNow
     runtimeRef.current.anyWinner = view.players.some(player => player.isWinner)
+    // A street that closed with bets out deals its cards once the chips
+    // have been swept into the pot, not through the middle of the sweep.
+    const sweepEndsAt = getWagerCollectEndsAt(runtimeRef.current, runtimeNow)
     syncBoardRuntime(
       runtimeRef.current.board,
       view.communityCards,
       highlightedCards,
-      (performance.now() - runtimeRef.current.startTime) / 1000
+      runtimeNow,
+      sweepEndsAt > runtimeNow ? sweepEndsAt + 0.1 : Number.NEGATIVE_INFINITY
     )
     // New seats, avatars and accessories arrive with every sync.
     for (const seat of runtimeRef.current.seats.values()) {
@@ -4137,7 +4485,8 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
                 </span>
                 </span>
 
-                {player.bet > 0 && (
+                {/* A fold-win ends the hand with bets still set; the chips are gone, so is the label. */}
+                {player.bet > 0 && view.phase === 'in_hand' && (
                   <span className="cinematic-seat-bet">${player.bet.toLocaleString()}</span>
                 )}
               </button>

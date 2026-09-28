@@ -97,6 +97,16 @@ describe('PersonalChipStack', () => {
     expect(shown()).toBe(stack.count)
   })
 
+  it('stacks a little differently for every player (no cloned stacks)', () => {
+    const placements = [3, 11, 29].map(seed => {
+      const chips = makeChips(PERSONAL_STACK_MAX_CHIPS + 12)
+      const stack = new PersonalChipStack(chips, 0.044, 0.042, seed)
+      stack.sync(1000, START, 0, { reducedMotion: true })
+      return chips.filter(chip => chip.visible).map(chip => `${chip.position.x.toFixed(3)},${chip.position.z.toFixed(3)}`).sort().join('|')
+    })
+    expect(new Set(placements).size).toBe(placements.length)
+  })
+
   it('keeps chips that still have a place when the stack grows', () => {
     const chips = makeChips(PERSONAL_STACK_MAX_CHIPS + 12)
     const stack = new PersonalChipStack(chips, 0.044, 0.042)

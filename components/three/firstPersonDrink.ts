@@ -39,8 +39,11 @@ const GLASS_RADIUS: Record<DrinkKind, number> = { beer: 0.1, water: 0.075 }
 // Rim positions in camera space (camera looks down -Z).
 // Rises left of the action tray, sips low and off-centre so the board stays readable.
 const OFF_SCREEN = new THREE.Vector3(0.3, -0.72, -0.62)
-const HOLD = new THREE.Vector3(0.12, -0.1, -0.68)
-const MOUTH = new THREE.Vector3(0.03, -0.3, -0.52)
+// Held low and to the right: the board and the pot stay readable over it.
+const HOLD = new THREE.Vector3(0.22, -0.22, -0.7)
+const MOUTH = new THREE.Vector3(0.1, -0.34, -0.5)
+/** After the last gulp the glass goes straight down and out, no bob back up. */
+const LOWER_SECONDS = 0.5
 const MOUTH_TIP = 1.95
 const VIEW_SCALE = 0.78
 
@@ -183,7 +186,6 @@ const easeOutBack = (t: number) => {
   return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2)
 }
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
-const easeIn = (t: number) => t * t * t
 const clamp01 = (t: number) => Math.min(1, Math.max(0, t))
 
 /**
@@ -204,7 +206,11 @@ export function updateFirstPersonDrink(drink: FirstPersonDrink, input: FirstPers
   const raiseEnd = 0.5
   const toMouthEnd = 0.85
   const sipEnd = 1.85
-  const fromMouthEnd = 2.15
+  const lowerEnd = Math.min(DRINK_DURATION, sipEnd + LOWER_SECONDS)
+  if (elapsed >= lowerEnd) {
+    drink.root.visible = false
+    return 0
+  }
   let tip = 0
   let drain = 0
   let headTilt = 0
@@ -226,16 +232,12 @@ export function updateFirstPersonDrink(drink: FirstPersonDrink, input: FirstPers
     position.y += gulp * 0.05
     drain = t
     headTilt = 1
-  } else if (elapsed < fromMouthEnd) {
-    const t = easeInOut((elapsed - sipEnd) / (fromMouthEnd - sipEnd))
-    position.lerpVectors(MOUTH, HOLD, t)
+  } else {
+    const t = easeInOut((elapsed - sipEnd) / (lowerEnd - sipEnd))
+    position.lerpVectors(MOUTH, OFF_SCREEN, t)
     tip = (1 - t) * MOUTH_TIP
     drain = 1
     headTilt = 1 - t
-  } else {
-    const t = easeIn((elapsed - fromMouthEnd) / (DRINK_DURATION - fromMouthEnd))
-    position.lerpVectors(HOLD, OFF_SCREEN, t)
-    drain = 1
   }
 
   // Drunk hands wander.

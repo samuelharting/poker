@@ -21,7 +21,7 @@ export const FELT_TOP_Y = 0.4
 export const RAIL_WIDTH = 0.66
 export const RAIL_PEAK_Y = FELT_TOP_Y + 0.26
 
-export const BOARD_CARD_WIDTH = 0.62
+export const BOARD_CARD_WIDTH = 0.58
 export const BOARD_CARD_DEPTH = BOARD_CARD_WIDTH * (88 / 63)
 export const BOARD_CARD_GAP = 0.12
 export const BOARD_Z = -0.3
@@ -199,11 +199,13 @@ export function createStylizedTable(): TableArt {
   rail.receiveShadow = true
   group.add(rail)
 
+  // Brushed, slightly aged brass: a polished finish turned the key spot into
+  // one blown white streak along the inner rail.
   const brassMaterial = new THREE.MeshStandardMaterial({
-    color: '#e0b25a',
-    roughness: 0.26,
-    metalness: 1,
-    envMapIntensity: 1.25,
+    color: '#c99a4c',
+    roughness: 0.46,
+    metalness: 0.9,
+    envMapIntensity: 0.85,
   })
   const inlay = new THREE.Mesh(
     sweepAroundEllipse([

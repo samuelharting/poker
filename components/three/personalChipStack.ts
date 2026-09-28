@@ -221,6 +221,34 @@ export class PersonalChipStack {
       chip.userData.glow = 0
     })
     this.glintPhase = next()
+    // Every player stacks a little differently: some keep the block mirrored,
+    // and each column sits a few millimetres off the grid with its own lean.
+    this.mirrored = next() < 0.5
+    this.placementSeed = Math.floor(next() * 100000)
+  }
+
+  private readonly mirrored: boolean
+  private readonly placementSeed: number
+  private readonly columnPlacements = new Map<string, readonly [number, number, number, number]>()
+
+  /** Stack-local x/z of a column's chip at `level`, with this player's own slop. */
+  private place(key: string, x: number, z: number, level: number, out: THREE.Vector3) {
+    let placement = this.columnPlacements.get(key)
+    if (!placement) {
+      let hash = this.placementSeed
+      for (let index = 0; index < key.length; index += 1) hash = (hash * 31 + key.charCodeAt(index)) % 1000003
+      const unit = (salt: number) => {
+        const value = Math.sin(hash * 12.9898 + salt * 78.233) * 43758.5453
+        return (value - Math.floor(value)) * 2 - 1
+      }
+      // Offset (±12mm) and a per-level lean (±1.2mm per chip).
+      placement = [unit(1) * 0.012, unit(2) * 0.012, unit(3) * 0.0012, unit(4) * 0.0012] as const
+      this.columnPlacements.set(key, placement)
+    }
+    const baseX = this.mirrored ? BLOCK_X * 2 - x : x
+    out.x = baseX + placement[0] + placement[2] * level
+    out.z = z + placement[1] + placement[3] * level
+    return out
   }
 
   setLeader(leader: boolean, time: number) {
@@ -246,7 +274,10 @@ export class PersonalChipStack {
       (best, entry) => (!best || getColumnTop(entry) > getColumnTop(best) ? entry : best),
       null
     )
-    out.set(tallest?.x ?? 0, (tallest ? getColumnTop(tallest) : 0) * this.levelHeight + this.chipHeight / 2, tallest?.z ?? 0)
+    const top = tallest ? getColumnTop(tallest) : 0
+    if (tallest) this.place(tallest.key, tallest.x, tallest.z, top, out)
+    else out.set(0, 0, 0)
+    out.y = top * this.levelHeight + this.chipHeight / 2
     return out
   }
 
@@ -341,10 +372,11 @@ export class PersonalChipStack {
       const chip = chips[index]!
       // A hand-placed wobble, fixed per chip so it doesn't shimmer.
       const wobble = (this.yaw[index]! / (Math.PI * 2) - 0.5) * 0.01
-      this.targets[index]!.set(
-        slot.x + wobble,
+      const target = this.place(slot.key.slice(0, slot.key.lastIndexOf(':')), slot.x, slot.z, slot.level, this.targets[index]!)
+      target.set(
+        target.x + wobble,
         this.chipHeight / 2 + slot.level * this.levelHeight,
-        slot.z - wobble * 0.7
+        target.z - wobble * 0.7
       )
       this.slotKey[index] = slot.key
       chip.userData.denomination = slot.denomination
@@ -499,7 +531,8 @@ export class StackSparkles {
       geometry,
       new THREE.PointsMaterial({
         map: texture,
-        size: 0.2,
+        // Small and soft: a glint, not a white hot-spot under the bloom.
+        size: 0.13,
         vertexColors: true,
         transparent: true,
         depthWrite: false,
@@ -539,10 +572,10 @@ export class StackSparkles {
       const alive = age >= 0 && age < SPARKLE_SECONDS
       // A quick twinkle: flare up, then fade while drifting upward.
       const life = alive ? age / SPARKLE_SECONDS : 1
-      const intensity = alive ? Math.sin(Math.min(1, life * 2.2) * Math.PI * 0.5) * (1 - life) * 1.6 * this.strength[slot]! : 0
+      const intensity = alive ? Math.sin(Math.min(1, life * 2.2) * Math.PI * 0.5) * (1 - life) * 0.95 * this.strength[slot]! : 0
       any ||= intensity > 0.001
       positions.setXYZ(slot, this.origin[slot * 3]!, this.origin[slot * 3 + 1]! + life * 0.08, this.origin[slot * 3 + 2]!)
-      colors.setXYZ(slot, intensity, intensity * 0.86, intensity * 0.52)
+      colors.setXYZ(slot, intensity, intensity * 0.8, intensity * 0.42)
     }
     this.points.visible = any
     if (any) {

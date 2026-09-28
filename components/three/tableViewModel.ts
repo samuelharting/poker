@@ -193,6 +193,8 @@ export interface ThreeAllInAnnouncement {
 export interface ThreeTableViewModel {
   roomCode: string
   phase: TableState['phase']
+  /** Server hand counter: a change means a fresh deal. */
+  handNumber?: number
   players: ThreePlayerView[]
   hero: ThreePlayerView | null
   actingPlayerId: string | null
@@ -433,6 +435,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
   return {
     roomCode: state.roomCode,
     phase: state.phase,
+    handNumber: state.handNumber,
     players,
     hero,
     actingPlayerId: actingPlayer?.id ?? null,

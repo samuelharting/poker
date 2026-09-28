@@ -132,6 +132,13 @@ export function burstConfetti(confetti: Confetti, origin: THREE.Vector3, amount 
   }
 }
 
+/** Winds every live piece down within `seconds` (a new hand is being dealt). */
+export function fadeOutConfetti(confetti: Confetti, seconds = 0.35) {
+  for (let index = 0; index < CONFETTI_COUNT; index += 1) {
+    if (confetti.life[index]! > seconds) confetti.life[index] = seconds
+  }
+}
+
 const RAIL_SCALE = 1 + RAIL_WIDTH / TABLE_FELT_SEMI_AXIS_Z
 
 /** Height paper settles at over the table (felt, then rail), or null past the rail. */

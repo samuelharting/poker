@@ -360,11 +360,14 @@ function createGlasses(
   })
   materials.push(frame, lens)
 
-  // Lenses sit just in front of the face at eye height.
-  const lensZ = fit.eyeFront + 0.035
+  // Lenses sit just in front of the face at eye height, sized to the face:
+  // the outer edge of each lens stays inside the face's width (big cartoon
+  // eyes would otherwise push them out past the cheeks, floating).
+  const lensZ = fit.eyeFront + 0.024
   group.position.set(0, fit.eyeY * s, lensZ * s)
-  const eyeX = fit.eyeX
-  const radius = Math.min(0.1, Math.max(0.06, eyeX * 0.82))
+  const maxOuter = fit.faceHalfWidth * 0.93
+  const radius = Math.min(0.1, Math.max(0.05, fit.eyeX * 0.82), Math.max(0.05, maxOuter - fit.eyeX))
+  const eyeX = Math.max(radius * 0.9, Math.min(fit.eyeX, maxOuter - radius))
 
   if (style === 'shades') {
     for (const side of [-1, 1]) {
@@ -374,7 +377,7 @@ function createGlasses(
         [side * eyeX * s, 0, 0]
       )
       glass.rotation.z = side * 0.04
-      glass.rotation.y = side * 0.12
+      glass.rotation.y = side * 0.24
       group.add(glass)
     }
   } else {
@@ -385,7 +388,8 @@ function createGlasses(
         [side * eyeX * s, 0, 0]
       )
       if (style === 'aviator') rim.scale.set(1.05, 0.84, 1)
-      rim.rotation.y = side * 0.1
+      // Wrapped round the face a little, like real frames.
+      rim.rotation.y = side * 0.22
       group.add(rim)
       const glass = mesh(
         new THREE.CircleGeometry(radius * 0.93 * s, 24),
@@ -393,7 +397,7 @@ function createGlasses(
         [side * eyeX * s, 0, 0.004 * s]
       )
       if (style === 'aviator') glass.scale.set(1.05, 0.84, 1)
-      glass.rotation.y = side * 0.1
+      glass.rotation.y = side * 0.22
       group.add(glass)
     }
   }
@@ -406,7 +410,7 @@ function createGlasses(
   ))
   // Temple arms: a short hinge out to the side of the head, then back along
   // it to the ear — hugging the head, never sticking out.
-  const templeX = Math.max(fit.faceHalfWidth, eyeX + radius) + 0.012
+  const templeX = Math.max(fit.faceHalfWidth, eyeX + radius) + 0.006
   const armBack = Math.max(0.12, lensZ - (fit.centerZ - 0.02))
   for (const side of [-1, 1]) {
     const hingeWidth = Math.max(0.01, templeX - (eyeX + radius * 0.95))

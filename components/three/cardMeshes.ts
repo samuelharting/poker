@@ -112,6 +112,54 @@ export interface CardMesh {
   face: CardFace | null
   faceMesh: THREE.Mesh
   backMesh: THREE.Mesh
+  /** Soft contact shadow kept flat on the felt under the card (see cullHiddenCardSide). */
+  shadowMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>
+}
+
+let cardShadowTexture: THREE.CanvasTexture | null = null
+let cardShadowGeometry: THREE.PlaneGeometry | null = null
+const CARD_SHADOW_OPACITY = 0.5
+
+/** A blurred rounded rectangle: a card's soft contact shadow on the felt. */
+function getCardShadowTexture() {
+  if (cardShadowTexture) return cardShadowTexture
+  const canvas = document.createElement('canvas')
+  canvas.width = 64
+  canvas.height = 80
+  const context = canvas.getContext('2d')
+  if (context) {
+    context.filter = 'blur(6px)'
+    context.fillStyle = 'rgba(0, 0, 0, 0.85)'
+    context.beginPath()
+    context.roundRect?.(12, 12, 40, 56, 6)
+    if (!context.roundRect) context.rect(12, 12, 40, 56)
+    context.fill()
+  }
+  cardShadowTexture = new THREE.CanvasTexture(canvas)
+  return cardShadowTexture
+}
+
+function createCardShadow() {
+  // Unit-card space (width 1): the blur spills ~20% past each edge.
+  cardShadowGeometry ??= new THREE.PlaneGeometry(1.6, (88 / 63) * 1.43).rotateX(-Math.PI / 2)
+  const mesh = new THREE.Mesh(cardShadowGeometry, new THREE.MeshBasicMaterial({
+    map: getCardShadowTexture(),
+    transparent: true,
+    opacity: CARD_SHADOW_OPACITY,
+    depthWrite: false,
+    toneMapped: false,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  }))
+  mesh.name = 'card-contact-shadow'
+  mesh.userData.contactShadow = true
+  mesh.renderOrder = 1
+  mesh.castShadow = false
+  mesh.receiveShadow = false
+  mesh.matrixAutoUpdate = false
+  return mesh
 }
 
 /**
@@ -143,10 +191,11 @@ export function createCardMesh(width: number): CardMesh {
   const edgeMesh = new THREE.Mesh(geometry.edge, edgeMaterial())
   edgeMesh.castShadow = false
   edgeMesh.receiveShadow = true
-  group.add(edgeMesh, faceMesh, backMesh)
+  const shadowMesh = createCardShadow()
+  group.add(edgeMesh, faceMesh, backMesh, shadowMesh)
   group.scale.setScalar(width)
 
-  const card: CardMesh = { group, faceMaterial, backMaterial, face: null, faceMesh, backMesh }
+  const card: CardMesh = { group, faceMaterial, backMaterial, face: null, faceMesh, backMesh, shadowMesh }
   setCardFace(card, null)
   return card
 }
@@ -178,6 +227,43 @@ export function cullHiddenCardSide(card: CardMesh, cameraPosition: THREE.Vector3
   const facing = cardUp.dot(cardToCamera.subVectors(cameraPosition, cardWorld))
   card.faceMesh.visible = facing > -1e-4
   card.backMesh.visible = facing < 1e-4
+  placeCardShadow(card, elements)
+}
+
+const shadowWorld = new THREE.Matrix4()
+const shadowParentInverse = new THREE.Matrix4()
+const shadowQuaternion = new THREE.Quaternion()
+const shadowScale = new THREE.Vector3()
+const shadowPosition = new THREE.Vector3()
+const shadowYawAxis = new THREE.Vector3(0, 1, 0)
+
+/**
+ * Keeps the card's contact shadow flat on the felt right under it (whatever
+ * the card's tilt or flip), fading as the card lifts off or turns on edge.
+ */
+function placeCardShadow(card: CardMesh, elements: ArrayLike<number>) {
+  const shadow = card.shadowMesh
+  const unitScale = Math.hypot(elements[0]!, elements[1]!, elements[2]!)
+  const lift = cardWorld.y - FELT_TOP_Y
+  const flat = Math.abs(cardUp.y) / Math.max(1e-6, unitScale)
+  const liftFade = 1 - THREE.MathUtils.smoothstep(lift, 0.16, 0.5)
+  const edgeFade = THREE.MathUtils.smoothstep(flat, 0.35, 0.85)
+  // Follow the fold fade (the card's own materials go transparent as it goes).
+  const cardOpacity = card.faceMaterial.transparent ? card.faceMaterial.opacity : 1
+  const opacity = CARD_SHADOW_OPACITY * liftFade * (0.35 + 0.65 * edgeFade) * cardOpacity
+  shadow.visible = opacity > 0.01 && unitScale > 0.01
+  if (!shadow.visible) return
+  shadow.material.opacity = opacity
+  // Card's long axis yaw, laid flat; a lifted card's shadow spreads and softens.
+  const yaw = Math.atan2(elements[8]!, elements[10]!)
+  shadowQuaternion.setFromAxisAngle(shadowYawAxis, yaw)
+  const spread = unitScale * (1 + Math.max(0, lift) * 0.8)
+  shadowScale.set(spread, 1, spread)
+  shadowPosition.set(cardWorld.x, FELT_TOP_Y + 0.003, cardWorld.z)
+  shadowWorld.compose(shadowPosition, shadowQuaternion, shadowScale)
+  shadowParentInverse.copy(card.group.matrixWorld).invert()
+  shadow.matrix.multiplyMatrices(shadowParentInverse, shadowWorld)
+  shadow.matrixWorldNeedsUpdate = true
 }
 
 export function disposeCardMesh(card: CardMesh) {
@@ -212,7 +298,13 @@ export interface BoardRuntime {
   slotOutlines: THREE.Mesh
 }
 
-const DEALER_ORIGIN = new THREE.Vector3(0, FELT_TOP_Y + 1.6, -3.2)
+/**
+ * The dealer's deck: one low point on the far felt, just right of the muck and
+ * behind the far betting line. Hole cards and the board both launch from here.
+ */
+export const DEAL_DECK_POINT = new THREE.Vector3(0.45, FELT_TOP_Y + 0.05, -2.0)
+/** Seconds a dealt card takes to grow out of the deck (no popping into being). */
+export const DEAL_LAUNCH_SECONDS = 0.06
 /** Where finished boards are swept to (the muck, beside the dealer). */
 const MUCK_ORIGIN = new THREE.Vector3(0, FELT_TOP_Y + 0.02, -2.1)
 /** Radians the board leans toward the hero's seat. */
@@ -293,7 +385,9 @@ export function syncBoardRuntime(
   board: BoardRuntime,
   cards: ReadonlyArray<{ rank: string; suit: CardSuit }>,
   highlighted: ReadonlyArray<{ rank: string; suit: CardSuit }>,
-  now: number
+  now: number,
+  /** Scene time new cards may start dealing (e.g. once the bets are swept in). */
+  notBefore = Number.NEGATIVE_INFINITY
 ) {
   const count = Math.min(5, cards.length)
   let dealtThisSync = 0
@@ -317,7 +411,7 @@ export function syncBoardRuntime(
       // Flop cards deal together with a stagger; turn and river on their own.
       // A new deal waits for the previous board to finish clearing.
       const clearing = Math.max(0, board.clearedAt + BOARD_CLEAR_SECONDS + 0.12 - now)
-      slot.dealtAt = now + clearing + dealtThisSync * 0.16
+      slot.dealtAt = Math.max(now + clearing, notBefore) + dealtThisSync * 0.16
       dealtThisSync += 1
       setCardFace(slot.card, { rank: card.rank, suit: card.suit })
     }
@@ -360,14 +454,16 @@ export function animateBoardRuntime(board: BoardRuntime, time: number, reducedMo
     group.scale.setScalar(BOARD_CARD_WIDTH)
     if (time < slot.dealtAt && !reducedMotion) {
       // Parked out of sight until the previous board has cleared.
-      group.position.set(DEALER_ORIGIN.x, -10, DEALER_ORIGIN.z)
+      group.position.set(DEAL_DECK_POINT.x, -10, DEAL_DECK_POINT.z)
       slot.highlightMesh.visible = false
       return
     }
     const progress = reducedMotion ? 1 : THREE.MathUtils.clamp((time - slot.dealtAt) / 0.62, 0, 1)
     const travel = 1 - Math.pow(1 - Math.min(1, progress / 0.62), 3)
     const flip = THREE.MathUtils.smoothstep(progress, 0.45, 1)
-    scratch.lerpVectors(DEALER_ORIGIN, slotTarget, travel)
+    scratch.lerpVectors(DEAL_DECK_POINT, slotTarget, travel)
+    const launch = reducedMotion ? 1 : THREE.MathUtils.clamp((time - slot.dealtAt) / DEAL_LAUNCH_SECONDS, 0, 1)
+    group.scale.setScalar(BOARD_CARD_WIDTH * Math.max(0.001, launch))
     scratch.y += Math.sin(travel * Math.PI) * 0.35 + (1 - flip) * 0.06
     const landing = progress >= 1 ? 0 : Math.sin(THREE.MathUtils.clamp((progress - 0.88) / 0.12, 0, 1) * Math.PI) * 0.015
     group.position.set(scratch.x, scratch.y + landing, scratch.z)

@@ -4,11 +4,15 @@ import type { BettingRound, GamePhase, ShowCardsMode } from './types'
 export const SHOWDOWN_INTRO_DURATION_MS = 900
 export const SHOWDOWN_MAX_CARD_REVEAL_STEP_MS = 160
 export const SHOWDOWN_MIN_CARD_REVEAL_STEP_MS = 64
-export const SHOWDOWN_MAX_CARD_REVEAL_SPAN_MS = 1_120
-export const SHOWDOWN_POST_REVEAL_PAUSE_MS = 320
+export const SHOWDOWN_MAX_CARD_REVEAL_SPAN_MS = 960
+// The winner lights up (and the 3D pot starts shipping) as the last hole
+// card finishes flipping, not a long beat later.
+export const SHOWDOWN_POST_REVEAL_PAUSE_MS = 200
 export const SHOWDOWN_WINNING_HAND_HOLD_MS = 420
 export const SHOWDOWN_PAYOUT_TRAVEL_MS = 850
-export const SHOWDOWN_RESULT_HOLD_MS = 650
+// Hold the result long enough to enjoy it: with the buffer the next deal comes
+// at least ~2.5s after the pot starts moving to the winner.
+export const SHOWDOWN_RESULT_HOLD_MS = 1_000
 export const SHOWDOWN_AUTO_START_BUFFER_MS = 400
 // Run it twice: run 1 deals, a beat, then run 2. Both the DOM boards and the
 // shared showdown clock read these so the payout never lands mid-runout.

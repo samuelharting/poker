@@ -9,10 +9,14 @@ import {
   getTableWagerAnchor,
   getTableWagerStartPoint,
   getWagerChipCount,
+  getWagerChipLayout,
   interpolateWagerArc,
+  TABLE_POT_POSITION,
+  WAGER_CHIPS_PER_COLUMN,
   type TableVec3,
   type TableVisualSeat,
 } from '@/components/three/tableWagerLayout'
+import { BOARD_CARD_DEPTH, BOARD_Z } from '@/components/three/tableArt'
 
 const mirroredSeatPairs: ReadonlyArray<readonly [TableVisualSeat, TableVisualSeat]> = [
   [1, 7],
@@ -82,6 +86,40 @@ describe('desktop table wager layout', () => {
 
     expect(counts.at(-1)).toBe(MAX_WAGER_CHIPS)
     expect(getWagerChipCount(5_000, 20, 5)).toBe(5)
+  })
+
+  it('reads bet size at a glance: blinds are a few chips, a shove is a spread pile', () => {
+    const blind = getWagerChipCount(20, 20)
+    const potRaise = getWagerChipCount(200, 20)
+    const shove = getWagerChipCount(1_000, 20)
+    expect(blind).toBeGreaterThanOrEqual(3)
+    expect(blind).toBeLessThanOrEqual(6)
+    expect(potRaise).toBeGreaterThan(blind * 2)
+    expect(shove).toBeGreaterThanOrEqual(20)
+    expect(shove).toBeLessThanOrEqual(MAX_WAGER_CHIPS)
+
+    const shoveLayout = getWagerChipLayout(shove, 0.274)
+    const blindLayout = getWagerChipLayout(blind, 0.274)
+    const columns = (slots: ReturnType<typeof getWagerChipLayout>) => new Set(slots.map(slot => `${slot.x},${slot.z}`)).size
+    expect(columns(blindLayout)).toBe(1)
+    expect(columns(shoveLayout)).toBeGreaterThanOrEqual(4)
+    expect(Math.max(...shoveLayout.map(slot => slot.level))).toBeLessThan(WAGER_CHIPS_PER_COLUMN)
+    // Big bets bring in the big denominations (black 3 / purple 4).
+    expect(shoveLayout.some(slot => slot.denomination >= 3)).toBe(true)
+    expect(blindLayout.every(slot => slot.denomination <= 1)).toBe(true)
+    // A second row only ever grows in toward the centre, never onto the player's cards.
+    expect(shoveLayout.every(slot => slot.z <= 0)).toBe(true)
+  })
+
+  it('keeps the pot off the board and well clear of the hero betting spot', () => {
+    const hero = getTableWagerAnchor(0)
+    const potReach = 0.56 + 0.13
+    const heroBetReach = 0.274 + 0.13
+    const gap = Math.hypot(TABLE_POT_POSITION[0] - hero[0], TABLE_POT_POSITION[2] - hero[2]) - potReach - heroBetReach
+    expect(gap).toBeGreaterThanOrEqual(0.3)
+    // In front of (nearer the hero than) the board's front edge, so it never
+    // rises into the board from the first-person camera.
+    expect(TABLE_POT_POSITION[2] - 0.44 - 0.13).toBeGreaterThan(BOARD_Z + BOARD_CARD_DEPTH / 2 + 0.3)
   })
 
   it('travels through exact endpoints with a smooth elevated midpoint', () => {
