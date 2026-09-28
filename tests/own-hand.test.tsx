@@ -2,6 +2,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { OwnHand } from '@/components/table/OwnHand'
+import { DEFAULT_PEEK_STYLE, PEEK_STYLES, PEEK_STYLE_LABELS, normalizePeekStyle } from '@/lib/peekStyle'
 
 describe('OwnHand strength badge', () => {
   it('shows the hand readout without coaching-style label text', () => {
@@ -115,6 +116,17 @@ describe('OwnHand peeking (live hand)', () => {
   it('tags the card row with a swappable reveal style (light wipe by default)', () => {
     expect(renderToStaticMarkup(<OwnHand cards={cards} isActing={false} concealed />)).toContain('data-peek-style="wipe"')
     expect(renderToStaticMarkup(<OwnHand cards={cards} isActing={false} concealed peekStyle="wipe" />)).toContain('data-peek-style="wipe"')
+  })
+
+  it('offers the sideways peel-up style alongside the others, keeping light wipe as the default', () => {
+    expect(PEEK_STYLES).toEqual(['wipe', 'curl', 'spin', 'slide', 'peel'])
+    expect(DEFAULT_PEEK_STYLE).toBe('wipe')
+    expect(PEEK_STYLE_LABELS.peel.name).toBe('Peel up')
+    expect(normalizePeekStyle('peel')).toBe('peel')
+    const markup = renderToStaticMarkup(<OwnHand cards={cards} isActing={false} concealed peekStyle="peel" />)
+    expect(markup).toContain('data-peek-style="peel"')
+    expect(markup).toContain('own-card-peek-turn')
+    expect(markup).toContain('own-card-cover-back')
   })
 
   it('reveals the cards and strength as before once the hand is over', () => {

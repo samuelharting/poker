@@ -1341,7 +1341,7 @@
   grid-area: cards;
   position: relative;
   display: flex;
-  gap: 0;
+  gap: 8px;
   padding: 0 0 6px;
 }
 
@@ -1388,16 +1388,12 @@
   transition: transform var(--dur-base) var(--ease-out);
 }
 
+/* Straight, side by side with a small clear gap: the two cards never overlap. */
 [data-layout='2d'] .mobile-hero-lane .own-card-slot-left,
-[data-layout='2d'] .mobile-hero-lane .own-card-slot-left:hover {
-  transform: rotate(-5deg) translate(5px, 3px);
-  transform-origin: bottom right;
-}
-
+[data-layout='2d'] .mobile-hero-lane .own-card-slot-left:hover,
 [data-layout='2d'] .mobile-hero-lane .own-card-slot-right,
 [data-layout='2d'] .mobile-hero-lane .own-card-slot-right:hover {
-  transform: rotate(5deg) translate(-5px, 3px);
-  transform-origin: bottom left;
+  transform: none;
 }
 
 [data-layout='2d'] .mobile-hero-lane .card-container {

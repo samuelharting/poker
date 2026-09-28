@@ -155,19 +155,6 @@
   animation: drink-pending-pulse 1.6s ease-in-out infinite;
 }
 
-.drink-cooldown {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: -6px;
-  height: 3px;
-  border-radius: var(--r-pill);
-  background: linear-gradient(90deg, var(--drink-amber), var(--drink-sky));
-  transform-origin: left center;
-  animation: drink-cooldown var(--drink-cooldown, 3s) linear forwards;
-  pointer-events: none;
-}
-
 .drink-meter {
   display: grid;
   gap: 5px;
@@ -832,11 +819,6 @@
   50% { translate: 3px -8px; opacity: 1; }
 }
 
-@keyframes drink-cooldown {
-  from { transform: scaleX(1); }
-  to { transform: scaleX(0); }
-}
-
 @keyframes drink-count-pop {
   0% { scale: 0.4; }
   60% { scale: 1.2; }
@@ -964,13 +946,8 @@
   to { opacity: 0; }
 }
 
-/* Classic dot meter: half pips and a pending-water marker */
+/* Classic dot meter: half pips */
 .drink-meter-pips i.is-half {
   background: linear-gradient(90deg, var(--c-brass-400) 50%, transparent 50%);
 }
 
-.drink-meter-water {
-  font-size: 11px;
-  line-height: 1;
-  opacity: 0.85;
-}

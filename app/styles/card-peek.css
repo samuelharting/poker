@@ -35,8 +35,14 @@
 
 .own-card-peek,
 .own-card-peek-body,
+.own-card-peek-turn,
 .own-card-peek-face {
   position: relative;
+}
+
+/* Only the 'peel' style turns the card; for every other style this is a plain box. */
+.own-card-peek-turn {
+  transform-style: preserve-3d;
 }
 
 .own-card-peek-body {
@@ -229,6 +235,7 @@
 /* Mobile 2D hero lane: cards fill fixed slots. */
 [data-layout='2d'] .mobile-hero-lane .own-card-peek,
 [data-layout='2d'] .mobile-hero-lane .own-card-peek-body,
+[data-layout='2d'] .mobile-hero-lane .own-card-peek-turn,
 [data-layout='2d'] .mobile-hero-lane .own-card-peek-face {
   width: 100%;
   height: 100%;
@@ -466,6 +473,128 @@
   12% { opacity: 1; }
   82% { opacity: 1; }
   100% { background-position: 0 0; opacity: 0; }
+}
+
+/* (7) Peel up: the cards lie sideways, face-down, like a real player's. A
+   peek lifts the near (bottom) edge toward you, hinged on the far edge, so the
+   corner index shows underneath; letting go lays the card back down.
+   The turn wrapper rotates the card -90deg, which puts the card's top-left
+   index at the near-left corner and its left edge nearest you. Inside that
+   turned frame the cover lifts with rotateY about its right edge (the far
+   edge on screen); the body's perspective origin sits below the cards, where
+   your eye is, so the lifted edge reads as coming up toward you. ---------- */
+.own-card-row[data-peek-style='peel'].is-concealed {
+  --peel-w: 110px;
+  --peel-h: 154px;
+}
+
+[data-layout='2d'] .mobile-hero-lane .own-card-row[data-peek-style='peel'].is-concealed {
+  --peel-w: var(--hero-card-w);
+  --peel-h: var(--hero-card-h);
+}
+
+/* Room for the landscape footprint, so the sideways cards never overlap. */
+.own-card-row[data-peek-style='peel'].is-concealed .own-card-slot {
+  margin-inline: calc((var(--peel-h) - var(--peel-w)) / 2);
+}
+
+.own-card-row[data-peek-style='peel'].is-concealed .own-card-slot,
+.own-card-row[data-peek-style='peel'].is-concealed .own-card-slot:hover,
+[data-layout='2d'] .mobile-hero-lane .own-card-row[data-peek-style='peel'].is-concealed .own-card-slot {
+  transform: none;
+}
+
+.own-card-row[data-peek-style='peel'] .own-card-peek-body {
+  perspective: 640px;
+  perspective-origin: 50% 160%;
+}
+
+.own-card-row[data-peek-style='peel'] .own-card-peek-turn {
+  transition: transform 240ms cubic-bezier(0.3, 1.2, 0.5, 1);
+}
+
+/* Lying sideways, bottom-aligned with where the upright card stood. */
+.own-card-row[data-peek-style='peel'].is-concealed:not(.is-peek-open) .own-card-peek-turn {
+  transform: translateY(calc((var(--peel-h) - var(--peel-w)) / 2)) rotate(-90deg);
+}
+
+.own-card-row[data-peek-style='peel'] .own-card-cover {
+  transform-origin: 100% 50%;
+  transition:
+    transform 160ms cubic-bezier(0.35, 1.25, 0.6, 1),
+    opacity 200ms ease;
+}
+
+.own-card-row[data-peek-style='peel'].is-peeking:not(.is-peek-open) .own-card-cover {
+  transform: rotateY(30deg);
+  transition:
+    transform 210ms cubic-bezier(0.25, 1.35, 0.4, 1),
+    opacity 200ms ease;
+}
+
+.own-card-row[data-peek-style='peel'].is-peek-held:not(.is-peek-open) .own-card-cover {
+  transform: rotateY(42deg);
+}
+
+.own-card-row[data-peek-style='peel'].is-peeking:not(.is-peek-held) .own-card-slot-right .own-card-cover {
+  transition-delay: 50ms;
+}
+
+/* Just dealt: upright and face-up; the backs fade on as the cards lie down. */
+.own-card-row[data-peek-style='peel'].is-peek-open .own-card-cover {
+  transform: none;
+  opacity: 0;
+}
+
+@media (hover: hover) {
+  .own-card-row.is-concealed[data-peek-style='peel']:not(.is-peeking):hover .own-card-cover {
+    transform: rotateY(7deg);
+  }
+}
+
+/* The sheen catches the lifted near edge; the shadow pools under the hinge. */
+.own-card-row[data-peek-style='peel'] .own-card-cover-sheen {
+  background: linear-gradient(
+    270deg,
+    rgba(255, 255, 255, 0) 30%,
+    rgba(255, 244, 214, 0.34) 80%,
+    rgba(255, 255, 255, 0.58) 100%
+  );
+}
+
+.own-card-row[data-peek-style='peel'] .own-card-peek-shade {
+  background: linear-gradient(270deg, rgba(20, 8, 4, 0.6) 0%, rgba(20, 8, 4, 0.2) 40%, transparent 72%);
+}
+
+.own-card-row[data-peek-style='peel'].is-peeking .own-card-peek-shade {
+  opacity: 0.5;
+}
+
+.own-card-row[data-peek-style='peel'].is-peek-open .own-card-peek-shade {
+  opacity: 0;
+}
+
+/* Sideways cards do not also pop up when you look; a small lift reads better. */
+.own-card-row[data-peek-style='peel'].is-peeking .own-card-peek-body,
+[data-layout='2d'] .mobile-hero-lane .own-card-row[data-peek-style='peel'].is-peeking .own-card-peek-body {
+  transform: translateY(-4px);
+}
+
+.own-card-row[data-peek-style='peel'].is-peek-held .own-card-peek-body,
+[data-layout='2d'] .mobile-hero-lane .own-card-row[data-peek-style='peel'].is-peek-held .own-card-peek-body {
+  transform: translateY(-6px);
+}
+
+/* The settings preview pair is landscape too, so it shrinks a little more. */
+.peek-style-preview > .own-card-row[data-peek-style='peel'] {
+  transform: translate(-50%, -50%) scale(0.36);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still lying sideways (layout, not motion); the back just fades. */
+  .own-card-row[data-peek-style='peel'] .own-card-peek-turn {
+    transition: none;
+  }
 }
 
 /* Settings preview: a small pair that loops the chosen style. */

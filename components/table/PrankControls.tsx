@@ -1,10 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
 
 /**
  * "Mess with your friends" buttons in the targeted player panel (desktop
- * only): buy them a shot, flick a chip at them. The server enforces every
+ * only): buy them a shot, flick a chip at them, flip them off (their avatar
+ * reacts on the 3D table, so it lives here rather than with the emojis). The server enforces every
  * rule; a disabled button explains itself in its tooltip, and cooldowns show
  * as a small number on the icon. No sentences on the table.
  */
@@ -18,6 +20,7 @@ export function PrankControls({
   isConnected,
   onBuyShot,
   onFlickChip,
+  onFlipOff,
 }: {
   targetName: string
   showShot: boolean
@@ -31,6 +34,7 @@ export function PrankControls({
   isConnected: boolean
   onBuyShot: () => void
   onFlickChip: () => void
+  onFlipOff?: () => void
 }) {
   const [now, setNow] = useState(() => Date.now())
   const flickCooling = flickReadyAt > now
@@ -77,6 +81,23 @@ export function PrankControls({
           <strong>Flick a chip</strong>
         </span>
       </button>
+      {onFlipOff && (
+        <button
+          type="button"
+          className="prank-button is-flip"
+          disabled={!isConnected}
+          onClick={onFlipOff}
+          title={`Flip off ${targetName}`}
+          aria-label={`Flip off ${targetName}`}
+        >
+          <span className="prank-button-icon" aria-hidden="true">
+            <EmojiGlyph emoji="🖕" />
+          </span>
+          <span className="prank-button-copy">
+            <strong>Flip off</strong>
+          </span>
+        </button>
+      )}
     </div>
   )
 }

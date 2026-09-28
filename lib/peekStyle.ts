@@ -7,7 +7,7 @@ import { useCallback, useSyncExternalStore } from 'react'
  * look preference (localStorage); timing and behaviour are shared.
  */
 // Owner picked Light wipe as the default; hinge lift and fan squeeze were cut.
-export const PEEK_STYLES = ['wipe', 'curl', 'spin', 'slide'] as const
+export const PEEK_STYLES = ['wipe', 'curl', 'spin', 'slide', 'peel'] as const
 export type PeekStyle = typeof PEEK_STYLES[number]
 export const DEFAULT_PEEK_STYLE: PeekStyle = 'wipe'
 
@@ -16,6 +16,7 @@ export const PEEK_STYLE_LABELS: Record<PeekStyle, { name: string; blurb: string 
   spin: { name: 'Quick spin', blurb: 'A fast flip over the long edge with a pop' },
   slide: { name: 'Slide reveal', blurb: 'The back slides up off the face' },
   wipe: { name: 'Light wipe', blurb: 'A bright sweep wipes the back away' },
+  peel: { name: 'Peel up', blurb: 'Cards lie sideways; you peel up the near edge to peek' },
 }
 
 const STORAGE_KEY = 'poker-night:peek-style'

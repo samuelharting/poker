@@ -972,20 +972,15 @@
   transform: translateY(-6px);
 }
 
-.own-card-slot-left {
-  transform: rotate(-4deg) translateY(3px);
-}
-
+/* Your two cards sit straight, side by side with a clear gap (no fan, no overlap). */
+.own-card-slot-left,
 .own-card-slot-right {
-  transform: rotate(4deg);
+  transform: none;
 }
 
-.own-card-slot-left:hover {
-  transform: rotate(-4deg) translateY(-2px);
-}
-
+.own-card-slot-left:hover,
 .own-card-slot-right:hover {
-  transform: rotate(4deg) translateY(-6px);
+  transform: translateY(-4px);
 }
 
 .hero-rail {
@@ -2186,23 +2181,7 @@ input[type='range'].raise-slider::-webkit-slider-thumb {
   }
 
   .table-scene[data-hero-seat='true'] .own-card-row {
-    gap: 8px;
-  }
-
-  .table-scene[data-hero-seat='true'] .own-card-slot-left {
-    transform: rotate(-4deg) translateY(3px);
-  }
-
-  .table-scene[data-hero-seat='true'] .own-card-slot-right {
-    transform: rotate(4deg);
-  }
-
-  .table-scene[data-hero-seat='true'] .own-card-slot-left:hover {
-    transform: rotate(-4deg) translateY(-3px);
-  }
-
-  .table-scene[data-hero-seat='true'] .own-card-slot-right:hover {
-    transform: rotate(4deg) translateY(-5px);
+    gap: 10px;
   }
 
   .table-scene[data-hero-seat='true'] .seat-0 .player-seat {
@@ -4235,7 +4214,7 @@ body {
   }
 
   .own-card-row {
-    gap: 4px;
+    gap: 10px;
     isolation: isolate;
     padding: 9px 13px 8px;
     border: 1px solid rgba(242, 222, 161, 0.18);
@@ -4261,21 +4240,6 @@ body {
     z-index: -1;
   }
 
-  .own-card-slot-left {
-    transform: rotate(-4deg) translateY(4px);
-  }
-
-  .own-card-slot-right {
-    transform: rotate(4deg) translateY(1px);
-  }
-
-  .own-card-slot-left:hover {
-    transform: rotate(-4deg) translateY(-2px);
-  }
-
-  .own-card-slot-right:hover {
-    transform: rotate(4deg) translateY(-6px);
-  }
 }
 
 /* Avatar polish: compact 2D/mobile identity marker matching the richer 3D seats. */

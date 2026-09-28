@@ -404,29 +404,32 @@ export function OwnHand({
           >
             <div className={clsx('own-card-peek', canPeek && 'card-deal-anim')}>
               <div className="own-card-peek-body">
-                <div className="own-card-peek-face" aria-hidden={isFaceHidden || undefined}>
-                  <PlayingCard
-                    card={card}
-                    size="xl"
-                    animateIn={!canPeek}
-                    highlighted={isWinner && (
-                      winningCards.length === 0 || winningCards.some(
-                        winningCard => winningCard.rank === card.rank && winningCard.suit === card.suit
-                      )
-                    )}
-                  />
-                </div>
-                {canPeek && (
-                  <>
-                    <span className="own-card-peek-shade" aria-hidden="true" />
-                    <div className="own-card-cover" aria-hidden="true">
-                      <div className="own-card-cover-curl">
-                        <div className="own-card-cover-back" />
-                        <span className="own-card-cover-sheen" />
+                {/* Turns the card on its side for the 'peel' style; plain wrapper otherwise. */}
+                <div className="own-card-peek-turn">
+                  <div className="own-card-peek-face" aria-hidden={isFaceHidden || undefined}>
+                    <PlayingCard
+                      card={card}
+                      size="xl"
+                      animateIn={!canPeek}
+                      highlighted={isWinner && (
+                        winningCards.length === 0 || winningCards.some(
+                          winningCard => winningCard.rank === card.rank && winningCard.suit === card.suit
+                        )
+                      )}
+                    />
+                  </div>
+                  {canPeek && (
+                    <>
+                      <span className="own-card-peek-shade" aria-hidden="true" />
+                      <div className="own-card-cover" aria-hidden="true">
+                        <div className="own-card-cover-curl">
+                          <div className="own-card-cover-back" />
+                          <span className="own-card-cover-sheen" />
+                        </div>
                       </div>
-                    </div>
-                  </>
-                )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           </div>

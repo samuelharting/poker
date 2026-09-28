@@ -52,13 +52,12 @@ describe('2D layout cards and seats', () => {
     expect(table2dCss).toContain('@keyframes boardCardDeal')
   })
 
-  it('shows the hero hand large with a gentle fan and simple card faces', () => {
+  it('shows the hero hand large, straight and side by side (no overlap) with simple card faces', () => {
     expect(table2dCss).toMatch(
-      /\.mobile-hero-lane \.own-card-slot-left,[^{]*\{[^}]*transform:\s*rotate\(-5deg\)/s
+      /\.mobile-hero-lane \.own-card-slot-left,[^{]*\.mobile-hero-lane \.own-card-slot-right[^{]*\{[^}]*transform:\s*none/s
     )
-    expect(table2dCss).toMatch(
-      /\.mobile-hero-lane \.own-card-slot-right,[^{]*\{[^}]*transform:\s*rotate\(5deg\)/s
-    )
+    expect(table2dCss).not.toMatch(/\.mobile-hero-lane \.own-card-slot-(left|right)[^{]*\{[^}]*rotate\(/s)
+    expect(table2dCss).toMatch(/\.mobile-hero-lane \.own-card-row \{[^}]*gap:\s*8px/s)
     expect(table2dCss).toMatch(
       /\.mobile-hero-lane \.card-corner-bottom,\s*\[data-layout='2d'\] \.mobile-board-zone \.card-corner-bottom\s*\{[^}]*display:\s*none;/s
     )

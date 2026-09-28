@@ -1,10 +1,8 @@
 'use client'
 
 import { useEffect, useState, type CSSProperties } from 'react'
-import { CHASER_WINDOW_MS, DRINK_COOLDOWN_MS, DRUNK_LEVEL_MAX, getDrunkTier, type DrunkTier } from '@/lib/drinks'
+import { DRINK_COOLDOWN_MS, DRUNK_LEVEL_MAX, getDrunkTier, type DrunkTier } from '@/lib/drinks'
 import { useChaserSecondsLeft, useDrinks } from './DrinkContext'
-
-const CHASER_WINDOW_SECONDS = CHASER_WINDOW_MS / 1000
 
 const TIER_LABELS: Record<DrunkTier, string> = {
   sober: 'Sober',
@@ -55,14 +53,13 @@ export function DrinkControls({
     return null
   }
 
-  const { myDrinks, canOrder, order, takeShot, lastOrderAt } = drinks
+  const { myDrinks, canOrder, order, takeShot } = drinks
   const disabled = !canOrder || isCooling
   const beerUsed = myDrinks.beerReadyAtHand > handNumber
   // The meter shows your real buzz; screen effects (profile) only start at 6.
   const buzzTier = getDrunkTier(myDrinks.level, myDrinks.passedOut)
   const tierLabel = TIER_LABELS[buzzTier]
   const style = {
-    '--drink-cooldown': `${DRINK_COOLDOWN_MS}ms`,
     '--drink-level': myDrinks.level,
   } as CSSProperties
   const beerTitle = myDrinks.passedOut
@@ -104,7 +101,7 @@ export function DrinkControls({
         </button>
         <button
           type="button"
-          className={`drink-button is-water ${chaserSeconds > 0 ? 'is-chaser' : ''}`}
+          className="drink-button is-water"
           onClick={() => order('water')}
           disabled={disabled}
           aria-label={waterTitle}
@@ -112,20 +109,6 @@ export function DrinkControls({
         >
           <span className="drink-button-glyph" aria-hidden="true">💧</span>
           <span className="drink-button-label">Water</span>
-          {chaserSeconds > 0 && (
-            // Chaser window after a shot: a ring that drains over 20s, no words.
-            <svg className="drink-chaser-ring" viewBox="0 0 36 36" aria-hidden="true" data-seconds={chaserSeconds}>
-              <circle className="drink-chaser-ring-track" cx="18" cy="18" r="15.5" />
-              <circle
-                className="drink-chaser-ring-fill"
-                cx="18"
-                cy="18"
-                r="15.5"
-                pathLength={100}
-                strokeDasharray={`${(chaserSeconds / CHASER_WINDOW_SECONDS) * 100} 100`}
-              />
-            </svg>
-          )}
         </button>
         <button
           type="button"
@@ -145,9 +128,6 @@ export function DrinkControls({
           </span>
           <span className="drink-button-label">Shot</span>
         </button>
-        {isCooling && lastOrderAt !== null && (
-          <span key={lastOrderAt} className="drink-cooldown" aria-hidden="true" />
-        )}
       </div>
 
       {/* The classic dot meter: one pip per buzz level. */}
@@ -161,7 +141,6 @@ export function DrinkControls({
             />
           ))}
         </span>
-        {myDrinks.waterNextHand > 0 && <span className="drink-meter-water" title="Water kicking in">💧</span>}
       </div>
 
     </div>

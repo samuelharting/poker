@@ -278,7 +278,8 @@ for (const viewport of ['desktop', 'mobile'] as ViewportName[]) {
         // Targeted quick emote.
         let panel = await openTargetPanel(host, guest.name)
         await expect(panel.getByLabel(`${guest.name} stats`)).toBeVisible()
-        await panel.getByRole('button', { name: `Send middle finger to ${guest.name}` }).click()
+        // Desktop: the middle finger is a prank button ("Flip off"); phones keep it as a quick emote.
+        await panel.getByRole('button', { name: new RegExp(`^(Send middle finger to|Flip off) ${guest.name}$`) }).first().click()
         await expect(panel).toBeHidden()
         await expect.poll(() => {
           const entry = (guest.tap.social?.active ?? []).find((item: { playerId: string }) => item.playerId === hostId)

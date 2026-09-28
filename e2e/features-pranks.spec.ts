@@ -55,13 +55,11 @@ test('desktop players flick a chip and buy a shot at each other', async ({ brows
     ])
     expect(sam.tap.snapshot.players.map((player: any) => player.stack)).toEqual(stacksBefore)
 
-    // Shot between hands: poured straight away, +3, chaser ring on Alex's Water button.
+    // Shot between hands: poured straight away, +3, no ring on the Water button.
     panel = await openTargetPanel(sam, 'PrankAlex')
     await panel.getByRole('button', { name: /Buy PrankAlex a shot/ }).click()
     await waitForSnapshot(alex, (_, tap) => tap.me()?.drinks?.shots === 1 && tap.me()?.drinks?.level >= 3, 'Alex got the shot')
     expect(alexPranks.some(event => event.kind === 'shot' && event.levelAdded === 3)).toBe(true)
-    await expect(alex.page.locator('.drink-button.is-water.is-chaser')).toBeVisible()
-    await expect(alex.page.locator('.drink-chaser-ring')).toBeVisible()
     // First-person: the warm burn once the glass is slammed.
     await expect(alex.page.locator('.desktop-3d-stage[data-flashes-shot]')).toBeAttached({ timeout: 10_000 })
     await snap(alex.page, 'pranks-alex-after-shot')

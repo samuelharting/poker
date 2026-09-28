@@ -461,12 +461,9 @@
     box-shadow: none;
   }
 
-  .table-scene[data-desktop-three='true'] .own-card-slot-left {
-    transform: rotate(-7deg) translateY(4px);
-  }
-
-  .table-scene[data-desktop-three='true'] .own-card-slot-right {
-    transform: rotate(6deg);
+  /* Straight and side by side with a clear gap: the cards never fan over each other. */
+  .table-scene[data-desktop-three='true'] .own-card-row {
+    gap: 12px;
   }
 
   .table-scene[data-desktop-three='true'] .own-card-slot .card {

@@ -13,6 +13,30 @@
   grid-column: 1 / -1;
 }
 
+/* Shot, chip and flip-off: three compact tiles, icon over the label. */
+.prank-controls:has(> :nth-child(3)) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.prank-controls:has(> :nth-child(3)) .prank-button {
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-height: 70px;
+  padding: 8px 6px;
+  text-align: center;
+}
+
+.prank-controls:has(> :nth-child(3)) .prank-button-copy strong {
+  font-size: var(--fs-12, 12px);
+  white-space: nowrap;
+}
+
+.prank-button.is-flip {
+  --prank-accent: rgba(255, 122, 61, 0.5);
+  background: linear-gradient(90deg, rgba(255, 122, 61, 0.14), var(--c-ink-800) 75%);
+}
+
 .prank-button {
   --prank-accent: var(--line-brass);
   display: flex;
@@ -281,50 +305,6 @@
   100% { opacity: 0; }
 }
 
-/* Chaser window after a shot: a ring round the Water button drains over 20s. */
-.drink-button.is-water.is-chaser {
-  border-color: rgba(127, 208, 255, 0.95);
-  background: linear-gradient(180deg, rgba(127, 208, 255, 0.4), rgba(127, 208, 255, 0.12));
-  box-shadow: 0 0 0 3px rgba(127, 208, 255, 0.25), 0 0 18px rgba(127, 208, 255, 0.55);
-  animation: chaser-water-glow 1s ease-in-out infinite;
-}
-
-.drink-chaser-ring {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 36px;
-  height: 36px;
-  translate: -50% -50%;
-  pointer-events: none;
-  rotate: -90deg;
-}
-
-.drink-button.is-water .drink-chaser-ring {
-  /* Centered on the droplet glyph. */
-  left: 18px;
-}
-
-.drink-chaser-ring-track {
-  fill: none;
-  stroke: rgba(127, 208, 255, 0.2);
-  stroke-width: 3;
-}
-
-.drink-chaser-ring-fill {
-  fill: none;
-  stroke: #9fe0ff;
-  stroke-width: 3;
-  stroke-linecap: round;
-  transition: stroke-dasharray 0.25s linear;
-  filter: drop-shadow(0 0 4px rgba(127, 208, 255, 0.8));
-}
-
-@keyframes chaser-water-glow {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(127, 208, 255, 0.25), 0 0 14px rgba(127, 208, 255, 0.45); }
-  50% { box-shadow: 0 0 0 5px rgba(127, 208, 255, 0.12), 0 0 24px rgba(127, 208, 255, 0.7); }
-}
-
 /* Seat badge (desktop fallback ring): shots next to beers */
 .seat-drink-shots {
   display: inline-flex;
@@ -346,8 +326,7 @@
     display: none;
   }
 
-  .desktop-3d-stage .cinematic-seat .cinematic-shot-waiting,
-  .drink-button.is-water.is-chaser {
+  .desktop-3d-stage .cinematic-seat .cinematic-shot-waiting {
     animation: none;
   }
 

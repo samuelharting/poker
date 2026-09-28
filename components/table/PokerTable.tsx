@@ -258,6 +258,19 @@ const DEFAULT_TARGETED_QUICK_EMOTES = [
   '\uD83C\uDDEE\uD83C\uDDF1',
   '\uD83D\uDC12',
 ] as const
+const FLIP_OFF_EMOTE = '🖕'
+const FLIP_OFF_FILLERS = ['😂', '💀', '🔥'] as const
+
+/** The middle finger has its own prank button (it animates the avatar), so it leaves the quick row there. */
+function withoutFlipOff(emotes: readonly string[]): string[] {
+  const next = emotes.filter(emote => emote !== FLIP_OFF_EMOTE)
+  for (const filler of FLIP_OFF_FILLERS) {
+    if (next.length >= 3) break
+    if (!next.includes(filler)) next.push(filler)
+  }
+  return next.slice(0, 3)
+}
+
 const TARGETED_QUICK_EMOTES_STORAGE_KEY = 'poker-night:targeted-quick-emotes'
 
 export function updateTargetedQuickEmotes(current: readonly string[], emote: string): string[] {
@@ -3435,6 +3448,7 @@ export function PokerTable({
                   isConnected={isConnected}
                   onBuyShot={handleBuyShot}
                   onFlickChip={handleFlickChip}
+                  onFlipOff={() => handleTargetedEmote(FLIP_OFF_EMOTE)}
                 />
               ) : null}
               onSendEmote={handleTargetedEmote}
@@ -3442,7 +3456,7 @@ export function PokerTable({
               onClose={closeTargetedEmote}
               fullPickerOpen={targetEmotePickerOpen}
               onToggleFullPicker={() => setTargetEmotePickerOpen(current => !current)}
-              quickEmotes={targetQuickEmotes}
+              quickEmotes={canPrankTarget ? withoutFlipOff(targetQuickEmotes) : targetQuickEmotes}
             />
           )}
     </div>

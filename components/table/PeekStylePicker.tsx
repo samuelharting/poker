@@ -70,14 +70,16 @@ function PeekStylePreview({ style }: { style: PeekStyle }) {
           >
             <div className="own-card-peek">
               <div className="own-card-peek-body">
-                <div className="own-card-peek-face">
-                  <PlayingCard card={card} size="xl" animateIn={false} />
-                </div>
-                <span className="own-card-peek-shade" />
-                <div className="own-card-cover">
-                  <div className="own-card-cover-curl">
-                    <div className="own-card-cover-back" />
-                    <span className="own-card-cover-sheen" />
+                <div className="own-card-peek-turn">
+                  <div className="own-card-peek-face">
+                    <PlayingCard card={card} size="xl" animateIn={false} />
+                  </div>
+                  <span className="own-card-peek-shade" />
+                  <div className="own-card-cover">
+                    <div className="own-card-cover-curl">
+                      <div className="own-card-cover-back" />
+                      <span className="own-card-cover-sheen" />
+                    </div>
                   </div>
                 </div>
               </div>
