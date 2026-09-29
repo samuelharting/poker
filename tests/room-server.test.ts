@@ -1609,8 +1609,8 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
     expect(snapshot?.state.smallBlind).toBe(10)
     expect(snapshot?.state.bigBlind).toBe(20)
     expect(snapshot?.state.startingStack).toBe(1_000)
-    expect(snapshot?.state.actionTimerDuration).toBe(10_000)
-    expect(snapshot?.state.autoStartDelay).toBe(5_000)
+    expect(snapshot?.state.actionTimerDuration).toBe(13_000)
+    expect(snapshot?.state.autoStartDelay).toBe(7_000)
     expect(snapshot?.state.sevenTwoBountyPercent).toBe(2)
   })
 
@@ -1647,7 +1647,7 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
     expect(snapshot?.state.smallBlind).toBe(10)
     expect(snapshot?.state.bigBlind).toBe(20)
     expect(snapshot?.state.startingStack).toBe(1_000)
-    expect(snapshot?.state.actionTimerDuration).toBe(10_000)
+    expect(snapshot?.state.actionTimerDuration).toBe(13_000)
     expect(snapshot?.state.rabbitHuntingEnabled).toBe(false)
     expect(snapshot?.state.pendingTableSettings).toMatchObject({
       smallBlind: 50,
@@ -1661,7 +1661,7 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
       autoFoldDeadline: number | null
     }
     expect(snapshot?.state.actionTimerStart).toBe(Date.now() - 1_000)
-    expect(runtime.autoFoldDeadline).toBe(Date.now() + 9_000)
+    expect(runtime.autoFoldDeadline).toBe(Date.now() + 12_000)
 
     const actingPlayer = snapshot?.state.actingPlayerId === host.playerId ? host : nonHost
     send(server, actingPlayer.connection, { type: 'player_action', action: 'fold' })

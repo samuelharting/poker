@@ -386,7 +386,7 @@ export function createInitialGameState(
   smallBlind = 10,
   bigBlind = 20,
   startingStack = 1000,
-  actionTimerDuration = 10000
+  actionTimerDuration = 13000
 ): InternalGameState {
   return {
     roomCode,

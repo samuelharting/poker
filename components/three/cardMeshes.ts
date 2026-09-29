@@ -343,7 +343,7 @@ const MUCK_ORIGIN = new THREE.Vector3(0, FELT_TOP_Y + 0.02, -2.1)
 /** Radians the board leans back toward the hero's seat (see BOARD_CARD_TILT). */
 const BOARD_TILT = BOARD_CARD_TILT
 /** How far the card's bottom edge sinks into its stand's slot. */
-const STAND_SINK = 0.045
+const STAND_SINK = 0
 /** World Z of the card's bottom edge (where its stand sits) relative to the slot centre. */
 const STAND_Z_OFFSET = (BOARD_CARD_DEPTH / 2) * Math.cos(BOARD_TILT)
 /** Height of the group's centre so the tilted card's bottom edge rests in the stand. */
@@ -517,8 +517,7 @@ export function animateBoardRuntime(board: BoardRuntime, time: number, reducedMo
       scratch.y += proppedLift(leaveTilt, STAND_SINK * (1 - flip))
       group.position.copy(scratch)
       group.rotation.set(leaveTilt, slide * (index - 2) * 0.05, Math.PI * flip)
-      slot.stand.visible = flip < 0.3
-      slot.stand.scale.y = 1 - THREE.MathUtils.smoothstep(flip, 0, 0.3)
+      slot.stand.visible = false
       group.scale.setScalar(BOARD_CARD_WIDTH * (1 - slide * 0.18))
       slot.highlightMesh.visible = false
       return
@@ -546,10 +545,8 @@ export function animateBoardRuntime(board: BoardRuntime, time: number, reducedMo
     const prop = BOARD_TILT * flip
     group.rotation.set(prop, (1 - travel) * 0.6, Math.PI * (1 - flip))
     group.position.y += proppedLift(prop, STAND_SINK * flip)
-    // The stand rises out of the felt as the card settles onto it.
-    const standGrow = THREE.MathUtils.smoothstep(progress, 0.6, 0.95)
-    slot.stand.visible = standGrow > 0.01
-    slot.stand.scale.y = Math.max(0.001, standGrow)
+    // The dark stands were removed: the card rests directly on the felt.
+    slot.stand.visible = false
 
     // Winning cards rise a touch and wear a steady gold rim; the face itself
     // is never brightened so ranks and suits stay crisp.

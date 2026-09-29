@@ -1,6 +1,7 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import type { Card } from '@/lib/poker/types'
 import { OwnHand } from '@/components/table/OwnHand'
 import { DEFAULT_PEEK_STYLE, PEEK_STYLES, PEEK_STYLE_LABELS, normalizePeekStyle } from '@/lib/peekStyle'
 
@@ -138,5 +139,39 @@ describe('OwnHand peeking (live hand)', () => {
     expect(markup).not.toContain('to look')
     expect(markup).toContain('Pair of Eights')
     expect(markup).toContain('8 of clubs')
+  })
+})
+
+describe('OwnHand tucking after a fold', () => {
+  const cards: Card[] = [
+    { rank: '9', suit: 'spades' },
+    { rank: 'K', suit: 'diamonds' },
+  ]
+
+  it('tucks away only while the hand you folded is still running', async () => {
+    const { isOwnHandTucked } = await import('@/components/table/OwnHand')
+    expect(isOwnHandTucked('in_hand', 'folded')).toBe(true)
+    expect(isOwnHandTucked('in_hand', 'active')).toBe(false)
+    expect(isOwnHandTucked('in_hand', 'all_in')).toBe(false)
+    expect(isOwnHandTucked('between_hands', 'folded')).toBe(false)
+    expect(isOwnHandTucked('lobby', undefined)).toBe(false)
+  })
+
+  it('cannot be peeked at while tucked, and has no show control exposed', () => {
+    const markup = renderToStaticMarkup(
+      <OwnHand cards={cards} isActing={false} isFolded concealed tucked />
+    )
+    expect(markup).toContain('is-tucked')
+    expect(markup).not.toContain('is-concealed')
+    expect(markup).not.toContain('Look at your cards')
+    expect(markup).not.toContain('Hold Space')
+  })
+
+  it('brings the cards back untucked at hand end', () => {
+    const markup = renderToStaticMarkup(
+      <OwnHand cards={cards} isActing={false} revealChoiceActive showCardsControl={<button type="button">R</button>} />
+    )
+    expect(markup).not.toContain('is-tucked')
+    expect(markup).toContain('>R<')
   })
 })

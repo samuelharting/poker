@@ -12,7 +12,7 @@ import {
 import { PlayerSeat, formatWinnerPaymentLabel, getVisibleSeatCards } from './PlayerSeat'
 import { CommunityCards } from './CommunityCards'
 import { RunItTwiceBoards, RunItTwicePrompt } from './RunItTwice'
-import { OwnHand } from './OwnHand'
+import { OwnHand, isOwnHandTucked } from './OwnHand'
 import { PotDisplay } from './PotDisplay'
 import { ShowdownCinematic, useShowdownPresentation } from './ShowdownCinematic'
 import { SeatDrinkBadge } from './SeatDrinkBadge'
@@ -1528,6 +1528,8 @@ export function PokerTable({
   const ownHandCards = visibleOwnPlayer?.holeCards ?? []
   const ownShowCardsMode: ShowCardsMode = canShowRevealedCards ? visibleOwnPlayer?.showCards ?? 'none' : 'none'
   const isOwnHandFolded = isInHand && visibleOwnPlayer?.status === 'folded'
+  // Folded cards leave the hand area until the hand is over.
+  const isOwnHandTuckedAway = isOwnHandTucked(state.phase, visibleOwnPlayer?.status)
   // A hand won by everyone folding ends with the street's bets still set on
   // the players; those chips already went to the winner, so drop the label.
   const heroTableBetAmount = !isSpectator && me && isInHand ? me.bet : 0
@@ -2770,6 +2772,7 @@ export function PokerTable({
                   cards={ownHandCards}
                   isActing={isMyTurn}
                   isFolded={isOwnHandFolded}
+                  tucked={isOwnHandTuckedAway}
                   isWinner={betweenHands && showWinnerHighlights && myWinnerAmount > 0}
                   winningCards={winnerCardsByPlayer.get(yourId)}
                   handDescription={hasVisibleRabbitRunout ? null : ownHandDescription}
@@ -2973,6 +2976,7 @@ export function PokerTable({
                 cards={ownHandCards}
                 isActing={isMyTurn}
                 isFolded={isOwnHandFolded}
+                tucked={isOwnHandTuckedAway}
                 isWinner={betweenHands && showWinnerHighlights && myWinnerAmount > 0}
                 winningCards={winnerCardsByPlayer.get(yourId)}
                 handDescription={ownHandDescription}
@@ -4182,7 +4186,7 @@ export function SettingsModal({
     bigBlind: state.pendingTableSettings?.bigBlind ?? state.bigBlind,
     startingStack: state.pendingTableSettings?.startingStack ?? state.startingStack,
     actionTimerDuration: state.pendingTableSettings?.actionTimerDuration ?? state.actionTimerDuration,
-    autoStartDelay: state.pendingTableSettings?.autoStartDelay ?? state.autoStartDelay ?? 5000,
+    autoStartDelay: state.pendingTableSettings?.autoStartDelay ?? state.autoStartDelay ?? 7000,
     rabbitHuntingEnabled: state.pendingTableSettings?.rabbitHuntingEnabled ?? state.rabbitHuntingEnabled,
     sevenTwoRuleEnabled: state.pendingTableSettings?.sevenTwoRuleEnabled ?? state.sevenTwoRuleEnabled,
     sevenTwoBountyPercent: state.pendingTableSettings?.sevenTwoBountyPercent ?? state.sevenTwoBountyPercent,

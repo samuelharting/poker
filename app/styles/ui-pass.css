@@ -112,25 +112,148 @@
   }
 
   /* Turn: a solid, unmistakable state. */
+  .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-target {
+    /* A touch larger than its neighbours (same depth scaling as the base rule). */
+    transform: scale(calc((0.78 + var(--seat-depth, 1) * 0.22) * var(--acting-boost, 1.07)));
+  }
+
   .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-panel {
-    border-color: rgba(127, 208, 255, 0.85);
+    position: relative;
+    border-color: rgba(150, 220, 255, 0.95);
     background:
-      linear-gradient(180deg, rgba(127, 208, 255, 0.16), rgba(127, 208, 255, 0.04)),
-      rgba(10, 17, 18, 0.86);
+      linear-gradient(180deg, rgba(127, 208, 255, 0.2), rgba(127, 208, 255, 0.05)),
+      rgba(10, 17, 18, 0.88);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34), 0 0 0 3px rgba(127, 208, 255, 0.32), 0 0 30px rgba(127, 208, 255, 0.5);
+    animation: ui-acting-ring 1.3s ease-in-out infinite;
   }
 
+  /* Soft light-blue pool of light under the plate, spilling toward the player. */
+  .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-target::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: -34px;
+    width: 150%;
+    height: 56px;
+    background: radial-gradient(closest-side, rgba(127, 208, 255, 0.42), rgba(127, 208, 255, 0.12) 60%, rgba(127, 208, 255, 0));
+    transform: translateX(-50%);
+    pointer-events: none;
+    z-index: -1;
+    animation: ui-acting-pool 1.3s ease-in-out infinite;
+  }
+
+  /* Pointer: the plate's tail becomes a bold light-blue arrow at the player. */
   .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-target::after {
-    border-color: rgba(127, 208, 255, 0.85);
-    background: rgba(18, 40, 52, 0.95);
+    bottom: -9px;
+    width: 14px;
+    height: 14px;
+    border-color: rgba(150, 220, 255, 0.95);
+    background: #7fd0ff;
+    box-shadow: 0 0 12px rgba(127, 208, 255, 0.7);
+    animation: ui-acting-arrow 1.3s ease-in-out infinite;
   }
 
+  /* The ACTING chip: solid, larger, with a live dot. */
   .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-meta small {
+    max-width: 110px;
+    padding: 3px 9px 3px 8px;
     background: var(--c-sky-400);
     color: #04121c;
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    box-shadow: 0 0 10px rgba(127, 208, 255, 0.55);
+  }
+
+  .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-meta small::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 5px;
+    border-radius: 50%;
+    background: #04121c;
+    vertical-align: 1px;
   }
 
   .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-topline strong {
     color: #fff;
+  }
+
+  /* Committed chips on the name card. */
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-in-bet {
+    position: absolute;
+    top: -13px;
+    right: -9px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 9px;
+    border: 1.5px solid #fff3c4;
+    border-radius: var(--r-pill);
+    background: linear-gradient(180deg, #ffd96a, #f0a91f);
+    color: #1c1200;
+    font-family: var(--font-display);
+    font-size: 12.5px;
+    font-style: normal;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    white-space: nowrap;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-in-bet span {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    opacity: 0.75;
+  }
+
+  /* Bet label over the chips on the felt: big enough to read at a glance. */
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-bet {
+    padding: 4px 13px 5px;
+    border: 2px solid rgba(255, 217, 106, 0.9);
+    background: rgba(8, 14, 15, 0.94);
+    color: #ffe9a3;
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    line-height: 1.15;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.4);
+  }
+
+  @keyframes ui-acting-ring {
+    0%,
+    100% {
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34), 0 0 0 3px rgba(127, 208, 255, 0.3), 0 0 24px rgba(127, 208, 255, 0.4);
+    }
+    50% {
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34), 0 0 0 6px rgba(127, 208, 255, 0.16), 0 0 40px rgba(127, 208, 255, 0.72);
+    }
+  }
+
+  @keyframes ui-acting-pool {
+    0%,
+    100% {
+      opacity: 0.65;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes ui-acting-arrow {
+    0%,
+    100% {
+      transform: translateX(-50%) translateY(0) rotate(45deg);
+    }
+    50% {
+      transform: translateX(-50%) translateY(3px) rotate(45deg);
+    }
   }
 
   .desktop-3d-stage .cinematic-seat.is-folded {
@@ -498,6 +621,21 @@
     min-width: 108px;
   }
 
+  /* The plates are shrunk here, so the plate-side additions are sized up to stay legible. */
+  .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-target {
+    transform: scale(calc((0.78 + var(--seat-depth, 1) * 0.22) * 0.76 * var(--acting-boost, 1.07)));
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-bet {
+    padding: 4px 14px 5px;
+    font-size: 19px;
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-in-bet {
+    height: 24px;
+    font-size: 14px;
+  }
+
   .table-scene[data-desktop-three='true'] .betting-tray .btn-action,
   .table-scene[data-desktop-three='true'] .betting-tray .btn-action.is-primary {
     height: 48px;
@@ -540,6 +678,20 @@
   .room-shell .drink-button,
   .desktop-3d-stage .cinematic-seat-panel {
     transition-duration: 0.01ms;
+    animation: none;
+  }
+
+  .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-panel,
+  .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-target::before,
+  .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-target::after {
+    animation: none;
+  }
+
+  .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-target::after {
+    transform: translateX(-50%) rotate(45deg);
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-bet {
     animation: none;
   }
 

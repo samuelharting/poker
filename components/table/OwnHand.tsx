@@ -13,6 +13,11 @@ interface OwnHandProps {
   cards: Card[]
   isActing: boolean
   isFolded?: boolean
+  /**
+   * You folded and the hand is still running: the cards slide away, cannot be
+   * peeked at, and come back once the hand is over (see isOwnHandTucked).
+   */
+  tucked?: boolean
   isWinner?: boolean
   winningCards?: Card[]
   handDescription?: string | null
@@ -39,6 +44,14 @@ interface OwnHandProps {
    * player's saved preference from Settings.
    */
   peekStyle?: PeekStyle
+}
+
+/**
+ * The hero's hole cards leave the bottom hand area while a hand they folded is
+ * still being played, and return (to look at or show) once it is over.
+ */
+export function isOwnHandTucked(phase: string | undefined, status: string | undefined): boolean {
+  return phase === 'in_hand' && status === 'folded'
 }
 
 /** Holding longer than this turns a quick squeeze into a full look that lasts while held. */
@@ -161,6 +174,8 @@ function useCardPeek(
       if (modeRef.current !== 'idle') {
         modeRef.current = 'idle'
         setModeState('idle')
+        // Folding mid-peek: the table must stop seeing you look.
+        callbacksRef.current.onPeekChange?.(false)
       }
       return
     }
@@ -280,6 +295,7 @@ export function OwnHand({
   cards,
   isActing,
   isFolded = false,
+  tucked = false,
   isWinner = false,
   winningCards = [],
   handDescription = null,
@@ -299,7 +315,7 @@ export function OwnHand({
 }: OwnHandProps) {
   const [savedPeekStyle] = usePeekStyle()
   const peekStyle = peekStyleProp ?? savedPeekStyle
-  const canPeek = concealed && cards.length > 0
+  const canPeek = concealed && cards.length > 0 && !tucked
   const handKey = cards.map(card => `${card.rank}${card.suit}`).join('-')
   const { mode: peekMode, peekedOnce, pointerHandlers } = useCardPeek(canPeek, handKey, onPeekChange, onSoundCue)
   const peeking = peekMode !== 'idle'
@@ -330,9 +346,11 @@ export function OwnHand({
         visibleHandDescription && 'has-strength',
         isActing && 'is-acting',
         isFolded && 'is-folded',
+        tucked && 'is-tucked',
         isWinner && 'is-winner',
         canPeek && 'is-concealable'
       )}
+      data-tucked={tucked ? 'true' : undefined}
       aria-label={visibleHandDescription ? `Your hand: ${visibleHandDescription}` : 'Your hand'}
     >
       {(socialMessage || socialEmote) && (

@@ -2965,7 +2965,7 @@ function animateSeat(
     : seat.acting
       ? 0.62 + (reducedMotion ? 0 : Math.sin(time * 3.2) * 0.18)
       : 0
-  seat.ring.material.emissiveIntensity = seat.winner ? 2.6 : 1.8
+  seat.ring.material.emissiveIntensity = seat.winner ? 2.6 : seat.acting ? 2.4 : 1.8
 
   seat.winnerHalo.visible = seat.winner
   seat.winnerSparkles.visible = seat.winner
@@ -3207,7 +3207,7 @@ function disposeObject(root: THREE.Object3D) {
 
 /** Head-top anchor, in seat-root space, that each DOM nameplate follows. */
 const NAMEPLATE_ANCHOR = new THREE.Vector3(0, 2.32, 0.08)
-const WAGER_LABEL_LIFT = 0.28
+const WAGER_LABEL_LIFT = 0.2
 const BOARD_LABEL_HALF_SPAN = BOARD_XS[4]! + BOARD_CARD_WIDTH / 2 + 0.2
 const BOARD_LABEL_CLEARANCE = Math.sin(BOARD_CARD_TILT) * BOARD_CARD_DEPTH + 0.05
 
@@ -4532,7 +4532,7 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
                   ) : player.drinks?.tripping ? (
                     <em className="cinematic-drink-badge is-tripping" aria-label="Tripping">💊</em>
                   ) : player.drinks?.hungover ? (
-                    <em className="cinematic-drink-badge is-hungover" aria-label="Hungover">🤕</em>
+                    <em className="cinematic-drink-badge is-hungover" aria-label="Hungover">🤮</em>
                   ) : player.drinks?.designatedDriver ? (
                     <em className="cinematic-drink-badge is-dd" aria-label="Sober: designated driver" title="Designated driver">🚗 DD</em>
                   ) : Math.round(player.drinks?.level ?? 0) > 0 ? (
@@ -4572,6 +4572,12 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
                     <small>{statusLabel}</small>
                   ) : null}
                 </span>
+                {/* Chips committed this street, right on the name card (the felt label follows the chips). */}
+                {player.bet > 0 && view.phase === 'in_hand' && (
+                  <em className="cinematic-seat-in-bet" aria-label={`Bet $${player.bet.toLocaleString()} this street`}>
+                    <span>BET</span> ${player.bet.toLocaleString()}
+                  </em>
+                )}
                 </span>
 
                 {/* A fold-win ends the hand with bets still set; the chips are gone, so is the label. */}
