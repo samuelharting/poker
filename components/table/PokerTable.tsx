@@ -18,6 +18,9 @@ import { ShowdownCinematic, useShowdownPresentation } from './ShowdownCinematic'
 import { SeatDrinkBadge } from './SeatDrinkBadge'
 import { useDrinks } from './DrinkContext'
 import { PrankControls } from './PrankControls'
+import { StickyNoteChip } from './StickyNoteChip'
+import { StickyNoteControl } from './StickyNoteControl'
+import { STICKY_NOTE_COOLDOWN_MS } from '@/lib/stickyNote'
 import { getShotBlockReasonFromState, isLiveInHand, type DrinkEvent } from '@/lib/drinks'
 import { CHIP_FLICK_COOLDOWN_MS, type PrankEvent } from '@/lib/pranks'
 import { CompanionBadge } from './CompanionBadge'
@@ -143,6 +146,7 @@ interface PokerTableProps {
   prankEvents?: readonly PrankEvent[]
   onBuyShot?: (targetId: string) => void
   onFlickChip?: (targetId: string) => void
+  onStickyNote?: (targetId: string, text: string) => void
   onFeedback: (message: string, tone?: FeedbackTone) => void
   /** Rebuys, settle-up, Venmo and the host's money rules (Settings > Ledger). */
   onSendLedgerMessage?: (message: LedgerC2SMessage) => void
@@ -695,6 +699,7 @@ function MobileEdgeSeat({
         <div className="mobile-edge-seat-name">
           <span className="mobile-edge-seat-name-text">{mobileSeatName}</span>
         </div>
+        <StickyNoteChip note={player.stickyNote} />
         <div
           className="mobile-edge-seat-stack"
           aria-label={`${mobileSeatName} stack ${formatAmount(displayStack)}`}
@@ -790,6 +795,7 @@ function MobileHeroSeat({
             </span>
           )}
         </div>
+        <StickyNoteChip note={player.stickyNote} />
         <div className="mobile-hero-seat-stack">{formatAmount(displayStack)}</div>
         <div className="mobile-hero-seat-status">{status}</div>
       </div>
@@ -1267,6 +1273,7 @@ export function PokerTable({
   prankEvents = NO_PRANK_EVENTS,
   onBuyShot,
   onFlickChip,
+  onStickyNote,
   onFeedback,
   onSendLedgerMessage,
 }: PokerTableProps) {
@@ -1591,6 +1598,9 @@ export function PokerTable({
   const [targetEmotePlayerId, setTargetEmotePlayerId] = useState<string | null>(null)
   const [targetEmotePickerOpen, setTargetEmotePickerOpen] = useState(false)
   const [flickReadyAt, setFlickReadyAt] = useState(0)
+  /** My last sticky note (hand + time): one per hand, then a short cooldown. The server has the last word. */
+  const [stickyUsed, setStickyUsed] = useState<{ hand: number; at: number } | null>(null)
+  const [stickyNow, setStickyNow] = useState(() => Date.now())
   const [targetQuickEmotes, setTargetQuickEmotes] = useState<string[]>(() => (
     [...DEFAULT_TARGETED_QUICK_EMOTES]
   ))
@@ -2461,6 +2471,34 @@ export function PokerTable({
     setFlickReadyAt(Date.now() + CHIP_FLICK_COOLDOWN_MS)
     closeTargetedEmote()
   }, [closeTargetedEmote, onFlickChip, targetedPlayer])
+
+  const handleStickyNote = useCallback((text: string) => {
+    if (!targetedPlayer || !onStickyNote) return
+    onStickyNote(targetedPlayer.id, text)
+    const sentAt = Date.now()
+    setStickyUsed({ hand: state.handNumber, at: sentAt })
+    setStickyNow(sentAt)
+    closeTargetedEmote()
+  }, [closeTargetedEmote, onStickyNote, state.handNumber, targetedPlayer])
+  const stickyBlockedReason = (() => {
+    if (!stickyUsed) return null
+    if (stickyUsed.hand === state.handNumber) return 'One sticky note per hand'
+    const seconds = Math.ceil((stickyUsed.at + STICKY_NOTE_COOLDOWN_MS - stickyNow) / 1000)
+    return seconds > 0 ? `Next sticky note in ${seconds}s` : null
+  })()
+  useEffect(() => {
+    // Tick only while a cooldown countdown is on screen.
+    if (!stickyUsed || stickyUsed.hand === state.handNumber || !stickyBlockedReason) return
+    const timer = window.setInterval(() => setStickyNow(Date.now()), 500)
+    return () => window.clearInterval(timer)
+  }, [stickyBlockedReason, stickyUsed, state.handNumber])
+  // Sticky notes work from phones too; the target only has to be someone else at the table.
+  const canStickyTarget = Boolean(
+    onStickyNote &&
+    targetedPlayer &&
+    targetedPlayer.id !== yourId &&
+    state.funModeEnabled !== false
+  )
 
   // Pranks: desktop only (phones have none of it, either direction), fun mode
   // on, you are seated, and the target is someone else at the table.
@@ -3460,6 +3498,14 @@ export function PokerTable({
                   onFlipOff={() => handleTargetedEmote(FLIP_OFF_EMOTE)}
                 />
               ) : null}
+              stickyControls={canStickyTarget ? (
+                <StickyNoteControl
+                  targetName={targetedPlayer.nickname}
+                  isConnected={isConnected}
+                  blockedReason={stickyBlockedReason}
+                  onSend={handleStickyNote}
+                />
+              ) : null}
               onSendEmote={handleTargetedEmote}
               onSendMessage={handleTargetedMessage}
               onClose={closeTargetedEmote}
@@ -3807,10 +3853,12 @@ function TargetedEmotePanel({
   onToggleFullPicker,
   quickEmotes,
   prankControls = null,
+  stickyControls = null,
 }: {
   target: SeatPlayer
   isConnected: boolean
   prankControls?: React.ReactNode
+  stickyControls?: React.ReactNode
   onSendEmote: (emote: string) => void
   onSendMessage: (message: string) => void
   onClose: () => void
@@ -3885,6 +3933,7 @@ function TargetedEmotePanel({
           </div>
 
           {prankControls}
+          {stickyControls}
 
           <div className="targeted-message-compose">
             <input

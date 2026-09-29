@@ -168,6 +168,8 @@ export interface RoomState {
   prankEvents: PrankEvent[]
   buyShot: (targetId: string) => void
   flickChip: (targetId: string) => void
+  /** Stick a short word on a seated player's forehead for the rest of the hand. */
+  stickyNote: (targetId: string, text: string) => void
   /** The pill (internally "mushroom"): public reveals and this player's private news, oldest first. */
   mushroomEvents: MushroomEvent[]
   /** What only this player knows about the pill (holding it / who they spiked). */
@@ -245,6 +247,10 @@ export function useRoom(
 
   const flickChip = useCallback((targetId: string) => {
     sendMessage({ type: 'flick_chip', targetId })
+  }, [sendMessage])
+
+  const stickyNote = useCallback((targetId: string, text: string) => {
+    sendMessage({ type: 'sticky_note', targetId, text })
   }, [sendMessage])
 
   const spikeWater = useCallback((targetId: string) => {
@@ -623,6 +629,7 @@ export function useRoom(
     prankEvents,
     buyShot,
     flickChip,
+    stickyNote,
     mushroomEvents,
     privateMushroom,
     spikeWater,

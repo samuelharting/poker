@@ -91,6 +91,8 @@ export interface ThreePlayerView {
   shotsWaiting: number
   /** Privately looking at their hole cards right now (drives the 3D peek animation). */
   isPeeking: boolean
+  /** Sticky note on their forehead for the rest of the hand (public). */
+  stickyNote?: { text: string; fromNickname: string }
   /** Broadcast win odds (tabled all-in, or any street for spectators). */
   odds?: SeatOddsView
 }
@@ -420,6 +422,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
 
         shotsWaiting: normalizeDrinkState(player.drinks).shotsWaiting,
         isPeeking: Boolean(player.isPeeking) && player.hasCards && !isOutOfHand,
+        ...(player.stickyNote ? { stickyNote: { text: player.stickyNote.text, fromNickname: player.stickyNote.fromNickname } } : {}),
         ...(oddsView?.byPlayer.get(player.id) ? { odds: oddsView.byPlayer.get(player.id) } : {}),
       }
     })

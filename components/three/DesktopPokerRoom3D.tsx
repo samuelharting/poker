@@ -38,9 +38,14 @@ import {
   type AvatarAnimatorState,
   type AvatarPose,
 } from './avatarAnimator'
-import { getArmChain, getArmOvershoot, orientBoneFrame, solveArmIK } from './avatarIK'
+import { getArmChain, solveArmIK } from './avatarIK'
+import { updateAvatarHands } from './avatarHands'
+import { solveAvatarArms, type ArmSolveContext } from './avatarBodyArms'
+import { updateHatSecondary } from './avatarBodySecondary'
 import { applyBlink, getBlinkAmount, stylizeAvatar, type StylizedAvatar } from './avatarStyle'
-import { createAvatarFace, disposeAvatarFace, updateAvatarFace, type AvatarFaceRig, type FaceMood } from './avatarFace'
+import { disposeStickyNoteFx, syncStickyNoteFx, type StickyNoteFx } from './stickyNote'
+import { createAvatarFace, disposeAvatarFace, updateAvatarFace, type AvatarFaceRig } from './avatarFace'
+import { buildFaceInput, setFaceViewer, triggerFaceEmote } from './avatarFaceDirector'
 import { createDrinkProp, disposeDrinkProp, DRINK_DURATION, type DrinkProp } from './drinkProps'
 import {
   createFirstPersonDrink,
@@ -123,6 +128,7 @@ import {
 import {
   createDecoCarpetTexture,
   createLoungeBackBar,
+  createSconceShadeMaterial,
   createRoomDressing,
   createLoungeDecor,
   createLoungeWallTexture,
@@ -150,6 +156,7 @@ import type {
   ThreeTableViewModel,
 } from './tableViewModel'
 import { getThreeVisibleCardSlots } from './tableViewModel'
+import { createBeveledChipGeometry, createContactShadowMaterial, getContactShadowStrength } from './tableChipGeometry'
 import {
   getTableWagerAnchor,
   getTableWagerStartPoint,
@@ -166,6 +173,7 @@ import {
 import { getAvatarHeadTurn } from './turnFocus'
 import { FunFx, type FunPoseInput } from './funFx'
 import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
+import { StickyNoteChip } from '@/components/table/StickyNoteChip'
 import { OddsPill } from '@/components/table/HandOdds'
 
 type Vec3 = [number, number, number]
@@ -232,6 +240,9 @@ interface SeatRuntime {
   anchorsFromRig: boolean
   avatarStyle: StylizedAvatar | null
   face: AvatarFaceRig | null
+  /** Sticky note text the server says is on this player's forehead ('' = none), and its 3D note. */
+  stickyText: string
+  sticky: StickyNoteFx | null
   drinkProp: DrinkProp | null
   drinkId: string
   isHero: boolean
@@ -612,13 +623,7 @@ function createWallSconce(scene: THREE.Scene, x: number, brassMaterial: THREE.Me
   const shade = addMesh(
     sconce,
     new THREE.CylinderGeometry(0.16, 0.3, 0.38, 24, 1, true),
-    new THREE.MeshStandardMaterial({
-      color: '#ffb66b',
-      emissive: '#ff9a40',
-      emissiveIntensity: 1.6,
-      side: THREE.DoubleSide,
-      roughness: 0.6,
-    }),
+    createSconceShadeMaterial(),
     [0, 0.14, 0.36]
   )
   shade.castShadow = false
@@ -839,6 +844,8 @@ function setSeatPosition(seat: SeatRuntime, visualSeat: number) {
   // seats sit only ~1.35 apart, so beside the cards is taken) and the betting
   // line. Folded cards land front-left, away from it.
   seat.dealerButton.position.set(0.34, cardSpot[1] + DEALER_PUCK_HEIGHT / 2 - 0.008, cardSpot[2] - 0.6)
+  // Keep the D upright for the hero at the near edge whichever seat holds the button.
+  seat.dealerButton.rotation.y = -seat.root.rotation.y + DEALER_PUCK_YAW
   // Selection ring sits on the carpet under the chair.
   seat.ring.position.set(0, (-2 - position[1]) / scale + 0.03, 0.25)
   seat.cards.position.set(0, cardSpot[1], cardSpot[2])
@@ -1079,6 +1086,8 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     anchorsFromRig: false,
     avatarStyle: null,
     face: null,
+    stickyText: '',
+    sticky: null,
     drinkProp: null,
     drinkId: player.drinks?.lastDrink?.id ?? '',
     isHero: player.isHero,
@@ -1176,6 +1185,8 @@ function detachRiggedAvatar(seat: SeatRuntime) {
     seat.avatarMixer?.stopAllAction()
   }
 
+  if (seat.sticky) disposeStickyNoteFx(seat.sticky)
+  seat.sticky = null
   disposeAvatarFace(seat.face)
   seat.face = null
   disposeDrinkProp(seat.drinkProp)
@@ -1263,7 +1274,7 @@ async function requestRiggedAvatar(
     const style = stylizeAvatar(avatar.model, avatar.materials, { skinColor: seat.avatarProfile.skinColor, seed: playerId })
     seat.avatar = { ...avatar, materials: style.materials }
     seat.avatarStyle = style
-    seat.face = createAvatarFace(avatar.model, avatar.bones.get('Head'), style.materials, style.skinColor, seat.avatarProfile.glasses, seat.animator.seed)
+    seat.face = createAvatarFace(avatar.model, avatar.bones.get('Head'), style.materials, style.skinColor, seat.avatarProfile.glasses, seat.animator.seed, seat.avatarProfile)
     seat.skinBaseColor = style.skinColor ? style.skinColor.clone() : null
     seat.avatarMount.add(avatar.root)
     seat.avatarMount.position.set(0, AVATAR_SEAT_LIFT, 0)
@@ -1407,6 +1418,7 @@ function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number, deal:
   if (player.hasCards && deal.handNumber !== undefined) seat.dealtHand = deal.handNumber
   seat.hadCards = player.hasCards
   seat.peeking = Boolean(player.isPeeking)
+  seat.stickyText = player.stickyNote?.text ?? ''
   seat.cards.visible = player.hasCards && (
     !player.isOutOfHand || seat.keepFoldedCardsVisible
   )
@@ -1549,12 +1561,14 @@ const OPPONENT_STACK_SIDES: Record<TableVisualSeat, number> = {
 const HOLE_CARD_WIDTH = 0.48
 const DEALER_PUCK_RADIUS = 0.2
 const DEALER_PUCK_HEIGHT = 0.07
-let sharedChipGeometry: THREE.CylinderGeometry | null = null
+/** Yaw that puts the cap's D upright as seen from the hero's seat. */
+const DEALER_PUCK_YAW = Math.PI / 2
+let sharedChipGeometry: THREE.BufferGeometry | null = null
 
 function getChipGeometry() {
   // One shared cylinder: the side group takes the edge-spot band and both caps
   // take the printed face, so each chip is a single draw with no detail mesh.
-  sharedChipGeometry ??= new THREE.CylinderGeometry(CHIP_RADIUS, CHIP_RADIUS, CHIP_HEIGHT, 36)
+  sharedChipGeometry ??= createBeveledChipGeometry(CHIP_RADIUS, CHIP_HEIGHT, 48)
   return sharedChipGeometry
 }
 
@@ -1661,12 +1675,13 @@ function createChipInstancer(scene: THREE.Scene): ChipInstancer {
   })
   const contactGeometry = new THREE.PlaneGeometry(CHIP_RADIUS * 3.1, CHIP_RADIUS * 3.1)
   contactGeometry.rotateX(-Math.PI / 2)
-  const contact = new THREE.InstancedMesh(contactGeometry, new THREE.MeshBasicMaterial({
-    map: getContactShadowTexture(),
-    transparent: true,
-    depthWrite: false,
-    toneMapped: false,
-  }), CHIP_INSTANCE_CAPACITY)
+  const contact = new THREE.InstancedMesh(
+    contactGeometry,
+    createContactShadowMaterial(getContactShadowTexture()),
+    CHIP_INSTANCE_CAPACITY
+  )
+  // Red channel = shadow strength, faded out as a column lifts off the felt.
+  contact.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(CHIP_INSTANCE_CAPACITY * 3).fill(1), 3)
   contact.name = 'chip-contact-shadows'
   contact.frustumCulled = false
   contact.renderOrder = 1
@@ -1723,16 +1738,18 @@ function updateChipInstances(instancer: ChipInstancer, scene: THREE.Scene) {
       contactPosition.setFromMatrixPosition(chip.matrixWorld)
       const lift = contactPosition.y - FELT_TOP_Y - CHIP_HEIGHT / 2
       if (lift < 0.35) {
-        const scale = 1 + Math.max(0, lift) * 1.6
+        const scale = 1 + Math.max(0, lift) * 3
         contactMatrix.makeScale(scale, 1, scale)
         contactMatrix.setPosition(contactPosition.x, FELT_TOP_Y + 0.0025, contactPosition.z)
         instancer.contact.setMatrixAt(contactCount, contactMatrix)
+        if (instancer.contact.instanceColor) (instancer.contact.instanceColor.array as Float32Array)[contactCount * 3] = getContactShadowStrength(lift)
         contactCount += 1
       }
     }
   }
   instancer.contact.count = contactCount
   instancer.contact.instanceMatrix.needsUpdate = true
+  if (instancer.contact.instanceColor) instancer.contact.instanceColor.needsUpdate = true
   instancer.meshes.forEach((mesh, index) => {
     mesh.count = counts[index]!
     mesh.instanceMatrix.needsUpdate = true
@@ -2383,224 +2400,31 @@ function animatePot(runtime: SceneRuntime, time: number, reducedMotion: boolean,
   })
 }
 
-const ikTarget = new THREE.Vector3()
-const ikPole = new THREE.Vector3()
-const raiseUp = new THREE.Vector3()
-const raiseSide = new THREE.Vector3()
-const faceGuardCenter = new THREE.Vector3()
-const faceGuardOffset = new THREE.Vector3()
-/** Skull radius (seat units) the wrists are kept outside of. */
-const FACE_GUARD_RADIUS = 0.2
-
-const restElbow = new THREE.Vector3()
-const restWrist = new THREE.Vector3()
-const restFingers = new THREE.Vector3()
-const restInward = new THREE.Vector3()
-const restSide = new THREE.Vector3()
-const flipUp = new THREE.Vector3()
-const flipSide = new THREE.Vector3()
-const flipToward = new THREE.Vector3()
-const flipWrist = new THREE.Vector3()
-const flipForearm = new THREE.Vector3()
-/** Most the flick-off hand may bend off the forearm line (radians). */
-const FLIP_MAX_WRIST_BEND = 0.6
-const WORLD_UP = new THREE.Vector3(0, 1, 0)
+const armContexts = new WeakMap<SeatRuntime, ArmSolveContext>()
 
 /**
- * Reaches each hand to its animator target with two-bone arm IK. Targets past
- * a comfortable (soft-elbow) reach lean the chest in rather than locking the
- * arm straight; during a flick-off the right hand is turned knuckles-out with
- * the fingers up.
+ * Reaches each hand to its animator target and orients it (arm IK with elbow
+ * clearance, shoulder assist, hand frames and forearm twist: avatarBodyArms.ts).
  */
-function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | null = null) {
-  const bones = seat.avatar?.bones
-  if (!bones) return
-  const sides = [
-    { side: 'R', hand: pose.handR, shoulder: seat.anchors.shoulderR, out: 1 },
-    { side: 'L', hand: pose.handL, shoulder: seat.anchors.shoulderL, out: -1 },
-  ] as const
-  // Lean in for far reaches (pushing chips, shoving all-in) before solving.
-  let overshoot = 0
-  for (const { side, hand } of sides) {
-    const chain = getArmChain(bones.get(`UpperArm${side}`), bones.get(`LowerArm${side}`), bones.get(`Wrist${side}`))
-    if (!chain) continue
-    ikTarget.set(hand[0], hand[1], hand[2])
-    seat.root.localToWorld(ikTarget)
-    overshoot = Math.max(overshoot, getArmOvershoot(chain, ikTarget))
+function solveSeatArms(seat: SeatRuntime, pose: AvatarPose, flipTarget: Vec3 | null = null, delta = 1 / 60) {
+  const avatar = seat.avatar
+  if (!avatar) return
+  let context = armContexts.get(seat)
+  if (!context) {
+    context = {
+      root: seat.root,
+      bones: avatar.bones,
+      anchors: seat.anchors,
+      model: avatar.model,
+      applyOffset: (bone, x, y, z) => applyAvatarBoneOffset(seat, bone, x, y, z),
+    }
+    armContexts.set(seat, context)
   }
-  if (overshoot > 0.001) {
-    // Lean over the (wide) rail to reach the felt, keeping the eyes up so the
-    // face stays readable from across the table.
-    const lean = Math.min(0.55, (overshoot / Math.max(0.2, seat.root.scale.x)) * 0.9)
-    applyAvatarBoneOffset(seat, bones.get('Chest'), lean * 0.62, 0, 0)
-    applyAvatarBoneOffset(seat, bones.get('Torso'), lean * 0.38, 0, 0)
-    applyAvatarBoneOffset(seat, bones.get('Head'), -lean * 0.65, 0, 0)
-    seat.avatar?.model.updateMatrixWorld(true)
-  }
-  const splay = THREE.MathUtils.clamp(pose.elbowOut, 0, 1)
-  const raiseAll = THREE.MathUtils.clamp(pose.elbowUp, 0, 1)
-  // Face guard: the live skull, as a sphere a little above the head bone
-  // (which sits at the top of the neck), in seat space. A wrist target that
-  // would pass through it (hands travelling to or from behind the head, a rub
-  // on the crown) is slid out sideways, toward its own shoulder, so the hand
-  // goes round the side of the head and never in front of the face.
-  const headBone = bones.get('Head')
-  let guardRadius = 0
-  if (headBone) {
-    seat.root.worldToLocal(headBone.getWorldPosition(faceGuardCenter))
-    faceGuardCenter.y += 0.13
-    guardRadius = FACE_GUARD_RADIUS
-  }
-  for (const { side, hand, shoulder, out } of sides) {
-    const chain = getArmChain(bones.get(`UpperArm${side}`), bones.get(`LowerArm${side}`), bones.get(`Wrist${side}`))
-    if (!chain) continue
-    ikTarget.set(hand[0], hand[1], hand[2])
-    const raise = raiseAll * THREE.MathUtils.smoothstep(hand[1], shoulder[1] - 0.05, shoulder[1] + 0.2)
-    if (raise > 0.01 && guardRadius > 0) {
-      // Hands up at the head (laced behind it, rubbing it) go where the head
-      // is now: the targets are laid out against the upright rest pose, and a
-      // lounge or flinch moves the skull back by a hand's width.
-      const restHead = seat.anchors.chin
-      ikTarget.x += (faceGuardCenter.x - restHead[0]) * raise
-      ikTarget.y += (faceGuardCenter.y - 0.13 - (restHead[1] - 0.02)) * raise
-      ikTarget.z += (faceGuardCenter.z - (restHead[2] + 0.26)) * raise
-    }
-    // Never into the padded rail: over its cushion a wrist stays at least a
-    // forearm's thickness above the crown (the rail anchor sits there).
-    const railAnchor = out > 0 ? seat.anchors.railR : seat.anchors.railL
-    if (ikTarget.z < railAnchor[2] + 0.05 && ikTarget.z > railAnchor[2] - 0.4) {
-      ikTarget.y = Math.max(ikTarget.y, railAnchor[1] - 0.03)
-    }
-    if (guardRadius > 0) {
-      faceGuardOffset.subVectors(ikTarget, faceGuardCenter)
-      const across = guardRadius * guardRadius - faceGuardOffset.y * faceGuardOffset.y - faceGuardOffset.z * faceGuardOffset.z
-      if (across > 0) {
-        const clearX = Math.sqrt(across)
-        if (faceGuardOffset.x * out < clearX) ikTarget.x = faceGuardCenter.x + out * clearX
-      }
-    }
-    seat.root.localToWorld(ikTarget)
-    // Elbows swing out to the side and down/back, like arms resting on a rail;
-    // folded on the rail (passed out) they splay out level with the hands;
-    // a hand raised to or above the head (elbowUp) lifts its own elbow only.
-    // (Relaxed: out more than down, so the elbows sit a little away from the
-    // ribs instead of pinned to them with the forearms in a tight V.)
-    ikPole.set(
-      shoulder[0] + out * (0.95 + 0.25 * splay + 0.1 * raise),
-      shoulder[1] - (0.5 * (1 - splay) + 0.12 * splay) * (1 - raise) + 0.5 * raise,
-      shoulder[2] + (0.25 * (1 - splay) + 0.05 * splay) * (1 - raise) + 0.15 * raise
-    )
-    seat.root.localToWorld(ikPole)
-    solveArmIK(chain, ikTarget, ikPole)
-
-    // Resting on the rail: palm down on the padding, fingers carrying on from
-    // the forearm and curving in toward the other hand, the pinky edge a touch
-    // lower (a relaxed, slightly rolled hand), instead of whatever roll the
-    // IK left (palms up, "begging"). Fades out as the hand leaves the rail.
-    const restWeight = 1 - THREE.MathUtils.smoothstep(Math.abs(hand[1] - (out > 0 ? seat.anchors.railR[1] : seat.anchors.railL[1])), 0.04, 0.14)
-    if (restWeight > 0.01 && raise < 0.01) {
-      const middle = bones.get(`Middle2${side}`)
-      const index = bones.get(`Index2${side}`)
-      const pinky = bones.get(`Pinky2${side}`)
-      if (middle && index && pinky) {
-        chain.lower.getWorldPosition(restElbow)
-        chain.hand.getWorldPosition(restWrist)
-        restFingers.subVectors(restWrist, restElbow).setY(0)
-        if (restFingers.lengthSq() > 1e-8) {
-          restFingers.normalize()
-          // Mostly straight ahead over the cushion, only angled a little in
-          // (the forearms come in from splayed elbows, and following them
-          // would lay one hand over the other); the palm lies flat on the
-          // crown and only the relaxed finger curl drops the tips onto it.
-          restInward.set(0, 0, -1).transformDirection(seat.root.matrixWorld).setY(0).normalize()
-          restFingers.multiplyScalar(0.25).addScaledVector(restInward, 0.75).normalize()
-          restSide.crossVectors(restFingers, WORLD_UP).normalize().multiplyScalar(out)
-          restSide.addScaledVector(WORLD_UP, -0.15).normalize()
-          restFingers.addScaledVector(WORLD_UP, -0.04).normalize()
-          orientBoneFrame(chain.hand, middle, index, pinky, restFingers, restSide, restWeight)
-        }
-      }
-    }
-
-    if (raise > 0.01) {
-      // Raised arms: fingers up and back over the skull, palms to the head,
-      // instead of the hands jutting straight inward across the face.
-      const middle = bones.get(`Middle2${side}`)
-      const index = bones.get(`Index2${side}`)
-      const pinky = bones.get(`Pinky2${side}`)
-      if (middle && index && pinky) {
-        raiseUp.set(0, 0.4, 0.92).transformDirection(seat.root.matrixWorld)
-        raiseSide.set(0, -0.6, 0.8).transformDirection(seat.root.matrixWorld)
-        orientBoneFrame(chain.hand, middle, index, pinky, raiseUp, raiseSide, raise)
-      }
-    }
-
-    if (flipTarget && side === getFlipOffHand(flipTarget) && pose.middleFinger > 0.01) {
-      const middle = bones.get(`Middle2${side}`)
-      const index = bones.get(`Index2${side}`)
-      const pinky = bones.get(`Pinky2${side}`)
-      if (middle && index && pinky) {
-        chain.hand.getWorldPosition(flipWrist)
-        flipToward.set(flipTarget[0], flipTarget[1], flipTarget[2])
-        seat.root.localToWorld(flipToward)
-        flipToward.sub(flipWrist).setY(0)
-        if (flipToward.lengthSq() > 1e-6) {
-          flipToward.normalize()
-          // Fingers up (tipped a touch toward the target), back of the hand to
-          // them: index-to-pinky runs to the sender's left (right, for the left hand).
-          flipUp.copy(WORLD_UP).addScaledVector(flipToward, 0.28).normalize()
-          // Keep the wrist bend believable (at most ~35 degrees off the
-          // forearm): a hand snapped 90 degrees up off a level forearm reads
-          // as a flat wedge instead of a raised finger.
-          chain.lower.getWorldPosition(restElbow)
-          flipForearm.subVectors(flipWrist, restElbow)
-          if (flipForearm.lengthSq() > 1e-8) {
-            flipForearm.normalize()
-            const cos = THREE.MathUtils.clamp(flipForearm.dot(flipUp), -1, 1)
-            if (Math.acos(cos) > FLIP_MAX_WRIST_BEND) {
-              flipUp.addScaledVector(flipForearm, -cos)
-              if (flipUp.lengthSq() > 1e-8) {
-                flipUp.normalize().multiplyScalar(Math.sin(FLIP_MAX_WRIST_BEND))
-                flipUp.addScaledVector(flipForearm, Math.cos(FLIP_MAX_WRIST_BEND)).normalize()
-              } else {
-                flipUp.copy(flipForearm)
-              }
-            }
-          }
-          flipSide.crossVectors(WORLD_UP, flipToward).normalize().multiplyScalar(side === 'R' ? 1 : -1)
-          orientBoneFrame(chain.hand, middle, index, pinky, flipUp, flipSide, pose.middleFinger)
-        }
-      }
-    }
-  }
-}
-
-const FINGER_NAMES = ['Index', 'Middle', 'Ring', 'Pinky'] as const
-/** Radians per joint (knuckle → tip) at a full fist. */
-const FINGER_FIST_CURL = [1.25, 1.45, 0.9] as const
-/** A relaxed hand is never flat: a little natural bend at every joint. */
-const FINGER_REST_CURL = [0.1, 0.16, 0.1] as const
-/** Outer fingers curl a bit more than the index for a natural cascade. */
-const FINGER_CASCADE: Record<(typeof FINGER_NAMES)[number], number> = { Index: -0.06, Middle: 0, Ring: 0.06, Pinky: 0.12 }
-
-/** Curls one hand: 0 = relaxed open, 1 = fist; `middleUp` extends only the middle finger. */
-function curlHand(seat: SeatRuntime, bones: ReadonlyMap<string, THREE.Bone>, side: 'R' | 'L', curl: number, middleUp = 0) {
-  const fist = Math.max(curl, middleUp)
-  for (const finger of FINGER_NAMES) {
-    const extended = finger === 'Middle' ? middleUp : 0
-    const amount = THREE.MathUtils.clamp(fist + FINGER_CASCADE[finger] * (1 - fist), 0, 1)
-    for (let joint = 0; joint < 3; joint += 1) {
-      const bend = (FINGER_REST_CURL[joint] + amount * FINGER_FIST_CURL[joint]) * (1 - extended) - 0.05 * extended
-      // On these rigs negative local X flexes a finger toward the palm
-      // (positive bends it back toward the knuckles).
-      applyAvatarBoneOffset(seat, bones.get(`${finger}${joint + 1}${side}`), -bend, 0, 0)
-    }
-  }
-  // Thumb folds in over the curled fingers (tucked for the flick-off).
-  const mirror = side === 'R' ? 1 : -1
-  applyAvatarBoneOffset(seat, bones.get(`Thumb1${side}`), -(0.05 + fist * 0.3 + 0.25 * middleUp), -mirror * (fist * 0.3 + 0.3 * middleUp), 0)
-  applyAvatarBoneOffset(seat, bones.get(`Thumb2${side}`), -(0.1 + fist * 0.45 + 0.25 * middleUp), 0, 0)
-  applyAvatarBoneOffset(seat, bones.get(`Thumb3${side}`), -(0.08 + fist * 0.35), 0, 0)
+  context.bones = avatar.bones
+  context.model = avatar.model
+  context.anchors = seat.anchors
+  context.cardsVisible = seat.cards.visible
+  solveAvatarArms(context, pose, { flipTarget, delta })
 }
 
 const flipTargetWorld = new THREE.Vector3()
@@ -2652,8 +2476,8 @@ function getDealerPuckTexture() {
     context.fillStyle = '#16191c'
     context.textAlign = 'center'
     context.textBaseline = 'middle'
-    context.font = `800 128px ${font ? `${font}, ` : ''}'Arial Black', sans-serif`
-    context.fillText('D', 128, 138)
+    context.font = `800 176px ${font ? `${font}, ` : ''}'Arial Black', sans-serif`
+    context.fillText('D', 128, 144)
   })
   return dealerPuckTexture
 }
@@ -2701,7 +2525,8 @@ function placeDrinkProp(seat: SeatRuntime, pose: AvatarPose, time: number) {
   const inHand = THREE.MathUtils.smoothstep(elapsed, 0.26, 0.4) * (1 - THREE.MathUtils.smoothstep(elapsed, 2.14, 2.3))
   // Held in the left hand: the glass sits on the felt to the player's left.
   const wrist = seat.avatar?.bones.get('WristL')
-  const knuckle = seat.avatar?.bones.get('Middle1L')
+  // Grip centre: halfway from the wrist to the knuckle row (the palm), where a fist closes on a glass.
+  const knuckle = seat.avatar?.bones.get('Middle2L')
   drinkYaw.setFromAxisAngle(drinkUp, seat.root.rotation.y)
   if (!wrist || inHand <= 0.001) {
     prop.group.position.copy(drinkRestWorld)
@@ -2712,7 +2537,7 @@ function placeDrinkProp(seat: SeatRuntime, pose: AvatarPose, time: number) {
   wrist.getWorldPosition(drinkWristWorld)
   if (knuckle) {
     knuckle.getWorldPosition(drinkKnuckleWorld)
-    drinkWristWorld.lerp(drinkKnuckleWorld, 0.7)
+    drinkWristWorld.lerp(drinkKnuckleWorld, 0.5)
   }
   // Base of the glass in the fist, just in front of the palm.
   drinkForward.set(0, 0, -1).applyQuaternion(seat.root.quaternion)
@@ -2750,13 +2575,13 @@ function placeDrinkProp(seat: SeatRuntime, pose: AvatarPose, time: number) {
         // Elbow down and a little out/forward: the forearm comes up from
         // below to the mouth instead of lying across the face.
         const shoulderL = seat.anchors.shoulderL
-        drinkElbowPole.set(shoulderL[0] - 0.35, shoulderL[1] - 1, shoulderL[2] - 0.35)
+        drinkElbowPole.set(shoulderL[0] + 0.1, shoulderL[1] - 1.7, shoulderL[2] - 0.05)
         seat.root.localToWorld(drinkElbowPole)
         // Two passes: the grip-to-wrist offset depends on the solved forearm.
         for (let pass = 0; pass < 2; pass += 1) {
           wrist.getWorldPosition(drinkGripOffset)
           drinkGripTarget.copy(drinkGripOffset)
-          if (knuckle) drinkGripTarget.lerp(knuckle.getWorldPosition(drinkKnuckleWorld), 0.7)
+          if (knuckle) drinkGripTarget.lerp(knuckle.getWorldPosition(drinkKnuckleWorld), 0.5)
           // Grip offset from the wrist bone, as measured on the live hand.
           drinkGripOffset.subVectors(drinkGripTarget, drinkGripOffset)
           // Where the grip should be on the (tipped) glass: low on its body.
@@ -2906,7 +2731,7 @@ function animateSeat(
     }
     seat.avatar.model.updateMatrixWorld(true)
     if (!seat.anchorsFromRig) measureRigAnchors(seat)
-    solveSeatArms(seat, pose, flipOff?.target ?? null)
+    solveSeatArms(seat, pose, flipOff?.target ?? null, delta)
     const blink = seat.passedOut ? 1 : reducedMotion ? 0 : getBlinkAmount(time, seat.animator.seed)
     placeDrinkProp(seat, pose, time)
     flushCheeks(seat)
@@ -2914,35 +2739,33 @@ function animateSeat(
       // A bonk startles; the shot's burn scrunches the face.
       const bonked = prank?.bonkElapsed !== null && prank?.bonkElapsed !== undefined && prank.bonkElapsed < 1.2
       const burning = prank?.shotElapsed !== null && prank?.shotElapsed !== undefined && prank.shotElapsed > SHOT_DOWN_AT && prank.shotElapsed < SHOT_SHUDDER_END
-      const mood: FaceMood = bonked
-        ? 'surprised'
-        : burning
-          ? 'sad'
-          : seat.winner
-        ? 'happy'
-        : seat.loser
-          ? 'sad'
-          : tableHeat > 0.3 && !seat.acting
-            ? 'surprised'
-            : seat.acting
-              ? 'focused'
-              : seat.folded || seat.drunkLevel >= 4
-                ? 'bored'
-                : 'neutral'
-      updateAvatarFace(seat.face, {
+      // The face director turns the seat's game state into emotion weights and gaze targets.
+      updateAvatarFace(seat.face, buildFaceInput(seat.face, seat, {
         delta,
-        blink,
-        mood,
-        lookX: -(poseBones.Head[1] + poseBones.Neck[1]) * 1.6,
-        lookY: (poseBones.Head[0] + poseBones.Neck[0]) * 1.4,
+        time,
         reducedMotion,
-      })
+        actingVisualSeat,
+        tableHeat,
+        anyWinner,
+        runtimeSeats,
+        cue: playback.cue,
+        bonked,
+        burning,
+        cheers: prank?.cheersRaise ?? 0,
+        fallbackYaw: -(poseBones.Head[1] + poseBones.Neck[1]) * 1.6,
+        fallbackPitch: (poseBones.Head[0] + poseBones.Neck[0]) * 1.4,
+      }))
+      seat.sticky = syncStickyNoteFx(seat.sticky, seat.face, seat.stickyText, delta, reducedMotion, seat.avatar?.root ?? null)
     } else if (seat.avatarStyle) {
       applyBlink(seat.avatarStyle, blink)
     }
-    const flipHand = flipOff ? getFlipOffHand(flipOff.target) : 'R'
-    curlHand(seat, bones, 'R', pose.fingerCurlR, flipHand === 'R' ? pose.middleFinger : 0)
-    curlHand(seat, bones, 'L', pose.fingerCurlL, flipHand === 'L' ? pose.middleFinger : 0)
+    updateAvatarHands(seat.animator.hands, bones, pose.handShapeR, pose.handShapeL, {
+      time,
+      delta,
+      reducedMotion,
+      seed: seat.animator.seed,
+    })
+    updateHatSecondary(seat.riggedAccessories, bones.get('Head'), delta, reducedMotion)
 
     if (process.env.NODE_ENV !== 'production') {
       // Development-only live pose tuning: window.__avatarTweak = { Bone: [x, y, z] }.
@@ -2965,7 +2788,8 @@ function animateSeat(
     : seat.acting
       ? 0.62 + (reducedMotion ? 0 : Math.sin(time * 3.2) * 0.18)
       : 0
-  seat.ring.material.emissiveIntensity = seat.winner ? 2.6 : seat.acting ? 2.4 : 1.8
+  // Kept under the bloom threshold: at 2.4 the acting ring clipped to a white band with a blue halo.
+  seat.ring.material.emissiveIntensity = seat.winner ? 1.5 : seat.acting ? 0.95 : 0.8
 
   seat.winnerHalo.visible = seat.winner
   seat.winnerSparkles.visible = seat.winner
@@ -3207,7 +3031,7 @@ function disposeObject(root: THREE.Object3D) {
 
 /** Head-top anchor, in seat-root space, that each DOM nameplate follows. */
 const NAMEPLATE_ANCHOR = new THREE.Vector3(0, 2.32, 0.08)
-const WAGER_LABEL_LIFT = 0.2
+const WAGER_LABEL_LIFT = 0.14
 const BOARD_LABEL_HALF_SPAN = BOARD_XS[4]! + BOARD_CARD_WIDTH / 2 + 0.2
 const BOARD_LABEL_CLEARANCE = Math.sin(BOARD_CARD_TILT) * BOARD_CARD_DEPTH + 0.05
 
@@ -3299,9 +3123,9 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
     if (wager) {
       scratch.copy(wager.target)
       scratch.y += WAGER_LABEL_LIFT
-      // A bet behind the propped board would print its label over the cards
+      // Once the board is out, a bet behind the propped board would print its label over the cards
       // from the seated camera: float it above the card tops instead.
-      if (scratch.z < BOARD_Z - 0.2 && Math.abs(scratch.x) < BOARD_LABEL_HALF_SPAN) scratch.y += BOARD_LABEL_CLEARANCE
+      if (runtime.board.visibleCount > 0 && scratch.z < BOARD_Z - 0.2 && Math.abs(scratch.x) < BOARD_LABEL_HALF_SPAN) scratch.y += BOARD_LABEL_CLEARANCE
       scratch.project(runtime.camera)
       overlayBetPositions.set(element, {
         x: (scratch.x * 0.5 + 0.5) * width,
@@ -3525,6 +3349,13 @@ function mergeAccessoryMeshes(set: AvatarAccessorySet | null) {
       combined.castShadow = meshes.some(mesh => mesh.castShadow)
       combined.receiveShadow = meshes.some(mesh => mesh.receiveShadow)
       combined.renderOrder = meshes[0]!.renderOrder
+      // Keep the hat tag (see avatarBodySecondary) on the baked mesh.
+      for (let node: THREE.Object3D | null = meshes[0]!; node && node !== group; node = node.parent) {
+        if (node.userData.accessoryKind) {
+          combined.userData.accessoryKind = node.userData.accessoryKind
+          break
+        }
+      }
       group.add(combined)
       for (const mesh of meshes) {
         mesh.removeFromParent()
@@ -3904,6 +3735,7 @@ function createSceneRuntime(
     const actingSeat = viewRef.current.actingVisualSeat
     funFx.reducedMotion = reducedMotion
     funFx.update(viewRef.current, runtime.seats, time)
+    setFaceViewer(runtime.camera)
     const { heat, sourceId } = getTableHeat(runtime, time)
     let winnerSeat: SeatRuntime | null = null
     for (const seat of runtime.seats.values()) {
@@ -4358,6 +4190,8 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
     for (const reaction of emoteReactions) {
       if (seenGesturesRef.current.has(reaction.id)) continue
       seenGesturesRef.current.add(reaction.id)
+      triggerFaceEmote(runtime.seats.get(reaction.senderId)?.face, reaction.emote, 'sender')
+      if (reaction.targeted && reaction.targetId !== reaction.senderId) triggerFaceEmote(runtime.seats.get(reaction.targetId)?.face, reaction.emote, 'target')
       if (!reaction.emote.includes('\u{1F595}') || !reaction.targeted) continue
       const sender = runtime.seats.get(reaction.senderId)
       if (sender) sender.flipOff = { startedAt: now, targetId: reaction.targetId }
@@ -4454,6 +4288,8 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
           const reaction = emoteReactions.find(item => item.targetId === player.id)
           const chatMessage = chatMessages.find(item => item.targetId === player.id)
           const statusLabel = getStatusLabel(player)
+          // Committed chips this street; a fold-win ends the hand with bets still set, but the chips are gone.
+          const showBetChip = player.bet > 0 && view.phase === 'in_hand'
           const cardRevealAction = cardRevealActions.find(action => action.playerId === player.id)
 
           return (
@@ -4521,6 +4357,7 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
                 >
                 <span className="cinematic-seat-topline">
                   <strong>{player.nickname}</strong>
+                  <StickyNoteChip note={player.stickyNote} />
                   {player.shotsWaiting > 0 && (
                     // A shot is lined up for them, poured once they're out of the hand.
                     <em className="cinematic-shot-waiting" aria-label="Shot waiting" title="Shot waiting">
@@ -4556,6 +4393,11 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
                 </span>
                 <span className="cinematic-seat-meta">
                   <b>${player.stack.toLocaleString()}</b>
+                  {showBetChip && (
+                    <em className="cinematic-seat-in-bet" aria-label={`$${player.bet.toLocaleString()} in this street`}>
+                      <i aria-hidden="true" />${player.bet.toLocaleString()}
+                    </em>
+                  )}
                   {player.odds && (
                     <OddsPill odds={player.odds} playerName={player.nickname} className="cinematic-odds-pill" />
                   )}
@@ -4569,15 +4411,9 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
                       {player.winnerHandDescription ?? 'Winner'}
                     </small>
                   ) : statusLabel ? (
-                    <small>{statusLabel}</small>
+                    <small>{showBetChip ? statusLabel.replace(/\s+(?:to\s+)?\$[\d,]+.*$/i, '') : statusLabel}</small>
                   ) : null}
                 </span>
-                {/* Chips committed this street, right on the name card (the felt label follows the chips). */}
-                {player.bet > 0 && view.phase === 'in_hand' && (
-                  <em className="cinematic-seat-in-bet" aria-label={`Bet $${player.bet.toLocaleString()} this street`}>
-                    <span>BET</span> ${player.bet.toLocaleString()}
-                  </em>
-                )}
                 </span>
 
                 {/* A fold-win ends the hand with bets still set; the chips are gone, so is the label. */}

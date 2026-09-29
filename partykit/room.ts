@@ -97,6 +97,12 @@ import {
   type MushroomEvent,
   type MushroomTable,
 } from '../lib/mushroom'
+import {
+  STICKY_NOTE_COOLDOWN_MS,
+  STICKY_NOTE_MAX_PER_TARGET_PER_HAND,
+  sanitizeStickyText,
+  type StickyNote,
+} from '../lib/stickyNote'
 import { CHIP_FLICK_COOLDOWN_MS, HOUSE_ID, type PrankEvent, type PrankKind } from '../lib/pranks'
 import { computeHouseRules, WATERFALL_EVERY_HANDS } from '../lib/houseRules'
 import {
@@ -353,6 +359,11 @@ export default class PokerRoom implements PartyServer {
   private autoBeerTimer: ReturnType<typeof setInterval> | null = null
   /** Last chip flick per sender (cosmetic prank rate limit). */
   private lastChipFlickAt = new Map<string, number>()
+  /** Sticky notes currently on foreheads, by target id. Cleared when the next hand starts. */
+  private stickyNotes = new Map<string, StickyNote>()
+  /** Last note per sender (cooldown, one per hand) and per-target counts for the current hand. */
+  private stickyLastByPlayer = new Map<string, { at: number; hand: number }>()
+  private stickyTargetCounts = new Map<string, { hand: number; count: number }>()
   /** Bought shots waiting for their target to be out of the hand, oldest first. */
   private shotQueue: QueuedShot[] = []
   /** Shot took them to the edge mid-hand: blackout waits until they fold or the hand ends. */
@@ -581,6 +592,9 @@ export default class PokerRoom implements PartyServer {
           break
         case 'spike_water':
           this.handleSpikeWater(sender, msg.targetId)
+          break
+        case 'sticky_note':
+          this.handleStickyNote(sender, msg.targetId, msg.text)
           break
         case 'dev_fun':
           this.handleDevFun(sender, msg.action, msg.targetId)
@@ -1035,6 +1049,7 @@ export default class PokerRoom implements PartyServer {
       this.recordHandsPlayedForCurrentHand()
       this.wakeRestedDrinkers()
       this.advanceMushroomsForNewHand()
+      this.clearStickyNotes()
       this.scheduleBotDrinks()
       this.scheduleBotPeeks()
       this.syncActionTimer(true)
@@ -1293,6 +1308,7 @@ export default class PokerRoom implements PartyServer {
     for (const timer of this.botShotTimers) clearTimeout(timer)
     this.botShotTimers.clear()
     this.lastChipFlickAt.clear()
+    this.clearStickyNotes()
     this.shotQueue = []
     this.data.ladyLuck = createLadyLuckTracker()
   }
@@ -2476,6 +2492,77 @@ export default class PokerRoom implements PartyServer {
     this.sendActionResult(conn)
   }
 
+  private handleStickyNote(conn: Connection, targetId: string, rawText: string) {
+    const senderId = this.data.connectionToPlayer[conn.id]
+    if (!senderId) {
+      this.sendActionFailed(conn, 'Join the room before sticking a note')
+      return
+    }
+    if (!this.isFunModeEnabled()) {
+      this.sendActionFailed(conn, 'Fun mode is off at this table')
+      return
+    }
+    // Seated players and bots can wear one (yourself included); the sender may be seated or watching.
+    const target = this.getPlayer(targetId)
+    if (!target) {
+      this.sendActionFailed(conn, 'That player is not at the table')
+      return
+    }
+    const cleaned = sanitizeStickyText(rawText)
+    if (!cleaned.ok) {
+      this.sendActionFailed(conn, cleaned.reason)
+      return
+    }
+    const now = Date.now()
+    const hand = this.data.gameState.handNumber
+    const last = this.stickyLastByPlayer.get(senderId)
+    if (last && last.hand === hand) {
+      this.sendActionFailed(conn, 'One sticky note per hand. Wait for the next deal.')
+      return
+    }
+    if (last && now - last.at < STICKY_NOTE_COOLDOWN_MS) {
+      const seconds = Math.ceil((STICKY_NOTE_COOLDOWN_MS - (now - last.at)) / 1000)
+      this.sendActionFailed(conn, `Out of sticky notes. Next one in ${seconds}s.`)
+      return
+    }
+    const counts = this.stickyTargetCounts.get(targetId)
+    const usedOnTarget = counts && counts.hand === hand ? counts.count : 0
+    if (usedOnTarget >= STICKY_NOTE_MAX_PER_TARGET_PER_HAND) {
+      this.sendActionFailed(conn, `${target.nickname} has had enough sticky notes this hand.`)
+      return
+    }
+
+    const fromNickname = this.getPlayer(senderId)?.nickname ?? this.data.playerNicknames[senderId] ?? 'Someone'
+    this.stickyLastByPlayer.set(senderId, { at: now, hand })
+    this.stickyTargetCounts.set(targetId, { hand, count: usedOnTarget + 1 })
+    // A new note replaces the old one.
+    this.stickyNotes.set(targetId, { text: cleaned.text, fromId: senderId, fromNickname, at: now })
+    if (targetId !== senderId) {
+      for (const targetConn of Array.from(this.room.getConnections())) {
+        if (this.data.connectionToPlayer[targetConn.id] !== targetId) continue
+        this.sendMessage(targetConn, {
+          type: 'notice',
+          kind: 'sticky_note',
+          message: `${fromNickname} stuck "${cleaned.text}" on you`,
+          playerId: senderId,
+        })
+      }
+    }
+    this.sendActionResult(conn)
+    this.broadcastState()
+  }
+
+  /** Notes only last the hand they were stuck in. */
+  private clearStickyNotes() {
+    this.stickyNotes.clear()
+  }
+
+  private forgetStickyPlayer(playerId: string) {
+    this.stickyNotes.delete(playerId)
+    this.stickyTargetCounts.delete(playerId)
+    this.stickyLastByPlayer.delete(playerId)
+  }
+
   private broadcastPrankEvent(
     kind: PrankKind,
     fromId: string,
@@ -2943,6 +3030,7 @@ export default class PokerRoom implements PartyServer {
 
 
   private forgetDrinks(playerId: string) {
+    this.forgetStickyPlayer(playerId)
     this.forgetMushroomPlayer(playerId)
     this.clearWaterTimers(playerId)
     this.clearBlackoutTimers(playerId)
@@ -3263,6 +3351,7 @@ export default class PokerRoom implements PartyServer {
   }
 
   private removePlayerFromTable(playerId: string) {
+    this.stickyNotes.delete(playerId)
     this.data.gameState.players = this.data.gameState.players.filter(player => player.id !== playerId)
     delete this.data.pendingRemovals[playerId]
   }
@@ -3743,6 +3832,7 @@ export default class PokerRoom implements PartyServer {
         ...toPublicDrinkState(this.drinkLedger[player.id] ?? (this.isBotPlayer(player.id) ? undefined : this.newSeatedDrinkEntry())),
         shotsWaiting: this.shotQueue.filter(shot => shot.targetId === player.id).length,
       },
+      ...(this.isFunModeEnabled() && this.stickyNotes.has(player.id) ? { stickyNote: this.stickyNotes.get(player.id)! } : {}),
       ...(this.isPlayerPeeking(player.id) ? { isPeeking: true } : {}),
       ...(this.data.membership.awayIds[player.id] ? { isAway: true } : {}),
     }
@@ -4473,6 +4563,7 @@ export default class PokerRoom implements PartyServer {
         this.recordHandsPlayedForCurrentHand()
         this.wakeRestedDrinkers()
         this.advanceMushroomsForNewHand()
+        this.clearStickyNotes()
         this.scheduleBotDrinks()
         this.scheduleBotPeeks()
         this.clearAutoFold()

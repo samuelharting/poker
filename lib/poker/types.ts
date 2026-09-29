@@ -98,6 +98,8 @@ export interface SeatPlayer {
   drinkCapable?: boolean
   /** On a mushroom trip (only once it has kicked in; a queued trip is secret). Visual only. */
   trip?: { startedAt: number; endsAfterHand: number }
+  /** A sticky note someone stuck on this player's forehead for the rest of the hand. Public. */
+  stickyNote?: { text: string; fromId: string; fromNickname: string; at: number }
 }
 
 export interface Pot {

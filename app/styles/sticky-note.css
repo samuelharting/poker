@@ -1,0 +1,90 @@
+/* Sticky note on the forehead: the 2D chip (nameplates, mobile seats, the hero's own pill)
+   and the little composer inside the prank menu. */
+
+.sticky-note-chip {
+  display: inline-block;
+  max-width: 9.5em;
+  padding: 0.05em 0.5em 0.08em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  font: 800 0.72rem/1.25 'Segoe Print', 'Bradley Hand', 'Marker Felt', 'Comic Sans MS', cursive;
+  color: #1e2350;
+  background: linear-gradient(#ffe860, #f2c92c);
+  border-radius: 2px 2px 8px 2px;
+  box-shadow: 0 1px 3px rgba(40, 25, 0, 0.45);
+  transform: rotate(-2.5deg);
+  animation: sticky-note-chip-in 0.32s cubic-bezier(0.3, 1.5, 0.5, 1) both;
+  pointer-events: none;
+}
+
+.mobile-edge-seat-main + .sticky-note-chip,
+.mobile-hero-meta > .sticky-note-chip {
+  align-self: flex-start;
+  margin: 1px 0 2px;
+  font-size: 0.66rem;
+}
+
+@keyframes sticky-note-chip-in {
+  from { transform: scale(1.7) rotate(6deg); opacity: 0; }
+  to { transform: scale(1) rotate(-2.5deg); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sticky-note-chip { animation: none; }
+}
+
+.sticky-note-composer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  border-radius: 10px;
+  background: rgba(255, 224, 80, 0.12);
+  border: 1px solid rgba(255, 224, 80, 0.45);
+}
+
+.sticky-note-composer input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 224, 80, 0.6);
+  background: #fff3a8;
+  color: #1e2350;
+  font: 800 0.9rem/1.2 'Segoe Print', 'Bradley Hand', 'Marker Felt', 'Comic Sans MS', cursive;
+}
+
+.sticky-note-composer input:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+.sticky-note-composer-count {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.sticky-note-composer-count.is-full { color: #ffd166; opacity: 1; }
+
+.sticky-note-composer button {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 0;
+  background: #f2c92c;
+  color: #1e2350;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.sticky-note-composer button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.prank-button.is-sticky {
+  --prank-accent: rgba(255, 224, 80, 0.55);
+  background: linear-gradient(90deg, rgba(255, 224, 80, 0.16), var(--c-ink-800) 75%);
+}

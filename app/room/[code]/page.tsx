@@ -174,7 +174,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     setIsRejoining(Boolean(loadStoredReconnectToken(roomCode)))
   }, [roomCode])
 
-  const { tableState, socialState, yourId, isHost, sendAction, seatMe, sendMessage, isConnected, connectionIssue, drinkEvents, orderDrink, prankEvents, buyShot, flickChip, mushroomEvents, privateMushroom, spikeWater, sessionEnded, notices, dismissNotice } = useRoom(
+  const { tableState, socialState, yourId, isHost, sendAction, seatMe, sendMessage, isConnected, connectionIssue, drinkEvents, orderDrink, prankEvents, buyShot, flickChip, stickyNote, mushroomEvents, privateMushroom, spikeWater, sessionEnded, notices, dismissNotice } = useRoom(
     roomCode,
     currentProfile
   )
@@ -435,6 +435,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           prankEvents={prankEvents}
           onBuyShot={buyShot}
           onFlickChip={flickChip}
+          onStickyNote={stickyNote}
           onFeedback={ignoreFeedback}
           onSendLedgerMessage={handleLedgerMessage}
         />

@@ -6,6 +6,7 @@ import clsx from 'clsx'
 import { PlayingCard } from '@/components/ui/PlayingCard'
 import { ChipStack } from '@/components/ui/ChipStack'
 import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
+import { StickyNoteChip } from './StickyNoteChip'
 
 interface PlayerSeatProps {
   player: SeatPlayer
@@ -252,6 +253,7 @@ export function PlayerSeat({
         ) : (
           <div className="player-name">{player.nickname}</div>
         )}
+        <StickyNoteChip note={player.stickyNote} />
       </div>
 
       {blindRole && (

@@ -110,6 +110,8 @@ export type C2SMessage =
   | { type: 'set_drink_capable'; capable: boolean }
   /** Secretly slip your mushroom into another seated player's next water. */
   | { type: 'spike_water'; targetId: string }
+  /** Stick a short word (max 10 characters) on a seated player's forehead for the rest of the hand. */
+  | { type: 'sticky_note'; targetId: string; text: string }
   /** Dev builds only (localhost server): force a fun effect on the sender or a target. */
   | { type: 'dev_fun'; action: DevFunAction; targetId?: string }
   | { type: 'companion_mute' }
@@ -144,7 +146,7 @@ export type S2CMessage =
 
 export type SessionEndedReason = 'kicked' | 'replaced' | 'name_taken'
 /** host_changed: a new host. ledger: someone rebought / the host moved chips. */
-export type NoticeKind = 'host_changed' | 'ledger'
+export type NoticeKind = 'host_changed' | 'ledger' | 'sticky_note'
 
 export const MAX_CHAT_LENGTH = 140
 const ALLOWED_CHAT_MESSAGE_RE = /\s+/g
@@ -406,6 +408,13 @@ export function parseC2S(raw: string): C2SMessage | null {
         return targetId && targetId.length <= 64 ? { type, targetId } : null
       }
 
+      case 'sticky_note': {
+        const targetId = typeof parsed.targetId === 'string' ? parsed.targetId.trim() : ''
+        // Only shape-check here: the room sanitizes and rejects with a friendly message.
+        const text = typeof parsed.text === 'string' && parsed.text.length <= 200 ? parsed.text : null
+        return targetId && targetId.length <= 64 && text !== null ? { type, targetId, text } : null
+      }
+
       case 'dev_fun': {
         const action = parsed.action
         const targetId = typeof parsed.targetId === 'string' ? parsed.targetId.trim().slice(0, 64) : undefined
@@ -517,7 +526,7 @@ export function parseS2C(raw: string): S2CMessage | null {
       case 'notice': {
         const message = typeof parsed.message === 'string' ? sanitizeText(parsed.message, 160) : ''
         const playerId = typeof parsed.playerId === 'string' ? parsed.playerId : undefined
-        return (parsed.kind === 'host_changed' || parsed.kind === 'ledger') && message
+        return (parsed.kind === 'host_changed' || parsed.kind === 'ledger' || parsed.kind === 'sticky_note') && message
           ? { type, kind: parsed.kind, message, ...(playerId ? { playerId } : {}) }
           : null
       }
