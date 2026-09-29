@@ -1,10 +1,21 @@
 import type { PlayerAvatarCelebration, PlayerAvatarIdleTell } from '@/lib/profile'
 import {
   getOpponentTableActionPose,
+  getPokerActionMotionProfile,
   getSeatedAvatarActionPose,
   type Vec3,
 } from './pokerActionPose'
 import type { ThreeActionCue } from './tableViewModel'
+import {
+  blendHandShape,
+  createAvatarHandsState,
+  createHandTarget,
+  getHandLab,
+  resetHandTarget,
+  type AvatarHandsState,
+  type HandShapeId,
+  type HandTarget,
+} from './avatarHands'
 import {
   CHIP_BONK_REACT_SECONDS,
   CHIP_FLICK_GESTURE_SECONDS,
@@ -69,6 +80,12 @@ export interface AvatarPose {
   handL: Vec3
   fingerCurlR: number
   fingerCurlL: number
+  /**
+   * Unsmoothed hand-shape targets (owned by the animator state; avatarHands
+   * springs every finger toward them, so they are not smoothed twice).
+   */
+  handShapeR: HandTarget
+  handShapeL: HandTarget
   bodyPosition: Vec3
   bodyRotation: Vec3
   /** 0..1 how far the player has lifted their hole cards to peek. */
@@ -81,6 +98,18 @@ export interface AvatarPose {
   elbowOut: number
   /** 0..1 elbows raised up and out (hands laced behind the head). */
   elbowUp: number
+  /**
+   * Hand frames: [weight, yaw, pitch, roll] relative to palm-down with the
+   * fingers toward the table. Yaw turns the fingers in toward the body's
+   * midline, pitch raises them, roll turns the palm toward the midline. Weight
+   * 0 leaves the hand in its natural relaxed frame (see avatarBodyArms).
+   */
+  frameR: number[]
+  frameL: number[]
+  /** 0..1 the hand is deliberately taking chips from the personal stack (no stack clearance). */
+  stackGrip: number
+  /** True when the pose was not smoothed (reduced motion, first frame): the arm solve must not smooth either. */
+  instant: boolean
 }
 
 export interface AvatarAnimatorInput {
@@ -170,12 +199,38 @@ export interface AvatarAnimatorState {
   reactionSince: number
   reactionKind: 0 | 1 | 2
   initialized: boolean
+  handTargetR: HandTarget
+  handTargetL: HandTarget
+  /** Finger springs (see avatarHands.ts). */
+  hands: AvatarHandsState
+  /** Breath cycle (0..1), and the slow stance / posture drifts that come and go. */
+  breathPhase: number
+  stance: number
+  stanceTarget: number
+  nextShiftAt: number
+  posture: number
+  postureTarget: number
+  nextPostureAt: number
+  /** Small body reactions (laugh, shrug, head shake, sigh, nod) between the big idles. */
+  nextMicroAt: number
+  microStartedAt: number
+  microKind: 0 | 1 | 2 | 3 | 4
+  /** Spring stiffness, eased toward its per-situation goal so a gesture never starts with a jolt. */
+  omega: number
+  /** Reused every frame (no per-frame allocation). */
+  smoothed: number[]
+  outPose: AvatarPose | null
+  targetPose: AvatarPose | null
 }
 
+/** Legacy finger curl that already corresponds to the relaxed hand shape. */
+const HAND_REST_CURL = 0.15
 const BONE_CHANNELS = ANIMATED_BONES.length * 3
 /** Channel index of bodyPosition in writeChannels (after bones, hands and fingers). */
 const BODY_CHANNEL_START = BONE_CHANNELS + 3 + 3 + 2
-const CHANNEL_COUNT = BONE_CHANNELS + 3 + 3 + 2 + 3 + 3 + 1 + 1 + 1 + 1 + 1
+const HAND_R_CHANNEL = BONE_CHANNELS
+const HAND_L_CHANNEL = BONE_CHANNELS + 3
+const CHANNEL_COUNT = BONE_CHANNELS + 3 + 3 + 2 + 3 + 3 + 1 + 1 + 1 + 1 + 1 + 8 + 1
 /** Wind-up, thrust + jab, a readable ~1.4s hold, and a relaxed return. */
 export const FLIP_OFF_SECONDS = 3.2
 const DRINK_SECONDS = 2.6
@@ -226,10 +281,29 @@ export function createAvatarAnimatorState(seedSource: string): AvatarAnimatorSta
     reactionSince: Number.NEGATIVE_INFINITY,
     reactionKind: 0,
     initialized: false,
+    handTargetR: createHandTarget(),
+    handTargetL: createHandTarget(),
+    hands: createAvatarHandsState(),
+    breathPhase: random(),
+    stance: 0,
+    stanceTarget: 0,
+    nextShiftAt: 2 + random() * 5,
+    posture: 0,
+    postureTarget: 0,
+    nextPostureAt: 4 + random() * 8,
+    nextMicroAt: 9 + random() * 22,
+    microStartedAt: Number.NEGATIVE_INFINITY,
+    microKind: 0,
+    omega: 9,
+    smoothed: new Array(CHANNEL_COUNT).fill(0),
+    outPose: null,
+    targetPose: null,
   }
 }
 
-function emptyPose(): AvatarPose {
+const NEUTRAL_HAND_TARGET = createHandTarget()
+
+function emptyPose(handShapeR: HandTarget = NEUTRAL_HAND_TARGET, handShapeL: HandTarget = NEUTRAL_HAND_TARGET): AvatarPose {
   const bones = {} as Record<AnimatedBone, Vec3>
   for (const bone of ANIMATED_BONES) bones[bone] = [0, 0, 0]
   return {
@@ -238,6 +312,8 @@ function emptyPose(): AvatarPose {
     handL: [0, 0, 0],
     fingerCurlR: 0,
     fingerCurlL: 0,
+    handShapeR,
+    handShapeL,
     bodyPosition: [0, 0, 0],
     bodyRotation: [0, 0, 0],
     cardLift: 0,
@@ -245,7 +321,27 @@ function emptyPose(): AvatarPose {
     middleFinger: 0,
     elbowOut: 0,
     elbowUp: 0,
+    frameR: [0, 0, 0, 0],
+    frameL: [0, 0, 0, 0],
+    stackGrip: 0,
+    instant: false,
   }
+}
+
+/**
+ * Blends a hand frame toward a gesture (`weight` 0 keeps it, 1 replaces it).
+ * Angles are weighted by how much of the frame each contributor owns, so a
+ * gesture never blends from the meaningless zeros of an unused frame.
+ */
+export function blendFrame(frame: number[], weight: number, yawIn: number, pitch: number, rollIn: number) {
+  const w = weight < 0 ? 0 : weight > 1 ? 1 : weight
+  if (w <= 0) return
+  const owned = frame[0]! * (1 - w)
+  const total = owned + w
+  frame[1] = (frame[1]! * owned + yawIn * w) / total
+  frame[2] = (frame[2]! * owned + pitch * w) / total
+  frame[3] = (frame[3]! * owned + rollIn * w) / total
+  frame[0] = total
 }
 
 /**
@@ -284,6 +380,18 @@ function blendTo(target: Vec3, goal: Vec3, weight: number) {
   target[2] += (goal[2] - target[2]) * w
 }
 
+type Side = 'R' | 'L'
+
+/** Crossfades a hand toward a named shape (see avatarHands). */
+function handShape(pose: AvatarPose, side: Side, id: HandShapeId, weight: number) {
+  blendHandShape(side === 'R' ? pose.handShapeR : pose.handShapeL, id, weight)
+}
+
+/** Blends a hand frame (yaw toward the midline, pitch up, roll palm-in) over the natural one. */
+function handFrame(pose: AvatarPose, side: Side, weight: number, yawIn: number, pitch: number, rollIn: number) {
+  blendFrame(side === 'R' ? pose.frameR : pose.frameL, weight, yawIn, pitch, rollIn)
+}
+
 function offset(base: Vec3, x: number, y: number, z: number): Vec3 {
   return [base[0] + x, base[1] + y, base[2] + z]
 }
@@ -295,8 +403,8 @@ function offset(base: Vec3, x: number, y: number, z: number): Vec3 {
  * opposite elbow. The chest anchor is measured in the upright rest pose; the
  * fold also sits back (bodyPosition) so the targets are pulled in to match.
  */
-const FOLD_HAND_R = (anchors: AvatarAnchors): Vec3 => offset(anchors.chest, -0.15, -0.2, 0.05)
-const FOLD_HAND_L = (anchors: AvatarAnchors): Vec3 => offset(anchors.chest, 0.15, -0.29, 0.1)
+const FOLD_HAND_R = (anchors: AvatarAnchors): Vec3 => offset(anchors.chest, -0.21, -0.2, 0.05)
+const FOLD_HAND_L = (anchors: AvatarAnchors): Vec3 => offset(anchors.chest, 0.21, -0.29, 0.1)
 
 /**
  * Wrist target for hands laced behind the head. The chin anchor sits in front
@@ -373,28 +481,28 @@ export function restingHands(anchors: AvatarAnchors, seed: number) {
   let curlL = 0.15
   if (style === 0) {
     // Hands together: fingertips nearly meeting in front of the chest.
-    rightX = 0.17
-    leftX = -0.175
+    rightX = 0.2
+    leftX = -0.205
     curlR = 0.2
     curlL = 0.18
   } else if (style === 1) {
     // Asymmetric: the right hand a little further out on the cushion.
-    rightX = 0.19
-    leftX = -0.15
+    rightX = 0.22
+    leftX = -0.19
     rightFwd = 0.05
     leftFwd = -0.02
     curlR = 0.13
     curlL = 0.2
   } else if (style === 2) {
     // Relaxed apart, each forearm on the cushion.
-    rightX = 0.21
-    leftX = -0.2
+    rightX = 0.24
+    leftX = -0.23
     curlR = 0.12
     curlL = 0.14
   } else {
     // Leaning on the left forearm, right hand out wide.
-    rightX = 0.24
-    leftX = -0.135
+    rightX = 0.26
+    leftX = -0.18
     rightFwd = -0.02
     leftFwd = 0.04
     curlR = 0.17
@@ -450,11 +558,41 @@ function getLivePeekWeights(state: AvatarAnimatorState, input: AvatarAnimatorInp
   return { reach, lift }
 }
 
+/** Zeroes a pooled pose in place (its arrays may have been swapped for fresh ones by a pose branch). */
+function resetPose(pose: AvatarPose, shapeR: HandTarget, shapeL: HandTarget): AvatarPose {
+  for (const bone of ANIMATED_BONES) pose.bones[bone].fill(0)
+  pose.handR.fill(0)
+  pose.handL.fill(0)
+  pose.fingerCurlR = 0
+  pose.fingerCurlL = 0
+  pose.handShapeR = shapeR
+  pose.handShapeL = shapeL
+  pose.bodyPosition.fill(0)
+  pose.bodyRotation.fill(0)
+  pose.cardLift = 0
+  pose.drinkLift = 0
+  pose.middleFinger = 0
+  pose.elbowOut = 0
+  pose.elbowUp = 0
+  pose.frameR.fill(0)
+  pose.frameL.fill(0)
+  pose.stackGrip = 0
+  pose.instant = false
+  return pose
+}
+
+/**
+ * Builds the unsmoothed target pose. Pass `out` to reuse a pooled pose object
+ * (the render loop does); without it a fresh pose is returned.
+ */
 export function computeAvatarTargetPose(
   state: AvatarAnimatorState,
-  input: AvatarAnimatorInput
+  input: AvatarAnimatorInput,
+  out?: AvatarPose
 ): AvatarPose {
-  const pose = emptyPose()
+  resetHandTarget(state.handTargetR)
+  resetHandTarget(state.handTargetL)
+  const pose = out ? resetPose(out, state.handTargetR, state.handTargetL) : emptyPose(state.handTargetR, state.handTargetL)
   const { bones } = pose
   const { time, anchors } = input
   const motion = input.reducedMotion ? 0 : 1
@@ -492,17 +630,55 @@ export function computeAvatarTargetPose(
   pose.fingerCurlR = rest.curlR
   pose.fingerCurlL = rest.curlL
 
-  // 2. Breathing and slow weight shifts keep every player alive.
-  const breath = Math.sin(time * 1.3 + seed * 20) * motion
-  add(bones.Chest, 0.018 * breath, 0, 0)
-  add(bones.ShoulderR, 0, 0, 0.025 * breath)
-  add(bones.ShoulderL, 0, 0, -0.025 * breath)
-  add(bones.Head, -0.012 * breath, 0, 0)
-  const shift = sway(time, seed) * motion
-  add(bones.Torso, 0, 0.04 * shift, 0.03 * shift)
-  add(bones.Head, 0, -0.025 * shift, -0.02 * shift)
-  pose.handR[1] += 0.01 * breath
-  pose.handL[1] += 0.01 * breath
+  // 2. Breathing, weight shifts and posture changes keep every player alive.
+  // The breath is a slow inhale and a longer exhale (not a sine), quicker and
+  // deeper the more the player is worked up.
+  const dt = Math.min(0.1, Math.max(0.0001, input.delta))
+  const arousal = clamp01(0.1 + 0.6 * input.tableHeat + (input.acting ? 0.25 : 0) + (input.winner ? 0.3 : 0) + (input.loser ? 0.15 : 0))
+  state.breathPhase = (state.breathPhase + dt * (0.21 + 0.05 * seed) * (1 + 0.8 * arousal)) % 1
+  const inhale = state.breathPhase < 0.4
+    ? smoothStep(state.breathPhase / 0.4)
+    : 1 - smoothStep((state.breathPhase - 0.4) / 0.6)
+  const breath = (inhale * 2 - 1) * motion
+  const depth = 1 + 0.9 * arousal
+  add(bones.Chest, 0.02 * breath * depth, 0, 0)
+  add(bones.Torso, 0.006 * breath * depth, 0, 0)
+  add(bones.ShoulderR, 0, 0, 0.03 * breath * depth)
+  add(bones.ShoulderL, 0, 0, -0.03 * breath * depth)
+  add(bones.Head, -0.012 * breath * depth, 0, 0)
+  add(bones.Neck, -0.006 * breath * depth, 0, 0)
+  const shift = sway(time, seed) * motion * 0.5
+  add(bones.Torso, 0, 0.02 * shift, 0.015 * shift)
+  add(bones.Head, 0, -0.012 * shift, -0.01 * shift)
+  pose.handR[1] += 0.008 * breath * depth
+  pose.handL[1] += 0.008 * breath * depth
+  // Every few seconds the weight goes onto the other hip (a slow lateral roll,
+  // the head levelling back against it), and now and then they settle back or
+  // lean onto their forearms. Eased over a second or so, never a pop.
+  if (time >= state.nextShiftAt) {
+    state.stanceTarget = (state.random() * 2 - 1) * 0.9
+    state.nextShiftAt = time + 6 + state.random() * 9
+  }
+  if (time >= state.nextPostureAt) {
+    const roll = state.random()
+    state.postureTarget = roll < 0.3 ? -0.9 : roll < 0.65 ? 0 : 0.75
+    state.nextPostureAt = time + 9 + state.random() * 14
+  }
+  state.stance += (state.stanceTarget - state.stance) * (1 - Math.exp(-dt / 0.6))
+  state.posture += (state.postureTarget - state.posture) * (1 - Math.exp(-dt / 0.9))
+  const settleBody = motion * (input.acting || input.cueActive ? 0.35 : 1)
+  const stance = state.stance * settleBody
+  const posture = state.posture * settleBody
+  add(bones.Torso, 0, 0.03 * stance, 0.045 * stance)
+  add(bones.Chest, 0, 0, -0.02 * stance)
+  add(bones.Head, 0, -0.015 * stance, -0.04 * stance)
+  add(bones.ShoulderR, 0, 0, -0.03 * stance)
+  add(bones.ShoulderL, 0, 0, -0.03 * stance)
+  pose.bodyPosition[0] += 0.02 * stance
+  add(bones.Chest, 0.06 * posture, 0, 0)
+  add(bones.Torso, 0.025 * posture, 0, 0)
+  add(bones.Head, -0.035 * posture, 0, 0)
+  pose.bodyPosition[2] -= 0.025 * posture
   // Resting hands are never frozen: a slow, small drift of each wrist on the
   // padding (out of step with each other), like thumbs idly moving.
   const drift = motion * 0.012
@@ -548,7 +724,10 @@ export function computeAvatarTargetPose(
   }
 
   // 4. Idle card peeks: reach to the cards, lift the corners, look down.
-  const canIdle = !input.acting && !input.cueActive && !input.folded && !input.winner && !input.loser && !input.passedOut
+  // Dev review switch: window.__animQuiet = true stops the random idles (peeks,
+  // big idles, fidgets, reactions) so a pose can be reviewed on its own.
+  const quiet = process.env.NODE_ENV !== 'production' && Boolean((globalThis as { __animQuiet?: boolean }).__animQuiet)
+  const canIdle = !quiet && !input.acting && !input.cueActive && !input.folded && !input.winner && !input.loser && !input.passedOut
   if (canIdle && input.hasCards && time >= state.nextPeekAt && !Number.isFinite(state.peekStartedAt)) {
     state.peekStartedAt = time
   }
@@ -562,9 +741,14 @@ export function computeAvatarTargetPose(
     const lifted = smoothStep((elapsed - 0.45) / 0.35) * peek
     add(bones.Chest, 0.09, 0.02, 0, peek)
     add(bones.Head, 0.26, 0.03, 0, peek)
-    blendTo(pose.handR, offset(anchors.cards, 0.1, 0.05 + 0.08 * lifted, 0.14), peek)
-    blendTo(pose.handL, offset(anchors.cards, -0.16, 0.06 + 0.04 * lifted, 0.2), peek * 0.85)
+    blendTo(pose.handR, offset(anchors.cards, 0.17, 0.09 + 0.08 * lifted, 0.14), peek)
+    blendTo(pose.handL, offset(anchors.cards, -0.22, 0.1 + 0.04 * lifted, 0.2), peek * 0.85)
     pose.fingerCurlR += 0.2 * peek
+    // Both hands cup the near corners, fingertips tucked under the edge.
+    handShape(pose, 'R', 'peek', peek)
+    handShape(pose, 'L', 'peek', peek * 0.85)
+    handFrame(pose, 'R', peek, 0, -0.14, 0.08)
+    handFrame(pose, 'L', peek * 0.85, 0, -0.14, 0.08)
     pose.cardLift = lifted
   }
 
@@ -580,12 +764,15 @@ export function computeAvatarTargetPose(
           add(bones.WristR, 0, 0.3 * Math.sin(circle), 0, window)
           add(bones.Head, 0.12, -0.08, 0, window)
           pose.fingerCurlR += 0.4 * window
+          handShape(pose, 'R', 'pinch', window)
+          handFrame(pose, 'R', window, 0.1, -0.3, 0.15)
           break
         }
         case 'table_drum': {
           const tap = Math.max(0, Math.sin(time * 16 + seed * 3))
-          pose.handR[1] += 0.05 * tap * window
-          add(bones.WristR, 0.35 * tap, 0, 0, window)
+          pose.handR[1] += 0.03 * tap * window
+          add(bones.WristR, 0.2 * tap, 0, 0, window)
+          pose.handShapeR.drum = Math.max(pose.handShapeR.drum, window)
           add(bones.Head, 0, 0.06 * Math.sin(time * 2), 0, window)
           break
         }
@@ -609,9 +796,9 @@ export function computeAvatarTargetPose(
     const w = envelope(phase, 1.7, 0.35, 0.55) * motion
     if (w > 0.001) {
       if (kind === 0) {
-        // Fingers drumming on the cushion.
-        pose.fingerCurlR += (0.12 + 0.18 * Math.abs(Math.sin(time * 9 + seed))) * w
-        pose.handR[1] += 0.015 * Math.max(0, Math.sin(time * 9 + seed)) * w
+        // Fingers drumming on the cushion, a ripple from index to pinky.
+        pose.handShapeR.drum = Math.max(pose.handShapeR.drum, w)
+        pose.handR[1] += 0.004 * Math.sin(time * 12.5 + seed) * w
       } else if (kind === 1) {
         // One hand lifts a touch and resettles a little further out on the
         // cushion (outward, so it never lands on the other hand).
@@ -633,6 +820,80 @@ export function computeAvatarTargetPose(
     }
   }
 
+  // 5c. Small body reactions between the big idles: a laugh, a shrug, a head
+  // shake, a sigh, a nod. Body language only (faces are the face rig's job).
+  if (canIdle && !Number.isFinite(state.peekStartedAt) && !Number.isFinite(state.bigIdleStartedAt) &&
+      !Number.isFinite(state.microStartedAt) && time >= state.nextMicroAt) {
+    state.microStartedAt = time
+    state.microKind = Math.floor(state.random() * 5) as 0 | 1 | 2 | 3 | 4
+  }
+  if (Number.isFinite(state.microStartedAt)) {
+    const elapsed = time - state.microStartedAt
+    const durations = [2.0, 1.7, 1.5, 2.4, 1.3] as const
+    const duration = durations[state.microKind]
+    const w = canIdle ? envelope(elapsed, duration, 0.28, 0.5) * motion : 0
+    if (elapsed > duration || !canIdle) {
+      state.microStartedAt = Number.NEGATIVE_INFINITY
+      state.nextMicroAt = time + 14 + state.random() * 26
+    }
+    if (w > 0.001) {
+      switch (state.microKind) {
+        case 0: { // laugh: head thrown back, chest heaving, shoulders bouncing, a hand to the belly
+          const bounce = Math.sin(elapsed * 15) * 0.5 + 0.5
+          add(bones.Head, -0.3, 0.05 * Math.sin(elapsed * 6), 0.1 * Math.sin(elapsed * 4.2), w)
+          add(bones.Chest, -0.12 + 0.07 * bounce, 0, 0, w)
+          add(bones.Neck, 0.04 * bounce, 0, 0, w)
+          add(bones.ShoulderR, 0, 0, 0.2 * bounce, w)
+          add(bones.ShoulderL, 0, 0, -0.2 * bounce, w)
+          pose.handR[1] += 0.03 * bounce * w
+          pose.handL[1] += 0.03 * bounce * w
+          pose.bodyPosition[1] += 0.02 * bounce * w
+          break
+        }
+        case 1: { // shrug: shoulders up round the ears, forearms and open palm-up hands lifted off the rail
+          const rise = smoothStep(elapsed / 0.3) * (1 - smoothStep((elapsed - 1.1) / 0.4))
+          add(bones.ShoulderR, 0, 0, 0.3, w * rise)
+          add(bones.ShoulderL, 0, 0, -0.3, w * rise)
+          add(bones.Head, 0.03, 0, 0.12, w)
+          add(bones.Chest, -0.04, 0, 0, w * rise)
+          add(pose.handR, 0.08, 0.17, 0.06, w * rise)
+          add(pose.handL, -0.08, 0.17, 0.06, w * rise)
+          handShape(pose, 'R', 'open', w * 0.9)
+          handShape(pose, 'L', 'open', w * 0.9)
+          pose.handShapeR.spread = Math.max(pose.handShapeR.spread, 0.25 * w)
+          pose.handShapeL.spread = Math.max(pose.handShapeL.spread, 0.25 * w)
+          handFrame(pose, 'R', w, -0.1, 0.5, 2.3)
+          handFrame(pose, 'L', w, -0.1, 0.5, 2.3)
+          break
+        }
+        case 2: { // head shake: a small no, decaying
+          const decay = Math.exp(-elapsed * 1.5)
+          add(bones.Head, 0.02, 0.3 * Math.sin(elapsed * 11) * decay, 0.03 * Math.sin(elapsed * 11 + 1), w)
+          add(bones.Neck, 0, 0.06 * Math.sin(elapsed * 11 - 0.4) * decay, 0, w)
+          add(bones.Chest, 0, 0.03 * Math.sin(elapsed * 11 - 0.9) * decay, 0, w)
+          break
+        }
+        case 3: { // sigh: a long breath in, shoulders up, then out and slump
+          const inn = envelope(elapsed, 1.0, 0.5, 0.4)
+          const out = smoothStep((elapsed - 1.0) / 0.7)
+          add(bones.Chest, -0.07 * inn + 0.05 * out, 0, 0, w)
+          add(bones.ShoulderR, 0, 0, 0.1 * inn - 0.07 * out, w)
+          add(bones.ShoulderL, 0, 0, -0.1 * inn + 0.07 * out, w)
+          add(bones.Head, -0.04 * inn + 0.05 * out, 0, 0, w)
+          pose.bodyPosition[1] -= 0.012 * out * w
+          break
+        }
+        default: { // nod, twice
+          const nod = Math.max(0, Math.sin(clamp01(elapsed / 1.0) * Math.PI * 2))
+          add(bones.Head, 0.15 * nod, 0, 0, w)
+          add(bones.Neck, 0.05 * nod, 0, 0, w)
+          add(bones.Chest, 0.02 * nod, 0, 0, w)
+          break
+        }
+      }
+    }
+  }
+
   // 6. Thinking while it's their turn: chin rest, chip riffle, or a lean-in stare.
   if (input.acting && !input.cueActive) {
     const think = smoothStep((time - state.actingSince) / 0.55)
@@ -643,8 +904,10 @@ export function computeAvatarTargetPose(
         add(bones.Head, 0.05, -0.06, 0.12, think)
         // Chin resting on a loose fist.
         blendTo(pose.handR, offset(anchors.chin, 0.02, -0.04 - 0.015 * tap, -0.04), think)
-        add(bones.WristR, -0.35, 0, 0, think)
         pose.fingerCurlR = pose.fingerCurlR * (1 - think) + 0.85 * think
+        handShape(pose, 'R', 'loose', think)
+        // Fingers curl toward the face, the knuckles under the chin.
+        handFrame(pose, 'R', think, 0.55, 1.0, 1.25)
         break
       case 1: {
         const riffle = Math.sin(time * 11 + seed * 3) * motion
@@ -653,6 +916,9 @@ export function computeAvatarTargetPose(
         blendTo(pose.handR, offset(anchors.railR, -0.06, 0.04 + 0.02 * Math.abs(riffle), -0.16), think)
         add(bones.WristR, 0.1, 0.35 * riffle, 0.2 * riffle, think)
         pose.fingerCurlR += (0.3 + 0.3 * tap) * think
+        // Thumb and fingers walking a chip.
+        handShape(pose, 'R', 'pinch', think)
+        handFrame(pose, 'R', think, 0.1, -0.3, 0.2)
         break
       }
       default: {
@@ -670,6 +936,11 @@ export function computeAvatarTargetPose(
         blendTo(pose.handL, offset(mid, -0.1, 0, 0), think)
         pose.fingerCurlR += 0.5 * think
         pose.fingerCurlL += 0.5 * think
+        handShape(pose, 'R', 'fist', think * 0.85)
+        handShape(pose, 'L', 'fist', think * 0.85)
+        // Fists side by side, knuckles up, thumbs on top.
+        handFrame(pose, 'R', think, 0.1, 0.1, 0.9)
+        handFrame(pose, 'L', think, 0.1, 0.1, 0.9)
         break
       }
     }
@@ -702,12 +973,19 @@ export function computeAvatarTargetPose(
     bones.Neck[0] += (0.1 - bones.Neck[0]) * reach
     bones.Head[0] += (0.26 + 0.05 * lift - bones.Head[0]) * reach
     add(bones.Head, 0, 0, 0.05 * Math.sin(time * 0.9 + seed), lift)
-    blendTo(pose.handR, offset(anchors.cards, 0.09, 0.03 + 0.085 * lift + wiggle, 0.13 - 0.035 * lift), reach)
-    blendTo(pose.handL, offset(anchors.cards, -0.09, 0.03 + 0.085 * lift - wiggle, 0.13 - 0.035 * lift), reach)
+    blendTo(pose.handR, offset(anchors.cards, 0.16, 0.07 + 0.085 * lift + wiggle, 0.13 - 0.035 * lift), reach)
+    blendTo(pose.handL, offset(anchors.cards, -0.16, 0.07 + 0.085 * lift - wiggle, 0.13 - 0.035 * lift), reach)
     add(bones.WristR, -0.35 * lift, 0, 0.2, reach)
     add(bones.WristL, -0.35 * lift, 0, -0.2, reach)
     pose.fingerCurlR = pose.fingerCurlR + (0.62 - pose.fingerCurlR) * reach
     pose.fingerCurlL = pose.fingerCurlL + (0.62 - pose.fingerCurlL) * reach
+    // Cupped round the near edge; lifting the corner tips the wrists back.
+    handShape(pose, 'R', 'peek', reach)
+    handShape(pose, 'L', 'peek', reach)
+    handShape(pose, 'R', 'card', lift * 0.7)
+    handShape(pose, 'L', 'card', lift * 0.7)
+    handFrame(pose, 'R', reach, 0.05, -0.12 + 0.28 * lift, 0.08)
+    handFrame(pose, 'L', reach, 0.05, -0.12 + 0.28 * lift, 0.08)
     pose.cardLift = Math.max(pose.cardLift, lift)
   }
 
@@ -728,9 +1006,14 @@ export function computeAvatarTargetPose(
         const tap = Math.max(0, Math.sin(clamp01((t - 0.2) / 0.14) * Math.PI), Math.sin(clamp01((t - 0.42) / 0.14) * Math.PI))
         const cock = smoothStep(t / 0.18) * (1 - smoothStep((t - 0.2) / 0.08))
         const lift = smoothStep((t - 0.58) / 0.2) * (1 - smoothStep((t - 0.8) / 0.2))
-        blendTo(pose.handR, offset(anchors.tap, 0, 0.12 + 0.05 * cock - 0.12 * tap + 0.06 * lift, 0.02 * lift), reach)
+        blendTo(pose.handR, offset(anchors.tap, 0, 0.12 + 0.05 * cock - 0.12 * tap + 0.06 * lift, 0.2 + 0.02 * lift), reach)
         add(bones.WristR, 0.55 * tap - 0.35 * cock - 0.2 * lift, 0, 0, reach)
         pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + reach
+        // Knuckle rap (a fist) or a two-finger tap, by the player's style; the
+        // hand dips toward the felt on each tap and cocks back between them.
+        const knuckles = getPokerActionMotionProfile('check', actionPoseOptions).checkStyle === 'knuckle'
+        handShape(pose, 'R', knuckles ? 'fist' : 'tap', reach)
+        handFrame(pose, 'R', reach, 0.05, -0.12 - 0.22 * tap + 0.16 * cock, 0)
         add(bones.Head, 0.1 * reach + 0.07 * tap, 0, 0)
         add(bones.Chest, 0.05 * tap, 0, 0)
         break
@@ -753,6 +1036,7 @@ export function computeAvatarTargetPose(
         const back = smoothStep((t - 0.86) / 0.14)
         const flick = pulse(t, 0.8, 0.05, 0.14) * motion
         const hold = reach * (1 - back)
+        pose.stackGrip = Math.max(pose.stackGrip, hold)
         const grabbed = offset(anchors.stack, 0, 0.04 + 0.08 * antic, 0.04)
         // Push a hand-length or two toward the bet line; the chips fly on.
         const toBetX = anchors.betSpot[0] - grabbed[0]
@@ -770,9 +1054,15 @@ export function computeAvatarTargetPose(
           // Flat hand behind the stack, palm down, fingers together.
           add(bones.WristR, -0.28, 0, 0, hold)
           pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + 0.1 * reach
+          handShape(pose, 'R', 'flat', hold)
+          handFrame(pose, 'R', hold, 0.04, 0.05 + 0.1 * push, 0)
         } else {
           add(bones.WristR, -0.2 * push - 0.45 * flick, 0, 0, hold)
           pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + (0.9 - 0.75 * release) * reach
+          // Claw round the chips to push them out, then fingers spring open on the release.
+          handShape(pose, 'R', 'grab', hold * (1 - release))
+          handShape(pose, 'R', 'open', hold * release * 0.55)
+          handFrame(pose, 'R', hold, 0.05, -0.08 + 0.22 * release, 0)
         }
         const twoHands = isCall ? 0 : smoothStep((big - 0.5) / 0.25)
         if (twoHands > 0) {
@@ -784,6 +1074,9 @@ export function computeAvatarTargetPose(
           ]
           blendTo(pose.handL, pathL, hold * twoHands)
           pose.fingerCurlL = pose.fingerCurlL * (1 - twoHands * reach) + 0.2 * twoHands * reach
+          handShape(pose, 'L', 'chipRest', hold * twoHands * (1 - release))
+          handShape(pose, 'L', 'flat', hold * twoHands * release)
+          handFrame(pose, 'L', hold * twoHands, -0.05, -0.05 + 0.15 * release, 0)
         }
         const drive = Math.sin(clamp01((t - 0.2) / 0.66) * Math.PI)
         const lean = isCall ? 0.12 : 0.16 + 0.2 * big
@@ -803,6 +1096,7 @@ export function computeAvatarTargetPose(
         // up — a brief defiant hold — then sit back.
         const gather = envelope(t, 0.3, 0.1, 0.12) * motion
         const grip = smoothStep((t - 0.06) / 0.16)
+        pose.stackGrip = Math.max(pose.stackGrip, grip * (1 - smoothStep((t - 0.84) / 0.16)))
         const shove = smoothStep((t - 0.22) / 0.32)
         const hold = smoothStep((t - 0.5) / 0.08)
         const settle = smoothStep((t - 0.84) / 0.16)
@@ -824,6 +1118,13 @@ export function computeAvatarTargetPose(
         add(bones.WristL, -0.25 * shove, 0, 0, 1 - settle)
         pose.fingerCurlR = pose.fingerCurlR * (1 - grip) + 0.35 * grip * (1 - settle)
         pose.fingerCurlL = pose.fingerCurlL * (1 - grip) + 0.35 * grip * (1 - settle)
+        // Hands spread wide around the stack, claw in, then flat to sweep it forward.
+        for (const side of ['R', 'L'] as const) {
+          handShape(pose, side, 'open', gather * 0.8)
+          handShape(pose, side, 'grab', grip * (1 - shove) * (1 - settle))
+          handShape(pose, side, 'flat', shove * (1 - settle))
+          handFrame(pose, side, grip * (1 - settle), 0.15, -0.05 + 0.1 * shove, 0)
+        }
         // Lunge with the shove, chin up and hold.
         add(bones.Chest, (0.34 * shove + 0.06 * slam) * (1 - settle), 0, 0)
         add(bones.Neck, -0.1 * hold * (1 - settle), 0, 0)
@@ -849,9 +1150,15 @@ export function computeAvatarTargetPose(
         blendTo(pose.handR, toward, flick * (1 - back))
         add(bones.WristR, 0.5 * cock - 0.75 * flick - 0.3 * follow, 0, 0.3 * flick, 1 - back)
         pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + (0.75 - 0.65 * flick) * reach
+        // Fingers pinch the cards' edge, then spring open on the toss.
+        handShape(pose, 'R', 'card', reach * (1 - flick) * (1 - back))
+        handShape(pose, 'R', 'flickSnap', flick * (1 - back) * 0.9)
+        handFrame(pose, 'R', reach * (1 - back), 0.1, -0.08 + 0.32 * cock - 0.42 * flick, 0.15)
         // Lean back into the folded-arms rest the fold state holds afterwards.
         blendTo(pose.handR, FOLD_HAND_R(anchors), back * 0.8)
         blendTo(pose.handL, FOLD_HAND_L(anchors), back * 0.8)
+        handShape(pose, 'R', 'loose', back * 0.5)
+        handShape(pose, 'L', 'loose', back * 0.5)
         add(bones.Chest, 0.08 * reach * (1 - back) + 0.04 * cock - 0.14 * back, -0.06 * back, 0)
         const disgust = clamp01((input.tableHeat - 0.2) / 0.4) * envelope(t - 0.5, 0.5, 0.08, 0.15) * motion
         add(bones.Head, 0.05 - 0.08 * back, -0.2 * back + 0.2 * Math.sin((t - 0.5) * 38) * disgust, 0.05 * back)
@@ -901,6 +1208,12 @@ export function computeAvatarTargetPose(
         add(bones.Head, -0.2, 0, 0, w)
         pose.fingerCurlR *= 1 - w
         pose.fingerCurlL *= 1 - w
+        // Fingers reaching for the ceiling, palms turned up and back: fingers
+        // together and gently extended (a wide splay reads as an OK sign).
+        handShape(pose, 'R', 'flat', w * 0.7)
+        handShape(pose, 'L', 'flat', w * 0.7)
+        handFrame(pose, 'R', w, -0.1, 1.3, 1.9)
+        handFrame(pose, 'L', w, -0.1, 1.3, 1.9)
         break
       }
       case 1: // lean back, hands laced behind the head, elbows up and out
@@ -912,6 +1225,8 @@ export function computeAvatarTargetPose(
         // Fingers loosely laced, not splayed, on the way up and back.
         pose.fingerCurlR = pose.fingerCurlR * (1 - w) + 0.5 * w
         pose.fingerCurlL = pose.fingerCurlL * (1 - w) + 0.5 * w
+        handShape(pose, 'R', 'grab', w * 0.85)
+        handShape(pose, 'L', 'grab', w * 0.85)
         add(bones.Chest, -0.22, 0, 0, w)
         add(bones.Head, -0.08, 0.05, 0, w)
         pose.bodyPosition[2] += 0.1 * w
@@ -927,6 +1242,11 @@ export function computeAvatarTargetPose(
         add(bones.WristL, 0, 0, 0.45 * pushOut, w)
         pose.fingerCurlR = pose.fingerCurlR * (1 - w) + 0.8 * w
         pose.fingerCurlL = pose.fingerCurlL * (1 - w) + 0.8 * w
+        // Fingers laced (claws pressed together), palms turning out as they push.
+        handShape(pose, 'R', 'grab', w)
+        handShape(pose, 'L', 'grab', w)
+        handFrame(pose, 'R', w, 0.05, 0.15, 1.35 - 1.1 * pushOut)
+        handFrame(pose, 'L', w, 0.05, 0.15, 1.35 - 1.1 * pushOut)
         add(bones.Chest, 0.06, 0, 0, w)
         break
       }
@@ -935,6 +1255,8 @@ export function computeAvatarTargetPose(
         blendTo(pose.handR, offset(anchors.stack, -0.12, 0.06, 0.06), w)
         add(bones.WristR, 0.2, 0.5 * spin, 0, w)
         pose.fingerCurlR = pose.fingerCurlR * (1 - w) + 0.5 * w
+        handShape(pose, 'R', 'pinch', w)
+        handFrame(pose, 'R', w, 0.1, -0.35, 0.2)
         add(bones.Head, 0.25, 0, 0, w)
         break
       }
@@ -955,6 +1277,11 @@ export function computeAvatarTargetPose(
       // Open for the clap, but never splayed stiff.
       pose.fingerCurlR += (0.15 - pose.fingerCurlR) * w
       pose.fingerCurlL += (0.15 - pose.fingerCurlL) * w
+      // Palms facing each other, fingers angled up.
+      handShape(pose, 'R', 'clap', w)
+      handShape(pose, 'L', 'clap', w)
+      handFrame(pose, 'R', w, 0.25, 0.65, 1.4)
+      handFrame(pose, 'L', w, 0.25, 0.65, 1.4)
     } else if (state.reactionKind === 1) {
       add(bones.Head, 0.12 * Math.sin((time - state.reactionSince) * 7), 0, 0, w)
     } else {
@@ -977,6 +1304,11 @@ export function computeAvatarTargetPose(
     blendTo(pose.handL, FOLD_HAND_L(anchors), settle)
     pose.fingerCurlR += (0.38 - pose.fingerCurlR) * settle
     pose.fingerCurlL += (0.38 - pose.fingerCurlL) * settle
+    // Hands tucked over the opposite arm: loosely curled, wrists turned in.
+    handShape(pose, 'R', 'loose', settle * 0.55)
+    handShape(pose, 'L', 'loose', settle * 0.55)
+    handFrame(pose, 'R', settle, 0.7, 0.1, 0.35)
+    handFrame(pose, 'L', settle, 0.7, 0.1, 0.35)
     pose.elbowOut = Math.max(pose.elbowOut, 0.55 * settle)
     pose.bodyPosition[2] += 0.08 * settle
   }
@@ -984,7 +1316,7 @@ export function computeAvatarTargetPose(
   // 9. Big bet elsewhere: hands off the rail, lean back — "whoa".
   const heatElapsed = time - state.heatSince
   const startle = envelope(heatElapsed, 1.4, 0.14, 0.8) * input.tableHeat * motion
-  if (startle > 0 && !input.acting && !input.cueActive) {
+  if (startle > 0 && !input.acting && !input.cueActive && !quiet) {
     add(bones.Chest, -0.16, 0, 0, startle)
     add(bones.Head, -0.14, 0, 0, startle)
     add(pose.handR, 0.06, 0.16, 0.12, startle)
@@ -992,6 +1324,11 @@ export function computeAvatarTargetPose(
     pose.bodyPosition[2] += 0.06 * startle
     pose.fingerCurlR = Math.max(Math.min(pose.fingerCurlR, 0.15), pose.fingerCurlR * (1 - 0.6 * startle))
     pose.fingerCurlL = Math.max(Math.min(pose.fingerCurlL, 0.15), pose.fingerCurlL * (1 - 0.6 * startle))
+    // Hands fly off the rail, fingers spread, palms out.
+    handShape(pose, 'R', 'open', startle * 0.7)
+    handShape(pose, 'L', 'open', startle * 0.7)
+    handFrame(pose, 'R', startle, -0.1, 0.35, 0.7)
+    handFrame(pose, 'L', startle, -0.1, 0.35, 0.7)
   }
 
   // 10. Lost the showdown: each loser reacts in their own time and way —
@@ -1006,6 +1343,9 @@ export function computeAvatarTargetPose(
       add(bones.Chest, 0.16 * settle, 0, 0)
       blendTo(pose.handR, offset(anchors.chin, 0.02, 0.2, -0.1), settle)
       pose.fingerCurlR = pose.fingerCurlR * (1 - settle) + 0.15 * settle
+      // Facepalm: the flat hand over the eyes, fingers up.
+      handShape(pose, 'R', 'flat', settle)
+      handFrame(pose, 'R', settle, 0.55, 1.35, 1.35)
     } else if (style === 1) {
       add(bones.Head, 0.08, 0.24 * shake, 0)
       add(bones.Chest, -0.12 * settle, 0, 0)
@@ -1024,6 +1364,11 @@ export function computeAvatarTargetPose(
       add(bones.WristL, 0, 0, 0.7 * shrug)
       pose.fingerCurlR *= 1 - shrug
       pose.fingerCurlL *= 1 - shrug
+      // Palms up and open: what can you do.
+      handShape(pose, 'R', 'open', shrug * 0.6)
+      handShape(pose, 'L', 'open', shrug * 0.6)
+      handFrame(pose, 'R', shrug, -0.1, 0.25, 2.7)
+      handFrame(pose, 'L', shrug, -0.1, 0.25, 2.7)
     }
     // Then a long exhale and a slump: shoulders rise on the sigh, drop, and
     // the whole body sinks into the chair.
@@ -1061,6 +1406,11 @@ export function computeAvatarTargetPose(
       add(bones.WristL, 0.3, 0, 0, rakeW)
       pose.fingerCurlR = pose.fingerCurlR * (1 - rakeW) + 0.5 * rakeW
       pose.fingerCurlL = pose.fingerCurlL * (1 - rakeW) + 0.5 * rakeW
+      // Raking arms: fingers hooked, palms drawing toward the body.
+      handShape(pose, 'R', 'chipRest', rakeW)
+      handShape(pose, 'L', 'chipRest', rakeW)
+      handFrame(pose, 'R', rakeW, -0.1, -0.12 - 0.2 * pull, 0)
+      handFrame(pose, 'L', rakeW, -0.1, -0.12 - 0.2 * pull, 0)
       add(bones.Chest, 0.24 * (1 - pull * 0.6), 0, 0, rakeW)
       // Eyes up and grinning at the table while the arms pull the pot in.
       add(bones.Head, -0.1, 0, 0, rakeW)
@@ -1091,6 +1441,13 @@ export function computeAvatarTargetPose(
         add(bones.Head, 0.06 * Math.sin(beat * 0.5) * up * motion, 0, 0)
         pose.fingerCurlR = 0.12 + 0.3 * lounge
         pose.fingerCurlL = 0.12 + 0.3 * lounge
+        // Open hands thrown up (palms toward the ceiling's far side), then laced behind the head.
+        handShape(pose, 'R', 'open', up * 0.9)
+        handShape(pose, 'L', 'open', up * 0.9)
+        handShape(pose, 'R', 'loose', lounge * 0.8)
+        handShape(pose, 'L', 'loose', lounge * 0.8)
+        handFrame(pose, 'R', up, -0.15, 1.25, 0.5)
+        handFrame(pose, 'L', up, -0.15, 1.25, 0.5)
         break
       }
       case 'fist_pump': {
@@ -1111,6 +1468,12 @@ export function computeAvatarTargetPose(
         add(bones.WristR, -0.3 * punch * pumping, 0, 0)
         pose.fingerCurlR = 1 - 0.6 * lounge
         pose.fingerCurlL = 0.6
+        handShape(pose, 'R', 'fist', pumping)
+        handShape(pose, 'R', 'loose', lounge * 0.8)
+        handShape(pose, 'L', 'fist', pumping * 0.6)
+        handShape(pose, 'L', 'loose', lounge * 0.8)
+        handFrame(pose, 'R', pumping, -0.1, 0.5, 0.9)
+        handFrame(pose, 'L', pumping * 0.6, 0.2, 0.2, 0.9)
         break
       }
       case 'slow_clap': {
@@ -1121,6 +1484,10 @@ export function computeAvatarTargetPose(
         add(bones.Head, 0.05 * clap, 0, 0, rise)
         pose.fingerCurlR = 0.12
         pose.fingerCurlL = 0.12
+        handShape(pose, 'R', 'clap', rise)
+        handShape(pose, 'L', 'clap', rise)
+        handFrame(pose, 'R', rise, 0.3, 0.7, 1.4)
+        handFrame(pose, 'L', rise, 0.3, 0.7, 1.4)
         break
       }
       case 'wave':
@@ -1131,6 +1498,8 @@ export function computeAvatarTargetPose(
         add(bones.WristR, 0, 0, 0.4 * wave, rise)
         add(bones.Head, 0, 0, -0.06 * wave, rise)
         pose.fingerCurlR = 0.06
+        handShape(pose, 'R', 'open', rise)
+        handFrame(pose, 'R', rise, -0.25, 1.2, 0.15)
         break
       }
     }
@@ -1174,8 +1543,11 @@ export function computeAvatarTargetPose(
   // 13. Drinking: grab the glass, lift it to the mouth, tip the head back, set it down.
   if (input.drinkElapsed !== null && input.drinkElapsed !== undefined && !input.passedOut) {
     const elapsed = input.drinkElapsed
-    const holding = envelope(elapsed, DRINK_SECONDS, 0.35, 0.35)
-    const lift = smoothStep((elapsed - 0.35) / 0.45) * smoothStep((DRINK_SECONDS - 0.4 - elapsed) / 0.45)
+    // One continuous motion: the ramps overlap (the hand is already rising
+    // toward the mouth while it closes on the glass, and starts back to the rail
+    // while the glass is still coming down), not grab, then lift, then tip.
+    const holding = smoothStep(elapsed / 0.55) * (1 - smoothStep((elapsed - (DRINK_SECONDS - 0.6)) / 0.55))
+    const lift = smoothStep((elapsed - 0.3) / 1.0) * (1 - smoothStep((elapsed - (DRINK_SECONDS - 1.25)) / 0.95))
     // The glass sits on the felt to the player's left, so the left hand takes
     // it (no arm across the body). Raised, the fist stays on its own side
     // just below and in front of the mouth; the renderer (placeDrinkProp)
@@ -1184,7 +1556,18 @@ export function computeAvatarTargetPose(
     blendTo(pose.handL, offset(anchors.chin, -0.1, -0.22, -0.02), lift)
     add(bones.Head, -0.3 * lift, 0, 0)
     add(bones.Chest, -0.08 * lift, 0, 0)
+    // The swallow (a small throat bob as the glass comes down) and a satisfied exhale.
+    const swallow = pulse(elapsed, DRINK_SECONDS - 0.95, 0.09, 0.28) * motion
+    const sigh = envelope(elapsed - (DRINK_SECONDS - 0.7), 0.9, 0.25, 0.4) * motion
+    add(bones.Neck, 0.06 * swallow, 0, 0)
+    add(bones.Head, 0.04 * swallow, 0, 0)
+    add(bones.Chest, -0.04 * sigh, 0, 0)
+    add(bones.ShoulderR, 0, 0, 0.05 * sigh)
+    add(bones.ShoulderL, 0, 0, -0.05 * sigh)
     pose.fingerCurlL = pose.fingerCurlL * (1 - holding) + 0.85 * holding
+    // Fingers wrap the glass, thumb up its side, the fist vertical.
+    handShape(pose, 'L', 'cup', holding)
+    handFrame(pose, 'L', holding, 0.05, 0.05 + 0.25 * lift, 1.35)
     pose.drinkLift = lift
   }
 
@@ -1273,6 +1656,9 @@ export function computeAvatarTargetPose(
     else pose.fingerCurlR = pose.fingerCurlR * (1 - w) + w
     // The finger goes up as the arm is thrown and drops as it comes back.
     pose.middleFinger = w * smoothStep((elapsed - 0.18) / 0.22) * smoothStep((FLIP_OFF_SECONDS - 0.45 - elapsed) / 0.35)
+    // A fist while the arm winds up, the middle finger rising out of it.
+    handShape(pose, left ? 'L' : 'R', 'fist', w)
+    handShape(pose, left ? 'L' : 'R', 'middle', pose.middleFinger)
     pose.bodyPosition[2] -= (0.05 * extend + 0.05 * jab) * w
   }
 
@@ -1301,6 +1687,9 @@ export function computeAvatarTargetPose(
     pose.bodyPosition[2] += 0.05 * tip - 0.05 * slam
     pose.handR[1] -= 0.04 * slam
     pose.fingerCurlR = pose.fingerCurlR * (1 - reach) + 0.9 * reach
+    // Fingers round the little glass.
+    handShape(pose, 'R', 'cup', reach)
+    handFrame(pose, 'R', reach, 0.05, 0.05 + 0.3 * lift, 1.3)
     // Brrr: a fast head shake, shoulders up around the ears, chin tucked.
     const buzz = Math.sin(e * 44) * motion
     add(bones.Head, 0.12 * shudder, 0.14 * buzz * shudder, 0.07 * Math.sin(e * 31) * shudder * motion)
@@ -1312,6 +1701,9 @@ export function computeAvatarTargetPose(
     const thump = Math.max(0, Math.sin((e - SHOT_SLAM_AT) * 14)) * motion
     blendTo(pose.handL, offset(anchors.chest, 0.06, -0.16, 0.06 - 0.03 * thump), shudder * 0.85)
     pose.fingerCurlL = pose.fingerCurlL * (1 - shudder) + 0.2 * shudder
+    // A flat hand thumping the chest.
+    handShape(pose, 'L', 'flat', shudder * 0.9)
+    handFrame(pose, 'L', shudder, 1.0, 0.2, 0.5)
     pose.drinkLift = Math.max(pose.drinkLift, tip)
     // Cheers: glass held high out over the table, a little clink bump, chin up.
     const raise = input.cheersRaise ?? 0
@@ -1343,6 +1735,11 @@ export function computeAvatarTargetPose(
     // down to the felt folds the hand into a wedge).
     add(bones.WristR, -0.3 * cock + 0.55 * snap, 0, 0, w)
     pose.fingerCurlR = pose.fingerCurlR * (1 - w) + (0.8 * (1 - snap) + 0.15 * snap) * w
+    // Index cocked behind the thumb, then it springs free with the snap.
+    handShape(pose, 'R', 'flickCock', w * (1 - snap))
+    handShape(pose, 'R', 'flickSnap', w * snap)
+    pose.handShapeR.speed = 1 + 1.6 * snap
+    handFrame(pose, 'R', w, 0.05, -0.22 + 0.15 * cock - 0.1 * snap, 0.1)
     blendAxis(bones.Head, 1, turn * 0.34, w)
     blendAxis(bones.Neck, 1, turn * 0.16, w)
     blendAxis(bones.Chest, 1, turn * 0.2, w)
@@ -1376,6 +1773,9 @@ export function computeAvatarTargetPose(
     aroundHead(pose.handR, rub, 1)
     pose.elbowUp = Math.max(pose.elbowUp, rub)
     pose.fingerCurlR = pose.fingerCurlR * (1 - rub) + 0.35 * rub
+    // Fingertips rubbing the sore spot, palm on the skull.
+    handShape(pose, 'R', 'rub', rub)
+    handFrame(pose, 'R', rub, 0.55, 1.0, 1.25)
     // Head bows into the rub, wincing side to side.
     add(bones.Head, 0.14 * rub, 0.06 * Math.sin(b * 5) * rub * motion, -0.08 * rub)
   }
@@ -1417,6 +1817,8 @@ export function computeAvatarTargetPose(
     aroundHead(pose.handR, rub, 1)
     pose.elbowUp = Math.max(pose.elbowUp, rub)
     pose.fingerCurlR = pose.fingerCurlR * (1 - rub) + 0.25 * rub
+    handShape(pose, 'R', 'rub', rub)
+    handFrame(pose, 'R', rub, 0.5, 1.15, 1.2)
     add(bones.Head, 0.12 * rub, -0.08 * rub, -0.1 * rub)
     add(bones.Chest, 0.05, 0, 0)
     add(bones.ShoulderR, 0, 0, 0.06 * rub)
@@ -1434,12 +1836,35 @@ export function computeAvatarTargetPose(
     add(bones.WristL, 0, -0.6 * turn, -0.4 * Math.cos(t) * motion, wonder)
     pose.fingerCurlR = pose.fingerCurlR * (1 - wonder) + 0.05 * wonder
     pose.fingerCurlL = pose.fingerCurlL * (1 - wonder) + 0.05 * wonder
+    // Fingers spread wide, palms turning toward the face in wonder.
+    handShape(pose, 'R', 'open', wonder * 0.9)
+    handShape(pose, 'L', 'open', wonder * 0.9)
+    pose.handShapeR.spread = wonder * 0.4
+    pose.handShapeL.spread = wonder * 0.4
+    handFrame(pose, 'R', wonder, -0.3, 0.9, 1.5 + 0.5 * turn)
+    handFrame(pose, 'L', wonder, -0.3, 0.9, 1.5 - 0.5 * turn)
     const swayX = Math.sin(time * 0.7 + seed * 3) * motion
     const swayZ = Math.cos(time * 0.55 + seed * 2) * motion
     add(bones.Head, 0.06 + 0.08 * Math.sin(time * 0.5) * motion, 0.14 * turn, 0.22 * swayX)
     add(bones.Torso, 0.04 * swayZ, 0.05 * swayX, 0.12 * swayX)
     add(bones.Chest, -0.04, 0, 0.06 * swayZ)
     pose.bodyPosition[0] += 0.03 * swayX
+  }
+
+  // Dev-only close-up rig (see getHandLab): hands held out in front of the chest.
+  const lab = getHandLab()
+  if (lab && !input.passedOut) {
+    const sep = lab.sep ?? 0.16
+    const forward = lab.forward ?? 0.5
+    const up = (lab.up ?? 0) - 0.05
+    pose.handR = offset(anchors.chest, sep, up, -forward)
+    pose.handL = offset(anchors.chest, -sep, up, -forward)
+    const frame = lab.frame ?? [0, 0, 0]
+    pose.frameR = [1, frame[0], frame[1], frame[2]]
+    pose.frameL = [1, frame[0], frame[1], frame[2]]
+    const wrist = lab.wrist ?? [0, 0, 0]
+    bones.WristR = [wrist[0], wrist[1], wrist[2]]
+    bones.WristL = [wrist[0], wrist[1], wrist[2]]
   }
 
   // Keep faces visible: clamp the stacked downward pitch of neck + head, and
@@ -1472,6 +1897,10 @@ export function computeAvatarTargetPose(
 
   pose.fingerCurlR = clamp01(pose.fingerCurlR)
   pose.fingerCurlL = clamp01(pose.fingerCurlL)
+  // The relaxed hand already carries the resting curl; only curl beyond it
+  // (a grip, a fist) is layered on top by the finger springs.
+  state.handTargetR.curl = clamp01((pose.fingerCurlR - HAND_REST_CURL) / (1 - HAND_REST_CURL))
+  state.handTargetL.curl = clamp01((pose.fingerCurlL - HAND_REST_CURL) / (1 - HAND_REST_CURL))
   return pose
 }
 
@@ -1483,38 +1912,76 @@ function writeChannels(pose: AvatarPose, out: number[]) {
     out[index++] = value[1]
     out[index++] = value[2]
   }
-  for (const value of [...pose.handR, ...pose.handL]) out[index++] = value
+  for (let axis = 0; axis < 3; axis += 1) out[index++] = pose.handR[axis]!
+  for (let axis = 0; axis < 3; axis += 1) out[index++] = pose.handL[axis]!
   out[index++] = pose.fingerCurlR
   out[index++] = pose.fingerCurlL
-  for (const value of [...pose.bodyPosition, ...pose.bodyRotation]) out[index++] = value
+  for (let axis = 0; axis < 3; axis += 1) out[index++] = pose.bodyPosition[axis]!
+  for (let axis = 0; axis < 3; axis += 1) out[index++] = pose.bodyRotation[axis]!
   out[index++] = pose.cardLift
   out[index++] = pose.drinkLift
   out[index++] = pose.middleFinger
   out[index++] = pose.elbowOut
   out[index++] = pose.elbowUp
+  out[index++] = pose.stackGrip
+  for (let axis = 0; axis < 4; axis += 1) out[index++] = pose.frameR[axis]!
+  for (let axis = 0; axis < 4; axis += 1) out[index++] = pose.frameL[axis]!
 }
 
-function readChannels(values: readonly number[]): AvatarPose {
-  const pose = emptyPose()
+function readChannels(values: readonly number[], state: AvatarAnimatorState): AvatarPose {
+  // Filled in place: the pose object (and its small arrays) belongs to the
+  // animator state and is reused every frame.
+  const pose = state.outPose ?? (state.outPose = emptyPose(state.handTargetR, state.handTargetL))
+  pose.handShapeR = state.handTargetR
+  pose.handShapeL = state.handTargetL
+  pose.instant = false
   let index = 0
   for (const bone of ANIMATED_BONES) {
-    pose.bones[bone] = [values[index++]!, values[index++]!, values[index++]!]
+    const rotation = pose.bones[bone]
+    rotation[0] = values[index++]!
+    rotation[1] = values[index++]!
+    rotation[2] = values[index++]!
   }
-  pose.handR = [values[index++]!, values[index++]!, values[index++]!]
-  pose.handL = [values[index++]!, values[index++]!, values[index++]!]
+  for (let axis = 0; axis < 3; axis += 1) pose.handR[axis] = values[index++]!
+  for (let axis = 0; axis < 3; axis += 1) pose.handL[axis] = values[index++]!
   pose.fingerCurlR = values[index++]!
   pose.fingerCurlL = values[index++]!
-  pose.bodyPosition = [values[index++]!, values[index++]!, values[index++]!]
-  pose.bodyRotation = [values[index++]!, values[index++]!, values[index++]!]
+  for (let axis = 0; axis < 3; axis += 1) pose.bodyPosition[axis] = values[index++]!
+  for (let axis = 0; axis < 3; axis += 1) pose.bodyRotation[axis] = values[index++]!
   pose.cardLift = values[index++]!
   pose.drinkLift = values[index++]!
   pose.middleFinger = values[index++]!
   pose.elbowOut = values[index++]!
   pose.elbowUp = values[index++]!
+  pose.stackGrip = values[index++]!
+  for (let axis = 0; axis < 4; axis += 1) pose.frameR[axis] = values[index++]!
+  for (let axis = 0; axis < 4; axis += 1) pose.frameL[axis] = values[index++]!
   return pose
 }
 
 const scratchTarget: number[] = new Array(CHANNEL_COUNT).fill(0)
+
+/** Caps the speed of the 3 spring channels starting at `start` (seat units per second). */
+function limitHandSpeed(springs: Spring[], values: number[], start: number, max: number, dt: number) {
+  const a = springs[start]!
+  const b = springs[start + 1]!
+  const c = springs[start + 2]!
+  const speed = Math.hypot(a.velocity, b.velocity, c.velocity)
+  if (speed <= max) return
+  const scale = max / speed
+  // Roll the position back by the clipped part of this step's travel so the
+  // hand really slows instead of only carrying less momentum next frame.
+  const excess = 1 - scale
+  a.value -= a.velocity * excess * dt
+  b.value -= b.velocity * excess * dt
+  c.value -= c.velocity * excess * dt
+  a.velocity *= scale
+  b.velocity *= scale
+  c.velocity *= scale
+  values[start] = a.value
+  values[start + 1] = b.value
+  values[start + 2] = c.value
+}
 
 /**
  * Advances the animator and returns the smoothed pose. Action cues use a stiff
@@ -1524,7 +1991,21 @@ export function updateAvatarAnimator(
   state: AvatarAnimatorState,
   input: AvatarAnimatorInput
 ): AvatarPose {
-  const target = computeAvatarTargetPose(state, input)
+  const profile = process.env.NODE_ENV !== 'production' ? (globalThis as { __animProf?: Record<string, number> }).__animProf : undefined
+  const started = profile ? performance.now() : 0
+  const pose = updateAvatarAnimatorInner(state, input)
+  if (profile) {
+    profile.anim = (profile.anim ?? 0) + performance.now() - started
+    profile.calls = (profile.calls ?? 0) + 1
+  }
+  return pose
+}
+
+function updateAvatarAnimatorInner(
+  state: AvatarAnimatorState,
+  input: AvatarAnimatorInput
+): AvatarPose {
+  const target = computeAvatarTargetPose(state, input, state.targetPose ?? (state.targetPose = emptyPose(state.handTargetR, state.handTargetL)))
   writeChannels(target, scratchTarget)
 
   if (input.reducedMotion || !state.initialized) {
@@ -1533,6 +2014,7 @@ export function updateAvatarAnimator(
       spring.velocity = 0
     })
     state.initialized = true
+    target.instant = true
     return target
   }
 
@@ -1544,13 +2026,20 @@ export function updateAvatarAnimator(
     (input.bonkElapsed !== null && input.bonkElapsed !== undefined)
   // The blackout lands fast (a bonk, not a slow sink).
   const bonking = input.passedOut && input.blackoutElapsed !== null && input.blackoutElapsed !== undefined && input.blackoutElapsed < 1.1
-  const omega = input.cueActive || bonking ? 18 : input.flipOff || prankActive ? 14 : input.winner ? 12 : input.passedOut ? 5 : 9
-
+  const omegaGoal = input.cueActive || bonking ? 16 : input.flipOff || prankActive ? 14 : input.winner ? 12 : input.passedOut ? 5 : 9
+  // Ease the stiffness itself toward its goal (about 0.14s): the cue's target
+  // and the spring never both jump in the same frame. A bonk / blackout needs
+  // its snap immediately.
   const dt = Math.min(0.1, Math.max(0.0001, input.delta))
+  if (bonking) state.omega = omegaGoal
+  else state.omega += (omegaGoal - state.omega) * (1 - Math.exp(-dt / 0.14))
+  const omega = state.omega
   const steps = Math.max(1, Math.ceil(dt / (1 / 120)))
   const h = dt / steps
-  const values: number[] = new Array(CHANNEL_COUNT)
-  state.springs.forEach((spring, index) => {
+  const values = state.smoothed
+  const springs = state.springs
+  for (let index = 0; index < springs.length; index += 1) {
+    const spring = springs[index]!
     const goal = scratchTarget[index]!
     // Spine and body settle with a little overshoot for weight; hands track tightly.
     const zeta = index < 6 || (index >= BODY_CHANNEL_START && index < BODY_CHANNEL_START + 3) ? 0.62 : 0.95
@@ -1564,6 +2053,12 @@ export function updateAvatarAnimator(
       spring.velocity = 0
     }
     values[index] = spring.value
-  })
-  return readChannels(values)
+  }
+  // A hand is a limb, not a projectile: cap how fast a wrist target may travel
+  // (a chin rest to the chips is a big move; the arm should swing there, not
+  // whip). Gestures that really are quick (flick-off, chip flick, shot) get more.
+  const handSpeedMax = input.flipOff || prankActive ? 9 : input.cueActive ? 5.5 : 4.2
+  limitHandSpeed(springs, values, HAND_R_CHANNEL, handSpeedMax, dt)
+  limitHandSpeed(springs, values, HAND_L_CHANNEL, handSpeedMax, dt)
+  return readChannels(values, state)
 }

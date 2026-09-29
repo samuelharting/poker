@@ -78,7 +78,7 @@ describe('animated WebGL desktop player presentation', () => {
     expect(renderer).toContain('function animateSeat')
     // Poses come from the spring-driven animator; hands reach targets with IK.
     expect(renderer).toContain('updateAvatarAnimator(seat.animator')
-    expect(renderer).toContain('solveSeatArms(seat, pose, flipOff?.target ?? null)')
+    expect(renderer).toContain('solveSeatArms(seat, pose, flipOff?.target ?? null, delta)')
     expect(renderer).toContain('getOpponentTableActionPose')
     expect(renderer).toContain('seat.cards.position.set')
     expect(renderer).toContain('seat.avatarMixer.update(reducedMotion ? 0 : delta)')

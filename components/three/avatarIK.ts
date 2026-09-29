@@ -139,8 +139,12 @@ export function getArmChain(upper?: THREE.Bone, lower?: THREE.Bone, hand?: THREE
  * `pole`. `weight` blends from the incoming animated pose to the solved pose.
  * Segment lengths are read from the live joints, so rig scale never matters.
  */
-export function solveArmIK(chain: ArmChain, target: THREE.Vector3, pole: THREE.Vector3, weight = 1) {
+export function solveArmIK(chain: ArmChain, target: THREE.Vector3, pole: THREE.Vector3, weight = 1, fresh = false) {
   if (weight <= 0.001) return
+  if (fresh) {
+    solveArmIKFresh(chain, target, pole, weight)
+    return
+  }
   const { upper, lower, hand } = chain
   upper.updateMatrixWorld(true)
   upper.getWorldPosition(shoulder)
@@ -168,4 +172,83 @@ export function solveArmIK(chain: ArmChain, target: THREE.Vector3, pole: THREE.V
   aimBoneAt(upper, lower, elbowTarget, weight)
   lower.updateMatrixWorld(true)
   aimBoneAt(lower, hand, clampedTarget, weight)
+}
+
+const parentPosition = new THREE.Vector3()
+const parentScale = new THREE.Vector3()
+const parentQ = new THREE.Quaternion()
+const swingLocal = new THREE.Quaternion()
+const swingVector = new THREE.Vector3()
+
+/**
+ * Rotates `bone` (whose matrixWorld is current) so its child joint at world
+ * `childPosition` points at `target`, working in the parent's frame:
+ * local' = (P^-1 swing P) * local, with no world-quaternion lookups.
+ */
+function aimFresh(bone: THREE.Object3D, childPosition: THREE.Vector3, target: THREE.Vector3, weight: number) {
+  boneWorld.setFromMatrixPosition(bone.matrixWorld)
+  currentDirection.subVectors(childPosition, boneWorld)
+  desiredDirection.subVectors(target, boneWorld)
+  if (currentDirection.lengthSq() < 1e-10 || desiredDirection.lengthSq() < 1e-10) return
+  currentDirection.normalize()
+  desiredDirection.normalize()
+  swing.setFromUnitVectors(currentDirection, desiredDirection)
+  if (weight < 1) swing.slerp(identityQuaternion, 1 - weight)
+  const parent = bone.parent
+  if (parent) {
+    parent.matrixWorld.decompose(parentPosition, parentQ, parentScale)
+    parentQ.invert()
+    swingVector.set(swing.x, swing.y, swing.z).applyQuaternion(parentQ)
+    swingLocal.set(swingVector.x, swingVector.y, swingVector.z, swing.w)
+    bone.quaternion.premultiply(swingLocal)
+  } else {
+    bone.quaternion.premultiply(swing)
+  }
+}
+
+/**
+ * solveArmIK for callers that guarantee every matrixWorld in the arm chain is
+ * current (the room updates the model just before): no parent-chain or subtree
+ * refreshes between the two aims, and one subtree update at the end.
+ */
+function solveArmIKFresh(chain: ArmChain, target: THREE.Vector3, pole: THREE.Vector3, weight: number) {
+  const { upper, lower, hand } = chain
+  shoulder.setFromMatrixPosition(upper.matrixWorld)
+  elbow.setFromMatrixPosition(lower.matrixWorld)
+  wrist.setFromMatrixPosition(hand.matrixWorld)
+  const a = shoulder.distanceTo(elbow)
+  const b = elbow.distanceTo(wrist)
+  if (a < 1e-5 || b < 1e-5) return
+
+  toTarget.subVectors(target, shoulder)
+  const reach = Math.max(Math.abs(a - b) + 1e-3, Math.min(toTarget.length(), (a + b) * ARM_MAX_EXTENSION))
+  toTarget.normalize()
+  clampedTarget.copy(shoulder).addScaledVector(toTarget, reach)
+
+  const along = (a * a - b * b + reach * reach) / (2 * reach)
+  const height = Math.sqrt(Math.max(0, a * a - along * along))
+  bendAxis.subVectors(pole, shoulder)
+  bendAxis.addScaledVector(toTarget, -bendAxis.dot(toTarget))
+  if (bendAxis.lengthSq() < 1e-8) bendAxis.set(0, -1, 0)
+  bendAxis.normalize()
+  elbowTarget.copy(shoulder).addScaledVector(toTarget, along).addScaledVector(bendAxis, height)
+
+  aimFresh(upper, elbow, elbowTarget, weight)
+  // Only the upper arm and the elbow joint move for the second aim.
+  upper.updateMatrix()
+  upper.matrixWorld.multiplyMatrices(upper.parent!.matrixWorld, upper.matrix)
+  lower.matrixWorld.multiplyMatrices(upper.matrixWorld, lower.matrix)
+  elbow.setFromMatrixPosition(lower.matrixWorld)
+  wrist.copy(hand.position).applyMatrix4(lower.matrixWorld)
+  aimFresh(lower, wrist, clampedTarget, weight)
+  // Only the forearm and hand matrices are refreshed (callers that need the
+  // fingers' world matrices update them; the renderer refreshes the rest).
+  updateWorldOf(lower, upper)
+  updateWorldOf(hand, lower)
+}
+
+/** Recomputes one bone's local and world matrix from its (already current) parent. */
+export function updateWorldOf(bone: THREE.Object3D, parent: THREE.Object3D) {
+  bone.updateMatrix()
+  bone.matrixWorld.multiplyMatrices(parent.matrixWorld, bone.matrix)
 }

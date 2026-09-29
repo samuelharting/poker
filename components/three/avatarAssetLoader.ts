@@ -251,6 +251,7 @@ function createAvatarAssetTemplate(
   gltf: GLTF
 ): AvatarAssetTemplate {
   validateAvatarScene(modelKey, gltf.scene)
+  stripFingerTracks(gltf.animations)
 
   return {
     modelKey,
@@ -259,6 +260,21 @@ function createAvatarAssetTemplate(
     scene: gltf.scene,
     animations: gltf.animations,
     clips: getAvatarClipSet(gltf.animations),
+  }
+}
+
+const FINGER_TRACK_PATTERN = /^(Thumb|Index|Middle|Ring|Pinky)\d[LR]\./
+
+/**
+ * The stock idle clip animates a few finger bones (one hand more than the
+ * other). The procedural hands (avatarHands.ts) own every finger bone, so the
+ * clip must not fight them.
+ */
+export function stripFingerTracks(animations: readonly THREE.AnimationClip[]) {
+  for (const clip of animations) {
+    if (clip.tracks.some(track => FINGER_TRACK_PATTERN.test(track.name))) {
+      clip.tracks = clip.tracks.filter(track => !FINGER_TRACK_PATTERN.test(track.name))
+    }
   }
 }
 

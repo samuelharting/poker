@@ -327,6 +327,9 @@ function createHeadAccessories(
   // Pieces are modelled facing +Z; heads that face -Z get the group turned.
   const glassesGroup = createGlasses(glasses, calibration, fit, materials)
   const hatGroup = createHat(hat, calibration, fit, materials)
+  // Tagged so the secondary-motion spring (avatarBodySecondary) can find the
+  // hat even after its meshes are baked into merged meshes.
+  hatGroup.userData.accessoryKind = 'hat'
   if (calibration.front < 0) {
     for (const piece of [glassesGroup, hatGroup]) {
       piece.position.z *= -1
@@ -353,8 +356,11 @@ function createGlasses(
     metalness: 0.78,
   })
   const lens = standardMaterial(style === 'shades' ? '#071014' : '#273b42', {
-    roughness: 0.12,
-    metalness: 0.18,
+    // Matte-ish on purpose: a mirror-smooth lens catches a small hard specular
+    // that blinks on and off as the head turns (a mint blob on round frames).
+    roughness: 0.6,
+    metalness: 0,
+    envMapIntensity: 0.35,
     transparent: true,
     opacity: style === 'shades' ? 0.92 : 0.3,
   })
