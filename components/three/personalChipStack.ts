@@ -188,6 +188,8 @@ export class PersonalChipStack {
   private readonly slotKey: string[]
   private readonly targets: THREE.Vector3[]
   private readonly yaw: Float32Array
+  /** Per-chip lean (radians, x then z): a stack of loose chips is never perfectly plumb. */
+  private readonly tilt: Float32Array
   private readonly landed: Uint8Array
   layout: PersonalStackLayout = { tier: 'empty', ratio: 0, columns: [], total: 0 }
   private layoutSignature = ''
@@ -210,6 +212,12 @@ export class PersonalChipStack {
     this.slotKey = Array.from({ length: count }, () => '')
     this.targets = chips.map(() => new THREE.Vector3())
     this.yaw = new Float32Array(count)
+    this.tilt = new Float32Array(count * 2)
+    for (let index = 0; index < count * 2; index += 1) {
+      // A deterministic hash (not the seeded stream above, which other layout code depends on).
+      const value = Math.sin((index + 1) * 12.9898 + seed * 78.233) * 43758.5453
+      this.tilt[index] = ((value - Math.floor(value)) * 2 - 1) * 0.022
+    }
     let random = seed * 9301 + 49297
     const next = () => {
       random = (random * 9301 + 49297) % 233280
@@ -404,7 +412,7 @@ export class PersonalChipStack {
       }
       chip.visible = true
       chip.position.copy(this.targets[index]!)
-      chip.rotation.set(0, this.yaw[index]!, 0)
+      chip.rotation.set(this.tilt[index * 2]!, this.yaw[index]!, this.tilt[index * 2 + 1]!)
       chip.scale.setScalar(1)
       chip.userData.glow = 0
     })
@@ -450,7 +458,7 @@ export class PersonalChipStack {
         } else {
           const q = Math.min(1, (elapsed - FALL_SECONDS) / BOUNCE_SECONDS)
           chip.position.set(target.x, target.y + Math.sin(q * Math.PI) * 0.022, target.z)
-          chip.rotation.set(0, this.yaw[index]!, 0)
+          chip.rotation.set(this.tilt[index * 2]!, this.yaw[index]!, this.tilt[index * 2 + 1]!)
           if (!this.landed[index]) {
             this.landed[index] = 1
             // A glint on the new top of each column as it lands.
@@ -482,7 +490,7 @@ export class PersonalChipStack {
         chip.visible = true
         chip.scale.setScalar(1)
         chip.position.lerp(target, glide)
-        chip.rotation.set(0, this.yaw[index]!, 0)
+        chip.rotation.set(this.tilt[index * 2]!, this.yaw[index]!, this.tilt[index * 2 + 1]!)
       }
       if (glinting && state !== LEAVING) {
         const level = Number(chip.userData.level ?? 0)

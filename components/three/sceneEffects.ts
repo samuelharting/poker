@@ -13,66 +13,197 @@ export interface LightCone {
   material: THREE.ShaderMaterial
 }
 
-/** A soft additive cone from the overhead lamp down to the felt. */
-export function createLightCone(scene: THREE.Scene, apex: THREE.Vector3, baseY: number, baseRadius: number): LightCone {
-  const height = apex.y - baseY
-  const geometry = new THREE.CylinderGeometry(0.35, baseRadius, height, 48, 1, true)
-  geometry.translate(0, -height / 2, 0)
-  const material = new THREE.ShaderMaterial({
+const HAZE_VERTEX = /* glsl */ `
+  varying float vHeight;
+  varying vec3 vNormal;
+  varying vec3 vView;
+  varying float vAngle;
+  void main() {
+    vHeight = position.y;
+    vAngle = atan(position.x, position.z);
+    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    vNormal = normalize(normalMatrix * normal);
+    vView = normalize(-mv.xyz);
+    gl_Position = projectionMatrix * mv;
+  }
+`
+
+const HAZE_FRAGMENT = /* glsl */ `
+  uniform vec3 color;
+  uniform float intensity;
+  uniform float height;
+  uniform float time;
+  uniform float seed;
+  varying float vHeight;
+  varying vec3 vNormal;
+  varying vec3 vView;
+  varying float vAngle;
+  void main() {
+    float along = clamp(-vHeight / height, 0.0, 1.0);
+    float facing = abs(dot(vNormal, vView));
+    float edge = smoothstep(0.0, 0.65, facing);
+    // Fades out well above the felt so the cone never washes the board cards.
+    float fade = smoothstep(0.0, 0.25, along) * (1.0 - smoothstep(0.45, 0.9, along));
+    // Shafts: slow angular streaks, as if dust and smoke were catching the beam unevenly.
+    float streak = 0.72
+      + 0.16 * sin(vAngle * 9.0 + seed + time * 0.11 + along * 2.0)
+      + 0.12 * sin(vAngle * 17.0 - seed * 1.7 - time * 0.07);
+    gl_FragColor = vec4(color * intensity * edge * fade * streak, 1.0);
+  }
+`
+
+function createHazeMaterial(intensity: number, height: number, seed: number) {
+  return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
     blending: THREE.AdditiveBlending,
     uniforms: {
       color: { value: new THREE.Color('#ffe2b0') },
-      intensity: { value: 0.06 },
+      intensity: { value: intensity },
       height: { value: height },
+      time: { value: 0 },
+      seed: { value: seed },
     },
+    vertexShader: HAZE_VERTEX,
+    fragmentShader: HAZE_FRAGMENT,
+  })
+}
+
+/** Slow dust motes drifting through the beams: one Points draw, animated entirely in the vertex shader. */
+function createDustMotes(height: number, centres: ReadonlyArray<readonly [number, number, number]>) {
+  const count = 56
+  const positions = new Float32Array(count * 3)
+  const phases = new Float32Array(count * 3)
+  let seed = 0xd057
+  const random = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0
+    return seed / 0x100000000
+  }
+  for (let index = 0; index < count; index += 1) {
+    const [cx, cy, cz] = centres[index % centres.length]!
+    const along = 0.12 + random() * 0.7
+    const spread = 0.35 + along * 1.6
+    const angle = random() * Math.PI * 2
+    const radius = Math.sqrt(random()) * spread
+    positions[index * 3] = cx + Math.cos(angle) * radius
+    positions[index * 3 + 1] = cy - along * height
+    positions[index * 3 + 2] = cz + Math.sin(angle) * radius
+    phases[index * 3] = random() * Math.PI * 2
+    phases[index * 3 + 1] = 0.05 + random() * 0.09
+    phases[index * 3 + 2] = 0.5 + random() * 1.4
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  geometry.setAttribute('phase', new THREE.BufferAttribute(phases, 3))
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: { time: { value: 0 }, span: { value: height * 0.8 } },
     vertexShader: /* glsl */ `
-      varying float vHeight;
-      varying vec3 vNormal;
-      varying vec3 vView;
+      attribute vec3 phase;
+      uniform float time;
+      uniform float span;
+      varying float vAlpha;
       void main() {
-        vHeight = position.y;
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        vNormal = normalize(normalMatrix * normal);
-        vView = normalize(-mv.xyz);
+        vec3 p = position;
+        // Rise slowly and wrap; sway sideways.
+        p.y += mod(time * phase.y * 1.6 + phase.x * 3.0, span) - span * 0.5;
+        p.x += sin(time * 0.31 * phase.z + phase.x) * 0.22;
+        p.z += cos(time * 0.27 * phase.z + phase.x * 1.7) * 0.22;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
         gl_Position = projectionMatrix * mv;
+        gl_PointSize = clamp(26.0 / max(0.5, -mv.z), 1.0, 2.6);
+        vAlpha = 0.45 + 0.55 * sin(time * (0.6 + phase.z * 0.5) + phase.x * 5.0) * sin(time * 0.37 + phase.x);
       }
     `,
     fragmentShader: /* glsl */ `
-      uniform vec3 color;
-      uniform float intensity;
-      uniform float height;
-      varying float vHeight;
-      varying vec3 vNormal;
-      varying vec3 vView;
+      varying float vAlpha;
       void main() {
-        float along = clamp(-vHeight / height, 0.0, 1.0);
-        float facing = abs(dot(vNormal, vView));
-        float edge = smoothstep(0.0, 0.65, facing);
-        // Fades out well above the felt so the cone never washes the board cards.
-        float fade = smoothstep(0.0, 0.25, along) * (1.0 - smoothstep(0.45, 0.9, along));
-        gl_FragColor = vec4(color * intensity * edge * fade, 1.0);
+        float d = length(gl_PointCoord - 0.5) * 2.0;
+        float a = smoothstep(1.0, 0.1, d) * max(vAlpha, 0.0);
+        gl_FragColor = vec4(vec3(1.0, 0.86, 0.6) * a * 0.32, 1.0);
       }
     `,
   })
+  const points = new THREE.Points(geometry, material)
+  points.name = 'dust-motes'
+  points.frustumCulled = false
+  points.renderOrder = 6
+  return points
+}
+
+/**
+ * A soft additive cone from the overhead lamp down to the felt, with two
+ * thinner beams under the pendant shades and a scatter of dust motes drifting
+ * through all three. The hazes are children of the main cone, so they share
+ * its placement, animation and disposal.
+ */
+export function createLightCone(scene: THREE.Scene, apex: THREE.Vector3, baseY: number, baseRadius: number): LightCone {
+  const height = apex.y - baseY
+  const geometry = new THREE.CylinderGeometry(0.35, baseRadius, height, 48, 1, true)
+  geometry.translate(0, -height / 2, 0)
+  const material = createHazeMaterial(0.06, height, 0)
   const mesh = new THREE.Mesh(geometry, material)
   mesh.name = 'light-cone'
   mesh.position.copy(apex)
   mesh.renderOrder = 5
+
+  // Pendant beams: the two lamps at x = +-2.6 (see createPendantLamp).
+  const pendantHeight = 7.0 - baseY
+  const pendantGeometry = new THREE.CylinderGeometry(0.5, 1.45, pendantHeight, 32, 1, true)
+  pendantGeometry.translate(0, -pendantHeight / 2, 0)
+  const hazes: THREE.ShaderMaterial[] = [material]
+  const pendantOffsets: Array<readonly [number, number, number]> = []
+  for (const [side, seed] of [[-1, 1.7], [1, 4.1]] as const) {
+    const pendantMaterial = createHazeMaterial(0.03, pendantHeight, seed)
+    // Far wall of the cone only: half the overdraw, same look from outside.
+    pendantMaterial.side = THREE.BackSide
+    const beam = new THREE.Mesh(pendantGeometry, pendantMaterial)
+    beam.name = 'pendant-haze'
+    beam.position.set(side * 2.6 - apex.x, 7.0 - apex.y, -0.4 - apex.z)
+    beam.renderOrder = 5
+    mesh.add(beam)
+    hazes.push(pendantMaterial)
+    pendantOffsets.push([beam.position.x, beam.position.y, beam.position.z])
+  }
+  const motes = createDustMotes(height, [[0, 0, 0], ...pendantOffsets])
+  mesh.add(motes)
+  mesh.userData.hazes = hazes
+  mesh.userData.motes = motes.material
   scene.add(mesh)
 
   return { mesh, material }
 }
 
 export function animateLightCone(cone: LightCone, time: number, reducedMotion: boolean, boost: number) {
-  cone.material.uniforms.intensity!.value = 0.032 + boost * 0.018 + (reducedMotion ? 0 : Math.sin(time * 0.7) * 0.004)
+  const intensity = 0.032 + boost * 0.018 + (reducedMotion ? 0 : Math.sin(time * 0.7) * 0.004)
+  cone.material.uniforms.intensity!.value = intensity
+  const hazes = cone.mesh.userData.hazes as THREE.ShaderMaterial[] | undefined
+  const drift = reducedMotion ? 0 : time
+  if (hazes) {
+    for (let index = 0; index < hazes.length; index += 1) {
+      const haze = hazes[index]!
+      haze.uniforms.time!.value = drift
+      // Pendant beams ride at about half the main cone's strength.
+      if (index > 0) haze.uniforms.intensity!.value = intensity * 0.5
+    }
+  }
+  const motes = cone.mesh.userData.motes as THREE.ShaderMaterial | undefined
+  if (motes) motes.uniforms.time!.value = drift
 }
 
 export function disposeLightCone(cone: LightCone) {
   cone.mesh.removeFromParent()
-  cone.mesh.geometry.dispose()
+  const seen = new Set<THREE.BufferGeometry>()
+  cone.mesh.traverse(object => {
+    const mesh = object as THREE.Mesh
+    if (!mesh.geometry || seen.has(mesh.geometry)) return
+    seen.add(mesh.geometry)
+    mesh.geometry.dispose()
+    ;(mesh.material as THREE.Material).dispose()
+  })
   cone.material.dispose()
 }
 

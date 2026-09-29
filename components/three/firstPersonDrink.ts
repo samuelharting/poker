@@ -38,10 +38,10 @@ const GLASS_RADIUS: Record<DrinkKind, number> = { beer: 0.1, water: 0.075 }
 
 // Rim positions in camera space (camera looks down -Z).
 // Rises left of the action tray, sips low and off-centre so the board stays readable.
-const OFF_SCREEN = new THREE.Vector3(0.3, -0.72, -0.62)
+const OFF_SCREEN = new THREE.Vector3(0.28, -0.6, -0.64)
 // Held low and to the right: the board and the pot stay readable over it.
-const HOLD = new THREE.Vector3(0.22, -0.22, -0.7)
-const MOUTH = new THREE.Vector3(0.1, -0.34, -0.5)
+const HOLD = new THREE.Vector3(0.14, -0.08, -0.72)
+const MOUTH = new THREE.Vector3(0.06, -0.16, -0.52)
 /** After the last gulp the glass goes straight down and out, no bob back up. */
 const LOWER_SECONDS = 0.5
 const MOUTH_TIP = 1.95
@@ -99,7 +99,7 @@ function buildModel(drink: FirstPersonDrink, kind: DrinkKind, skinColor: string,
   drink.kind = kind
   drink.colorKey = `${kind}|${skinColor}|${sleeveColor}`
 
-  const prop = createDrinkProp(kind)
+  const prop = createDrinkProp(kind, { firstPerson: true })
   prop.group.visible = true
   // Rim at the origin: tipping the root pivots the glass at the lips.
   prop.group.position.y = -RIM_OFFSET[kind]

@@ -41,37 +41,133 @@ function roundedCardShape(width: number, depth: number, radius: number) {
 }
 
 let sharedGeometry: {
-  face: THREE.ShapeGeometry
-  back: THREE.ShapeGeometry
-  edge: THREE.ExtrudeGeometry
+  face: THREE.BufferGeometry
+  back: THREE.BufferGeometry
+  edge: THREE.BufferGeometry
 } | null = null
 
-/** Unit card geometry (width 1). Callers scale the group to the size they need. */
+/**
+ * Real stock is never perfectly flat: it bows across its width, curls a little
+ * along its length and picks up a slight twist. Unit-card space, always >= 0 so
+ * a card lying on the felt never dips into it (the lowest corner just touches).
+ */
+const CARD_BEND_ACROSS = 0.011
+const CARD_BEND_ALONG = 0.004
+const CARD_BEND_TWIST = 0.007
+
+function cardBend(x: number, z: number, depth: number) {
+  const u = x * 2
+  const v = (z * 2) / depth
+  return CARD_BEND_ACROSS * u * u + CARD_BEND_ALONG * v * v + CARD_BEND_TWIST * (u * v + 1) * 0.5
+}
+
+/**
+ * Unit card geometry (width 1). Callers scale the group to the size they need.
+ * The faces are a gridded rounded rectangle (not a two-triangle plate) so they
+ * can hold a bend; the edge band follows the same bent outline.
+ */
 function getCardGeometry() {
   if (sharedGeometry) return sharedGeometry
   const depth = 88 / 63
-  const shape = roundedCardShape(1, depth, 0.07)
+  const radius = 0.085
+  const arcSegments = 6
+  const columns = 10
+  const interiorRows = 14
+  const half = { x: 0.5, y: depth / 2 }
+  const faceY = CARD_THICKNESS / 2 + 0.0005
 
-  const face = new THREE.ShapeGeometry(shape, 6)
-  const uv = face.getAttribute('uv')
-  const position = face.getAttribute('position')
-  for (let index = 0; index < position.count; index += 1) {
-    uv.setXY(index, position.getX(index) + 0.5, position.getY(index) / depth + 0.5)
+  // Row list (shape-space y, half-extent in x): a quarter-circle run at each
+  // end so the corners are truly rounded, uniform rows in between.
+  const rows: Array<{ y: number; span: number }> = []
+  for (let step = 0; step <= arcSegments; step += 1) {
+    const angle = (step / arcSegments) * (Math.PI / 2)
+    rows.push({ y: -half.y + radius * (1 - Math.cos(angle)), span: half.x - radius * (1 - Math.sin(angle)) })
   }
-  face.rotateX(-Math.PI / 2)
-  face.translate(0, CARD_THICKNESS / 2 + 0.0005, 0)
+  for (let row = 1; row <= interiorRows; row += 1) {
+    const t = row / (interiorRows + 1)
+    rows.push({ y: -half.y + radius + t * (depth - radius * 2), span: half.x })
+  }
+  for (let step = arcSegments; step >= 0; step -= 1) {
+    const angle = (step / arcSegments) * (Math.PI / 2)
+    rows.push({ y: half.y - radius * (1 - Math.cos(angle)), span: half.x - radius * (1 - Math.sin(angle)) })
+  }
+  const stride = columns + 1
 
-  const back = face.clone()
-  back.rotateZ(Math.PI)
-  back.translate(0, 0, 0)
+  const buildFace = (sign: 1 | -1) => {
+    const positions: number[] = []
+    const uvs: number[] = []
+    const indices: number[] = []
+    for (const row of rows) {
+      for (let column = 0; column <= columns; column += 1) {
+        const shapeX = -row.span + (column / columns) * row.span * 2
+        // rotateX(-PI/2) sends shape-y to world -z.
+        const z = -row.y
+        // The back is the front turned over (rotateZ(PI)): mirrored in x, same UVs.
+        const worldX = sign > 0 ? shapeX : -shapeX
+        positions.push(worldX, sign * faceY + cardBend(worldX, z, depth), z)
+        uvs.push(shapeX + 0.5, row.y / depth + 0.5)
+      }
+    }
+    for (let row = 0; row < rows.length - 1; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const a = row * stride + column
+        const b = a + 1
+        const c = a + stride
+        const d = c + 1
+        // Columns run +x for the front and -x for the back, so one winding
+        // yields +Y normals on the front and -Y normals on the back.
+        indices.push(a, b, c, b, d, c)
+      }
+    }
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+    geometry.setIndex(indices)
+    geometry.computeVertexNormals()
+    return geometry
+  }
+  const face = buildFace(1)
+  const back = buildFace(-1)
 
-  const edge = new THREE.ExtrudeGeometry(shape, {
-    depth: CARD_THICKNESS,
-    bevelEnabled: false,
-    curveSegments: 6,
+  // Edge band: walk the outline of the front and join it to the back's.
+  const loop: number[] = []
+  for (let column = 0; column < columns; column += 1) loop.push(column)
+  for (let row = 0; row < rows.length - 1; row += 1) loop.push(row * stride + columns)
+  for (let column = columns; column > 0; column -= 1) loop.push((rows.length - 1) * stride + column)
+  for (let row = rows.length - 1; row > 0; row -= 1) loop.push(row * stride)
+  const edgePositions: number[] = []
+  const edgeIndices: number[] = []
+  const frontPosition = face.getAttribute('position')
+  const backPosition = back.getAttribute('position')
+  const backOf = (index: number) => {
+    // The back's vertex at the same physical outline point has the mirrored column.
+    const row = Math.floor(index / stride)
+    const column = index % stride
+    return row * stride + (columns - column)
+  }
+  loop.forEach(index => {
+    edgePositions.push(frontPosition.getX(index), frontPosition.getY(index), frontPosition.getZ(index))
+    const other = backOf(index)
+    edgePositions.push(backPosition.getX(other), backPosition.getY(other), backPosition.getZ(other))
   })
-  edge.rotateX(-Math.PI / 2)
-  edge.translate(0, -CARD_THICKNESS / 2, 0)
+  const sides = loop.length
+  for (let index = 0; index < sides; index += 1) {
+    const next = (index + 1) % sides
+    const a = index * 2
+    const b = next * 2
+    // (front_i, back_i, front_next, back_next); winding checked against the outward direction.
+    const outward = new THREE.Vector3(edgePositions[a * 3]!, 0, edgePositions[a * 3 + 2]!)
+    const edgeA = new THREE.Vector3(edgePositions[b * 3]! - edgePositions[a * 3]!, edgePositions[b * 3 + 1]! - edgePositions[a * 3 + 1]!, edgePositions[b * 3 + 2]! - edgePositions[a * 3 + 2]!)
+    const down = new THREE.Vector3(0, -1, 0)
+    const facing = new THREE.Vector3().crossVectors(edgeA, down).dot(outward)
+    if (facing < 0) edgeIndices.push(a, a + 1, b, b, a + 1, b + 1)
+    else edgeIndices.push(a, b, a + 1, b, b + 1, a + 1)
+  }
+  const edge = new THREE.BufferGeometry()
+  edge.setAttribute('position', new THREE.Float32BufferAttribute(edgePositions, 3))
+  edge.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(edgePositions.length / 3 * 2), 2))
+  edge.setIndex(edgeIndices)
+  edge.computeVertexNormals()
 
   sharedGeometry = { face, back, edge }
   return sharedGeometry
@@ -274,7 +370,7 @@ function placeCardShadow(card: CardMesh, elements: ArrayLike<number>) {
   const flat = Math.abs(cardUp.y) / Math.max(1e-6, unitScale)
   // A propped card rests on its stand: full-strength footprint shadow.
   const lift = card.propped ? 0 : cardWorld.y - FELT_TOP_Y
-  const liftFade = 1 - THREE.MathUtils.smoothstep(lift, 0.16, 0.5)
+  const liftFade = 1 - THREE.MathUtils.smoothstep(lift, 0.01, 0.26)
   const edgeFade = card.propped ? 1 : THREE.MathUtils.smoothstep(flat, 0.35, 0.85)
   // Follow the fold fade (the card's own materials go transparent as it goes).
   const cardOpacity = card.faceMaterial.transparent ? card.faceMaterial.opacity : 1
@@ -285,7 +381,7 @@ function placeCardShadow(card: CardMesh, elements: ArrayLike<number>) {
   // Card's long axis yaw, laid flat; a lifted card's shadow spreads and softens.
   const yaw = Math.atan2(elements[8]!, elements[10]!)
   shadowQuaternion.setFromAxisAngle(shadowYawAxis, yaw)
-  const spread = unitScale * (1 + Math.max(0, lift) * 0.8)
+  const spread = unitScale * (1 + Math.max(0, lift) * 2)
   // A propped card only covers the felt under its footprint (plus a soft spill).
   shadowScale.set(spread, 1, card.propped ? spread * (0.42 + 0.58 * flat) : spread)
   shadowPosition.set(cardWorld.x, FELT_TOP_Y + 0.003, cardWorld.z)
@@ -370,7 +466,7 @@ export function createBoardRuntime(scene: THREE.Scene): BoardRuntime {
 
   // Winning cards get a thin gold rim hugging the card (in card-unit space, so
   // it tilts and lifts with the card) instead of any brightening of the face.
-  const rimGeometry = roundedFrameGeometry(1.0, 88 / 63, 0.07, 0.07)
+  const rimGeometry = roundedFrameGeometry(1.0, 88 / 63, 0.085, 0.07)
 
   // All five slot outlines merge into one faint draw on the felt.
   const outlineParts = BOARD_XS.map(x => {

@@ -91,9 +91,10 @@ const VignetteShader = {
   name: 'PokerVignetteShader',
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
-    strength: { value: 0.42 },
+    strength: { value: 0.32 },
     softness: { value: 0.62 },
     warmth: { value: 0.06 },
+    time: { value: 0 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -107,15 +108,28 @@ const VignetteShader = {
     uniform float strength;
     uniform float softness;
     uniform float warmth;
+    uniform float time;
     varying vec2 vUv;
+    float hash(vec2 p) {
+      vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+      p3 += dot(p3, p3.yzx + 33.33);
+      return fract((p3.x + p3.y) * p3.z);
+    }
     void main() {
-      vec4 color = texture2D(tDiffuse, vUv);
       vec2 centered = vUv - vec2(0.5, 0.52);
       centered.x *= 1.15;
       float distanceFromCenter = length(centered);
+      vec4 color = texture2D(tDiffuse, vUv);
       float vignette = smoothstep(0.78, 0.78 - softness, distanceFromCenter);
       color.rgb *= mix(1.0 - strength, 1.0, vignette);
       color.rgb += vec3(warmth, warmth * 0.55, 0.0) * vignette * 0.12;
+      // Split-tone grade: cool, slightly teal shadows and warm highlights, like a lit set.
+      float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+      color.rgb = mix(color.rgb, color.rgb * vec3(1.05, 1.0, 0.93), smoothstep(0.25, 1.1, luma));
+      color.rgb += vec3(-0.002, 0.002, 0.004) * (1.0 - smoothstep(0.0, 0.25, luma));
+      // Fine film grain (also dithers the dark gradients): strongest in the mids.
+      float grain = hash(gl_FragCoord.xy + fract(time * 7.13) * 91.7) - 0.5;
+      color.rgb *= 1.0 + grain * 0.045 * (0.5 + smoothstep(0.02, 0.4, luma));
       gl_FragColor = color;
     }
   `,
@@ -150,7 +164,14 @@ export function createPostFx(
   composer.addPass(new RenderPass(scene, camera))
   const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.24, 0.32, 0.97)
   composer.addPass(bloom)
-  composer.addPass(new ShaderPass(VignetteShader))
+  const vignettePass = new ShaderPass(VignetteShader)
+  // Drives the grain: the pass owns its uniforms, so stamp the clock as it renders.
+  const renderVignette = vignettePass.render.bind(vignettePass)
+  vignettePass.render = (...args: Parameters<ShaderPass['render']>) => {
+    vignettePass.uniforms.time!.value = (performance.now() / 1000) % 1000
+    renderVignette(...args)
+  }
+  composer.addPass(vignettePass)
   composer.addPass(new OutputPass())
   const fxaa = new ShaderPass(FXAAShader)
   composer.addPass(fxaa)

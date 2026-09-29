@@ -64,7 +64,7 @@ describe('desktop 3D board cards', () => {
   })
 
   it('shares one textured chip geometry so every chip is a single draw', () => {
-    expect(renderer).toContain('sharedChipGeometry ??= new THREE.CylinderGeometry')
+    expect(renderer).toContain('sharedChipGeometry ??= createBeveledChipGeometry(')
     expect(renderer).toContain('const chipBodyGeometry = getChipGeometry()')
     expect(renderer).toContain('[edgeMaterial, faceMaterial, faceMaterial]')
     expect(renderer).toContain('getChipEdgeTexture(index)')

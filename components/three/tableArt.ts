@@ -9,6 +9,7 @@ import {
 } from './tableWagerLayout'
 import {
   getFeltTexture,
+  getBrushedMetalTexture,
   getFeltWeaveTexture,
   getLeatherBumpTexture,
   getRailLeatherTexture,
@@ -170,12 +171,16 @@ function addCupHolders(group: THREE.Group, brassMaterial: THREE.Material) {
     const normal = new THREE.Vector2(Math.cos(t) / TABLE_FELT_SEMI_AXIS_X, Math.sin(t) / TABLE_FELT_SEMI_AXIS_Z).normalize()
     const x = Math.cos(t) * TABLE_FELT_SEMI_AXIS_X + normal.x * offset
     const z = Math.sin(t) * TABLE_FELT_SEMI_AXIS_Z + normal.y * offset
+    // The ring sits slightly sunk and a short brass collar runs down into the
+    // padding, so it reads as set into the leather even where the cushion curves away.
     const ring = new THREE.TorusGeometry(0.125, 0.016, 8, 32)
     ring.rotateX(Math.PI / 2)
-    ring.translate(x, top + 0.006, z)
+    ring.translate(x, top - 0.016, z)
     rings.push(ring)
+    // Dark liner (not brass): a bright collar edge read as a horizontal light bar.
+    wells.push(new THREE.CylinderGeometry(0.121, 0.121, 0.06, 32, 1, true).translate(x, top - 0.036, z))
     const well = new THREE.CylinderGeometry(0.118, 0.1, 0.03, 28)
-    well.translate(x, top - 0.006, z)
+    well.translate(x, top - 0.016, z)
     wells.push(well)
   })
   const ringMerged = mergeGeometries(rings, false)
@@ -188,7 +193,8 @@ function addCupHolders(group: THREE.Group, brassMaterial: THREE.Material) {
     group.add(mesh)
   }
   if (wellMerged) {
-    const mesh = new THREE.Mesh(wellMerged, new THREE.MeshStandardMaterial({ color: '#120807', roughness: 0.7, metalness: 0.1 }))
+    // Unlit near-black: a lit disc picked up the blue room fill and read as a blue button.
+    const mesh = new THREE.Mesh(wellMerged, new THREE.MeshBasicMaterial({ color: '#0b0605' }))
     mesh.name = 'cup-holder-wells'
     group.add(mesh)
   }
@@ -229,12 +235,34 @@ export function createStylizedTable(): TableArt {
   feltWeave.repeat.set(150, 96)
   const feltMaterial = new THREE.MeshStandardMaterial({
     map: feltTexture,
+    color: '#b4b4b4',
     bumpMap: feltWeave,
     bumpScale: 0.35,
     roughness: 0.94,
     metalness: 0,
     envMapIntensity: 0.35,
   })
+  // The key spot sits right over the felt: compress the lit result above a knee
+  // (scaling all channels together) so bright cloth stays emerald and never
+  // washes out to mint, exactly like the card and chip clamps.
+  feltMaterial.onBeforeCompile = shader => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <opaque_fragment>',
+      /* glsl */ `{
+        float feltLuma = dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722));
+        const float feltKnee = 0.27;
+        float over = max(feltLuma - feltKnee, 0.0);
+        float compressed = min(feltLuma, feltKnee) + over / (1.0 + over * 6.0);
+        vec3 squeezed = outgoingLight * (compressed / max(feltLuma, 1e-4));
+        // Ease the hue toward the albedo only as the light climbs past the knee
+        // (a hard switch here draws visible contour lines across the cloth).
+        squeezed = mix(squeezed, diffuseColor.rgb * compressed * 1.9, 0.5 * smoothstep(0.0, 0.25, over));
+        outgoingLight = squeezed;
+      }
+      #include <opaque_fragment>`
+    )
+  }
+  feltMaterial.customProgramCacheKey = () => 'poker-felt-soft-knee'
   const felt = new THREE.Mesh(feltGeometry, feltMaterial)
   felt.name = 'printed-felt'
   felt.receiveShadow = true
@@ -243,14 +271,17 @@ export function createStylizedTable(): TableArt {
   const leatherBump = getLeatherBumpTexture()
   leatherBump.repeat.set(1, 1)
   // Oxblood leather with panel seams and saddle stitching painted into the wrap.
-  const railMaterial = new THREE.MeshStandardMaterial({
+  const railMaterial = new THREE.MeshPhysicalMaterial({
     color: '#ffffff',
     map: getRailLeatherTexture(),
-    roughness: 0.4,
+    roughness: 0.46,
     metalness: 0.02,
     bumpMap: leatherBump,
-    bumpScale: 0.5,
+    bumpScale: 0.32,
     envMapIntensity: 1.05,
+    // A waxed top coat: a tight highlight riding over the grain.
+    clearcoat: 0.05,
+    clearcoatRoughness: 0.5,
   })
   const rail = new THREE.Mesh(sweepAroundEllipse(railCushionProfile()), railMaterial)
   rail.name = 'padded-leather-rail'
@@ -260,11 +291,17 @@ export function createStylizedTable(): TableArt {
 
   // Brushed, slightly aged brass: a polished finish turned the key spot into
   // one blown white streak along the inner rail.
+  const brushed = getBrushedMetalTexture()
   const brassMaterial = new THREE.MeshStandardMaterial({
     color: '#c99a4c',
-    roughness: 0.46,
+    // The roughness map averages ~0.58, so the base value is high: effective
+    // roughness lands near the old 0.5 with fine streaks, instead of a mirror.
+    roughness: 0.9,
     metalness: 0.9,
-    envMapIntensity: 0.85,
+    envMapIntensity: 0.55,
+    roughnessMap: brushed,
+    bumpMap: brushed,
+    bumpScale: 0.12,
   })
   const inlay = new THREE.Mesh(
     sweepAroundEllipse([
@@ -298,12 +335,15 @@ export function createStylizedTable(): TableArt {
 
   addCupHolders(group, brassMaterial)
 
-  const woodMaterial = new THREE.MeshStandardMaterial({
+  const woodMaterial = new THREE.MeshPhysicalMaterial({
     color: '#ffffff',
     map: getWalnutTexture(),
-    roughness: 0.34,
+    roughness: 0.44,
     metalness: 0.05,
     envMapIntensity: 0.9,
+    // French-polish lacquer over the veneer.
+    clearcoat: 0.45,
+    clearcoatRoughness: 0.2,
   })
   const apron = new THREE.Mesh(
     // A deep wooden skirt: hides the players' legs and grounds the table.
@@ -525,6 +565,60 @@ const composeMatrix = (
 )
 
 /**
+ * A turned bar-stool leg: tapered, with a collar under the seat, two beads and
+ * a swelling above the brass ferrule (a lathe profile, so it costs nothing extra).
+ */
+function createTurnedLegGeometry(length: number) {
+  const half = length / 2
+  const along = (fraction: number) => -half + fraction * length
+  const profile: THREE.Vector2[] = []
+  const add = (fraction: number, radius: number) => profile.push(new THREE.Vector2(radius, along(fraction)))
+  add(0, 0.024)
+  add(0.05, 0.03)
+  add(0.2, 0.033)
+  add(0.24, 0.041)
+  add(0.27, 0.031)
+  add(0.55, 0.036)
+  add(0.6, 0.046)
+  add(0.64, 0.033)
+  add(0.86, 0.042)
+  add(0.93, 0.05)
+  add(0.97, 0.054)
+  add(1, 0.05)
+  return new THREE.LatheGeometry(profile, 14)
+}
+
+/** Cream contrast stitching in dashes along a curve on the chair shell. */
+function stitchRow(
+  color: THREE.Color,
+  pointAt: (t: number) => THREE.Vector3,
+  centreAt: (t: number) => THREE.Vector3,
+  count: number
+) {
+  const dash = new THREE.BoxGeometry(0.042, 0.008, 0.008)
+  const parts: THREE.BufferGeometry[] = []
+  const tangent = new THREE.Vector3()
+  const outward = new THREE.Vector3()
+  const along = new THREE.Vector3(1, 0, 0)
+  const quaternion = new THREE.Quaternion()
+  for (let index = 0; index < count; index += 1) {
+    const t = (index + 0.5) / count
+    const point = pointAt(t)
+    tangent.subVectors(pointAt(Math.min(1, t + 0.004)), pointAt(Math.max(0, t - 0.004))).normalize()
+    outward.subVectors(point, centreAt(t)).normalize()
+    quaternion.setFromUnitVectors(along, tangent)
+    const stitch = paint(dash.clone(), color)
+    parts.push(prepare(stitch, new THREE.Matrix4().compose(
+      point.clone().addScaledVector(outward, 0.0012),
+      quaternion,
+      new THREE.Vector3(1, 1, 1)
+    ), true))
+  }
+  dash.dispose()
+  return parts
+}
+
+/**
  * Button-tufted leather tub chair on four slim walnut legs with a brass foot
  * ring (the table is a high-top, so the seat sits well above the carpet).
  * Everything merges into one mesh with two material groups: upholstery, and a
@@ -537,26 +631,32 @@ export function createStylizedChair(
   const group = new THREE.Group()
   group.name = 'club-chair'
 
-  const leather = new THREE.Color(upholstery).lerp(HOUSE_LEATHER, 0.45)
+  // Lifted a little: the old mix read near-black at play distance.
+  const leather = new THREE.Color(upholstery).lerp(HOUSE_LEATHER, 0.45).offsetHSL(0, 0.03, 0.04).multiplyScalar(1.12)
   const tuftColor = getTuftedLeatherTexture()
   tuftColor.repeat.set(3.4, 3.4)
   const tuftBump = getTuftedLeatherTexture(true)
   tuftBump.repeat.set(3.4, 3.4)
-  const upholsteryMaterial = new THREE.MeshStandardMaterial({
+  const upholsteryMaterial = new THREE.MeshPhysicalMaterial({
     color: leather,
     map: tuftColor,
     bumpMap: tuftBump,
-    bumpScale: 1.4,
-    roughness: 0.42,
+    bumpScale: 2.4,
+    roughness: 0.5,
     metalness: 0.04,
     envMapIntensity: 1.1,
+    clearcoat: 0.28,
+    clearcoatRoughness: 0.4,
+    sheen: 0.55,
+    sheenRoughness: 0.45,
+    sheenColor: new THREE.Color('#a86a6c'),
   })
   const frameMaterial = new THREE.MeshStandardMaterial({
     color: '#ffffff',
     vertexColors: true,
-    roughness: 0.34,
-    metalness: 0.45,
-    envMapIntensity: 1.1,
+    roughness: 0.4,
+    metalness: 0.3,
+    envMapIntensity: 0.75,
   })
 
   const brass = new THREE.Color(trim)
@@ -593,8 +693,16 @@ export function createStylizedChair(
     const tube = paint(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 96, 0.013, 6, false), brass)
     frameParts.push(prepare(tube, new THREE.Matrix4(), true))
   }
+  // Contrast stitching just below the piping, on the inner face (the side the
+  // sitter and the camera see over the table) and on the outer face.
+  const thread = new THREE.Color('#dccb9f')
+  for (const capAngle of [Math.PI * 0.9, Math.PI * 0.1]) {
+    const pointAt = (t: number) => shellCapPoint((t * 2 - 1) * SHELL_MAX_ANGLE * 0.96, capAngle)
+    const centreAt = (t: number) => shellCapPoint((t * 2 - 1) * SHELL_MAX_ANGLE * 0.96, Math.PI / 2)
+    frameParts.push(...stitchRow(thread, pointAt, centreAt, 84))
+  }
   // Row of brass nailheads around the lower outer skirt of the shell.
-  const nailGeometry = new THREE.SphereGeometry(0.019, 6, 4)
+  const nailGeometry = new THREE.SphereGeometry(0.023, 8, 5)
   for (let step = 0; step <= 34; step += 1) {
     const theta = ((step / 34) * 2 - 1) * SHELL_MAX_ANGLE * 0.96
     const point = shellSidePoint(theta, 0.06, 0.004)
@@ -609,20 +717,48 @@ export function createStylizedChair(
   for (const [x, z] of [[-0.42, -0.2], [0.42, -0.2], [-0.4, 0.46], [0.4, 0.46]] as const) {
     const splayX = Math.sign(x) * 0.06
     const splayZ = (z > 0.1 ? 1 : -1) * 0.05
-    const leg = paint(new THREE.CylinderGeometry(0.048, 0.03, legLength, 10), CHAIR_WOOD)
+    // Chunkier than before (x1.5 radius): the old legs read as spindly under the tall tub.
+    const leg = paint(createTurnedLegGeometry(legLength).scale(1.5, 1, 1.5), CHAIR_WOOD)
     const tilt: [number, number, number] = [-splayZ / legLength, 0, splayX / legLength]
     frameParts.push(prepare(leg, composeMatrix([x + splayX / 2, (legTopY + floorY) / 2, z + splayZ / 2], tilt), true))
-    const ferrule = paint(new THREE.CylinderGeometry(0.03, 0.03, 0.08, 10), brass)
-    frameParts.push(prepare(ferrule, composeMatrix([x + splayX, floorY + 0.04, z + splayZ]), true))
+    // Dark turned foot with a slim brass band (no bright gold tip on the carpet).
+    const foot = paint(new THREE.CylinderGeometry(0.058, 0.066, 0.06, 12), CHAIR_WOOD)
+    frameParts.push(prepare(foot, composeMatrix([x + splayX, floorY + 0.03, z + splayZ]), true))
+    const band = paint(new THREE.CylinderGeometry(0.06, 0.06, 0.012, 12), new THREE.Color('#6a4f28'))
+    frameParts.push(prepare(band, composeMatrix([x + splayX, floorY + 0.075, z + splayZ]), true))
+    // Brass collar where the leg meets the seat rail.
+    const collar = paint(new THREE.CylinderGeometry(0.066, 0.075, 0.05, 12), new THREE.Color('#5a4322'))
+    frameParts.push(prepare(collar, composeMatrix([x, legTopY - 0.02, z]), true))
   }
   // Walnut stretchers tie the legs together so the frame reads as one piece.
   for (const [ax, az, bx, bz] of [[-0.4, 0.46, 0.4, 0.46], [-0.42, -0.2, 0.42, -0.2], [-0.4, 0.46, -0.42, -0.2], [0.4, 0.46, 0.42, -0.2]] as const) {
     const length = Math.hypot(bx - ax, bz - az)
-    const bar = paint(new THREE.CylinderGeometry(0.02, 0.02, length, 8), CHAIR_WOOD)
+    const bar = paint(new THREE.CylinderGeometry(0.03, 0.03, length, 8), CHAIR_WOOD)
     bar.rotateX(Math.PI / 2)
     bar.rotateY(Math.atan2(bx - ax, bz - az))
     bar.translate((ax + bx) / 2, -1.62, (az + bz) / 2)
     frameParts.push(prepare(bar, new THREE.Matrix4(), true))
+  }
+  // Swivel hub under the cushion: a brass-edged plate, a short column and four
+  // spokes out to the legs, so the seat reads as a proper swivel stool frame and
+  // not a tub floating on sticks. It stays well above the players' shins.
+  const hubX = 0
+  const hubZ = 0.12
+  const plate = paint(new THREE.CylinderGeometry(0.34, 0.36, 0.05, 28), CHAIR_WOOD)
+  frameParts.push(prepare(plate, composeMatrix([hubX, -0.29, hubZ]), true))
+  const plateRim = paint(new THREE.TorusGeometry(0.355, 0.012, 6, 32), brass)
+  frameParts.push(prepare(plateRim, composeMatrix([hubX, -0.29, hubZ], [Math.PI / 2, 0, 0]), true))
+  const column = paint(new THREE.CylinderGeometry(0.07, 0.09, 0.3, 14), CHAIR_WOOD)
+  frameParts.push(prepare(column, composeMatrix([hubX, -0.47, hubZ]), true))
+  const hubBand = paint(new THREE.CylinderGeometry(0.095, 0.095, 0.03, 14), brass)
+  frameParts.push(prepare(hubBand, composeMatrix([hubX, -0.6, hubZ]), true))
+  for (const [x, z] of [[-0.42, -0.2], [0.42, -0.2], [-0.4, 0.46], [0.4, 0.46]] as const) {
+    const length = Math.hypot(x - hubX, z - hubZ)
+    const spoke = paint(new THREE.CylinderGeometry(0.028, 0.034, length, 8), CHAIR_WOOD)
+    spoke.rotateX(Math.PI / 2)
+    spoke.rotateY(Math.atan2(x - hubX, z - hubZ))
+    spoke.translate((x + hubX) / 2, -0.6, (z + hubZ) / 2)
+    frameParts.push(prepare(spoke, new THREE.Matrix4(), true))
   }
   // Brass foot ring where the players rest their feet.
   const footRing = paint(new THREE.TorusGeometry(0.5, 0.022, 8, 48), brass)
