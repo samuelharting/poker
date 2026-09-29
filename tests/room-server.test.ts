@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import type { Connection, Room } from 'partykit/server'
-import PokerRoom, { AUTO_FOLD_DELAY, AUTO_START_DELAY, BOT_ACTION_DELAY, HOST_DISCONNECT_GRACE_MS, PEEK_MAX_DURATION_MS } from '@/partykit/room'
+import PokerRoom, { AUTO_FOLD_DELAY, AUTO_FOLD_GRACE_MS, AUTO_START_DELAY, BOT_ACTION_DELAY, HOST_DISCONNECT_GRACE_MS, PEEK_MAX_DURATION_MS } from '@/partykit/room'
 import { getShowdownMinimumDurationMs } from '@/lib/poker/showdown'
 import type { C2SMessage, S2CMessage } from '@/shared/protocol'
 import type { PlayerAvatarCustomization } from '@/lib/profile'
@@ -723,13 +723,13 @@ describe('PokerRoom timer handling', () => {
     const reconnect = joinPlayer(server, room, 'reconnect', actingPlayerId === alice.playerId ? 'Alice' : 'Bob', acting.reconnectToken)
     expect(reconnect.playerId).toBe(acting.playerId)
 
-    // Reconnecting does not buy a fresh clock: the fold lands on the original deadline.
+    // Reconnecting does not buy a fresh clock: the fold lands on the original deadline (plus the network grace).
     vi.advanceTimersByTime(AUTO_FOLD_DELAY - 6_000 - 1)
 
     const midHandSnapshot = lastMessage(reconnect.connection, 'room_snapshot') ?? lastMessage(waiting.connection, 'room_snapshot')
     expect(midHandSnapshot?.state.phase).toBe('in_hand')
 
-    vi.advanceTimersByTime(2)
+    vi.advanceTimersByTime(AUTO_FOLD_GRACE_MS + 2)
 
     const endedSnapshot = lastMessage(reconnect.connection, 'room_snapshot') ?? lastMessage(waiting.connection, 'room_snapshot')
     expect(endedSnapshot?.state.phase).toBe('between_hands')
@@ -1365,7 +1365,7 @@ describe('PokerRoom auto-start lifecycle', () => {
     }
     expect(roomRuntime.autoFoldTimeout).not.toBeNull()
 
-    vi.advanceTimersByTime(AUTO_FOLD_DELAY + 10)
+    vi.advanceTimersByTime(AUTO_FOLD_DELAY + AUTO_FOLD_GRACE_MS + 10)
 
     const ended = lastMessage(host.connection, 'room_snapshot')
     expect(ended?.state.phase).toBe('between_hands')

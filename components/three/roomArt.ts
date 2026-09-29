@@ -512,3 +512,86 @@ export function createLoungeDecor(scene: THREE.Scene, brassMaterial: THREE.Mater
   }
   return group
 }
+
+function radialGlowTexture(rgb: string, alpha: number) {
+  return canvasTexture(128, 128, (context, width, height) => {
+    const gradient = context.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width / 2)
+    gradient.addColorStop(0, `rgba(${rgb}, ${alpha})`)
+    gradient.addColorStop(0.45, `rgba(${rgb}, ${alpha * 0.4})`)
+    gradient.addColorStop(1, `rgba(${rgb}, 0)`)
+    context.fillStyle = gradient
+    context.fillRect(0, 0, width, height)
+  })
+}
+
+/**
+ * Architecture and baked light for the room shell. Everything is one draw per
+ * material and uses no real lights: walnut pilasters framing the posters, a
+ * crown moulding, warm light spilling from the sconces onto the wall, and a
+ * warm pool on the carpet under the key light so the floor has depth and sheen
+ * instead of reading as a flat dark disc.
+ */
+export function createRoomDressing(scene: THREE.Scene, brassMaterial: THREE.Material) {
+  const group = new THREE.Group()
+  group.name = 'room-dressing'
+  scene.add(group)
+
+  const woodMaterial = new THREE.MeshStandardMaterial({
+    color: '#9a7b66',
+    map: getWalnutTexture(),
+    roughness: 0.4,
+    metalness: 0.06,
+    envMapIntensity: 0.7,
+  })
+  const wood: THREE.BufferGeometry[] = []
+  const brass: THREE.BufferGeometry[] = []
+  for (const side of [-1, 1]) {
+    for (const x of [5.8, 8.2]) {
+      wood.push(box(0.42, 5.4, 0.22, side * x, 3.6, -9.34))
+      wood.push(box(0.56, 0.16, 0.32, side * x, 0.98, -9.3))
+      wood.push(box(0.56, 0.2, 0.34, side * x, 6.3, -9.28))
+      brass.push(box(0.5, 0.05, 0.36, side * x, 6.42, -9.27))
+    }
+  }
+  // Crown moulding and picture rail along the whole back wall.
+  wood.push(box(32, 0.22, 0.4, 0, 6.55, -9.3))
+  wood.push(box(32, 0.1, 0.5, 0, 6.72, -9.26))
+  brass.push(box(32, 0.04, 0.42, 0, 6.42, -9.28))
+  const woodMerged = mergeGeometries(wood, false)
+  const brassMerged = mergeGeometries(brass, false)
+  wood.forEach(part => part.dispose())
+  brass.forEach(part => part.dispose())
+  if (woodMerged) {
+    const mesh = new THREE.Mesh(woodMerged, woodMaterial)
+    mesh.name = 'wall-pilasters'
+    group.add(mesh)
+  }
+  if (brassMerged) group.add(new THREE.Mesh(brassMerged, brassMaterial))
+
+  const additive = (texture: THREE.Texture) => new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    fog: false,
+    toneMapped: false,
+  })
+
+  // Sconce spill on the wall (behind the sconces, in front of the wallpaper).
+  const spills = mergeGeometries([-9.4, -4.6, 4.6, 9.4].map(x => new THREE.PlaneGeometry(3.2, 3.6).translate(x, 2.4, -9.42)), false)
+  if (spills) {
+    const mesh = new THREE.Mesh(spills, additive(radialGlowTexture('255, 170, 90', 0.32)))
+    mesh.name = 'sconce-spill'
+    mesh.renderOrder = 1
+    group.add(mesh)
+  }
+
+  // Warm pool on the carpet under the key spot.
+  const pool = new THREE.Mesh(new THREE.PlaneGeometry(19, 14), additive(radialGlowTexture('255, 178, 104', 0.3)))
+  pool.name = 'carpet-light-pool'
+  pool.rotation.x = -Math.PI / 2
+  pool.position.set(0, -1.975, -0.4)
+  pool.renderOrder = 1
+  group.add(pool)
+  return group
+}

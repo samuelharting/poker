@@ -511,6 +511,13 @@ export function computeAvatarTargetPose(
   pose.handL[0] += drift * Math.sin(time * 0.37 + seed * 13 + 1.7)
   pose.handL[2] += drift * Math.sin(time * 0.29 + seed * 3 + 0.8)
 
+  // Fingers never hold one shape: a slow loosening and tightening, out of
+  // step per hand, plus a barely-there head float from incommensurate sines so
+  // the idle never reads as a loop. Later poses blend over these values.
+  pose.fingerCurlR += motion * (0.045 * Math.sin(time * 0.61 + seed * 11) + 0.02 * Math.sin(time * 1.7 + seed * 3))
+  pose.fingerCurlL += motion * (0.045 * Math.sin(time * 0.53 + seed * 7 + 2.1) + 0.02 * Math.sin(time * 1.9 + seed * 5))
+  add(bones.Head, 0.006 * Math.sin(time * 0.71 + seed * 9) * motion, 0.008 * Math.sin(time * 0.47 + seed * 4) * motion, 0.008 * Math.sin(time * 0.37 + seed * 2) * motion)
+
   // 3. Attention: follow the acting player, otherwise glance around the table.
   const someoneElseActing = Math.abs(input.lookYaw) > 0.001 || input.lookPitch > -0.03
   if (time >= state.nextGlanceAt) {

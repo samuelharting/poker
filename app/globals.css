@@ -526,25 +526,25 @@
 [data-suit-colors='four'] .card-face.card-suit-spades,
 [data-suit-colors='four'] .card-suit-top.card-suit-spades,
 [data-suit-colors='four'] .card-center-suit.card-suit-spades {
-  color: #16181d;
+  color: #111417;
 }
 
 [data-suit-colors='four'] .card-face.card-suit-hearts,
 [data-suit-colors='four'] .card-suit-top.card-suit-hearts,
 [data-suit-colors='four'] .card-center-suit.card-suit-hearts {
-  color: #d54242;
+  color: #d0202f;
 }
 
 [data-suit-colors='four'] .card-face.card-suit-diamonds,
 [data-suit-colors='four'] .card-suit-top.card-suit-diamonds,
 [data-suit-colors='four'] .card-center-suit.card-suit-diamonds {
-  color: #3478f6;
+  color: #1f62dd;
 }
 
 [data-suit-colors='four'] .card-face.card-suit-clubs,
 [data-suit-colors='four'] .card-suit-top.card-suit-clubs,
 [data-suit-colors='four'] .card-center-suit.card-suit-clubs {
-  color: #18a957;
+  color: #12873f;
 }
 
 .card-corner {
@@ -5258,4 +5258,30 @@ button.player-seat-marker:focus-visible {
   .avatar-preview-figure {
     justify-self: center;
   }
+}
+
+/* Four-color suits for the small text-based card chips (showdown cinematic
+   hole cards, rabbit-hunt tag, hand history), matching lib/suitColors.ts. */
+[data-suit-colors='four'] .desktop-3d-stage .cinematic-seat .cinematic-hole-cards i.is-face.is-spades,
+[data-suit-colors='four'] .table-rabbit-card.is-spades,
+[data-suit-colors='four'] .hand-history-card.is-spades {
+  color: #111417;
+}
+
+[data-suit-colors='four'] .desktop-3d-stage .cinematic-seat .cinematic-hole-cards i.is-face.is-hearts,
+[data-suit-colors='four'] .table-rabbit-card.is-hearts,
+[data-suit-colors='four'] .hand-history-card.is-hearts {
+  color: #d0202f;
+}
+
+[data-suit-colors='four'] .desktop-3d-stage .cinematic-seat .cinematic-hole-cards i.is-face.is-diamonds,
+[data-suit-colors='four'] .table-rabbit-card.is-diamonds,
+[data-suit-colors='four'] .hand-history-card.is-diamonds {
+  color: #1f62dd;
+}
+
+[data-suit-colors='four'] .desktop-3d-stage .cinematic-seat .cinematic-hole-cards i.is-face.is-clubs,
+[data-suit-colors='four'] .table-rabbit-card.is-clubs,
+[data-suit-colors='four'] .hand-history-card.is-clubs {
+  color: #12873f;
 }

@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { getSuitInk, type SuitColorMode } from '@/lib/suitColors'
 
 /**
  * Canvas-painted textures for the stylized desktop room. Everything is drawn at
@@ -9,15 +10,10 @@ import * as THREE from 'three'
 export type CardSuit = 'clubs' | 'diamonds' | 'hearts' | 'spades'
 
 export const CARD_ASPECT = 88 / 63
-const CARD_TEXTURE_WIDTH = 256
+const CARD_TEXTURE_WIDTH = 384
 const CARD_TEXTURE_HEIGHT = Math.round(CARD_TEXTURE_WIDTH * CARD_ASPECT)
 
-const SUIT_COLORS: Record<CardSuit, string> = {
-  spades: '#16191c',
-  clubs: '#16191c',
-  hearts: '#d23a44',
-  diamonds: '#d23a44',
-}
+export type { SuitColorMode } from '@/lib/suitColors'
 
 const textureCache = new Map<string, THREE.CanvasTexture>()
 const redrawers = new Map<string, () => void>()
@@ -103,7 +99,7 @@ export function drawSuit(
   x: number,
   y: number,
   size: number,
-  color = SUIT_COLORS[suit]
+  color = getSuitInk(suit)
 ) {
   const s = size / 2
   context.save()
@@ -170,29 +166,35 @@ function paintCardBase(context: CanvasRenderingContext2D, width: number, height:
   context.stroke()
 }
 
-/** A rounded, readable card face: big corner index plus a centre pip. */
-export function getCardFaceTexture(rank: string, suit: CardSuit) {
-  return cachedCanvasTexture(`card-face-${rank}-${suit}`, CARD_TEXTURE_WIDTH, CARD_TEXTURE_HEIGHT, (context, width, height) => {
+/**
+ * A rounded, high-contrast card face: jumbo rank plus a suit pip in the top
+ * corner, a big centre pip and a smaller mirrored index. Textures are cached per
+ * suit-color mode so toggling four-color suits just swaps maps.
+ */
+export function getCardFaceTexture(rank: string, suit: CardSuit, mode: SuitColorMode = 'two') {
+  return cachedCanvasTexture(`card-face-${mode}-${rank}-${suit}`, CARD_TEXTURE_WIDTH, CARD_TEXTURE_HEIGHT, (context, width, height) => {
     paintCardBase(context, width, height)
-    const color = SUIT_COLORS[suit]
+    const color = getSuitInk(suit, mode)
     const label = rank === 'T' ? '10' : rank
     const font = getDisplayFontFamily()
 
     context.fillStyle = color
     context.textAlign = 'center'
     context.textBaseline = 'alphabetic'
-    const indexSize = label.length > 1 ? width * 0.25 : width * 0.3
+    const wide = label.length > 1
+    const indexSize = wide ? width * 0.31 : width * 0.4
+    const indexX = wide ? width * 0.25 : width * 0.22
     context.font = `800 ${indexSize}px ${font}`
-    context.fillText(label, width * 0.22, height * 0.2)
-    drawSuit(context, suit, width * 0.22, height * 0.3, width * 0.17)
+    context.fillText(label, indexX, height * 0.235)
+    drawSuit(context, suit, width * 0.22, height * 0.345, width * 0.2, color)
 
-    drawSuit(context, suit, width * 0.58, height * 0.6, width * 0.52)
+    drawSuit(context, suit, width * 0.6, height * 0.62, width * 0.46, color)
 
     context.save()
     context.translate(width, height)
     context.rotate(Math.PI)
-    context.font = `800 ${indexSize * 0.62}px ${font}`
-    context.fillText(label, width * 0.14, height * 0.12)
+    context.font = `800 ${indexSize * (wide ? 0.5 : 0.6)}px ${font}`
+    context.fillText(label, wide ? width * 0.17 : width * 0.16, height * 0.15)
     context.restore()
   })
 }
@@ -264,12 +266,17 @@ export function getChipEdgeTexture(index: number) {
   return cachedCanvasTexture(`chip-edge-${index}`, 256, 32, (context, width, height) => {
     context.fillStyle = style.body
     context.fillRect(0, 0, width, height)
+    // Six slim inlay stripes with a hairline seam top and bottom: reads as a
+    // moulded chip edge, and stays a stripe (not a checkerboard) in a stack.
     context.fillStyle = style.spot
-    const spots = 8
+    const spots = 6
     for (let spot = 0; spot < spots; spot += 1) {
-      const x = (spot + 0.5) * (width / spots) - width / spots / 4
-      context.fillRect(x, 0, width / spots / 2, height)
+      const pitch = width / spots
+      context.fillRect(spot * pitch + pitch * 0.32, 4, pitch * 0.36, height - 8)
     }
+    context.fillStyle = style.rim
+    context.fillRect(0, 0, width, 4)
+    context.fillRect(0, height - 4, width, 4)
     context.fillStyle = 'rgba(0,0,0,0.18)'
     context.fillRect(0, 0, width, 3)
     context.fillRect(0, height - 3, width, 3)
@@ -368,6 +375,19 @@ export function getFeltTexture(layout: FeltLayout) {
     }
     context.globalAlpha = 1
 
+    // Low-frequency cloth mottling and a few worn patches where hands rest.
+    for (let blotch = 0; blotch < 70; blotch += 1) {
+      const bx = random() * width
+      const by = random() * height
+      const br = width * (0.03 + random() * 0.06)
+      const blot = context.createRadialGradient(bx, by, 0, bx, by, br)
+      const light = random() > 0.5
+      blot.addColorStop(0, light ? 'rgba(120, 255, 200, 0.045)' : 'rgba(0, 20, 12, 0.06)')
+      blot.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      context.fillStyle = blot
+      context.fillRect(bx - br, by - br, br * 2, br * 2)
+    }
+
     // Printed pinstripe just inside the rail, like a casino layout's border.
     context.save()
     context.strokeStyle = 'rgba(255, 223, 150, 0.28)'
@@ -395,16 +415,15 @@ export function getFeltTexture(layout: FeltLayout) {
     context.stroke()
     context.restore()
 
+    // Board slot outlines live in 3D (cardMeshes' slotOutlines) so they never
+    // double up with a printed guide; the felt only carries a soft dish under them.
     const cardW = layout.cardWidth * scaleX
     const cardH = layout.cardDepth * scaleY
-    context.strokeStyle = 'rgba(255, 244, 222, 0.22)'
-    context.lineWidth = 4
-    context.setLineDash([14, 10])
     for (const worldX of layout.boardXs) {
       roundedRectPath(context, toX(worldX) - cardW / 2, toY(layout.boardZ) - cardH / 2, cardW, cardH, cardW * 0.1)
-      context.stroke()
+      context.fillStyle = 'rgba(0, 24, 16, 0.12)'
+      context.fill()
     }
-    context.setLineDash([])
 
     const font = getDisplayFontFamily()
     const crestY = toY(layout.boardZ) + cardH / 2 + height * 0.14
@@ -434,19 +453,27 @@ export function getFeltTexture(layout: FeltLayout) {
       context.stroke()
       drawSuit(context, side < 0 ? 'hearts' : 'diamonds', width / 2 + side * crestRadius * 4.6, crestCenterY, crestRadius * 0.42, 'rgba(255, 226, 160, 0.2)')
     }
-    context.fillStyle = 'rgba(255, 236, 190, 0.22)'
-    // The room already says POKER NIGHT (neon + HUD); the felt just names the game.
-    context.font = `600 ${height * 0.026}px ${font}`
-    const label = 'NO  LIMIT  HOLD’EM'
+    // The room already says POKER NIGHT (neon + HUD); the felt just names the
+    // game. Embroidered look: a dark drop under a warm gold fill, wide tracking
+    // and a straight baseline so it reads from the seat.
+    const label = 'NO LIMIT HOLD’EM'
+    const fontSize = height * 0.03
+    context.font = `700 ${fontSize}px ${font}`
+    const tracking = fontSize * 0.3
     const letters = [...label]
-    const arcRadius = width * 0.2
-    const arcCenterY = crestCenterY + crestRadius * 1.9 - arcRadius
-    const letterStep = (height * 0.026 * 0.78) / arcRadius
+    const widths = letters.map(letter => context.measureText(letter).width + tracking)
+    const total = widths.reduce((sum, value) => sum + value, 0) - tracking
+    const baseY = crestCenterY + crestRadius * 1.9
+    let cursor = -total / 2
     letters.forEach((letter, index) => {
-      const angle = Math.PI / 2 + ((letters.length - 1) / 2 - index) * letterStep
+      const advance = widths[index]!
+      const mid = cursor + (advance - tracking) / 2
+      cursor += advance
       context.save()
-      context.translate(width / 2 + Math.cos(angle) * arcRadius, arcCenterY + Math.sin(angle) * arcRadius)
-      context.rotate(angle - Math.PI / 2)
+      context.translate(width / 2 + mid, baseY)
+      context.fillStyle = 'rgba(0, 28, 18, 0.55)'
+      context.fillText(letter, 1.5, 3)
+      context.fillStyle = 'rgba(255, 228, 165, 0.62)'
       context.fillText(letter, 0, 0)
       context.restore()
     })
@@ -562,10 +589,12 @@ export function getRailLeatherTexture() {
 
     for (const v of [0.2, 0.74]) {
       const y = v * height
-      context.fillStyle = 'rgba(0, 0, 0, 0.35)'
-      context.fillRect(0, y - 3, width, 1.5)
-      context.fillStyle = '#e8cf9c'
-      for (let x = 4; x < width; x += 14) context.fillRect(x, y - 1, 8, 2.5)
+      // Fine, tonal saddle stitching: a shallow groove with short thread dashes
+      // that read as texture up close and not as a dashed guide line from afar.
+      context.fillStyle = 'rgba(0, 0, 0, 0.3)'
+      context.fillRect(0, y - 2.5, width, 1.5)
+      context.fillStyle = 'rgba(214, 186, 140, 0.6)'
+      for (let x = 2; x < width; x += 8) context.fillRect(x, y - 0.8, 4.5, 1.8)
     }
   }, { repeat: true })
 }

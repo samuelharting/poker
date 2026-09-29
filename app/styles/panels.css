@@ -3533,11 +3533,11 @@
 }
 
 [data-suit-colors='four'] .hand-history-card.is-diamonds {
-  color: #1f5fd1;
+  color: #1f62dd;
 }
 
 [data-suit-colors='four'] .hand-history-card.is-clubs {
-  color: #177a3e;
+  color: #12873f;
 }
 
 .hand-history-muted,

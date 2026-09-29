@@ -62,12 +62,12 @@ export function createStageLights(scene: THREE.Scene): StageLights {
   key.shadow.camera.far = 22
   scene.add(key, key.target)
 
-  const rimLeft = new THREE.SpotLight('#7fb6ff', 60, 22, 0.7, 0.8, 1.5)
+  const rimLeft = new THREE.SpotLight('#7fb6ff', 74, 22, 0.7, 0.8, 1.5)
   rimLeft.position.set(-8, 6.2, -8.5)
   rimLeft.target.position.set(-1.5, 1.2, 0)
   scene.add(rimLeft, rimLeft.target)
 
-  const rimRight = new THREE.SpotLight('#ffb27f', 52, 22, 0.7, 0.8, 1.5)
+  const rimRight = new THREE.SpotLight('#ffb27f', 64, 22, 0.7, 0.8, 1.5)
   rimRight.position.set(8, 6.2, -8.5)
   rimRight.target.position.set(1.5, 1.2, 0)
   scene.add(rimRight, rimRight.target)

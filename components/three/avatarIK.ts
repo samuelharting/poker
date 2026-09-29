@@ -16,6 +16,9 @@ const desiredDirection = new THREE.Vector3()
 const swing = new THREE.Quaternion()
 const boneWorldQuaternion = new THREE.Quaternion()
 const parentWorldQuaternion = new THREE.Quaternion()
+const identityQuaternion = new THREE.Quaternion()
+const basisZ = new THREE.Vector3()
+const basisY = new THREE.Vector3()
 
 /** Rotates `bone` so that `child` points at `target` (all in world space). */
 export function aimBoneAt(bone: THREE.Object3D, child: THREE.Object3D, target: THREE.Vector3, weight = 1) {
@@ -27,7 +30,7 @@ export function aimBoneAt(bone: THREE.Object3D, child: THREE.Object3D, target: T
   currentDirection.normalize()
   desiredDirection.normalize()
   swing.setFromUnitVectors(currentDirection, desiredDirection)
-  if (weight < 1) swing.slerp(new THREE.Quaternion(), 1 - weight)
+  if (weight < 1) swing.slerp(identityQuaternion, 1 - weight)
 
   bone.getWorldQuaternion(boneWorldQuaternion)
   boneWorldQuaternion.premultiply(swing)
@@ -68,8 +71,8 @@ const frameOrigin = new THREE.Vector3()
 
 function basisQuaternion(primary: THREE.Vector3, secondary: THREE.Vector3, out: THREE.Quaternion) {
   const x = primary.normalize()
-  const z = new THREE.Vector3().crossVectors(x, secondary).normalize()
-  const y = new THREE.Vector3().crossVectors(z, x)
+  const z = basisZ.crossVectors(x, secondary).normalize()
+  const y = basisY.crossVectors(z, x)
   frameBasis.makeBasis(x, y, z)
   return out.setFromRotationMatrix(frameBasis)
 }
@@ -101,7 +104,7 @@ export function orientBoneFrame(
   basisQuaternion(frameCurrentX, frameCurrentY, frameCurrentQ)
   basisQuaternion(frameDesiredX, frameDesiredY, frameDesiredQ)
   frameDelta.copy(frameDesiredQ).multiply(frameCurrentQ.invert())
-  if (weight < 1) frameDelta.slerp(new THREE.Quaternion(), 1 - weight)
+  if (weight < 1) frameDelta.slerp(identityQuaternion, 1 - weight)
   bone.getWorldQuaternion(boneWorldQuaternion)
   boneWorldQuaternion.premultiply(frameDelta)
   if (bone.parent) {

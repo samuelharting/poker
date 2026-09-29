@@ -259,6 +259,14 @@ const DEFAULT_SETTINGS: TableSettings = {
 }
 
 export const AUTO_FOLD_DELAY = DEFAULT_SETTINGS.actionTimerDuration
+/**
+ * Slack added after the displayed turn clock hits zero before a timeout fold
+ * is applied. A client's countdown runs about one network hop behind the
+ * server's (the snapshot has to travel to it) and its click needs a second hop
+ * back, so an action made in the last second could otherwise reach the server
+ * just after the clock and lose to an automatic fold.
+ */
+export const AUTO_FOLD_GRACE_MS = 1_500
 export const BOT_ACTION_DELAY = 1200
 /** A peek the client never lowers (tab closed mid-hold) is dropped after this. */
 export const PEEK_MAX_DURATION_MS = 12_000
@@ -662,7 +670,16 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
-    const deadline = timerStart + gameState.actionTimerDuration
+    // Only fold for a clock this room is actually tracking for the player on
+    // turn. A stale alarm (left over from another turn, or from before a
+    // restart) must never fold whoever happens to be acting now: give that
+    // turn its own fresh clock instead.
+    if (this.autoFoldPlayerId !== actingPlayerId || this.autoFoldDeadline === null) {
+      this.syncActionTimer()
+      return
+    }
+
+    const deadline = this.autoFoldDeadline + AUTO_FOLD_GRACE_MS
     const remainingMs = deadline - Date.now()
     if (remainingMs > 25) {
       void this.room.storage.setAlarm(deadline)
@@ -1110,8 +1127,10 @@ export default class PokerRoom implements PartyServer {
     }
 
     try {
-      this.clearAutoFold()
+      // The clock only stops once the action is accepted: a rejected one (out
+      // of turn, illegal size) must not cancel the acting player's timer.
       this.data.gameState = processAction(this.data.gameState, playerId, action, amount)
+      this.clearAutoFold()
       this.markPlayerPresent(playerId)
       if (action === 'fold') {
         this.recordFold(playerId)
@@ -4102,9 +4121,9 @@ export default class PokerRoom implements PartyServer {
       !resetCurrentTimer &&
       this.autoFoldPlayerId === actingPlayerId &&
       this.autoFoldDeadline &&
-      this.autoFoldDeadline > Date.now()
+      this.autoFoldDeadline + AUTO_FOLD_GRACE_MS > Date.now()
     ) {
-      void this.room.storage.setAlarm(this.autoFoldDeadline)
+      void this.room.storage.setAlarm(this.autoFoldDeadline + AUTO_FOLD_GRACE_MS)
       return
     }
 
@@ -4117,11 +4136,21 @@ export default class PokerRoom implements PartyServer {
     this.autoFoldPlayerId = playerId
     this.data.gameState.actionTimerStart = Date.now()
     this.autoFoldDeadline = this.data.gameState.actionTimerStart + this.data.gameState.actionTimerDuration
-    void this.room.storage.setAlarm(this.autoFoldDeadline)
+    void this.room.storage.setAlarm(this.autoFoldDeadline + AUTO_FOLD_GRACE_MS)
 
+    const scheduledDeadline = this.autoFoldDeadline
+    const scheduledHand = this.data.gameState.handNumber
     this.autoFoldTimeout = setTimeout(() => {
+      // Ignore a timer that no longer belongs to the turn it was set for.
+      if (
+        this.autoFoldPlayerId !== playerId ||
+        this.autoFoldDeadline !== scheduledDeadline ||
+        this.data.gameState.handNumber !== scheduledHand
+      ) {
+        return
+      }
       this.runAutoFold(playerId)
-    }, this.data.gameState.actionTimerDuration)
+    }, this.data.gameState.actionTimerDuration + AUTO_FOLD_GRACE_MS)
   }
 
   private runAutoFold(playerId: string) {

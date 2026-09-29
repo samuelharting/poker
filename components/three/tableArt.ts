@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import {
+  TABLE_SEAT_POSITIONS,
   TABLE_FELT_SEMI_AXIS_X,
   TABLE_FELT_SEMI_AXIS_Z,
   TABLE_WAGER_SEMI_AXIS_X,
@@ -21,9 +22,16 @@ export const FELT_TOP_Y = 0.4
 export const RAIL_WIDTH = 0.66
 export const RAIL_PEAK_Y = FELT_TOP_Y + 0.26
 
-export const BOARD_CARD_WIDTH = 0.58
+export const BOARD_CARD_WIDTH = 0.68
 export const BOARD_CARD_DEPTH = BOARD_CARD_WIDTH * (88 / 63)
-export const BOARD_CARD_GAP = 0.12
+export const BOARD_CARD_GAP = 0.1
+/** Radians the board cards lean back from flat (~50 degrees) so they face the camera. */
+export const BOARD_CARD_TILT = 0.88
+/** The little stand each board card is seated in (depth along Z, height above the felt). */
+export const BOARD_STAND_DEPTH = 0.15
+export const BOARD_STAND_HEIGHT = 0.07
+/** Felt area a propped card really covers: its slanted footprint plus the stand lip. */
+export const BOARD_CARD_FOOTPRINT_DEPTH = BOARD_CARD_DEPTH * Math.cos(BOARD_CARD_TILT) + BOARD_STAND_DEPTH
 export const BOARD_Z = -0.3
 export const BOARD_XS = [-2, -1, 0, 1, 2].map(index => index * (BOARD_CARD_WIDTH + BOARD_CARD_GAP))
 
@@ -35,7 +43,7 @@ export const FELT_LAYOUT: FeltLayout = {
   boardXs: BOARD_XS,
   boardZ: BOARD_Z,
   cardWidth: BOARD_CARD_WIDTH,
-  cardDepth: BOARD_CARD_DEPTH,
+  cardDepth: BOARD_CARD_FOOTPRINT_DEPTH,
 }
 
 type Profile = ReadonlyArray<readonly [number, number]>
@@ -135,6 +143,57 @@ function railCushionProfile(): Profile {
   return points
 }
 
+/** Height of the cushion at a given outward offset (mirrors railCushionProfile). */
+function railHeightAt(offset: number) {
+  const inner = 0.06
+  const u = THREE.MathUtils.clamp((offset - inner) / (RAIL_WIDTH - inner), 0, 1)
+  const angle = Math.acos(2 * u - 1)
+  const base = FELT_TOP_Y + 0.02
+  return base + Math.sin(angle) * (RAIL_PEAK_Y - base) * (0.92 + 0.08 * u)
+}
+
+/**
+ * Brass-rimmed drink wells set into the padded rail, one in each gap between
+ * neighbouring seats. Two merged meshes for the whole ring of them.
+ */
+function addCupHolders(group: THREE.Group, brassMaterial: THREE.Material) {
+  const angles = Object.values(TABLE_SEAT_POSITIONS)
+    .map(([x, , z]) => Math.atan2(z / TABLE_FELT_SEMI_AXIS_Z, x / TABLE_FELT_SEMI_AXIS_X))
+    .sort((a, b) => a - b)
+  const offset = RAIL_WIDTH * 0.55
+  const top = railHeightAt(offset)
+  const rings: THREE.BufferGeometry[] = []
+  const wells: THREE.BufferGeometry[] = []
+  angles.forEach((angle, index) => {
+    const next = index === angles.length - 1 ? angles[0]! + Math.PI * 2 : angles[index + 1]!
+    const t = (angle + next) / 2
+    const normal = new THREE.Vector2(Math.cos(t) / TABLE_FELT_SEMI_AXIS_X, Math.sin(t) / TABLE_FELT_SEMI_AXIS_Z).normalize()
+    const x = Math.cos(t) * TABLE_FELT_SEMI_AXIS_X + normal.x * offset
+    const z = Math.sin(t) * TABLE_FELT_SEMI_AXIS_Z + normal.y * offset
+    const ring = new THREE.TorusGeometry(0.125, 0.016, 8, 32)
+    ring.rotateX(Math.PI / 2)
+    ring.translate(x, top + 0.006, z)
+    rings.push(ring)
+    const well = new THREE.CylinderGeometry(0.118, 0.1, 0.03, 28)
+    well.translate(x, top - 0.006, z)
+    wells.push(well)
+  })
+  const ringMerged = mergeGeometries(rings, false)
+  const wellMerged = mergeGeometries(wells, false)
+  rings.forEach(part => part.dispose())
+  wells.forEach(part => part.dispose())
+  if (ringMerged) {
+    const mesh = new THREE.Mesh(ringMerged, brassMaterial)
+    mesh.name = 'cup-holder-rims'
+    group.add(mesh)
+  }
+  if (wellMerged) {
+    const mesh = new THREE.Mesh(wellMerged, new THREE.MeshStandardMaterial({ color: '#120807', roughness: 0.7, metalness: 0.1 }))
+    mesh.name = 'cup-holder-wells'
+    group.add(mesh)
+  }
+}
+
 export interface TableArt {
   group: THREE.Group
   feltMaterial: THREE.MeshStandardMaterial
@@ -220,6 +279,25 @@ export function createStylizedTable(): TableArt {
   inlay.receiveShadow = true
   group.add(inlay)
 
+  // Brass beading where the leather cushion meets the walnut skirt: a thin
+  // rounded bead that catches the key light and finishes the rail edge.
+  const railBead = new THREE.Mesh(
+    sweepAroundEllipse([
+      [RAIL_WIDTH - 0.05, FELT_TOP_Y - 0.1],
+      [RAIL_WIDTH - 0.01, FELT_TOP_Y - 0.115],
+      [RAIL_WIDTH + 0.025, FELT_TOP_Y - 0.15],
+      [RAIL_WIDTH + 0.02, FELT_TOP_Y - 0.19],
+      [RAIL_WIDTH - 0.02, FELT_TOP_Y - 0.21],
+      [RAIL_WIDTH - 0.06, FELT_TOP_Y - 0.17],
+    ], 192, true),
+    brassMaterial
+  )
+  railBead.name = 'brass-rail-bead'
+  railBead.castShadow = true
+  group.add(railBead)
+
+  addCupHolders(group, brassMaterial)
+
   const woodMaterial = new THREE.MeshStandardMaterial({
     color: '#ffffff',
     map: getWalnutTexture(),
@@ -299,15 +377,44 @@ const CHAIR_WOOD = new THREE.Color('#3a2217')
  * of the seat. Tall in the middle, sweeping down into low arms at the sides.
  * UVs are in world units (arc length, height) so the tufting tile stays square.
  */
+const SHELL = {
+  radiusX: 0.66,
+  radiusZ: 0.56,
+  centerZ: 0.16,
+  thickness: 0.2,
+  baseY: -0.12,
+  backTop: 1.5,
+  armTop: 0.36,
+} as const
+const SHELL_MAX_ANGLE = THREE.MathUtils.degToRad(118)
+
+/** Point on the tub shell: theta around the back, r off the centreline, y absolute or on the pillow cap. */
+function shellCapPoint(theta: number, capAngle: number) {
+  const { radiusX, radiusZ, centerZ, thickness, backTop, armTop } = SHELL
+  const across = Math.abs(theta) / SHELL_MAX_ANGLE
+  const height = armTop + (backTop - armTop) * (1 - THREE.MathUtils.smoothstep(across, 0.22, 0.62))
+  const lean = 0.1 * (1 - THREE.MathUtils.smoothstep(across, 0.2, 0.6))
+  const sin = Math.sin(theta)
+  const cos = Math.cos(theta)
+  const normal = new THREE.Vector2(sin / radiusX, cos / radiusZ).normalize()
+  const y = height - thickness / 2 + Math.sin(capAngle) * (thickness / 2)
+  const offset = Math.cos(capAngle) * (thickness / 2) + lean * (y / backTop) * 1
+  return new THREE.Vector3(sin * radiusX + normal.x * offset, y, centerZ + cos * radiusZ + normal.y * offset)
+}
+
+/** Point on the outer face of the shell at a fixed height (for nailhead trim). */
+function shellSidePoint(theta: number, y: number, outward: number) {
+  const { radiusX, radiusZ, centerZ, thickness } = SHELL
+  const sin = Math.sin(theta)
+  const cos = Math.cos(theta)
+  const normal = new THREE.Vector2(sin / radiusX, cos / radiusZ).normalize()
+  const offset = thickness / 2 + outward
+  return new THREE.Vector3(sin * radiusX + normal.x * offset, y, centerZ + cos * radiusZ + normal.y * offset)
+}
+
 function createTubShell() {
-  const radiusX = 0.66
-  const radiusZ = 0.56
-  const centerZ = 0.16
-  const thickness = 0.2
-  const baseY = -0.12
-  const backTop = 1.5
-  const armTop = 0.36
-  const maxAngle = THREE.MathUtils.degToRad(118)
+  const { radiusX, radiusZ, centerZ, thickness, baseY, backTop, armTop } = SHELL
+  const maxAngle = SHELL_MAX_ANGLE
   const segments = 40
   const capSteps = 8
   // Profile loop in (radial offset, height fraction of the pillow top).
@@ -476,6 +583,25 @@ export function createStylizedChair(
   const piping = paint(new THREE.TorusGeometry(0.61, 0.018, 6, 48), brass)
   frameParts.push(prepare(piping, composeMatrix([0, -0.145, 0.12], [Math.PI / 2, 0, 0], [1, 0.82, 1]), true))
 
+  // Brass piping along both crest edges of the shell, from arm tip over the
+  // back to the other arm: the silhouette-defining line of a lounge chair.
+  for (const capAngle of [Math.PI * 0.2, Math.PI * 0.8]) {
+    const points: THREE.Vector3[] = []
+    for (let step = 0; step <= 48; step += 1) {
+      points.push(shellCapPoint(((step / 48) * 2 - 1) * SHELL_MAX_ANGLE * 0.985, capAngle))
+    }
+    const tube = paint(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 96, 0.013, 6, false), brass)
+    frameParts.push(prepare(tube, new THREE.Matrix4(), true))
+  }
+  // Row of brass nailheads around the lower outer skirt of the shell.
+  const nailGeometry = new THREE.SphereGeometry(0.019, 6, 4)
+  for (let step = 0; step <= 34; step += 1) {
+    const theta = ((step / 34) * 2 - 1) * SHELL_MAX_ANGLE * 0.96
+    const point = shellSidePoint(theta, 0.06, 0.004)
+    frameParts.push(prepare(paint(nailGeometry.clone(), brass), composeMatrix([point.x, point.y, point.z]), true))
+  }
+  nailGeometry.dispose()
+
   // Four slim, slightly splayed legs down to the carpet (floor is ~2 below the seat root).
   const floorY = -2.02
   const legTopY = -0.24
@@ -483,11 +609,20 @@ export function createStylizedChair(
   for (const [x, z] of [[-0.42, -0.2], [0.42, -0.2], [-0.4, 0.46], [0.4, 0.46]] as const) {
     const splayX = Math.sign(x) * 0.06
     const splayZ = (z > 0.1 ? 1 : -1) * 0.05
-    const leg = paint(new THREE.CylinderGeometry(0.038, 0.026, legLength, 10), CHAIR_WOOD)
+    const leg = paint(new THREE.CylinderGeometry(0.048, 0.03, legLength, 10), CHAIR_WOOD)
     const tilt: [number, number, number] = [-splayZ / legLength, 0, splayX / legLength]
     frameParts.push(prepare(leg, composeMatrix([x + splayX / 2, (legTopY + floorY) / 2, z + splayZ / 2], tilt), true))
     const ferrule = paint(new THREE.CylinderGeometry(0.03, 0.03, 0.08, 10), brass)
     frameParts.push(prepare(ferrule, composeMatrix([x + splayX, floorY + 0.04, z + splayZ]), true))
+  }
+  // Walnut stretchers tie the legs together so the frame reads as one piece.
+  for (const [ax, az, bx, bz] of [[-0.4, 0.46, 0.4, 0.46], [-0.42, -0.2, 0.42, -0.2], [-0.4, 0.46, -0.42, -0.2], [0.4, 0.46, 0.42, -0.2]] as const) {
+    const length = Math.hypot(bx - ax, bz - az)
+    const bar = paint(new THREE.CylinderGeometry(0.02, 0.02, length, 8), CHAIR_WOOD)
+    bar.rotateX(Math.PI / 2)
+    bar.rotateY(Math.atan2(bx - ax, bz - az))
+    bar.translate((ax + bx) / 2, -1.62, (az + bz) / 2)
+    frameParts.push(prepare(bar, new THREE.Matrix4(), true))
   }
   // Brass foot ring where the players rest their feet.
   const footRing = paint(new THREE.TorusGeometry(0.5, 0.022, 8, 48), brass)

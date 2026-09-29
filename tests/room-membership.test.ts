@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Connection } from 'partykit/server'
 import type { LedgerSnapshot } from '@/lib/poker/ledger'
-import { HOST_DISCONNECT_GRACE_MS, MISSED_HANDS_BEFORE_SIT_OUT } from '@/partykit/room'
+import { AUTO_FOLD_GRACE_MS, HOST_DISCONNECT_GRACE_MS, MISSED_HANDS_BEFORE_SIT_OUT } from '@/partykit/room'
 import {
   actingPlayer,
   createHarness,
@@ -465,7 +465,7 @@ describe('leaving and reconnecting', () => {
 
     disconnect(table.server, table.room, actorEntry.connection)
     expect(actingPlayer(internals)?.id).toBe(actor.id)
-    vi.advanceTimersByTime(internals.data.gameState.actionTimerDuration + 10)
+    vi.advanceTimersByTime(internals.data.gameState.actionTimerDuration + AUTO_FOLD_GRACE_MS + 10)
     expect(actingPlayer(internals)?.id).not.toBe(actor.id)
     expect(player(internals, actor.id)).toBeDefined()
     expect(allChips(internals)).toBe(chipsBefore)
@@ -591,7 +591,7 @@ describe('sitting out after missed hands', () => {
       const actor = actingPlayer(internals)
       if (!actor) break
       if (actor.id === awayId) {
-        vi.advanceTimersByTime(internals.data.gameState.actionTimerDuration + 10)
+        vi.advanceTimersByTime(internals.data.gameState.actionTimerDuration + AUTO_FOLD_GRACE_MS + 10)
       } else {
         actFor(table, table.byId, 'passive')
       }

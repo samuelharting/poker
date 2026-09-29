@@ -4,10 +4,14 @@ import {
   getCardBackTexture,
   getCardFaceTexture,
   type CardSuit,
+  type SuitColorMode,
 } from './sceneTextures'
 import {
   BOARD_CARD_DEPTH,
+  BOARD_CARD_TILT,
   BOARD_CARD_WIDTH,
+  BOARD_STAND_DEPTH,
+  BOARD_STAND_HEIGHT,
   BOARD_XS,
   BOARD_Z,
   FELT_TOP_Y,
@@ -110,6 +114,10 @@ export interface CardMesh {
   faceMaterial: THREE.MeshStandardMaterial
   backMaterial: THREE.MeshStandardMaterial
   face: CardFace | null
+  /** Suit-color mode the current face texture was painted for. */
+  suitMode: SuitColorMode
+  /** Propped up on a stand: its shadow is the footprint, not a lifted card's. */
+  propped: boolean
   faceMesh: THREE.Mesh
   backMesh: THREE.Mesh
   /** Soft contact shadow kept flat on the felt under the card (see cullHiddenCardSide). */
@@ -195,17 +203,36 @@ export function createCardMesh(width: number): CardMesh {
   group.add(edgeMesh, faceMesh, backMesh, shadowMesh)
   group.scale.setScalar(width)
 
-  const card: CardMesh = { group, faceMaterial, backMaterial, face: null, faceMesh, backMesh, shadowMesh }
+  const card: CardMesh = { group, faceMaterial, backMaterial, face: null, suitMode: activeSuitMode, propped: false, faceMesh, backMesh, shadowMesh }
   setCardFace(card, null)
   return card
 }
 
-export function setCardFace(card: CardMesh, face: CardFace | null) {
+/** Suit-color mode every new face texture is painted for (settings toggle). */
+let activeSuitMode: SuitColorMode = 'two'
+
+export function getActiveSuitMode() {
+  return activeSuitMode
+}
+
+export function setCardFace(card: CardMesh, face: CardFace | null, mode: SuitColorMode = activeSuitMode) {
   const sameFace = card.face?.rank === face?.rank && card.face?.suit === face?.suit
-  if (sameFace && card.faceMaterial.map) return
+  if (sameFace && card.suitMode === mode && card.faceMaterial.map) return
   card.face = face
-  card.faceMaterial.map = face ? getCardFaceTexture(face.rank, face.suit) : getCardBackTexture()
+  card.suitMode = mode
+  card.faceMaterial.map = face ? getCardFaceTexture(face.rank, face.suit, mode) : getCardBackTexture()
   card.faceMaterial.needsUpdate = true
+}
+
+/**
+ * Switches every card to the given suit-color mode without recreating meshes:
+ * only the cached per-mode textures are swapped. Returns true if it changed.
+ */
+export function applySuitColorMode(cards: Iterable<CardMesh>, mode: SuitColorMode) {
+  const changed = activeSuitMode !== mode
+  activeSuitMode = mode
+  for (const card of cards) setCardFace(card, card.face, mode)
+  return changed
 }
 
 const cardUp = new THREE.Vector3()
@@ -244,10 +271,11 @@ const shadowYawAxis = new THREE.Vector3(0, 1, 0)
 function placeCardShadow(card: CardMesh, elements: ArrayLike<number>) {
   const shadow = card.shadowMesh
   const unitScale = Math.hypot(elements[0]!, elements[1]!, elements[2]!)
-  const lift = cardWorld.y - FELT_TOP_Y
   const flat = Math.abs(cardUp.y) / Math.max(1e-6, unitScale)
+  // A propped card rests on its stand: full-strength footprint shadow.
+  const lift = card.propped ? 0 : cardWorld.y - FELT_TOP_Y
   const liftFade = 1 - THREE.MathUtils.smoothstep(lift, 0.16, 0.5)
-  const edgeFade = THREE.MathUtils.smoothstep(flat, 0.35, 0.85)
+  const edgeFade = card.propped ? 1 : THREE.MathUtils.smoothstep(flat, 0.35, 0.85)
   // Follow the fold fade (the card's own materials go transparent as it goes).
   const cardOpacity = card.faceMaterial.transparent ? card.faceMaterial.opacity : 1
   const opacity = CARD_SHADOW_OPACITY * liftFade * (0.35 + 0.65 * edgeFade) * cardOpacity
@@ -258,7 +286,8 @@ function placeCardShadow(card: CardMesh, elements: ArrayLike<number>) {
   const yaw = Math.atan2(elements[8]!, elements[10]!)
   shadowQuaternion.setFromAxisAngle(shadowYawAxis, yaw)
   const spread = unitScale * (1 + Math.max(0, lift) * 0.8)
-  shadowScale.set(spread, 1, spread)
+  // A propped card only covers the felt under its footprint (plus a soft spill).
+  shadowScale.set(spread, 1, card.propped ? spread * (0.42 + 0.58 * flat) : spread)
   shadowPosition.set(cardWorld.x, FELT_TOP_Y + 0.003, cardWorld.z)
   shadowWorld.compose(shadowPosition, shadowQuaternion, shadowScale)
   shadowParentInverse.copy(card.group.matrixWorld).invert()
@@ -287,6 +316,8 @@ interface BoardSlot {
   highlighted: boolean
   highlightMaterial: THREE.MeshBasicMaterial
   highlightMesh: THREE.Mesh
+  /** The small lip the propped card is seated in. */
+  stand: THREE.Mesh
 }
 
 export interface BoardRuntime {
@@ -296,6 +327,8 @@ export interface BoardRuntime {
   clearedAt: number
   /** Faint printed outlines marking the five board spots. */
   slotOutlines: THREE.Mesh
+  /** Shared stand geometry/material, disposed with the scene. */
+  disposables: Array<{ dispose(): void }>
 }
 
 /**
@@ -307,8 +340,16 @@ export const DEAL_DECK_POINT = new THREE.Vector3(0.45, FELT_TOP_Y + 0.05, -2.0)
 export const DEAL_LAUNCH_SECONDS = 0.06
 /** Where finished boards are swept to (the muck, beside the dealer). */
 const MUCK_ORIGIN = new THREE.Vector3(0, FELT_TOP_Y + 0.02, -2.1)
-/** Radians the board leans toward the hero's seat. */
-const BOARD_TILT = 0.32
+/** Radians the board leans back toward the hero's seat (see BOARD_CARD_TILT). */
+const BOARD_TILT = BOARD_CARD_TILT
+/** How far the card's bottom edge sinks into its stand's slot. */
+const STAND_SINK = 0.045
+/** World Z of the card's bottom edge (where its stand sits) relative to the slot centre. */
+const STAND_Z_OFFSET = (BOARD_CARD_DEPTH / 2) * Math.cos(BOARD_TILT)
+/** Height of the group's centre so the tilted card's bottom edge rests in the stand. */
+function proppedLift(angle: number, sink: number) {
+  return Math.sin(angle) * BOARD_CARD_DEPTH * 0.5 + sink
+}
 /** Seconds the board takes to flip over and slide off to the muck. */
 export const BOARD_CLEAR_SECONDS = 0.34
 
@@ -350,9 +391,32 @@ export function createBoardRuntime(scene: THREE.Scene): BoardRuntime {
   slotOutlines.renderOrder = 1
   group.add(slotOutlines)
 
+  // Each card leans back in a small dark-walnut stand with a brass lip, so it
+  // reads as physically propped rather than floating.
+  const standShape = roundedCardShape(BOARD_CARD_WIDTH * 1.08, BOARD_STAND_DEPTH, 0.045)
+  const standGeometry = new THREE.ExtrudeGeometry(standShape, {
+    depth: BOARD_STAND_HEIGHT,
+    bevelEnabled: true,
+    bevelSize: 0.012,
+    bevelThickness: 0.012,
+    bevelSegments: 2,
+    curveSegments: 6,
+  })
+  standGeometry.rotateX(-Math.PI / 2)
+  const standMaterial = new THREE.MeshStandardMaterial({ color: '#2e1c12', roughness: 0.42, metalness: 0.25 })
+  const disposables: Array<{ dispose(): void }> = [rimGeometry, standGeometry, standMaterial]
+
   const slots: BoardSlot[] = BOARD_XS.map(x => {
     const card = createCardMesh(BOARD_CARD_WIDTH)
+    card.propped = true
     card.group.position.set(x, FELT_TOP_Y + 0.008, BOARD_Z)
+    const stand = new THREE.Mesh(standGeometry, standMaterial)
+    stand.name = 'board-card-stand'
+    stand.position.set(x, FELT_TOP_Y + 0.002, BOARD_Z + STAND_Z_OFFSET)
+    stand.castShadow = false
+    stand.receiveShadow = true
+    stand.visible = false
+    group.add(stand)
     card.group.visible = false
     group.add(card.group)
 
@@ -375,10 +439,11 @@ export function createBoardRuntime(scene: THREE.Scene): BoardRuntime {
       highlighted: false,
       highlightMaterial,
       highlightMesh,
+      stand,
     }
   })
 
-  return { group, slots, visibleCount: 0, clearedAt: Number.NEGATIVE_INFINITY, slotOutlines }
+  return { group, slots, visibleCount: 0, clearedAt: Number.NEGATIVE_INFINITY, slotOutlines, disposables }
 }
 
 export function syncBoardRuntime(
@@ -427,13 +492,17 @@ const slotTarget = new THREE.Vector3()
 export function animateBoardRuntime(board: BoardRuntime, time: number, reducedMotion: boolean) {
   board.slots.forEach((slot, index) => {
     const group = slot.card.group
-    if (!group.visible) return
+    if (!group.visible) {
+      slot.stand.visible = false
+      return
+    }
     slotTarget.set(BOARD_XS[index]!, FELT_TOP_Y + 0.008, BOARD_Z)
 
     if (slot.leavingAt !== Number.NEGATIVE_INFINITY) {
       const leave = reducedMotion ? 1 : THREE.MathUtils.clamp((time - slot.leavingAt) / BOARD_CLEAR_SECONDS, 0, 1)
       if (leave >= 1) {
         group.visible = false
+        slot.stand.visible = false
         slot.highlightMesh.visible = false
         slot.leavingAt = Number.NEGATIVE_INFINITY
         group.scale.setScalar(BOARD_CARD_WIDTH)
@@ -444,8 +513,12 @@ export function animateBoardRuntime(board: BoardRuntime, time: number, reducedMo
       const slide = THREE.MathUtils.smoothstep(leave, 0.2, 1)
       scratch.lerpVectors(slotTarget, MUCK_ORIGIN, slide)
       scratch.y += Math.sin(flip * Math.PI) * 0.12 + index * 0.004 * slide
+      const leaveTilt = BOARD_TILT * (1 - flip)
+      scratch.y += proppedLift(leaveTilt, STAND_SINK * (1 - flip))
       group.position.copy(scratch)
-      group.rotation.set(BOARD_TILT * (1 - flip), slide * (index - 2) * 0.05, Math.PI * flip)
+      group.rotation.set(leaveTilt, slide * (index - 2) * 0.05, Math.PI * flip)
+      slot.stand.visible = flip < 0.3
+      slot.stand.scale.y = 1 - THREE.MathUtils.smoothstep(flip, 0, 0.3)
       group.scale.setScalar(BOARD_CARD_WIDTH * (1 - slide * 0.18))
       slot.highlightMesh.visible = false
       return
@@ -456,6 +529,7 @@ export function animateBoardRuntime(board: BoardRuntime, time: number, reducedMo
       // Parked out of sight until the previous board has cleared.
       group.position.set(DEAL_DECK_POINT.x, -10, DEAL_DECK_POINT.z)
       slot.highlightMesh.visible = false
+      slot.stand.visible = false
       return
     }
     const progress = reducedMotion ? 1 : THREE.MathUtils.clamp((time - slot.dealtAt) / 0.62, 0, 1)
@@ -471,7 +545,11 @@ export function animateBoardRuntime(board: BoardRuntime, time: number, reducedMo
     // then propped slightly toward the seated player so the board reads easily.
     const prop = BOARD_TILT * flip
     group.rotation.set(prop, (1 - travel) * 0.6, Math.PI * (1 - flip))
-    group.position.y += Math.sin(prop) * BOARD_CARD_DEPTH * 0.5
+    group.position.y += proppedLift(prop, STAND_SINK * flip)
+    // The stand rises out of the felt as the card settles onto it.
+    const standGrow = THREE.MathUtils.smoothstep(progress, 0.6, 0.95)
+    slot.stand.visible = standGrow > 0.01
+    slot.stand.scale.y = Math.max(0.001, standGrow)
 
     // Winning cards rise a touch and wear a steady gold rim; the face itself
     // is never brightened so ranks and suits stay crisp.

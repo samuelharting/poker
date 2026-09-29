@@ -323,6 +323,7 @@ interface DesktopPokerRoom3DProps {
   onRequestCardReveal: (playerId: string) => void
   highlightedCards?: ReadonlyArray<Pick<Card, 'rank' | 'suit'>>
   actingTimerPercent?: number
+  suitColorMode?: 'two' | 'four'
 }
 
 const DesktopPokerRoom3D = dynamic<DesktopPokerRoom3DProps>(
@@ -2232,7 +2233,8 @@ export function PokerTable({
       let handled = true
       switch (event.key.toLowerCase()) {
         case 'f':
-          if (byKey('fold')) byKey('fold')!.onClick()
+          // A stray F must never throw away a hand that checking keeps for free.
+          if (byKey('fold') && !byKey('check')) byKey('fold')!.onClick()
           else handled = false
           break
         case 'c': {
@@ -2568,6 +2570,7 @@ export function PokerTable({
           onRequestCardReveal={onRequestCardReveal}
           highlightedCards={highlightedWinningCards}
           actingTimerPercent={opponentTimerVisible ? turnTimer.percent : undefined}
+          suitColorMode={suitColorMode}
         />
       ) : null}
       {!isMobileViewport && showdownCinematic}

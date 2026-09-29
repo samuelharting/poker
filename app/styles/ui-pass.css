@@ -1,0 +1,552 @@
+/*
+ * UI pass (desktop 3D overlay). Loaded last so it settles the many earlier
+ * layers into one system: nameplates, action tray, timer, pot, room capsule,
+ * drink dock and Table talk share the same glass surface, radii, focus ring
+ * and hover/press feedback. Presentation only; no markup or game logic.
+ */
+
+:root {
+  --ui-glass:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 55%),
+    rgba(10, 17, 18, 0.8);
+  --ui-glass-soft:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 55%),
+    rgba(10, 17, 18, 0.64);
+  --ui-border: rgba(244, 239, 228, 0.12);
+  --ui-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 10px 26px rgba(0, 0, 0, 0.4);
+  --ui-focus: 0 0 0 2px var(--c-ink-900), 0 0 0 4px var(--c-brass-400);
+  --ui-dock-h: 46px;
+}
+
+@media (min-width: 1024px) {
+  /* Shared focus ring for every overlay control ---------------------------- */
+  .table-scene[data-desktop-three='true'] .btn-action:focus-visible,
+  .table-scene[data-desktop-three='true'] .btn-quick:focus-visible,
+  .table-scene[data-desktop-three='true'] .raise-input:focus-visible,
+  .table-scene[data-desktop-three='true'] .blind-tip-dismiss:focus-visible,
+  .room-shell .social-dock-toggle:focus-visible,
+  .room-shell .drink-button:focus-visible,
+  .room-shell .room-hud .hud-sound-trigger:focus-visible,
+  .room-shell .room-hud .hud-settings-trigger:focus-visible,
+  .desktop-3d-stage .cinematic-seat-target:focus-visible .cinematic-seat-panel {
+    outline: none;
+    box-shadow: var(--ui-focus);
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-slider:focus-visible {
+    outline: 2px solid var(--c-brass-400);
+    outline-offset: 4px;
+  }
+
+  /* Nameplates ------------------------------------------------------------- */
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-target {
+    gap: 5px;
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-panel {
+    min-width: 124px;
+    max-width: 176px;
+    padding: 6px 11px 7px;
+    row-gap: 3px;
+    border: 1px solid var(--ui-border);
+    border-radius: 12px;
+    background: var(--ui-glass-soft);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34);
+    backdrop-filter: blur(8px) saturate(1.15);
+  }
+
+  /* A small tail ties each plate to its player. */
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-target::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: -4px;
+    width: 8px;
+    height: 8px;
+    border-right: 1px solid var(--ui-border);
+    border-bottom: 1px solid var(--ui-border);
+    background: rgba(10, 17, 18, 0.7);
+    transform: translateX(-50%) rotate(45deg);
+    pointer-events: none;
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-topline {
+    gap: 6px;
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-topline strong {
+    color: var(--c-text-1);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.005em;
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-blind-role {
+    min-width: 24px;
+    height: 17px;
+    justify-content: center;
+    padding: 0 6px;
+    font-size: 9px;
+    line-height: 1;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3) inset;
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-meta {
+    gap: 10px;
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-meta b {
+    color: var(--c-felt-300);
+    font-size: 12.5px;
+    letter-spacing: 0;
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-meta small {
+    max-width: 92px;
+    padding: 2px 7px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--c-text-2);
+    font-size: 9.5px;
+    line-height: 1.3;
+  }
+
+  /* Turn: a solid, unmistakable state. */
+  .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-panel {
+    border-color: rgba(127, 208, 255, 0.85);
+    background:
+      linear-gradient(180deg, rgba(127, 208, 255, 0.16), rgba(127, 208, 255, 0.04)),
+      rgba(10, 17, 18, 0.86);
+  }
+
+  .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-target::after {
+    border-color: rgba(127, 208, 255, 0.85);
+    background: rgba(18, 40, 52, 0.95);
+  }
+
+  .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-meta small {
+    background: var(--c-sky-400);
+    color: #04121c;
+  }
+
+  .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-topline strong {
+    color: #fff;
+  }
+
+  .desktop-3d-stage .cinematic-seat.is-folded {
+    opacity: 0.5;
+  }
+
+  /* Pot -------------------------------------------------------------------- */
+
+  .table-scene[data-desktop-three='true'] .pot-display-card,
+  .desktop-3d-stage .payout-pot-readout {
+    gap: 10px;
+    padding: 7px 16px 8px;
+    border: 1px solid var(--line-brass);
+    background: var(--ui-glass);
+    box-shadow: var(--ui-shadow);
+  }
+
+  .table-scene[data-desktop-three='true'] .pot-display-label {
+    font-size: 10px;
+    letter-spacing: 0.16em;
+  }
+
+  /* Room capsule ----------------------------------------------------------- */
+
+  .room-shell .room-hud .room-hud-main {
+    border-color: var(--ui-border);
+    background: var(--ui-glass);
+    box-shadow: var(--ui-shadow);
+  }
+
+  .room-shell .room-hud .hud-sound-trigger,
+  .room-shell .room-hud .hud-settings-trigger {
+    transition:
+      background var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out),
+      transform var(--dur-fast) var(--ease-out);
+  }
+
+  .room-shell .room-hud .hud-sound-trigger:active,
+  .room-shell .room-hud .hud-settings-trigger:active {
+    transform: scale(0.96);
+  }
+
+  /* Bottom-left dock: Table talk + drinks share one height and surface ------ */
+
+  .room-shell .social-dock-toggle,
+  .drink-controls.is-desktop {
+    min-height: var(--ui-dock-h);
+    border: 1px solid var(--ui-border);
+    background: var(--ui-glass);
+    box-shadow: var(--ui-shadow);
+    backdrop-filter: blur(12px) saturate(1.15);
+  }
+
+  .room-shell .social-dock-toggle {
+    height: var(--ui-dock-h);
+    padding: 0 16px 0 6px;
+    transition:
+      transform var(--dur-fast) var(--ease-out),
+      border-color var(--dur-base) var(--ease-out),
+      box-shadow var(--dur-base) var(--ease-out);
+  }
+
+  .room-shell .social-dock-toggle > span {
+    width: 34px;
+    height: 34px;
+  }
+
+  .room-shell .social-dock-toggle strong {
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .room-shell .social-dock-toggle:hover {
+    border-color: var(--line-brass);
+    transform: translateY(-1px);
+  }
+
+  .room-shell .social-dock-toggle:active {
+    transform: scale(0.97);
+  }
+
+  .drink-controls.is-desktop {
+    left: 174px;
+    bottom: 20px;
+    padding: 5px 16px 5px 5px;
+    gap: var(--sp-3);
+  }
+
+  .drink-controls .drink-button {
+    height: 34px;
+  }
+
+  /* Action tray ------------------------------------------------------------ */
+
+  .table-scene[data-desktop-three='true'] .betting-tray {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--ui-border);
+    border-radius: 20px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 45%),
+      rgba(9, 15, 16, 0.86);
+    box-shadow: var(--shadow-3);
+    backdrop-filter: blur(16px) saturate(1.15);
+    transition: border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+  }
+
+  /* The whole tray warms up as the clock runs low. */
+  .table-scene[data-desktop-three='true'] .betting-tray:has(.timer-bar-shell[data-urgency='warn']) {
+    border-color: rgba(245, 180, 59, 0.4);
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray:has(.timer-bar-shell[data-urgency='low']) {
+    border-color: rgba(255, 90, 79, 0.7);
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray-header.turn-prompt {
+    grid-column: 1;
+    padding: 0 2px;
+    align-self: center;
+  }
+
+  .table-scene[data-desktop-three='true'] .turn-prompt-copy {
+    display: grid;
+    gap: 3px;
+  }
+
+  .table-scene[data-desktop-three='true'] .turn-prompt-kicker {
+    color: var(--c-sky-400);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray-kicker.turn-prompt-headline {
+    font-size: 20px;
+    line-height: 1.1;
+  }
+
+  .table-scene[data-desktop-three='true'] .turn-prompt-context {
+    color: var(--c-text-3);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  /* Timer: compact readout, colour and glow carry the urgency. */
+  .table-scene[data-desktop-three='true'] .betting-tray .timer-bar-shell {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+    min-width: 116px;
+    gap: 6px;
+    padding: 8px 12px 9px;
+    border-radius: 14px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .timer-bar-header {
+    display: grid;
+    grid-template-columns: 1fr;
+    justify-items: start;
+    gap: 2px;
+    font-size: 9px;
+    letter-spacing: 0.14em;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .timer-bar-header span.timer-bar-seconds,
+  .table-scene[data-desktop-three='true'] .betting-tray .timer-bar-header span.timer-bar-seconds.is-low {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    white-space: nowrap;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .timer-bar-seconds b {
+    margin-right: 3px;
+    font-family: var(--font-display);
+    font-size: 24px;
+    line-height: 1;
+    vertical-align: -2px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .timer-bar {
+    height: 6px;
+  }
+
+  /* Sizing presets and slider */
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-slider-row {
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) 92px;
+    grid-template-rows: 32px 24px;
+    gap: 8px 12px;
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--line-soft);
+    border-radius: 14px;
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-quick-btns {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-quick-btns .btn-quick,
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-quick {
+    min-height: 32px;
+    height: 32px;
+    padding: 0 6px;
+    border: 1px solid var(--ui-border);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--c-text-2);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-quick:hover:not(:disabled) {
+    border-color: var(--line-brass);
+    background: rgba(242, 199, 102, 0.14);
+    color: var(--c-brass-200);
+    transform: translateY(-1px);
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-input-wrap {
+    gap: 4px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-input-wrap .raise-input {
+    min-height: 44px;
+    border-radius: 12px;
+    font-size: 20px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-input-hint {
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  /* Actions: one row, primary dominates, the rest recede. */
+  .table-scene[data-desktop-three='true'] .betting-tray .bet-action-row {
+    grid-column: 1 / -1;
+    gap: 8px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action {
+    height: 58px;
+    padding: 0 6px;
+    border-radius: 14px;
+    gap: 3px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action-main {
+    font-size: 13px;
+    letter-spacing: 0.05em;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action-sub {
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  /* Keyboard hints: a tidy keycap in the bottom-right corner. */
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action-key {
+    top: auto;
+    right: 6px;
+    bottom: 5px;
+    min-width: 15px;
+    height: 15px;
+    border-radius: 4px;
+    font-size: 9px;
+    line-height: 13px;
+    opacity: 0.6;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action:hover:not(:disabled) .btn-action-key,
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action:focus-visible .btn-action-key {
+    opacity: 0.9;
+  }
+
+  /* Fold is a quiet ghost; all-in is an outlined danger, so neither competes. */
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action.btn-fold {
+    border-color: rgba(226, 80, 92, 0.45);
+    background: rgba(226, 80, 92, 0.08);
+    color: #ffb3ba;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action.btn-all-in:not(.is-primary) {
+    border-color: rgba(255, 122, 61, 0.6);
+    background: rgba(255, 122, 61, 0.12);
+    box-shadow: none;
+    color: var(--c-ember-300);
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action.btn-all-in:not(.is-primary)::after {
+    display: none;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action.btn-all-in:not(.is-primary):hover {
+    background: rgba(255, 122, 61, 0.22);
+    box-shadow: none;
+  }
+
+  /* With a primary action, the other solid buttons step back a notch. */
+  .table-scene[data-desktop-three='true'] .betting-tray .bet-action-row:has(.is-primary) .btn-action.btn-raise:not(.is-primary) {
+    filter: saturate(0.8) brightness(0.92);
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action.is-primary {
+    height: 64px;
+    margin-block: -3px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action.is-primary .btn-action-main {
+    font-size: 16px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action:active:not(:disabled) {
+    transform: translateY(1px) scale(0.98);
+  }
+}
+
+/* Narrow desktop: slimmer tray, 2x2 actions (existing grid), same hierarchy. */
+@media (min-width: 1024px) and (max-width: 1180px) {
+  .table-scene[data-desktop-three='true'] .betting-tray {
+    width: 340px;
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray-kicker.turn-prompt-headline {
+    font-size: 17px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .timer-bar-shell {
+    min-width: 100px;
+    padding: 6px 10px 8px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-slider-row {
+    grid-template-columns: minmax(0, 1fr) 74px;
+    padding: 8px 10px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-quick {
+    padding: 0 2px;
+    font-size: 10px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .bet-action-row[data-count] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-target {
+    transform: scale(calc((0.78 + var(--seat-depth, 1) * 0.22) * 0.76));
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-panel {
+    min-width: 108px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action,
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action.is-primary {
+    height: 48px;
+    min-height: 48px;
+    margin-block: 0;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action.is-primary .btn-action-main {
+    font-size: 14px;
+  }
+}
+
+/* Wide desktop */
+@media (min-width: 1181px) {
+  .table-scene[data-desktop-three='true'] .betting-tray {
+    width: clamp(420px, 32vw, 468px);
+  }
+}
+
+/* Short windows (e.g. 1440x700): tighten the tray so it stays clear of the hero. */
+@media (min-width: 1024px) and (max-height: 760px) {
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action {
+    height: 50px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action.is-primary {
+    height: 54px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-slider-row {
+    grid-template-rows: 30px 20px;
+    padding-block: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-scene[data-desktop-three='true'] .btn-action,
+  .table-scene[data-desktop-three='true'] .btn-quick,
+  .room-shell .social-dock-toggle,
+  .room-shell .drink-button,
+  .desktop-3d-stage .cinematic-seat-panel {
+    transition-duration: 0.01ms;
+    animation: none;
+  }
+
+  .table-scene[data-desktop-three='true'] .btn-action:hover,
+  .table-scene[data-desktop-three='true'] .btn-quick:hover,
+  .room-shell .social-dock-toggle:hover,
+  .room-shell .drink-button:hover {
+    transform: none;
+  }
+}

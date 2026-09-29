@@ -5,9 +5,12 @@ import * as THREE from 'three'
  *
  * The source models paint tiny eyes and brows onto the head. We locate those
  * painted regions in the skinned mesh (by material name), hide them, and mount
- * real eyes (sclera, pupil, glint, eyelids) and brows on the Head bone at the
- * same spots. The eyes can then blink, look at the action, and the whole face
- * can emote: focused, surprised, happy, sad, bored.
+ * real eyes (sclera, pupil, eyelids), brows and a morphing mouth on the Head
+ * bone at the same spots. The eyes blink, dart around and look at the action,
+ * and the whole face can emote: focused, surprised, happy, sad, bored.
+ *
+ * Cost: per eye 3 meshes, 2 brows, 1 mouth ribbon. The mouth vertex buffer is
+ * 22 floats rewritten only when the shape actually changes.
  */
 
 export type FaceMood = 'neutral' | 'focused' | 'surprised' | 'happy' | 'sad' | 'bored'
@@ -28,14 +31,86 @@ interface BrowRig {
   side: 1 | -1
 }
 
+/** One dynamic ribbon mesh that morphs between a line, smile, frown and open "O" (a single draw). */
+interface MouthRig {
+  mesh: THREE.Mesh
+  positions: THREE.BufferAttribute
+  halfWidth: number
+  thickness: number
+  /** Last written shape, to skip redundant buffer uploads. */
+  last: [number, number, number]
+}
+
 export interface AvatarFaceRig {
   eyes: EyeRig[]
   brows: BrowRig[]
-  mouth: { smile: THREE.Mesh; line: THREE.Mesh; ring: THREE.Mesh } | null
+  mouth: MouthRig | null
   materials: THREE.Material[]
   geometries: THREE.BufferGeometry[]
+  /** Painted-over eye/brow patches and lids: they follow the live skin colour (flush, folded shading). */
+  skinFollowers: THREE.MeshToonMaterial[]
+  skinSource: THREE.MeshToonMaterial | null
   /** Smoothed expression channels. */
-  state: { open: number; lookX: number; lookY: number; browLift: number; browTilt: number; squint: number }
+  state: {
+    open: number
+    lookX: number
+    lookY: number
+    browLift: number
+    browTilt: number
+    squint: number
+    smile: number
+    mouthOpen: number
+    mouthWidth: number
+    time: number
+    saccadeX: number
+    saccadeY: number
+    nextSaccade: number
+    seed: number
+  }
+}
+
+const MOUTH_SEGMENTS = 10
+
+function createMouthGeometry() {
+  const geometry = new THREE.BufferGeometry()
+  const positions = new THREE.BufferAttribute(new Float32Array((MOUTH_SEGMENTS + 1) * 2 * 3), 3)
+  positions.setUsage(THREE.DynamicDrawUsage)
+  geometry.setAttribute('position', positions)
+  const indices: number[] = []
+  for (let i = 0; i < MOUTH_SEGMENTS; i += 1) {
+    const a = i * 2
+    indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2)
+  }
+  geometry.setIndex(indices)
+  return { geometry, positions }
+}
+
+/** smile: -1 frown .. +1 smile; open: 0 closed .. 1 wide "O"; width: horizontal scale. */
+function writeMouth(mouth: MouthRig, smile: number, open: number, width: number) {
+  const last = mouth.last
+  if (Math.abs(last[0] - smile) + Math.abs(last[1] - open) + Math.abs(last[2] - width) < 0.002) return
+  last[0] = smile
+  last[1] = open
+  last[2] = width
+  const halfW = mouth.halfWidth * width
+  const array = mouth.positions.array as Float32Array
+  const bend = halfW * 0.5 * smile
+  const openHeight = halfW * 0.85 * open
+  for (let i = 0; i <= MOUTH_SEGMENTS; i += 1) {
+    const u = (i / MOUTH_SEGMENTS) * 2 - 1
+    const edge = 1 - u * u
+    const centerY = bend * (u * u - 0.4)
+    const thick = mouth.thickness * (0.35 + 0.65 * edge) * (1 + open * 0.3)
+    const o = i * 6
+    array[o] = u * halfW
+    array[o + 1] = centerY + thick
+    array[o + 2] = 0
+    array[o + 3] = u * halfW
+    array[o + 4] = centerY - thick - openHeight * Math.pow(edge, 0.7)
+    array[o + 5] = 0
+  }
+  mouth.positions.needsUpdate = true
+  mouth.mesh.geometry.computeBoundingSphere()
 }
 
 /** Collects the bind-pose positions (in Head-bone space) of vertices painted with a material. */
@@ -93,7 +168,8 @@ export function createAvatarFace(
   headBone: THREE.Bone | undefined,
   materials: readonly THREE.Material[],
   skinColor: THREE.Color | null,
-  eyewear: 'none' | 'round' | 'aviator' | 'shades' | string = 'none'
+  eyewear: 'none' | 'round' | 'aviator' | 'shades' | string = 'none',
+  seed = 0.5
 ): AvatarFaceRig | null {
   if (!headBone) return null
   const eyePoints = collectRegion(model, headBone, /^eye$/i)
@@ -126,7 +202,7 @@ export function createAvatarFace(
 
   const eyeWidth = Math.max(left.max.x - left.min.x, right.max.x - right.min.x)
   const eyeHeight = Math.max(left.max.y - left.min.y, right.max.y - right.min.y)
-  const radius = Math.max(eyeWidth, eyeHeight) * 1.15
+  const radius = Math.max(eyeWidth, eyeHeight) * 1.05
 
   const sphere = new THREE.SphereGeometry(1, 20, 14)
   const pupilDisc = new THREE.CircleGeometry(1, 20)
@@ -166,7 +242,7 @@ export function createAvatarFace(
 
     const pupil = new THREE.Group()
     const irisMesh = new THREE.Mesh(pupilDisc, iris)
-    irisMesh.scale.setScalar(0.46)
+    irisMesh.scale.setScalar(0.56)
     pupil.add(irisMesh)
     pupil.position.z = BALL_DEPTH + 0.015
     root.add(pupil)
@@ -202,41 +278,67 @@ export function createAvatarFace(
 
   paintOver(materials, /^eye$/i, skinColor)
   paintOver(materials, /^eyebrows?$/i, skinColor)
+  const skinSource = (materials.find(material => /^skin$/i.test(material.name)) as THREE.MeshToonMaterial | undefined) ?? null
+  const skinFollowers: THREE.MeshToonMaterial[] = skinSource
+    ? materials.filter(material => /^(eye|eyebrows?)$/i.test(material.name) && (material as THREE.MeshToonMaterial).color) as THREE.MeshToonMaterial[]
+    : []
+  if (skinSource) skinFollowers.push(lid)
 
   // Opaque sunglasses hide the eyes (and brows sit above the frames).
   const shaded = eyewear === 'shades' || eyewear === 'aviator'
   for (const eye of eyes) eye.root.visible = !shaded
 
-  // A simple cartoon mouth under the eyes that changes with mood.
-  const mouthMaterial = basic('#3a1410')
-  const mouthCenter = eyes[0]!.root.position.clone().lerp(eyes[1]!.root.position, 0.5)
-    .add(new THREE.Vector3(0, -radius * 2.5, 0))
-  const arc = new THREE.TorusGeometry(radius * 0.9, radius * 0.14, 6, 18, Math.PI)
-  const line = new THREE.CapsuleGeometry(radius * 0.13, radius * 1.1, 3, 6)
-  line.rotateZ(Math.PI / 2)
-  const ring = new THREE.TorusGeometry(radius * 0.38, radius * 0.14, 6, 18)
-  geometries.push(arc, line, ring)
-  const makeMouthPart = (geometry: THREE.BufferGeometry) => {
-    const mesh = new THREE.Mesh(geometry, mouthMaterial)
-    mesh.position.copy(mouthCenter)
-    mesh.quaternion.copy(quaternion)
-    mesh.name = 'cartoon-mouth'
-    headBone.add(mesh)
-    return mesh
+  // A single morphing mouth ribbon sitting on the face surface under the nose.
+  const mouthMaterial = new THREE.MeshBasicMaterial({ color: '#3a1410', side: THREE.DoubleSide })
+  created.push(mouthMaterial)
+  const eyeMid = eyes[0]!.root.position.clone().lerp(eyes[1]!.root.position, 0.5)
+  const mouthProbe = new THREE.Vector3(eyeMid.x, eyeMid.y - radius * 2.7, eyeMid.z)
+  let mouthDepth: number | null = null
+  {
+    const depths: number[] = []
+    for (const point of skinPoints) {
+      if (Math.abs(point.x - mouthProbe.x) < radius * 0.9 && Math.abs(point.y - mouthProbe.y) < radius * 0.55) {
+        depths.push(point.dot(forward))
+      }
+    }
+    if (depths.length > 0) {
+      depths.sort((a, b) => b - a)
+      const top = depths.slice(0, 3)
+      mouthDepth = top.reduce((sum, value) => sum + value, 0) / top.length
+    }
   }
-  const smile = makeMouthPart(arc)
-  const mouthLine = makeMouthPart(line)
-  const mouthRing = makeMouthPart(ring)
-  mouthRing.visible = false
-  smile.visible = false
+  const { geometry: mouthGeometry, positions: mouthPositions } = createMouthGeometry()
+  geometries.push(mouthGeometry)
+  const mouthMesh = new THREE.Mesh(mouthGeometry, mouthMaterial)
+  mouthMesh.name = 'cartoon-mouth'
+  const mouthAlong = mouthProbe.dot(forward)
+  const depth = mouthDepth ?? eyes[0]!.root.position.dot(forward) - radius * 0.1
+  mouthMesh.position.copy(mouthProbe).addScaledVector(forward, depth + radius * 0.07 - mouthAlong)
+  mouthMesh.quaternion.copy(quaternion)
+  mouthMesh.frustumCulled = false
+  headBone.add(mouthMesh)
+  const mouth: MouthRig = {
+    mesh: mouthMesh,
+    positions: mouthPositions,
+    halfWidth: radius * 0.85,
+    thickness: radius * 0.11,
+    last: [9, 9, 9],
+  }
+  writeMouth(mouth, 0.1, 0, 1)
 
   return {
     eyes,
     brows,
-    mouth: { smile, line: mouthLine, ring: mouthRing },
+    mouth,
     materials: created,
     geometries,
-    state: { open: 1, lookX: 0, lookY: 0, browLift: 0, browTilt: 0, squint: 0 },
+    skinFollowers,
+    skinSource,
+    state: {
+      open: 1, lookX: 0, lookY: 0, browLift: 0, browTilt: 0, squint: 0,
+      smile: 0.1, mouthOpen: 0, mouthWidth: 1,
+      time: seed * 40, saccadeX: 0, saccadeY: 0, nextSaccade: 1 + seed * 2, seed,
+    },
   }
 }
 
@@ -250,49 +352,76 @@ export interface FaceInput {
   reducedMotion: boolean
 }
 
-const MOODS: Record<FaceMood, { open: number; browLift: number; browTilt: number; squint: number }> = {
-  neutral: { open: 1, browLift: 0, browTilt: 0, squint: 0 },
-  focused: { open: 0.78, browLift: -0.35, browTilt: 0.35, squint: 0.2 },
-  surprised: { open: 1.2, browLift: 0.9, browTilt: -0.1, squint: 0 },
-  happy: { open: 0.55, browLift: 0.45, browTilt: -0.2, squint: 0.9 },
-  sad: { open: 0.6, browLift: 0.2, browTilt: -0.55, squint: 0 },
-  bored: { open: 0.5, browLift: -0.1, browTilt: 0, squint: 0 },
+const MOODS: Record<FaceMood, {
+  open: number
+  browLift: number
+  browTilt: number
+  squint: number
+  smile: number
+  mouthOpen: number
+  mouthWidth: number
+}> = {
+  neutral: { open: 0.93, browLift: 0, browTilt: 0, squint: 0, smile: 0.1, mouthOpen: 0, mouthWidth: 1 },
+  focused: { open: 0.88, browLift: -0.35, browTilt: 0.35, squint: 0.2, smile: -0.12, mouthOpen: 0, mouthWidth: 0.78 },
+  surprised: { open: 1.2, browLift: 0.9, browTilt: -0.1, squint: 0, smile: 0, mouthOpen: 1, mouthWidth: 0.5 },
+  happy: { open: 0.6, browLift: 0.45, browTilt: -0.2, squint: 0.9, smile: 0.95, mouthOpen: 0.4, mouthWidth: 1.15 },
+  sad: { open: 0.62, browLift: 0.2, browTilt: -0.55, squint: 0, smile: -0.75, mouthOpen: 0, mouthWidth: 0.85 },
+  bored: { open: 0.62, browLift: -0.1, browTilt: 0, squint: 0, smile: -0.18, mouthOpen: 0, mouthWidth: 0.9 },
 }
 
-/** Applies blink, gaze, lids and brows for this frame. */
+/** Deterministic pseudo-random in 0..1 (no allocations; reproducible per avatar). */
+function hash01(value: number) {
+  const x = Math.sin(value * 127.1 + 311.7) * 43758.5453
+  return x - Math.floor(x)
+}
+
+/** Applies blink, gaze, lids, brows and mouth for this frame. */
 export function updateAvatarFace(face: AvatarFaceRig, input: FaceInput) {
   const target = MOODS[input.mood]
   const rate = input.reducedMotion ? 1 : 1 - Math.exp(-input.delta * 12)
+  const slow = input.reducedMotion ? 1 : 1 - Math.exp(-input.delta * 7)
+  const gazeRate = input.reducedMotion ? 1 : 1 - Math.exp(-input.delta * 18)
   const state = face.state
+  state.time += input.delta
   state.open += (target.open - state.open) * rate
   state.browLift += (target.browLift - state.browLift) * rate
   state.browTilt += (target.browTilt - state.browTilt) * rate
   state.squint += (target.squint - state.squint) * rate
-  state.lookX += (THREE.MathUtils.clamp(input.lookX, -1, 1) - state.lookX) * rate
-  state.lookY += (THREE.MathUtils.clamp(input.lookY, -1, 1) - state.lookY) * rate
+  state.smile += (target.smile - state.smile) * slow
+  state.mouthOpen += (target.mouthOpen - state.mouthOpen) * slow
+  state.mouthWidth += (target.mouthWidth - state.mouthWidth) * slow
 
-  const open = Math.max(0, state.open * (1 - input.blink))
+  // Small darting eye movements (saccades) so the gaze never looks frozen.
+  if (!input.reducedMotion && state.time >= state.nextSaccade) {
+    const n = Math.floor(state.time * 3)
+    state.saccadeX = (hash01(state.seed * 91 + n) - 0.5) * 0.3
+    state.saccadeY = (hash01(state.seed * 53 + n * 1.7) - 0.5) * 0.18
+    state.nextSaccade = state.time + 1.1 + hash01(state.seed * 17 + n * 2.3) * 2.6
+  }
+  const wantX = THREE.MathUtils.clamp(input.lookX, -1, 1) + state.saccadeX
+  const wantY = THREE.MathUtils.clamp(input.lookY, -1, 1) + state.saccadeY
+  state.lookX += (wantX - state.lookX) * gazeRate
+  state.lookY += (wantY - state.lookY) * gazeRate
+
+  // Looking down drops the lids a little, looking up lifts them.
+  const gazeLid = THREE.MathUtils.clamp(state.lookY, -1, 1) * 0.05
+  const open = Math.max(0, (state.open - gazeLid) * (1 - input.blink))
   for (const eye of face.eyes) {
-    // Upper lid rotates down over the eye as it closes; the lower lid rises on a squint.
     // Positive X swings the upper cap's pole forward over the pupil (closed);
-    // negative tucks it up and back (open). The lower cap rises on a squint.
+    // negative tucks it up and back (open).
     eye.upperLid.rotation.x = THREE.MathUtils.lerp(1.45, -0.95, Math.min(1.1, open))
     eye.ball.scale.y = 1.1 * (0.92 + Math.min(0.2, Math.max(0, state.open - 1)))
-    eye.pupil.position.x = state.lookX * 0.28
-    eye.pupil.position.y = -state.lookY * 0.22
+    eye.pupil.position.x = THREE.MathUtils.clamp(state.lookX, -1.2, 1.2) * 0.26
+    eye.pupil.position.y = -THREE.MathUtils.clamp(state.lookY, -1.2, 1.2) * 0.2
   }
-  if (face.mouth) {
-    const { smile, line, ring } = face.mouth
-    const mood = input.mood
-    smile.visible = mood === 'happy' || mood === 'sad'
-    // The arc opens upward for a smile and flips for a frown.
-    smile.rotation.z = mood === 'sad' ? 0 : Math.PI
-    ring.visible = mood === 'surprised'
-    line.visible = !smile.visible && !ring.visible
-    line.scale.x = mood === 'focused' ? 0.7 : 1
+  if (face.skinSource) {
+    for (const follower of face.skinFollowers) follower.color.copy(face.skinSource.color)
   }
+  if (face.mouth) writeMouth(face.mouth, state.smile, state.mouthOpen, state.mouthWidth)
+  const radius = face.eyes[0]!.radius
+  const blinkDip = input.blink * radius * 0.12
   for (const brow of face.brows) {
-    const lift = state.browLift * face.eyes[0]!.radius * 0.6
+    const lift = state.browLift * radius * 0.6 - blinkDip
     brow.mesh.position.set(brow.base.x, brow.base.y + lift, brow.base.z)
     brow.mesh.rotation.z = brow.side * state.browTilt * 0.5
   }
@@ -302,7 +431,7 @@ export function disposeAvatarFace(face: AvatarFaceRig | null) {
   if (!face) return
   face.eyes.forEach(eye => eye.root.removeFromParent())
   face.brows.forEach(brow => brow.mesh.removeFromParent())
-  if (face.mouth) Object.values(face.mouth).forEach(mesh => mesh.removeFromParent())
+  face.mouth?.mesh.removeFromParent()
   face.materials.forEach(material => material.dispose())
   face.geometries.forEach(geometry => geometry.dispose())
 }

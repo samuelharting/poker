@@ -97,6 +97,7 @@ import {
   DEAL_DECK_POINT,
   DEAL_LAUNCH_SECONDS,
   disposeCardMesh,
+  applySuitColorMode,
   setCardFace,
   syncBoardRuntime,
   type BoardRuntime,
@@ -117,10 +118,12 @@ import {
   getChipEdgeTexture,
   getChipFaceTexture,
   CHIP_DENOMINATIONS,
+  type SuitColorMode,
 } from './sceneTextures'
 import {
   createDecoCarpetTexture,
   createLoungeBackBar,
+  createRoomDressing,
   createLoungeDecor,
   createLoungeWallTexture,
   createWainscotTexture,
@@ -132,6 +135,10 @@ import {
   getFeltEdgeToward,
   RAIL_PEAK_Y,
   RAIL_WIDTH,
+  BOARD_CARD_DEPTH,
+  BOARD_CARD_TILT,
+  BOARD_CARD_WIDTH,
+  BOARD_XS,
   BOARD_Z,
 } from './tableArt'
 import type {
@@ -188,6 +195,8 @@ interface DesktopPokerRoom3DProps {
   highlightedCards?: ReadonlyArray<{ rank: string; suit: ThreeCardView['suit'] }>
   /** The acting opponent's clock (0-100), drained on their nameplate. */
   actingTimerPercent?: number
+  /** Settings: classic two-color deck or four-color suits (applies to every 3D card). */
+  suitColorMode?: SuitColorMode
 }
 
 interface SeatRuntime {
@@ -354,6 +363,8 @@ interface SceneRuntime {
   feltMaterial: THREE.MeshStandardMaterial
   startTime: number
   animationFrame: number
+  /** performance.now() of the last frame the loop finished (black-screen watchdog heartbeat). */
+  lastFrameAt: number
   resizeObserver: ResizeObserver
   disposed: boolean
   suspended: boolean
@@ -663,9 +674,11 @@ function createPendantLamp(scene: THREE.Scene, x: number, z: number, brassMateri
 function createRoom(scene: THREE.Scene) {
   const floorMaterial = new THREE.MeshStandardMaterial({
     map: createCarpetTexture(),
-    roughness: 0.95,
+    // Lifted a little and slightly glossier so the carpet catches the warm pool.
+    color: new THREE.Color(1.35, 1.3, 1.25),
+    roughness: 0.8,
     metalness: 0,
-    envMapIntensity: 0.2,
+    envMapIntensity: 0.32,
   })
   const floor = addMesh(scene, new THREE.CircleGeometry(20, 96), floorMaterial, [0, -2, 0])
   floor.rotation.x = -Math.PI / 2
@@ -712,6 +725,7 @@ function createRoom(scene: THREE.Scene) {
   createPendantLamp(scene, -2.6, -0.4, brassMaterial)
   createPendantLamp(scene, 2.6, -0.4, brassMaterial)
   createLoungeDecor(scene, brassMaterial)
+  createRoomDressing(scene, brassMaterial)
 
   const neonMaterial = new THREE.MeshStandardMaterial({
     map: createNeonSignTexture('POKER NIGHT'),
@@ -1249,7 +1263,7 @@ async function requestRiggedAvatar(
     const style = stylizeAvatar(avatar.model, avatar.materials, { skinColor: seat.avatarProfile.skinColor, seed: playerId })
     seat.avatar = { ...avatar, materials: style.materials }
     seat.avatarStyle = style
-    seat.face = createAvatarFace(avatar.model, avatar.bones.get('Head'), style.materials, style.skinColor, seat.avatarProfile.glasses)
+    seat.face = createAvatarFace(avatar.model, avatar.bones.get('Head'), style.materials, style.skinColor, seat.avatarProfile.glasses, seat.animator.seed)
     seat.skinBaseColor = style.skinColor ? style.skinColor.clone() : null
     seat.avatarMount.add(avatar.root)
     seat.avatarMount.position.set(0, AVATAR_SEAT_LIFT, 0)
@@ -2001,8 +2015,8 @@ function animateWagers(runtime: SceneRuntime, time: number, reducedMotion: boole
         [wager.target.x, wager.target.y, wager.target.z],
         [potPosition.x, potPosition.y, potPosition.z],
         collectProgress,
-        // High enough to clear the board cards when sweeping across the felt.
-        0.5
+        // High enough to clear the propped board cards when sweeping across the felt.
+        0.95
       )
       wager.group.position.set(position[0], position[1], position[2])
       wager.group.visible = true
@@ -2182,7 +2196,7 @@ const POT_PAYOUT_STAGGER_SECONDS = 0.32
 const CHIP_FLIGHT_SECONDS = 0.5
 const POT_PAYOUT_SECONDS = POT_PAYOUT_STAGGER_SECONDS + CHIP_FLIGHT_SECONDS + 0.05
 /** Payout chips peak this high above the felt so they clear the board cards. */
-const PAYOUT_ARC_PEAK = 0.62
+const PAYOUT_ARC_PEAK = 1.05
 
 function getPayoutChipDelay(index: number, count: number) {
   return count <= 1 ? 0 : (index / (count - 1)) * POT_PAYOUT_STAGGER_SECONDS
@@ -3194,6 +3208,8 @@ function disposeObject(root: THREE.Object3D) {
 /** Head-top anchor, in seat-root space, that each DOM nameplate follows. */
 const NAMEPLATE_ANCHOR = new THREE.Vector3(0, 2.32, 0.08)
 const WAGER_LABEL_LIFT = 0.28
+const BOARD_LABEL_HALF_SPAN = BOARD_XS[4]! + BOARD_CARD_WIDTH / 2 + 0.2
+const BOARD_LABEL_CLEARANCE = Math.sin(BOARD_CARD_TILT) * BOARD_CARD_DEPTH + 0.05
 
 function getTableHeat(runtime: SceneRuntime, time: number) {
   // A live raise or all-in from one seat makes everyone else react.
@@ -3283,6 +3299,9 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
     if (wager) {
       scratch.copy(wager.target)
       scratch.y += WAGER_LABEL_LIFT
+      // A bet behind the propped board would print its label over the cards
+      // from the seated camera: float it above the card tops instead.
+      if (scratch.z < BOARD_Z - 0.2 && Math.abs(scratch.x) < BOARD_LABEL_HALF_SPAN) scratch.y += BOARD_LABEL_CLEARANCE
       scratch.project(runtime.camera)
       overlayBetPositions.set(element, {
         x: (scratch.x * 0.5 + 0.5) * width,
@@ -3760,6 +3779,7 @@ function createSceneRuntime(
     feltMaterial,
     startTime: performance.now(),
     animationFrame: 0,
+    lastFrameAt: performance.now(),
     resizeObserver: null as unknown as ResizeObserver,
     disposed: false as boolean,
     suspended: document.hidden,
@@ -3842,6 +3862,7 @@ function createSceneRuntime(
   const animate = () => {
     if (runtime.disposed || runtime.suspended) return
     runtime.animationFrame = window.requestAnimationFrame(animate)
+    runtime.lastFrameAt = performance.now()
     try {
       renderFrame()
     } catch (error) {
@@ -4041,6 +4062,7 @@ function createSceneRuntime(
     if (renderedFrames === 30 || renderedFrames === 120) checkForBlackFrame()
   }
   const blackProbe = new Uint8Array(4)
+  let blackSuspected = false
   const checkForBlackFrame = () => {
     const gl = renderer.getContext()
     if (gl.isContextLost()) return
@@ -4051,7 +4073,18 @@ function createSceneRuntime(
       gl.readPixels(Math.floor(width * u), Math.floor(height * v), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, blackProbe)
       return blackProbe[0]! + blackProbe[1]! + blackProbe[2]! === 0
     })
-    if (!black) return
+    if (!black) {
+      blackSuspected = false
+      return
+    }
+    // A single black sample can be a mid-swap frame; act only when the next
+    // sample (a few frames later) is black too.
+    if (!blackSuspected) {
+      blackSuspected = true
+      renderedFrames = renderedFrames >= 120 ? 110 : 20
+      return
+    }
+    blackSuspected = false
     if (runtime.postFx) {
       // Most likely the post-processing chain (render targets, passes): drop it.
       console.warn('3D table rendered black through post effects; falling back to direct rendering.')
@@ -4107,6 +4140,7 @@ function createSceneRuntime(
       seat.holeCards.forEach(disposeCardMesh)
     }
     runtime.board.slots.forEach(slot => disposeCardMesh(slot.card))
+    runtime.board.disposables.forEach(item => item.dispose())
     funFx.dispose()
     if (runtime.companion) disposeCompanion(runtime.companion)
     disposeFirstPersonDrink(runtime.firstPersonDrink)
@@ -4156,6 +4190,7 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
   drinkEvents = NO_DRINK_EVENTS,
   highlightedCards = NO_HIGHLIGHTED_CARDS,
   actingTimerPercent,
+  suitColorMode = 'two',
 }: DesktopPokerRoom3DProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -4239,19 +4274,61 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
       console.error('Unable to start the desktop 3D poker room.', error)
       setWebGLStatus('error')
       // A start can fail transiently (context limit, GPU busy): retry a few times.
+      // Never give up for good: a black table with a stuck message is the worst
+      // outcome, so keep retrying with a capped backoff.
       failedStartsRef.current += 1
-      if (failedStartsRef.current <= 4) rebuild(700 * failedStartsRef.current)
+      rebuild(Math.min(8_000, 700 * failedStartsRef.current))
     }
+
+    // Black-screen watchdog: a loop that stopped producing frames while the tab
+    // is visible (a lost context nobody reported, a stuck pause) or a canvas
+    // collapsed to nothing is rebuilt instead of being left black.
+    let stalledChecks = 0
+    const watchdog = window.setInterval(() => {
+      const runtime = runtimeRef.current
+      if (disposed || !runtime || runtime.disposed || document.hidden) {
+        stalledChecks = 0
+        return
+      }
+      const contextLost = runtime.renderer.getContext().isContextLost()
+      const collapsed = host.clientWidth > 0 && host.clientHeight > 0 && (canvas.width < 2 || canvas.height < 2)
+      const stalled = performance.now() - runtime.lastFrameAt > 3_000
+      if (!contextLost && !collapsed && !stalled) {
+        stalledChecks = 0
+        return
+      }
+      stalledChecks += 1
+      // Give a browser-driven context restore a moment before rebuilding.
+      if (stalledChecks < 2) return
+      stalledChecks = 0
+      console.warn('3D table stopped drawing; rebuilding the scene.', { contextLost, collapsed, stalled })
+      runtime.pause()
+      rebuild(0)
+    }, 2_000)
 
     return () => {
       disposed = true
       window.clearTimeout(rebuildTimer)
+      window.clearInterval(watchdog)
       canvas.removeEventListener('webglcontextlost', handleContextLost)
       canvas.removeEventListener('webglcontextrestored', handleContextRestored)
-      runtimeRef.current?.dispose()
+      const finished = runtimeRef.current
+      finished?.dispose()
       runtimeRef.current = null
     }
   }, [sceneGeneration])
+
+  // Four-color suits: swap the cached per-mode face textures on every live card
+  // (board + hole cards) in place; the scene is never rebuilt for this.
+  useEffect(() => {
+    const runtime = runtimeRef.current
+    const cards: CardMesh[] = []
+    if (runtime) {
+      runtime.board.slots.forEach(slot => cards.push(slot.card))
+      runtime.seats.forEach(seat => cards.push(...seat.holeCards))
+    }
+    applySuitColorMode(cards, suitColorMode)
+  }, [suitColorMode, sceneGeneration])
 
   // Pranks and house-rule drinks: each server event plays exactly once.
   useEffect(() => {
@@ -4289,28 +4366,40 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
 
   useEffect(() => {
     if (!runtimeRef.current) return
-    syncPlayers(runtimeRef.current, view)
-    syncWagers(runtimeRef.current, view)
-    syncPot(runtimeRef.current, view)
-    const runtimeNow = (performance.now() - runtimeRef.current.startTime) / 1000
-    if (view.communityCards.length > runtimeRef.current.board.visibleCount) runtimeRef.current.boardRevealAt = runtimeNow
-    runtimeRef.current.anyWinner = view.players.some(player => player.isWinner)
-    // A street that closed with bets out deals its cards once the chips
-    // have been swept into the pot, not through the middle of the sweep.
-    const sweepEndsAt = getWagerCollectEndsAt(runtimeRef.current, runtimeNow)
-    syncBoardRuntime(
-      runtimeRef.current.board,
-      view.communityCards,
-      highlightedCards,
-      runtimeNow,
-      sweepEndsAt > runtimeNow ? sweepEndsAt + 0.1 : Number.NEGATIVE_INFINITY
-    )
-    // New seats, avatars and accessories arrive with every sync.
-    for (const seat of runtimeRef.current.seats.values()) {
-      mergeAccessoryMeshes(seat.fallbackAccessories)
-      mergeAccessoryMeshes(seat.riggedAccessories)
-      pruneShadowCasters(seat.root)
+    // A throw here would unmount the whole table page (React has no boundary
+    // for it): isolate each sync so one bad seat cannot blank the screen.
+    const syncSafely = (label: string, run: () => void) => {
+      try {
+        run()
+      } catch (error) {
+        console.error(`3D ${label} sync failed; the scene keeps running.`, error)
+      }
     }
+    const liveRuntime = runtimeRef.current
+    syncSafely('player', () => syncPlayers(liveRuntime, view))
+    syncSafely('wager', () => syncWagers(liveRuntime, view))
+    syncSafely('pot', () => syncPot(liveRuntime, view))
+    syncSafely('board', () => {
+      const runtimeNow = (performance.now() - liveRuntime.startTime) / 1000
+      if (view.communityCards.length > liveRuntime.board.visibleCount) liveRuntime.boardRevealAt = runtimeNow
+      liveRuntime.anyWinner = view.players.some(player => player.isWinner)
+      // A street that closed with bets out deals its cards once the chips
+      // have been swept into the pot, not through the middle of the sweep.
+      const sweepEndsAt = getWagerCollectEndsAt(liveRuntime, runtimeNow)
+      syncBoardRuntime(
+        liveRuntime.board,
+        view.communityCards,
+        highlightedCards,
+        runtimeNow,
+        sweepEndsAt > runtimeNow ? sweepEndsAt + 0.1 : Number.NEGATIVE_INFINITY
+      )
+      // New seats, avatars and accessories arrive with every sync.
+      for (const seat of liveRuntime.seats.values()) {
+        mergeAccessoryMeshes(seat.fallbackAccessories)
+        mergeAccessoryMeshes(seat.riggedAccessories)
+        pruneShadowCasters(seat.root)
+      }
+    })
   }, [view, highlightedCards])
 
   return (

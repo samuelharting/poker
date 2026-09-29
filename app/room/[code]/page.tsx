@@ -242,6 +242,13 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     sessionStorage.setItem(`poker_starting_stack_${roomCode}`, String(value))
   }, [roomCode])
 
+  // Mirror the setting on <html> too, so cards rendered outside the table scene
+  // (portals, modals, toasts) get the same four-color suits.
+  useEffect(() => {
+    document.documentElement.dataset.suitColors = suitColorMode
+    return () => { delete document.documentElement.dataset.suitColors }
+  }, [suitColorMode])
+
   const handleSuitColorMode = useCallback((mode: 'two' | 'four') => {
     setSuitColorMode(mode)
     sessionStorage.setItem('poker_suit_color_mode', mode)
