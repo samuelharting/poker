@@ -4079,3 +4079,105 @@
     animation: none;
   }
 }
+
+/* Compact target panel (desktop): a smaller card for shot / chip / flip-off,
+   sticky note, message and emotes. The mobile bottom sheet keeps its own sizing. */
+@media (min-width: 1024px) {
+  .table-panel.targeted-emote-panel {
+    width: min(236px, calc(100vw - 40px));
+    gap: 8px;
+    padding: 10px;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+
+  .table-panel.targeted-emote-panel.is-picker-open {
+    width: min(300px, calc(100vw - 40px));
+  }
+
+  .targeted-emote-panel .table-panel-title {
+    font-size: 14px;
+  }
+
+  .targeted-emote-panel .targeted-emote-close {
+    width: 28px;
+    height: 28px;
+  }
+
+  .targeted-emote-panel .targeted-player-stats {
+    gap: 4px;
+  }
+
+  .targeted-emote-panel .targeted-player-stat {
+    gap: 2px;
+    padding: 4px 7px;
+  }
+
+  .targeted-emote-panel .targeted-player-stat span {
+    font-size: 8px;
+  }
+
+  .targeted-emote-panel .targeted-player-stat strong {
+    font-size: 13px;
+  }
+
+  .targeted-emote-panel .prank-controls {
+    gap: 4px;
+  }
+
+  .targeted-emote-panel .prank-button {
+    gap: 6px;
+    min-height: 38px;
+    padding: 4px 8px 4px 5px;
+  }
+
+  .targeted-emote-panel .prank-controls:has(> :nth-child(3)) .prank-button {
+    gap: 2px;
+    min-height: 50px;
+    padding: 5px 3px;
+  }
+
+  .targeted-emote-panel .prank-controls:has(> :nth-child(3)) .prank-button-copy strong {
+    font-size: 10px;
+  }
+
+  .targeted-emote-panel .prank-button-icon {
+    width: 24px;
+    height: 24px;
+    font-size: 15px;
+  }
+
+  .targeted-emote-panel .prank-button-copy strong {
+    font-size: 12px;
+  }
+
+  .targeted-emote-panel .targeted-message-compose input,
+  .targeted-emote-panel .targeted-message-compose button {
+    min-height: 32px;
+    font-size: 12px;
+  }
+
+  .targeted-emote-panel .targeted-message-compose button {
+    padding: 0 10px;
+  }
+
+  .targeted-emote-panel .chat-emotes {
+    grid-template-columns: repeat(3, 34px) minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .targeted-emote-panel .chat-emotes .emote-button {
+    min-height: 34px;
+    font-size: 18px;
+  }
+
+  .targeted-emote-panel .chat-emotes .emoji-glyph {
+    width: 20px;
+    height: 20px;
+  }
+
+  .targeted-emote-panel .emote-picker-toggle {
+    min-height: 34px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+}

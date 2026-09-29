@@ -212,19 +212,22 @@ export function getCardFaceTexture(rank: string, suit: CardSuit, mode: SuitColor
     context.textAlign = 'center'
     context.textBaseline = 'alphabetic'
     const wide = label.length > 1
-    const indexSize = wide ? width * 0.31 : width * 0.4
-    const indexX = wide ? width * 0.25 : width * 0.22
-    context.font = `800 ${indexSize}px ${font}`
-    context.fillText(label, indexX, height * 0.235)
-    drawSuit(context, suit, width * 0.22, height * 0.345, width * 0.2, color)
-
-    drawSuit(context, suit, width * 0.6, height * 0.62, width * 0.46, color)
+    const indexSize = wide ? width * 0.28 : width * 0.34
+    // One index column (rank over a small pip), repeated rotated 180deg in the
+    // opposite corner, with a single centred pip between them: the classic
+    // balanced layout, so nothing crowds the corners or drifts off-centre.
+    const drawIndex = () => {
+      context.font = `800 ${indexSize}px ${font}`
+      context.fillText(label, width * 0.19, height * 0.2)
+      drawSuit(context, suit, width * 0.19, height * 0.285, width * 0.17, color)
+    }
+    drawIndex()
+    drawSuit(context, suit, width * 0.5, height * 0.5, width * 0.42, color)
 
     context.save()
     context.translate(width, height)
     context.rotate(Math.PI)
-    context.font = `800 ${indexSize * (wide ? 0.5 : 0.6)}px ${font}`
-    context.fillText(label, wide ? width * 0.17 : width * 0.16, height * 0.15)
+    drawIndex()
     context.restore()
   })
 }

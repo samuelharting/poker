@@ -3127,14 +3127,20 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
       // from the seated camera: float it above the card tops instead.
       if (runtime.board.visibleCount > 0 && scratch.z < BOARD_Z - 0.2 && Math.abs(scratch.x) < BOARD_LABEL_HALF_SPAN) scratch.y += BOARD_LABEL_CLEARANCE
       scratch.project(runtime.camera)
-      overlayBetPositions.set(element, {
+      const betPosition = {
         x: (scratch.x * 0.5 + 0.5) * width,
         y: (-scratch.y * 0.5 + 0.5) * height,
-      })
+      }
+      overlayBetPositions.set(element, betPosition)
+      betLabelScratch.push(betPosition)
     } else {
       overlayBetPositions.delete(element)
     }
   }
+  // Bet labels never sit on top of each other: neighbours' bets (and bets lifted
+  // above the board) would otherwise stack into one unreadable pile of "$20 $40".
+  resolveBetLabelOverlaps(betLabelScratch)
+  betLabelScratch.length = 0
   // Resolve collisions: nudge plates apart so no two nameplates overlap, even
   // when the camera pushes in or neighbours pin to the same screen edge.
   const compact = width < 1366 || height < 820
@@ -3213,6 +3219,40 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
 
 const overlayScratch = new THREE.Vector3()
 const overlayBetPositions = new WeakMap<HTMLElement, { x: number; y: number }>()
+const betLabelScratch: Array<{ x: number; y: number }> = []
+const BET_LABEL_WIDTH = 74
+const BET_LABEL_HEIGHT = 36
+const compareBetLabelY = (a: { y: number }, b: { y: number }) => a.y - b.y
+
+/**
+ * Labels hang above their anchor (bottom edge on the anchor). Side-by-side
+ * labels slide apart horizontally; stacked ones lift the farther label up, so
+ * every label stays on or just above its own chips.
+ */
+function resolveBetLabelOverlaps(labels: Array<{ x: number; y: number }>) {
+  if (labels.length < 2) return
+  labels.sort(compareBetLabelY)
+  for (let pass = 0; pass < 3; pass += 1) {
+    for (let i = 0; i < labels.length; i += 1) {
+      for (let j = i + 1; j < labels.length; j += 1) {
+        const upper = labels[i]!
+        const lower = labels[j]!
+        const dx = lower.x - upper.x
+        const overlapX = BET_LABEL_WIDTH - Math.abs(dx)
+        const overlapY = BET_LABEL_HEIGHT - Math.abs(lower.y - upper.y)
+        if (overlapX <= 0 || overlapY <= 0) continue
+        if (overlapX <= overlapY * 1.4) {
+          const push = overlapX / 2 + 1
+          const direction = dx >= 0 ? 1 : -1
+          upper.x -= push * direction
+          lower.x += push * direction
+        } else {
+          upper.y -= overlapY + 1
+        }
+      }
+    }
+  }
+}
 /** The seat plate under the pointer (kept by pointer events, never read from :hover per frame). */
 let hoveredOverlayElement: HTMLElement | null = null
 const styleVarCache = new WeakMap<HTMLElement, Map<string, string>>()
