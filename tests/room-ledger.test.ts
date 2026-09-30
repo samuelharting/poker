@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Connection } from 'partykit/server'
-import type { LedgerSnapshot } from '@/lib/poker/ledger'
+import { netsToCents, type LedgerSnapshot } from '@/lib/poker/ledger'
 import {
   actingPlayer,
   createHarness,
@@ -52,13 +52,17 @@ function expectBalancedBooks(harness: Harness) {
   const ledger = ledgerOf(harness)
   expect(ledger.rows.reduce((sum, row) => sum + row.net, 0)).toBe(0)
   expect(ledger.totalChips).toBe(ledger.totalBoughtIn)
+  // Payments are money: they must square in whole cents. (At the default $5
+  // buy-in a chip is half a cent, so the chip count shown on a payment can be
+  // off by one; the cents are what actually gets paid.)
   const paid = new Map<string, number>()
   for (const payment of ledger.payments) {
-    paid.set(payment.fromKey, (paid.get(payment.fromKey) ?? 0) - payment.chips)
-    paid.set(payment.toKey, (paid.get(payment.toKey) ?? 0) + payment.chips)
+    paid.set(payment.fromKey, (paid.get(payment.fromKey) ?? 0) - payment.cents)
+    paid.set(payment.toKey, (paid.get(payment.toKey) ?? 0) + payment.cents)
   }
+  const owedCents = new Map(netsToCents(ledger.rows.map(row => ({ key: row.key, name: row.name, net: row.net })), ledger.settings.chipValue).map(balance => [balance.key, balance.net]))
   for (const row of ledger.rows) {
-    expect(paid.get(row.key) ?? 0).toBe(row.net)
+    expect(paid.get(row.key) ?? 0).toBe(owedCents.get(row.key) ?? 0)
   }
   return ledger
 }
