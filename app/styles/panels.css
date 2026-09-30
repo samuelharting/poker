@@ -4275,3 +4275,46 @@
     transition: none;
   }
 }
+
+/* Players tab, desktop: host controls sit on one compact line per player
+   (the chip amount's label moves into its placeholder-style inline tag). */
+@media (min-width: 900px) {
+  .settings-player-row {
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .settings-player-actions {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    padding-top: var(--sp-2);
+  }
+
+  .settings-player-chip-input {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: auto;
+  }
+
+  .settings-player-chip-input > span {
+    color: var(--c-text-3);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .settings-player-chip-input input {
+    width: 76px;
+    min-height: 32px;
+    padding: 0 8px;
+    font-size: 14px;
+  }
+
+  .settings-player-actions .btn-subtle,
+  .settings-player-actions .table-chip {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+}
