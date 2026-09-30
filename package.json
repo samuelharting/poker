@@ -12,6 +12,8 @@
     "test:watch": "vitest tests",
     "smoke:e2e": "playwright test e2e/private-table-smoke.spec.ts --browser=chromium --reporter=line",
     "typecheck": "tsc --noEmit",
+    "assets:avatars": "node scripts/slim-avatars.mjs && node scripts/verify-slim-avatars.mjs",
+    "assets:avatars:check": "node scripts/slim-avatars.mjs --check && node scripts/verify-slim-avatars.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "check": "npm run test && npm run typecheck && npm run build && npm run audit:prod",
     "deploy:partykit": "npx partykit deploy",

@@ -2,8 +2,13 @@
 
 import dynamic from 'next/dynamic'
 import clsx from 'clsx'
-import type { EmojiClickData } from 'emoji-picker-react'
-import { EmojiStyle, Theme } from 'emoji-picker-react'
+// Type-only: a value import (even of the Theme / EmojiStyle enums) pulls the
+// whole ~300 kB picker into the room's first-load bundle and defeats the
+// dynamic import below. The enum values are plain strings.
+import type { EmojiClickData, EmojiStyle, Theme } from 'emoji-picker-react'
+
+const DARK_THEME = 'dark' as Theme
+const NATIVE_EMOJI_STYLE = 'native' as EmojiStyle
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), {
   ssr: false,
@@ -30,8 +35,8 @@ export function SearchableEmojiPicker({
         open
         lazyLoadEmojis
         autoFocusSearch
-        theme={Theme.DARK}
-        emojiStyle={EmojiStyle.NATIVE}
+        theme={DARK_THEME}
+        emojiStyle={NATIVE_EMOJI_STYLE}
         width="100%"
         height={height}
         searchPlaceholder={searchPlaceholder}

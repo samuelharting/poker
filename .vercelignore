@@ -26,3 +26,6 @@ tmp-*
 # Editor and OS clutter
 .DS_Store
 Thumbs.db
+
+# Source art (originals of the slimmed public models); never served
+assets-src/
