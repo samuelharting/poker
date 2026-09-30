@@ -175,12 +175,15 @@ function addCupHolders(group: THREE.Group, brassMaterial: THREE.Material) {
     // padding, so it reads as set into the leather even where the cushion curves away.
     const ring = new THREE.TorusGeometry(0.125, 0.016, 8, 32)
     ring.rotateX(Math.PI / 2)
-    ring.translate(x, top - 0.016, z)
+    ring.translate(x, top - 0.01, z)
     rings.push(ring)
     // Dark liner (not brass): a bright collar edge read as a horizontal light bar.
     wells.push(new THREE.CylinderGeometry(0.121, 0.121, 0.06, 32, 1, true).translate(x, top - 0.036, z))
+    // The well's dark top sits just proud of the cushion's crest (hidden under
+    // the rim's inner lip): flush with it, the leather ridge z-fought through
+    // as a pale band across every holder.
     const well = new THREE.CylinderGeometry(0.118, 0.1, 0.03, 28)
-    well.translate(x, top - 0.016, z)
+    well.translate(x, top - 0.011, z)
     wells.push(well)
   })
   const ringMerged = mergeGeometries(rings, false)
@@ -233,6 +236,7 @@ export function createStylizedTable(): TableArt {
   // without touching the printed layout's colours.
   const feltWeave = getFeltWeaveTexture()
   feltWeave.repeat.set(150, 96)
+  feltWeave.updateMatrix()
   const feltMaterial = new THREE.MeshStandardMaterial({
     map: feltTexture,
     color: '#b4b4b4',
@@ -270,6 +274,7 @@ export function createStylizedTable(): TableArt {
 
   const leatherBump = getLeatherBumpTexture()
   leatherBump.repeat.set(1, 1)
+  leatherBump.updateMatrix()
   // Oxblood leather with panel seams and saddle stitching painted into the wrap.
   const railMaterial = new THREE.MeshPhysicalMaterial({
     color: '#ffffff',
@@ -635,8 +640,10 @@ export function createStylizedChair(
   const leather = new THREE.Color(upholstery).lerp(HOUSE_LEATHER, 0.45).offsetHSL(0, 0.03, 0.04).multiplyScalar(1.12)
   const tuftColor = getTuftedLeatherTexture()
   tuftColor.repeat.set(3.4, 3.4)
+  tuftColor.updateMatrix()
   const tuftBump = getTuftedLeatherTexture(true)
   tuftBump.repeat.set(3.4, 3.4)
+  tuftBump.updateMatrix()
   const upholsteryMaterial = new THREE.MeshPhysicalMaterial({
     color: leather,
     map: tuftColor,

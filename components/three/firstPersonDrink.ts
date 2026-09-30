@@ -36,16 +36,20 @@ export interface FirstPersonDrinkInput {
 const RIM_OFFSET: Record<DrinkKind, number> = { beer: 0.24, water: 0.22 }
 const GLASS_RADIUS: Record<DrinkKind, number> = { beer: 0.1, water: 0.075 }
 
-// Rim positions in camera space (camera looks down -Z).
-// Rises left of the action tray, sips low and off-centre so the board stays readable.
-const OFF_SCREEN = new THREE.Vector3(0.28, -0.6, -0.64)
-// Held low and to the right: the board and the pot stay readable over it.
-const HOLD = new THREE.Vector3(0.14, -0.08, -0.72)
-const MOUTH = new THREE.Vector3(0.06, -0.16, -0.52)
+// Rim positions in camera space (camera looks down -Z; vertical fov ~60).
+// The whole drink stays in the lower-right corner, below the near rail line:
+// it never crosses the board, the pot or the hole cards (rim at roughly
+// 60% right / 63% down of the half-screen at 1440x900 and 1024x700).
+const OFF_SCREEN = new THREE.Vector3(0.44, -0.62, -0.62)
+const HOLD = new THREE.Vector3(0.36, -0.24, -0.66)
+const MOUTH = new THREE.Vector3(0.27, -0.2, -0.55)
 /** After the last gulp the glass goes straight down and out, no bob back up. */
-const LOWER_SECONDS = 0.5
-const MOUTH_TIP = 1.95
+const LOWER_SECONDS = 0.45
+/** A modest tip: the glass bottom stays below the rim on screen instead of swinging up over the table. */
+const MOUTH_TIP = 1.12
 const VIEW_SCALE = 0.78
+/** The view only nods a little with the sip (the room scales this further). */
+const HEAD_TILT_SCALE = 0.45
 
 const scratch = new THREE.Vector3()
 
@@ -203,9 +207,9 @@ export function updateFirstPersonDrink(drink: FirstPersonDrink, input: FirstPers
   drink.root.visible = true
   drink.root.scale.setScalar(VIEW_SCALE)
 
-  const raiseEnd = 0.5
-  const toMouthEnd = 0.85
-  const sipEnd = 1.85
+  const raiseEnd = 0.45
+  const toMouthEnd = 0.75
+  const sipEnd = 1.45
   const lowerEnd = Math.min(DRINK_DURATION, sipEnd + LOWER_SECONDS)
   if (elapsed >= lowerEnd) {
     drink.root.visible = false
@@ -226,8 +230,8 @@ export function updateFirstPersonDrink(drink: FirstPersonDrink, input: FirstPers
   } else if (elapsed < sipEnd) {
     const t = (elapsed - toMouthEnd) / (sipEnd - toMouthEnd)
     position.copy(MOUTH)
-    // Three gulps: small extra tips that pump the glass.
-    const gulp = input.reducedMotion ? 0 : Math.max(0, Math.sin(t * Math.PI * 3)) * 0.12
+    // Two gulps: small extra tips that pump the glass.
+    const gulp = input.reducedMotion ? 0 : Math.max(0, Math.sin(t * Math.PI * 2)) * 0.1
     tip = MOUTH_TIP + gulp
     position.y += gulp * 0.05
     drain = t
@@ -259,7 +263,7 @@ export function updateFirstPersonDrink(drink: FirstPersonDrink, input: FirstPers
     drink.liquid.position.y = y + (height * remaining) / 2
     if (drink.foam) drink.foam.position.y = y + height * remaining + 0.012
   }
-  return headTilt
+  return headTilt * HEAD_TILT_SCALE
 }
 
 export function disposeFirstPersonDrink(drink: FirstPersonDrink | null) {

@@ -6,6 +6,7 @@ import {
   type CardSuit,
   type SuitColorMode,
 } from './sceneTextures'
+import { getSuitInk } from '@/lib/suitColors'
 import {
   BOARD_CARD_DEPTH,
   BOARD_CARD_TILT,
@@ -70,7 +71,8 @@ function getCardGeometry() {
   if (sharedGeometry) return sharedGeometry
   const depth = 88 / 63
   const radius = 0.085
-  const arcSegments = 6
+  // Enough steps that the rounded corners stay round even when a card fills the screen.
+  const arcSegments = 12
   const columns = 10
   const interiorRows = 14
   const half = { x: 0.5, y: depth / 2 }
@@ -199,6 +201,75 @@ function clampCardLighting(material: THREE.MeshStandardMaterial) {
   return material
 }
 
+/**
+ * Printed faces are two-tone (paper + one suit ink), so when a card is
+ * magnified past its texture (close-ups, a card filling the screen) the
+ * bilinear ramp at each glyph edge can be re-thresholded into a crisp,
+ * screen-space antialiased edge instead of a soft, stair-stepped blur. The
+ * paper behind a partly-inked texel is recovered from the known ink, so the
+ * paper tint and fibres survive. Off at normal distances (mipmaps win there).
+ */
+interface CardFaceUniforms {
+  uCardInk: { value: THREE.Color }
+  uCardSharp: { value: number }
+}
+
+function sharpenCardFace(material: THREE.MeshStandardMaterial) {
+  clampCardLighting(material)
+  const uniforms: CardFaceUniforms = { uCardInk: { value: new THREE.Color('#111111') }, uCardSharp: { value: 0 } }
+  material.userData.cardFace = uniforms
+  const clamp = material.onBeforeCompile
+  material.onBeforeCompile = (shader, renderer) => {
+    clamp.call(material, shader, renderer)
+    Object.assign(shader.uniforms, uniforms)
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uCardInk;\nuniform float uCardSharp;')
+      .replace(
+        '#include <map_fragment>',
+        /* glsl */ `#include <map_fragment>
+        #ifdef USE_MAP
+        {
+          vec2 cardTexels = fwidth(vMapUv) * vec2(textureSize(map, 0));
+          float cardPixelsPerTexel = 1.0 / max(max(cardTexels.x, cardTexels.y), 1e-5);
+          float cardSharp = uCardSharp * smoothstep(1.3, 2.6, cardPixelsPerTexel);
+          vec3 cardTexel = diffuseColor.rgb;
+          if (cardSharp > 0.001) {
+            // Cubic B-spline reconstruction (4 bilinear taps): bilinear
+            // isolines wobble at every texel boundary once thresholded.
+            vec2 cardSize = vec2(textureSize(map, 0));
+            vec2 cardSt = vMapUv * cardSize - 0.5;
+            vec2 cardI = floor(cardSt);
+            vec2 cardF = cardSt - cardI;
+            vec2 cardF2 = cardF * cardF;
+            vec2 cardF3 = cardF2 * cardF;
+            vec2 cardW0 = (1.0 - 3.0 * cardF + 3.0 * cardF2 - cardF3) / 6.0;
+            vec2 cardW1 = (4.0 - 6.0 * cardF2 + 3.0 * cardF3) / 6.0;
+            vec2 cardW2 = (1.0 + 3.0 * cardF + 3.0 * cardF2 - 3.0 * cardF3) / 6.0;
+            vec2 cardW3 = cardF3 / 6.0;
+            vec2 cardG0 = cardW0 + cardW1;
+            vec2 cardG1 = cardW2 + cardW3;
+            vec2 cardH0 = (cardI - 0.5 + cardW1 / cardG0) / cardSize;
+            vec2 cardH1 = (cardI + 1.5 + cardW3 / cardG1) / cardSize;
+            vec3 cardCubic =
+              cardG0.y * (cardG0.x * textureLod(map, vec2(cardH0.x, cardH0.y), 0.0).rgb + cardG1.x * textureLod(map, vec2(cardH1.x, cardH0.y), 0.0).rgb) +
+              cardG1.y * (cardG0.x * textureLod(map, vec2(cardH0.x, cardH1.y), 0.0).rgb + cardG1.x * textureLod(map, vec2(cardH1.x, cardH1.y), 0.0).rgb);
+            cardTexel = diffuse * cardCubic;
+          }
+          const vec3 cardLumaW = vec3(0.2126, 0.7152, 0.0722);
+          float cardInkL = dot(uCardInk, cardLumaW);
+          float cardT = clamp((0.86 - dot(cardTexel, cardLumaW)) / max(0.86 - cardInkL, 0.05), 0.0, 1.0);
+          vec3 cardPaper = cardT < 0.85 ? (cardTexel - uCardInk * cardT) / (1.0 - cardT) : vec3(0.93, 0.88, 0.76);
+          float cardK = clamp(0.7 / cardPixelsPerTexel, 0.02, 0.5);
+          float cardInk = smoothstep(0.5 - cardK, 0.5 + cardK, cardT);
+          diffuseColor.rgb = mix(cardTexel, mix(clamp(cardPaper, 0.0, 1.0), uCardInk, cardInk), cardSharp);
+        }
+        #endif`
+      )
+  }
+  material.customProgramCacheKey = () => 'poker-card-face-sharp'
+  return material
+}
+
 const edgeMaterial = () => clampCardLighting(new THREE.MeshStandardMaterial({
   color: '#efe3c8',
   roughness: 0.6,
@@ -240,6 +311,7 @@ function getCardShadowTexture() {
     context.fill()
   }
   cardShadowTexture = new THREE.CanvasTexture(canvas)
+  cardShadowTexture.matrixAutoUpdate = false
   return cardShadowTexture
 }
 
@@ -256,6 +328,8 @@ function createCardShadow() {
     polygonOffset: true,
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -1,
+    // A flat decal: one pass is enough (transparent + DoubleSide otherwise draws it twice).
+    forceSinglePass: true,
   }))
   mesh.name = 'card-contact-shadow'
   mesh.userData.contactShadow = true
@@ -274,7 +348,7 @@ export function createCardMesh(width: number): CardMesh {
   const geometry = getCardGeometry()
   const group = new THREE.Group()
   group.name = 'playing-card'
-  const faceMaterial = clampCardLighting(new THREE.MeshStandardMaterial({
+  const faceMaterial = sharpenCardFace(new THREE.MeshStandardMaterial({
     color: '#ffffff',
     roughness: 0.55,
     metalness: 0,
@@ -317,6 +391,12 @@ export function setCardFace(card: CardMesh, face: CardFace | null, mode: SuitCol
   card.face = face
   card.suitMode = mode
   card.faceMaterial.map = face ? getCardFaceTexture(face.rank, face.suit, mode) : getCardBackTexture()
+  const faceUniforms = card.faceMaterial.userData.cardFace as CardFaceUniforms | undefined
+  if (faceUniforms) {
+    // Only a printed face is two-tone; the back art (shown while face-down) is not.
+    faceUniforms.uCardSharp.value = face ? 1 : 0
+    if (face) faceUniforms.uCardInk.value.set(getSuitInk(face.suit, mode))
+  }
   card.faceMaterial.needsUpdate = true
 }
 

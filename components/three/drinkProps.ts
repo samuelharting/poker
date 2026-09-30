@@ -40,6 +40,22 @@ function thickBase(radius: number, height: number) {
   ], 28)
 }
 
+/**
+ * Real glass is clear where you look straight through it and dense towards
+ * the silhouette (Fresnel). Scaling the wall's alpha by the viewing angle keeps
+ * the beer golden through the front of the glass while the edges still read.
+ */
+function glassFresnelAlpha(shader: THREE.WebGLProgramParametersWithUniforms) {
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <opaque_fragment>',
+    `{
+      float glassFacing = abs(dot(normal, normalize(vViewPosition)));
+      diffuseColor.a = clamp(diffuseColor.a * mix(1.9, 0.5, smoothstep(0.1, 0.85, glassFacing)), 0.0, 0.95);
+    }
+    #include <opaque_fragment>`
+  )
+}
+
 export interface DrinkPropOptions {
   /** Held in front of the camera: the glass is nearly opaque so hand and sleeve never smear through it. */
   firstPerson?: boolean
@@ -60,18 +76,23 @@ export function createDrinkProp(kind: DrinkKind, options: DrinkPropOptions = {})
     return material
   }
   const droplets = getGlassDropletTexture()
-  const glassMaterial = (tint: string, opacity = firstPerson ? 0.62 : 0.33) => lit({
-    color: tint,
-    map: droplets,
-    transparent: true,
-    opacity,
-    roughness: 0.06,
-    metalness: 0,
-    envMapIntensity: firstPerson ? 0.45 : 1.0,
-    depthWrite: firstPerson,
-    // Both walls show through each other, like a real glass.
-    side: THREE.DoubleSide,
-  })
+  const glassMaterial = (tint: string, opacity = firstPerson ? 0.62 : 0.33) => {
+    const material = lit({
+      color: tint,
+      map: droplets,
+      transparent: true,
+      opacity,
+      roughness: 0.06,
+      metalness: 0,
+      envMapIntensity: firstPerson ? 0.45 : 1.0,
+      depthWrite: firstPerson,
+      // Both walls show through each other, like a real glass.
+      side: THREE.DoubleSide,
+    })
+    material.onBeforeCompile = glassFresnelAlpha
+    material.customProgramCacheKey = () => 'drink-glass-fresnel'
+    return material
+  }
   // A bright lip and a thick base: the two things that make a glass read as glass.
   const rimMaterial = lit({
     color: '#f4fbff',

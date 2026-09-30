@@ -37,6 +37,9 @@ function canvasTexture(
     texture.wrapT = THREE.RepeatWrapping
     texture.repeat.set(...repeat)
   }
+  // Static transform: no per-frame uv matrix rebuild.
+  texture.matrixAutoUpdate = false
+  texture.updateMatrix()
   return texture
 }
 
@@ -1040,6 +1043,7 @@ export function createRoomDressing(scene: THREE.Scene, brassMaterial: THREE.Mate
     const previous = mesh.material as THREE.MeshStandardMaterial
     const weave = getCarpetWeaveTexture()
     weave.repeat.set(560, 560)
+    weave.updateMatrix()
     mesh.material = new THREE.MeshPhysicalMaterial({
       map: previous.map,
       color: previous.color,

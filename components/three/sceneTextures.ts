@@ -71,6 +71,10 @@ function cachedCanvasTexture(
     texture.wrapS = THREE.RepeatWrapping
     texture.wrapT = THREE.RepeatWrapping
   }
+  // Static transform: skip the per-material, per-frame uv matrix rebuild.
+  // Callers that set repeat/offset afterwards must call texture.updateMatrix().
+  texture.matrixAutoUpdate = false
+  texture.updateMatrix()
   textureCache.set(key, texture)
   return texture
 }
