@@ -3,7 +3,7 @@ import { createDrinkProp, disposeDrinkProp, DRINK_DURATION, type DrinkKind, type
 
 /**
  * The local player's own drink, seen first-person: a toon hand and sleeve
- * (in the hero's avatar colours) bring the glass up from the bottom-right,
+ * (in the hero's avatar colours, mirrored into a left hand) bring the glass up from the bottom-left,
  * tip it back for a few gulps while the level drops, then lower it away.
  * Everything lives in camera space, so it is always framed the same way.
  */
@@ -36,22 +36,36 @@ export interface FirstPersonDrinkInput {
 const RIM_OFFSET: Record<DrinkKind, number> = { beer: 0.24, water: 0.22 }
 const GLASS_RADIUS: Record<DrinkKind, number> = { beer: 0.1, water: 0.075 }
 
-// Rim positions in camera space (camera looks down -Z; vertical fov ~60).
-// The whole drink stays in the lower-right corner, below the near rail line:
-// it never crosses the board, the pot or the hole cards (rim at roughly
-// 60% right / 63% down of the half-screen at 1440x900 and 1024x700).
-const OFF_SCREEN = new THREE.Vector3(0.44, -0.62, -0.62)
-const HOLD = new THREE.Vector3(0.36, -0.24, -0.66)
-const MOUTH = new THREE.Vector3(0.27, -0.2, -0.55)
+// Rim anchors as (screen x, screen y in -1..1, camera-space depth), turned
+// into camera space every frame from the lens, so the framing holds at any
+// aspect. The drink is held in the LEFT hand over the empty near rail left of
+// the hole cards and above the Beer/Water buttons: clear of the board, the
+// pot, the hole cards and every HUD panel on the right (action tray,
+// pre-action bar, show/muck), at 1440x900 and 1024x700 alike.
+const OFF_SCREEN = new THREE.Vector3(-0.42, -1.45, -0.62)
+const HOLD = new THREE.Vector3(-0.36, -0.55, -0.66)
+const MOUTH = new THREE.Vector3(-0.35, -0.54, -0.62)
 /** After the last gulp the glass goes straight down and out, no bob back up. */
 const LOWER_SECONDS = 0.45
 /** A modest tip: the glass bottom stays below the rim on screen instead of swinging up over the table. */
 const MOUTH_TIP = 1.12
-const VIEW_SCALE = 0.78
+const VIEW_SCALE = 0.48
 /** The view only nods a little with the sip (the room scales this further). */
-const HEAD_TILT_SCALE = 0.45
+const HEAD_TILT_SCALE = 0.3
 
 const scratch = new THREE.Vector3()
+const holdAt = new THREE.Vector3()
+const mouthAt = new THREE.Vector3()
+const offAt = new THREE.Vector3()
+
+/** Screen anchor -> camera space for the drink's parent camera. */
+function anchorToCamera(anchor: THREE.Vector3, camera: THREE.Object3D | null, out: THREE.Vector3) {
+  const lens = camera as THREE.PerspectiveCamera | null
+  const tanHalf = Math.tan(THREE.MathUtils.degToRad((lens?.isPerspectiveCamera ? lens.fov : 60) / 2))
+  const aspect = lens?.isPerspectiveCamera ? lens.aspect : 1.6
+  const depth = -anchor.z
+  return out.set(anchor.x * depth * tanHalf * aspect, anchor.y * depth * tanHalf, anchor.z)
+}
 
 export function createFirstPersonDrink(camera: THREE.Camera): FirstPersonDrink {
   const root = new THREE.Group()
@@ -205,7 +219,11 @@ export function updateFirstPersonDrink(drink: FirstPersonDrink, input: FirstPers
   const colorKey = `${input.kind}|${input.skinColor}|${input.sleeveColor}`
   if (drink.colorKey !== colorKey || !drink.prop) buildModel(drink, input.kind, input.skinColor, input.sleeveColor)
   drink.root.visible = true
-  drink.root.scale.setScalar(VIEW_SCALE)
+  // Mirrored: a left hand, handle on the left (three flips the winding for negative scale).
+  drink.root.scale.set(-VIEW_SCALE, VIEW_SCALE, VIEW_SCALE)
+  anchorToCamera(HOLD, drink.root.parent, holdAt)
+  anchorToCamera(MOUTH, drink.root.parent, mouthAt)
+  anchorToCamera(OFF_SCREEN, drink.root.parent, offAt)
 
   const raiseEnd = 0.45
   const toMouthEnd = 0.75
@@ -221,15 +239,15 @@ export function updateFirstPersonDrink(drink: FirstPersonDrink, input: FirstPers
   const position = drink.root.position
 
   if (elapsed < raiseEnd) {
-    position.lerpVectors(OFF_SCREEN, HOLD, easeOutBack(clamp01(elapsed / raiseEnd)))
+    position.lerpVectors(offAt, holdAt, easeOutBack(clamp01(elapsed / raiseEnd)))
   } else if (elapsed < toMouthEnd) {
     const t = easeInOut((elapsed - raiseEnd) / (toMouthEnd - raiseEnd))
-    position.lerpVectors(HOLD, MOUTH, t)
+    position.lerpVectors(holdAt, mouthAt, t)
     tip = t * MOUTH_TIP
     headTilt = t
   } else if (elapsed < sipEnd) {
     const t = (elapsed - toMouthEnd) / (sipEnd - toMouthEnd)
-    position.copy(MOUTH)
+    position.copy(mouthAt)
     // Two gulps: small extra tips that pump the glass.
     const gulp = input.reducedMotion ? 0 : Math.max(0, Math.sin(t * Math.PI * 2)) * 0.1
     tip = MOUTH_TIP + gulp
@@ -238,7 +256,7 @@ export function updateFirstPersonDrink(drink: FirstPersonDrink, input: FirstPers
     headTilt = 1
   } else {
     const t = easeInOut((elapsed - sipEnd) / (lowerEnd - sipEnd))
-    position.lerpVectors(MOUTH, OFF_SCREEN, t)
+    position.lerpVectors(mouthAt, offAt, t)
     tip = (1 - t) * MOUTH_TIP
     drain = 1
     headTilt = 1 - t
@@ -254,7 +272,7 @@ export function updateFirstPersonDrink(drink: FirstPersonDrink, input: FirstPers
     ).multiplyScalar(wobble)
     position.add(scratch)
   }
-  drink.root.rotation.set(tip, 0, 0.18 * (1 - tip / MOUTH_TIP) + wobble * Math.sin(input.time * 2.2) * 0.08)
+  drink.root.rotation.set(tip, 0, -0.18 * (1 - tip / MOUTH_TIP) + wobble * Math.sin(input.time * 2.2) * 0.08)
 
   const remaining = 1 - drain * 0.45
   if (drink.liquid) {

@@ -73,6 +73,7 @@ uniform vec4 uFabricA;
 uniform vec4 uFabricB;
 uniform vec4 uFabricC;
 uniform vec4 uFabricD;
+uniform vec4 uFabricE;
 uniform vec3 uFabricStitch;
 varying vec3 vFabricP;
 varying vec3 vFabricN;
@@ -125,7 +126,7 @@ vec4 fabricNoiseD(vec3 x) {
 // One planar weave cell pattern in -1..1: 1 twill, 2 plain weave, 3 knit, 4 open mesh.
 float fabricWeave(vec2 c, float kind) {
   if (kind < 1.5) return sin(6.2832 * (c.x + c.y)) * 0.75 + sin(12.566 * c.y) * 0.25;
-  if (kind < 2.5) return sin(6.2832 * c.x) * sin(6.2832 * c.y);
+  if (kind < 2.5) return (sin(6.2832 * c.x) + sin(6.2832 * c.y)) * 0.5;
   if (kind < 3.5) {
     float column = abs(fract(c.x) - 0.5);
     return sin(6.2832 * (c.y * 1.3 + column * 1.1)) * 0.6 - smoothstep(0.38, 0.5, column) * 0.8;
@@ -185,7 +186,7 @@ const FABRIC_SURFACE = /* glsl */ `
     // Weave, knit, grain or fuzz: only where it spans enough pixels to read.
     vec3 fabQ = fabP * uFabricA.y;
     float fabFoot = length(fwidth(fabQ));
-    float fabFine = 1.0 - smoothstep(0.12, 0.35, fabFoot);
+    float fabFine = 1.0 - smoothstep(0.1, 0.28, fabFoot);
     float fabWeave = 0.0;
     if (uFabricA.x > 4.5) {
       fabWeave = (fabricNoise(fabQ) + fabricNoise(fabQ * 2.7 + 5.3) * 0.5) * 1.33 - 1.0;
@@ -219,6 +220,11 @@ const FABRIC_SURFACE = /* glsl */ `
     // Denim and suede wear pale on the raised ridges of folds.
     diffuseColor.rgb = mix(fabBase, fabBase * 1.45 + vec3(0.025), uFabricC.w * smoothstep(0.0, 0.003, fabH));
     diffuseColor.rgb *= fabricShade;
+    // Hard plastics: deeper, more saturated body colour; the gloss does the rest.
+    if (uFabricE.y > 0.0) {
+      float fabL = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+      diffuseColor.rgb = mix(vec3(fabL), diffuseColor.rgb, 1.0 + uFabricE.y) * (1.0 - uFabricE.y * 0.3);
+    }
     vec3 fabThread = dot(uFabricStitch, vec3(1.0)) > 0.0 ? uFabricStitch : fabBase * 0.72;
     diffuseColor.rgb = mix(diffuseColor.rgb, fabThread, fabStitch * 0.7);
   }
@@ -236,8 +242,10 @@ const FABRIC_LIGHT = /* glsl */ `
     float fabNh = saturate(dot(normal, normalize(fabL + geometryViewDir)));
     float fabSp = pow(fabNh, mix(6.0, 80.0, uFabricC.y));
     // Posterized like the diffuse ramp: a painted highlight shape with a soft skirt.
-    fabSp = mix(fabSp, smoothstep(0.3, 0.5, fabSp), 0.65) * smoothstep(0.08, 0.45, toonLit);
-    vec3 fabSpecColor = mix(fabLc, diffuseColor.rgb * 1.7 + vec3(0.08), uFabricD.z);
+    fabSp = mix(fabSp, smoothstep(0.3, 0.5, fabSp), 0.65 * (1.0 - uFabricE.x * 0.6)) * smoothstep(0.08, 0.45, toonLit);
+    // Leather and satin sheen take the cloth's own colour (a white blob read as a stain on light hides).
+    vec3 fabTinted = diffuseColor.rgb / max(max(diffuseColor.r, diffuseColor.g), max(diffuseColor.b, 0.05)) * 0.9;
+    vec3 fabSpecColor = mix(mix(fabLc, fabLc * fabTinted, uFabricE.x), diffuseColor.rgb * 1.7 + vec3(0.08), uFabricD.z);
     outgoingLight += fabSpecColor * fabSp * uFabricC.x * 0.42;
     // Metal: a sky/floor reflection gradient instead of flat colour.
     outgoingLight *= mix(1.0, mix(0.72, 1.3, saturate(normal.y * 0.5 + 0.5)), uFabricD.z);
@@ -306,28 +314,30 @@ interface FabricPreset {
   c: [number, number, number, number]
   /** retro-reflective facing glow, metal, long slub mottle */
   d?: [number, number, number]
+  /** highlight tint toward the cloth colour, hard-plastic colour depth */
+  e?: [number, number]
   stitch?: [number, number, number]
 }
 
 const FABRIC_PRESETS: Record<Exclude<AvatarFabricKind, 'none'>, FabricPreset> = {
   wool: { a: [1, 900, 0.1, 0.05], b: [0.7, 0.8, 0.3, 0.15], c: [0, 0, 0.8, 0] },
-  cotton: { a: [2, 760, 0.06, 0.03], b: [0.9, 1.0, 0.25, 0.12], c: [0, 0, 0.7, 0] },
+  cotton: { a: [2, 760, 0.045, 0.03], b: [0.9, 1.0, 0.25, 0.12], c: [0, 0, 0.7, 0] },
   jersey: { a: [3, 520, 0.07, 0.04], b: [1.0, 1.0, 0.3, 0.1], c: [0, 0, 0.9, 0] },
-  satin: { a: [0, 1, 0, 0.02], b: [0.6, 0.6, 0.2, 0], c: [0.6, 0.35, 1.2, 0] },
+  satin: { a: [0, 1, 0, 0.02], b: [0.6, 0.6, 0.2, 0], c: [0.6, 0.35, 1.2, 0], e: [0.5, 0] },
   denim: { a: [1, 430, 0.22, 0.2], b: [0.7, 1.1, 0.4, 0.9], c: [0, 0, 0.6, 0.4], d: [0, 0, 1], stitch: [0.62, 0.42, 0.16] },
   fleece: { a: [3, 380, 0.07, 0.07], b: [1.1, 1.1, 0.3, 0.1], c: [0, 0, 1.45, 0] },
   knit: { a: [3, 170, 0.22, 0.1], b: [0.3, 0.3, 0.2, 0], c: [0, 0, 1.3, 0] },
-  leather: { a: [5, 240, 0.12, 0.06], b: [0.45, 1.1, 0.3, 0.5], c: [0.5, 0.7, 0.9, 0.12] },
+  leather: { a: [5, 240, 0.12, 0.06], b: [0.45, 1.1, 0.3, 0.5], c: [0.4, 0.75, 0.9, 0.12], e: [0.75, 0] },
   suede: { a: [6, 520, 0.1, 0.12], b: [0.5, 0.9, 0.3, 0.4], c: [0.06, 0.1, 1.35, 0.25] },
-  canvas: { a: [2, 520, 0.08, 0.06], b: [0.65, 0.9, 0.3, 0.35], c: [0, 0, 0.6, 0.12] },
+  canvas: { a: [2, 600, 0.05, 0.06], b: [0.65, 0.9, 0.3, 0.2], c: [0, 0, 0.6, 0.12] },
   hivis: { a: [4, 520, 0.16, 0.03], b: [0.5, 0.7, 0.15, 0.3], c: [0.18, 0.4, 0.8, 0] },
-  tape: { a: [0, 1, 0, 0.02], b: [0.3, 0.4, 0.1, 0], c: [0.4, 0.45, 1, 0], d: [0.3, 0, 0] },
-  plastic: { a: [0, 1, 0, 0.02], b: [0, 0, 0.2, 0], c: [0.8, 0.85, 1.0, 0] },
+  tape: { a: [0, 1, 0, 0.02], b: [0.3, 0.4, 0.1, 0], c: [0.55, 0.5, 0.8, 0], d: [0.55, 0, 0] },
+  plastic: { a: [0, 1, 0, 0.02], b: [0, 0, 0.2, 0], c: [1.1, 0.8, 0.55, 0], e: [0, 0.35] },
   rubber: { a: [0, 1, 0, 0.04], b: [0, 0.3, 0.2, 0], c: [0.12, 0.2, 0.7, 0] },
   felt: { a: [6, 700, 0.07, 0.1], b: [0.2, 0.25, 0.25, 0], c: [0.04, 0.05, 1.4, 0] },
   straw: { a: [2, 150, 0.3, 0.12], b: [0.1, 0.1, 0.2, 0.3], c: [0.1, 0.2, 0.8, 0] },
   metal: { a: [0, 1, 0, 0.02], b: [0, 0, 0, 0], c: [1.0, 0.9, 1.2, 0], d: [0, 1, 0] },
-  acetate: { a: [0, 1, 0, 0.02], b: [0, 0, 0, 0], c: [0.9, 0.92, 1.0, 0] },
+  acetate: { a: [0, 1, 0, 0.02], b: [0, 0, 0, 0], c: [0.9, 0.92, 1.0, 0], e: [0, 0.2] },
 }
 
 interface FabricUniforms {
@@ -335,6 +345,7 @@ interface FabricUniforms {
   uFabricB: { value: THREE.Vector4 }
   uFabricC: { value: THREE.Vector4 }
   uFabricD: { value: THREE.Vector4 }
+  uFabricE: { value: THREE.Vector4 }
   uFabricStitch: { value: THREE.Color }
   uFabricFrame: { value: THREE.Matrix4 }
 }
@@ -346,6 +357,7 @@ const FABRIC_FRAME_KEY = 'avatarFabricFrame'
 function writeFabricUniforms(uniforms: FabricUniforms, kind: AvatarFabricKind, frame: ArrayLike<number> | null) {
   if (kind === 'none') {
     uniforms.uFabricD.value.set(0, 0, 0, 0)
+    uniforms.uFabricE.value.set(0, 0, 0, 0)
   } else {
     const preset = FABRIC_PRESETS[kind]
     uniforms.uFabricA.value.fromArray(preset.a)
@@ -353,6 +365,8 @@ function writeFabricUniforms(uniforms: FabricUniforms, kind: AvatarFabricKind, f
     uniforms.uFabricC.value.fromArray(preset.c)
     const d = preset.d ?? [0, 0, 0]
     uniforms.uFabricD.value.set(1, d[0], d[1], d[2])
+    const e = preset.e ?? [0, 0]
+    uniforms.uFabricE.value.set(e[0], e[1], 0, 0)
     if (preset.stitch) uniforms.uFabricStitch.value.setRGB(preset.stitch[0], preset.stitch[1], preset.stitch[2], THREE.SRGBColorSpace)
     else uniforms.uFabricStitch.value.setRGB(0, 0, 0)
   }
@@ -369,6 +383,7 @@ function fabricUniformsFor(material: THREE.Material | undefined): FabricUniforms
       uFabricB: { value: new THREE.Vector4() },
       uFabricC: { value: new THREE.Vector4() },
       uFabricD: { value: new THREE.Vector4() },
+      uFabricE: { value: new THREE.Vector4() },
       uFabricStitch: { value: new THREE.Color(0, 0, 0) },
       uFabricFrame: { value: new THREE.Matrix4() },
     }
@@ -706,8 +721,9 @@ function creaseWeightFor(a: string, b: string) {
   if (/Wrist/.test(pair) && /LowerArm/.test(pair)) return 0.45
   if (/Abdomen/.test(pair) && /Hips/.test(pair)) return 0.65
   if (/Torso/.test(pair) && /Abdomen/.test(pair)) return 0.5
-  if (/Chest/.test(pair) && /Torso/.test(pair)) return 0.3
-  if (/Shoulder/.test(pair) && /Chest/.test(pair)) return 0.25
+  // Upper torso: the chest barely creases, and rings there read as streaks by the collar.
+  if (/Chest/.test(pair) && /Torso/.test(pair)) return 0.04
+  if (/Shoulder/.test(pair) && /Chest/.test(pair)) return 0.04
   return 0
 }
 
@@ -754,7 +770,62 @@ const FABRIC_EDGE_RANGE = 0.06
  * the bend axis between the two bones a vertex is split across, scaled by how
  * evenly it is split and how much that joint creases.
  */
-function bakeFabricAttributes(mesh: THREE.SkinnedMesh, frame: THREE.Matrix4) {
+/** Cloth vertices of a whole model in the fabric frame, bucketed for "is this edge covered?" tests. */
+interface ClothPointIndex {
+  cells: Map<string, Array<{ x: number; y: number; z: number; owner: THREE.BufferGeometry }>>
+  size: number
+}
+
+const COVER_RADIUS = 0.03
+
+function buildClothPointIndex(meshes: readonly THREE.SkinnedMesh[], frame: THREE.Matrix4): ClothPointIndex {
+  const index: ClothPointIndex = { cells: new Map(), size: COVER_RADIUS }
+  const point = new THREE.Vector3()
+  for (const mesh of meshes) {
+    const toFabric = frame.clone().multiply(mesh.bindMatrix)
+    const position = mesh.geometry.getAttribute('position')
+    for (let vertex = 0; vertex < position.count; vertex += 1) {
+      point.fromBufferAttribute(position, vertex).applyMatrix4(toFabric)
+      const key = `${Math.floor(point.x / index.size)},${Math.floor(point.y / index.size)},${Math.floor(point.z / index.size)}`
+      let cell = index.cells.get(key)
+      if (!cell) index.cells.set(key, (cell = []))
+      cell.push({ x: point.x, y: point.y, z: point.z, owner: mesh.geometry })
+    }
+  }
+  return index
+}
+
+/**
+ * An open edge tucked under another cloth piece (a shirt edge inside a
+ * jacket) is not a visible hem: true when another piece lies within reach on
+ * the outside of the surface (along its normal) at that point.
+ */
+function isEdgeCovered(index: ClothPointIndex | null, owner: THREE.BufferGeometry, x: number, y: number, z: number, nx: number, ny: number, nz: number) {
+  if (!index) return false
+  const cx = Math.floor(x / index.size)
+  const cy = Math.floor(y / index.size)
+  const cz = Math.floor(z / index.size)
+  for (let ix = cx - 1; ix <= cx + 1; ix += 1) {
+    for (let iy = cy - 1; iy <= cy + 1; iy += 1) {
+      for (let iz = cz - 1; iz <= cz + 1; iz += 1) {
+        const cell = index.cells.get(`${ix},${iy},${iz}`)
+        if (!cell) continue
+        for (const other of cell) {
+          if (other.owner === owner) continue
+          const dx = other.x - x
+          const dy = other.y - y
+          const dz = other.z - z
+          const distance = Math.hypot(dx, dy, dz)
+          if (distance > COVER_RADIUS) continue
+          if (dx * nx + dy * ny + dz * nz > -0.004) return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+function bakeFabricAttributes(mesh: THREE.SkinnedMesh, frame: THREE.Matrix4, cover: ClothPointIndex | null = null) {
   const geometry = mesh.geometry
   if (geometry.userData.fabricBaked) return
   geometry.userData.fabricBaked = true
@@ -784,11 +855,21 @@ function bakeFabricAttributes(mesh: THREE.SkinnedMesh, frame: THREE.Matrix4) {
   }
   const nodeCount = welded.size
   const nodePoint = new Float32Array(nodeCount * 3)
+  const nodeNormal = new Float32Array(nodeCount * 3)
+  const normalAttribute = geometry.getAttribute('normal')
+  const normalMatrix = new THREE.Matrix3().setFromMatrix4(toFabric)
+  const normal = new THREE.Vector3()
   for (let index = 0; index < count; index += 1) {
     const id = weldIds[index]!
     nodePoint[id * 3] = fabricPoints[index * 3]!
     nodePoint[id * 3 + 1] = fabricPoints[index * 3 + 1]!
     nodePoint[id * 3 + 2] = fabricPoints[index * 3 + 2]!
+    if (normalAttribute) {
+      normal.fromBufferAttribute(normalAttribute, index).applyMatrix3(normalMatrix)
+      nodeNormal[id * 3] += normal.x
+      nodeNormal[id * 3 + 1] += normal.y
+      nodeNormal[id * 3 + 2] += normal.z
+    }
   }
   const index = geometry.getIndex()
   const triangleCount = index ? index.count / 3 : count / 3
@@ -846,6 +927,11 @@ function bakeFabricAttributes(mesh: THREE.SkinnedMesh, frame: THREE.Matrix4) {
     const a = Math.floor(key / nodeCount)
     const b = key % nodeCount
     for (const node of [a, b]) {
+      const nx = nodeNormal[node * 3]!
+      const ny = nodeNormal[node * 3 + 1]!
+      const nz = nodeNormal[node * 3 + 2]!
+      const length = Math.hypot(nx, ny, nz) || 1
+      if (isEdgeCovered(cover, geometry, nodePoint[node * 3]!, nodePoint[node * 3 + 1]!, nodePoint[node * 3 + 2]!, nx / length, ny / length, nz / length)) continue
       if (distance[node] !== 0) {
         distance[node] = 0
         push(0, node)
@@ -930,11 +1016,13 @@ export function applyAvatarAccessoryFabrics(set: { groups: readonly THREE.Object
       if (!match) return
       const [, part, style] = match
       if (part === 'jacket') {
-        jacketStyle = style!
+        // The group is visited before its child `avatar-jacket-accent`: keep the first (the style).
+        if (!jacketStyle && style !== 'accent') jacketStyle = style!
         return
       }
       // Materials by how much of the piece they cover: the biggest is the body of the hat.
       const coverage = new Map<THREE.Material, number>()
+      const onTorus = new Set<THREE.Material>()
       let radius = 0
       object.traverse(child => {
         const mesh = child as THREE.Mesh
@@ -942,6 +1030,7 @@ export function applyAvatarAccessoryFabrics(set: { groups: readonly THREE.Object
         const material = mesh.material
         if (!(material as THREE.MeshToonMaterial).isMeshToonMaterial) return
         coverage.set(material, (coverage.get(material) ?? 0) + mesh.geometry.getAttribute('position').count)
+        if ((mesh.geometry as THREE.BufferGeometry).type === 'TorusGeometry') onTorus.add(material)
         mesh.geometry.computeBoundingSphere()
         radius = Math.max(radius, (mesh.geometry.boundingSphere?.radius ?? 0) + mesh.position.length())
       })
@@ -955,7 +1044,7 @@ export function applyAvatarAccessoryFabrics(set: { groups: readonly THREE.Object
         if (part === 'glasses') kind = style === 'aviator' ? 'metal' : 'acetate'
         else if (style === 'fedora') kind = rank === 0 ? 'felt' : 'satin'
         else if (style === 'cowboy') kind = rank === 0 ? 'suede' : 'leather'
-        else if (style === 'beanie') kind = 'knit'
+        else if (style === 'beanie') kind = onTorus.has(material) ? 'felt' : 'knit'
         else if (style === 'visor') kind = rank === 0 ? 'plastic' : 'jersey'
         else if (style === 'crown') kind = 'metal'
         else kind = 'felt'
@@ -1030,7 +1119,8 @@ export function stylizeAvatar(
   applyLook(model, converted.values(), look)
   if (clothMeshes.length > 0) {
     const frame = computeFabricFrame(skinnedMeshes)
-    for (const mesh of clothMeshes) bakeFabricAttributes(mesh, frame)
+    const cover = clothMeshes.some(mesh => !mesh.geometry.userData.fabricBaked) ? buildClothPointIndex(clothMeshes, frame) : null
+    for (const mesh of clothMeshes) bakeFabricAttributes(mesh, frame, cover)
     for (const material of converted.values()) {
       const kind = material.userData[FABRIC_KIND_KEY] as AvatarFabricKind | undefined
       if (kind && kind !== 'none') setAvatarFabric(material, kind, frame)

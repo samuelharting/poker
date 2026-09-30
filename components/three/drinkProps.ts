@@ -50,7 +50,7 @@ function glassFresnelAlpha(shader: THREE.WebGLProgramParametersWithUniforms) {
     '#include <opaque_fragment>',
     `{
       float glassFacing = abs(dot(normal, normalize(vViewPosition)));
-      diffuseColor.a = clamp(diffuseColor.a * mix(1.9, 0.5, smoothstep(0.1, 0.85, glassFacing)), 0.0, 0.95);
+      diffuseColor.a = clamp(diffuseColor.a * mix(1.9, 0.5, smoothstep(0.1, 0.85, glassFacing)), 0.14, 0.95);
     }
     #include <opaque_fragment>`
   )
@@ -178,7 +178,7 @@ export function createDrinkProp(kind: DrinkKind, options: DrinkPropOptions = {})
       new THREE.Vector3(0.136, 0.048, 0),
       new THREE.Vector3(0.092, 0.042, 0),
     ])
-    add(new THREE.TubeGeometry(handleCurve, 28, 0.0125, 8, false), glassMaterial('#fff6e4', firstPerson ? 0.42 : 0.2), [0, 0, 0])
+    add(new THREE.TubeGeometry(handleCurve, 28, 0.0125, 8, false), glassMaterial('#fff6e4', firstPerson ? 0.42 : 0.34), [0, 0, 0])
     add(thickBase(0.0905, 0.032), baseMaterial, [0, 0, 0])
     const lip = add(new THREE.TorusGeometry(0.1, 0.0045, 6, 36), rimMaterial, [0, 0.24, 0])
     lip.rotation.x = Math.PI / 2
