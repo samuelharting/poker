@@ -4229,7 +4229,7 @@ export function SettingsModal({
     | 'autoStartDelaySeconds'
     | 'sevenTwoBountyPercent'
 
-  const [activeTab, setActiveTab] = useState<'general' | 'avatar' | 'players' | 'hands' | 'ledger'>('general')
+  const [activeTab, setActiveTab] = useState<'general' | 'avatar' | 'players' | 'ledger'>('general')
   const [showSevenTwoCustomize, setShowSevenTwoCustomize] = useState(false)
   const [chipDrafts, setChipDrafts] = useState<Record<string, NumericDraftValue>>({})
   const [avatarDraft, setAvatarDraft] = useState<PlayerAvatarCustomization>(() => ({
@@ -4450,14 +4450,6 @@ export function SettingsModal({
           </button>
           <button
             type="button"
-            className={`settings-tab ${activeTab === 'hands' ? 'is-active' : ''}`}
-            aria-pressed={activeTab === 'hands'}
-            onClick={() => setActiveTab('hands')}
-          >
-            Last hands
-          </button>
-          <button
-            type="button"
             className={`settings-tab ${activeTab === 'ledger' ? 'is-active' : ''}`}
             aria-pressed={activeTab === 'ledger'}
             onClick={() => setActiveTab('ledger')}
@@ -4474,12 +4466,6 @@ export function SettingsModal({
             isConnected={isConnected}
             onSendLedgerMessage={onSendLedgerMessage}
           />
-        )}
-
-        {activeTab === 'hands' && (
-          <div className="settings-modal-body">
-            <HandHistoryList history={state.handHistory ?? []} players={state.players} yourId={yourId} />
-          </div>
         )}
 
         {activeTab === 'general' && (

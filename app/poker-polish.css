@@ -969,6 +969,17 @@ input:focus-visible {
   filter: saturate(0.82);
 }
 
+/* Run 2 reuses run 1's shared cards: an empty outline, never a second copy. */
+.run-it-twice-card.is-shared-slot {
+  width: clamp(48px, 4.6vw, 66px);
+  height: clamp(67px, 6.45vw, 92px);
+  border: 1.5px dashed rgba(242, 199, 102, 0.28);
+  border-radius: 8px;
+  opacity: 1;
+  transform: none;
+  animation: none;
+}
+
 .run-it-twice-card .card {
   width: clamp(48px, 4.6vw, 66px);
   height: clamp(67px, 6.45vw, 92px);

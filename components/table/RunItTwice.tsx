@@ -168,6 +168,17 @@ export function RunItTwiceBoards({
                 const style: RunoutCardStyle = {
                   '--runout-card-delay': `${delayMs}ms`,
                 }
+                // Shared cards are dealt once: run 2 shows an empty slot there, never
+                // a second copy (a flop jack drawn twice reads as a fifth jack).
+                if (boardIndex > 0 && cardIndex < sharedCardCount) {
+                  return (
+                    <div
+                      key={`shared-${cardIndex}`}
+                      className="run-it-twice-card is-shared-slot"
+                      aria-label="Same card as run 1"
+                    />
+                  )
+                }
 
                 return (
                   <div
