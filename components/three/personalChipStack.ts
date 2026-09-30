@@ -96,36 +96,38 @@ export function getPersonalStackLayout(
   const capped = (count: number) => Math.min(maxLevels, count)
   let tier: PersonalStackTier
   let columns: PersonalStackColumn[]
-  if (ratio < 0.75) {
+  // Every step off the buy-in shows: short stacks shrink to a chip or two,
+  // winners keep climbing all the way to 10x the buy-in.
+  if (ratio < 0.5) {
     tier = 'short'
-    // One column, 1-8 chips; the top couple turn blue as it recovers.
-    const count = THREE.MathUtils.clamp(Math.round(1.5 + ratio * 9), 1, 8)
-    columns = [column('short:0', LEFT, FRONT, capped(count), (level, levels) => (ratio >= 0.4 && level >= levels - 2 ? BLUE : RED))]
-  } else if (ratio < 1.6) {
+    // One column, 1-5 chips; the top turns blue as it recovers.
+    const count = THREE.MathUtils.clamp(Math.round(1 + ratio * 8), 1, 5)
+    columns = [column('short:0', LEFT, FRONT, capped(count), (level, levels) => (ratio >= 0.3 && level === levels - 1 && levels > 1 ? BLUE : RED))]
+  } else if (ratio < 1.3) {
     tier = 'neat'
-    const t = (ratio - 0.75) / 0.85
+    const t = (ratio - 0.5) / 0.8
     columns = [
-      column('block:red', LEFT, FRONT, capped(6 + 3 * t), solid(RED)),
-      column('block:blue', RIGHT, FRONT, capped(5 + 3 * t), solid(BLUE)),
-      column('block:green', LEFT, BACK, capped(4 + 3 * t), solid(GREEN)),
+      column('block:red', LEFT, FRONT, capped(4 + 4 * t), solid(RED)),
+      column('block:blue', RIGHT, FRONT, capped(3 + 4 * t), solid(BLUE)),
     ]
-  } else if (ratio < 3) {
+    if (ratio >= 0.85) columns.push(column('block:green', LEFT, BACK, capped(2 + 4 * t), solid(GREEN)))
+  } else if (ratio < 2.5) {
     tier = 'rich'
     // The block fills in: low chips at the front, the big ones behind.
-    const t = (ratio - 1.6) / 1.4
+    const t = (ratio - 1.3) / 1.2
     columns = [
       column('block:red', LEFT, FRONT, capped(8 + 2 * t), solid(RED)),
       column('block:blue', RIGHT, FRONT, capped(7 + 3 * t), solid(BLUE)),
       column('block:green', LEFT, BACK, capped(7 + 3 * t), solid(GREEN)),
-      column('block:black', RIGHT, BACK, capped(5 + 5 * t), solid(BLACK)),
+      column('block:black', RIGHT, BACK, capped(4 + 6 * t), solid(BLACK)),
     ]
   } else {
     tier = 'tower'
     // An even plinth (so the tower sits flat) with a purple column rising from
-    // its middle, resting on all four stacks, crowned with gold-spot blacks.
-    const t = THREE.MathUtils.clamp((ratio - 3) / 3, 0, 1)
-    let plinth = Math.round(9 + 2 * t)
-    let crown = Math.round(8 + 5 * t)
+    // its middle, crowned with gold-spot blacks. Grows on a log scale to 10x.
+    const t = THREE.MathUtils.clamp(Math.log2(ratio / 2.5) / 2, 0, 1)
+    let plinth = Math.round(10 + t)
+    let crown = Math.round(5 + 11 * t)
     if (plinth + crown > maxLevels) {
       const scale = maxLevels / (plinth + crown)
       plinth = Math.max(3, Math.round(plinth * scale))

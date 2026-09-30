@@ -16,16 +16,16 @@ describe('getPersonalStackLayout', () => {
 
   it('grows through the tiers as the stack grows', () => {
     const tiers = [100, 500, 1000, 2000, 4000].map(stack => getPersonalStackLayout(stack, START).tier)
-    expect(tiers).toEqual(['short', 'short', 'neat', 'rich', 'tower'])
+    expect(tiers).toEqual(['short', 'neat', 'neat', 'rich', 'tower'])
   })
 
   it('keeps a short stack to one modest column that shrinks', () => {
     const small = getPersonalStackLayout(100, START)
-    const bigger = getPersonalStackLayout(600, START)
+    const bigger = getPersonalStackLayout(400, START)
     expect(small.columns).toHaveLength(1)
     expect(bigger.columns).toHaveLength(1)
     expect(small.total).toBeLessThan(bigger.total)
-    expect(bigger.total).toBeLessThanOrEqual(8)
+    expect(bigger.total).toBeLessThanOrEqual(5)
   })
 
   it('never shrinks as the stack grows and caps the chip count', () => {
@@ -50,7 +50,7 @@ describe('getPersonalStackLayout', () => {
     expect(getColumnTop(crown)).toBeGreaterThanOrEqual(18)
     expect(crown.denominations.slice(-3)).toEqual([3, 3, 3])
     // Much taller than the richest non-tower stack.
-    const rich = getPersonalStackLayout(2990, START)
+    const rich = getPersonalStackLayout(2400, START)
     expect(getColumnTop(crown)).toBeGreaterThan(Math.max(...rich.columns.map(getColumnTop)) + 5)
   })
 
@@ -58,6 +58,12 @@ describe('getPersonalStackLayout', () => {
     const rich = getPersonalStackLayout(2200, START)
     const denominations = rich.columns.map(entry => entry.denominations[0])
     expect(denominations).toEqual([...denominations].sort((a, b) => a! - b!))
+  })
+
+  it('keeps growing well past a big win, up to 10x the buy-in', () => {
+    const crownTop = (stack: number) => getColumnTop(getPersonalStackLayout(stack, START).columns.find(entry => entry.key === 'tower:crown')!)
+    expect(crownTop(10000)).toBeGreaterThan(crownTop(5000))
+    expect(crownTop(5000)).toBeGreaterThan(crownTop(3000))
   })
 
   it('respects a height cap without losing the crown', () => {

@@ -4472,6 +4472,24 @@ export function SettingsModal({
 
         {activeTab === 'general' && (
           <div className="settings-modal-body">
+            {(() => {
+              const me = state.players.find(player => player.id === yourId) ??
+                state.lobbyPlayers.find(player => player.id === yourId)
+              if (!me) return null
+              return (
+                <div className="settings-section">
+                  <div className="settings-section-title">Your stats</div>
+                  <div className="targeted-player-stats" aria-label="Your stats">
+                    {formatPlayerStatsSummary(me.stats).map(stat => (
+                      <div key={stat.label} className="targeted-player-stat">
+                        <span>{stat.label}</span>
+                        <strong>{stat.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
             <div className="settings-section settings-room-section">
               <div className="settings-section-title">Room</div>
               <div className="settings-room-code">
