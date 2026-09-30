@@ -321,10 +321,10 @@ describe('room UI layering', () => {
     expectRule(".table-scene[data-tray-open='true'] .cinematic-seat-6", [
       'top: 36%;',
     ], polishCss)
-    expectRule(".table-scene[data-tray-open='true'] .cinematic-seat-5 .cinematic-seat-bet", [
+    expectRule(".table-scene[data-tray-open='true']:not([data-desktop-three='true']) .cinematic-seat-5 .cinematic-seat-bet", [
       'left: 0;',
     ], polishCss)
-    expectRule(".table-scene[data-tray-open='true'] .cinematic-seat-6 .cinematic-seat-bet", [
+    expectRule(".table-scene[data-tray-open='true']:not([data-desktop-three='true']) .cinematic-seat-6 .cinematic-seat-bet", [
       'right: calc(100% + 8px);',
       'top: 50%;',
       'transform: translateY(-50%);',

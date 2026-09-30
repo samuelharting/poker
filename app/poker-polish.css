@@ -310,11 +310,12 @@ input:focus-visible {
     top: 36%;
   }
 
-  .table-scene[data-tray-open='true'] .cinematic-seat-5 .cinematic-seat-bet {
+  /* 2D only: in the 3D room the bet label is pinned to its chips by JS. */
+  .table-scene[data-tray-open='true']:not([data-desktop-three='true']) .cinematic-seat-5 .cinematic-seat-bet {
     left: 0;
   }
 
-  .table-scene[data-tray-open='true'] .cinematic-seat-6 .cinematic-seat-bet {
+  .table-scene[data-tray-open='true']:not([data-desktop-three='true']) .cinematic-seat-6 .cinematic-seat-bet {
     left: auto;
     right: calc(100% + 8px);
     top: 50%;
