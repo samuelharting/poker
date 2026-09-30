@@ -135,7 +135,7 @@ export function LedgerLayer({
             <p id="ledger-confirm-copy">
               {rebuy.canRebuy
                 ? <>
-                    Adds {formatChips(rebuy.amount)} to your stack and to your buy-in on the ledger
+                    Adds {formatChips(rebuy.amount)} to your stack and to your buy-in on the leaderboard
                     {rebuy.row ? ` (you'd be in for ${formatChips(rebuy.row.boughtIn + rebuy.amount)})` : ''}.
                     {rebuy.queues ? ' You are in a hand, so it lands as soon as this hand ends.' : ''}
                     {rebuy.rebuysLeft !== null ? ` ${rebuy.rebuysLeft - 1} rebuy${rebuy.rebuysLeft - 1 === 1 ? '' : 's'} left after this.` : ''}

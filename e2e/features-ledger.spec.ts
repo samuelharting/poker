@@ -37,7 +37,7 @@ test('a player rebuys themselves and everyone gets the settle-up at the end of t
 
     // The guest is below the buy-in, so they can rebuy themselves from Settings > Ledger.
     const dialog = await openSettings(guest.page)
-    await dialog.getByRole('button', { name: 'Ledger', exact: true }).click()
+    await dialog.getByRole('button', { name: 'Leaderboard', exact: true }).click()
     await expect(dialog.getByText('Your night')).toBeVisible()
     await dialog.getByRole('button', { name: 'Rebuy $1,000' }).click()
     const confirm = guest.page.getByRole('alertdialog', { name: 'Rebuy for $1,000?' })
@@ -66,7 +66,7 @@ test('a player rebuys themselves and everyone gets the settle-up at the end of t
 
     // The host ends the night: everyone sees the settle-up card.
     const hostDialog = await openSettings(host.page)
-    await hostDialog.getByRole('button', { name: 'Ledger', exact: true }).click()
+    await hostDialog.getByRole('button', { name: 'Leaderboard', exact: true }).click()
     await hostDialog.getByRole('button', { name: 'End night: show everyone' }).click()
     const card = guest.page.getByRole('dialog', { name: 'Settle up' })
     await expect(card).toBeVisible()

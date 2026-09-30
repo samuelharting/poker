@@ -4457,7 +4457,7 @@ export function SettingsModal({
             aria-pressed={activeTab === 'ledger'}
             onClick={() => setActiveTab('ledger')}
           >
-            Ledger
+            Leaderboard
           </button>
         </div>
 
