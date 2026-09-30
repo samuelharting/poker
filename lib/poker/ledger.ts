@@ -60,6 +60,9 @@ export const DEFAULT_LEDGER_SETTINGS: LedgerSettings = {
   chipValue: 1,
 }
 
+/** Real money one starting stack costs unless the host picks another buy-in. */
+export const DEFAULT_BUY_IN_DOLLARS = 5
+
 export const MAX_LEDGER_EVENTS = 60
 export const MAX_REBUYS_LIMIT = 99
 export const MIN_CHIP_VALUE = 0.0001

@@ -115,7 +115,8 @@ describe('buy-ins on the ledger', () => {
     const table = setupTable(['Ann', 'Ben'])
     const snapshot = lastMessage(table.byName.Ben!.connection, 'room_snapshot')
     expect(snapshot?.state.ledger?.rows.map(row => row.name).sort()).toEqual(['Ann', 'Ben'])
-    expect(snapshot?.state.ledger?.settings).toEqual({ allowRebuys: true, maxRebuys: 0, chipValue: 1 })
+    // Default buy-in: $5 for one starting stack.
+    expect(snapshot?.state.ledger?.settings).toEqual({ allowRebuys: true, maxRebuys: 0, chipValue: 5 / snapshot!.state.startingStack })
   })
 })
 
@@ -238,7 +239,7 @@ describe('self-serve rebuys', () => {
     send(table.server, table.host.connection, { type: 'adjust_player_stack', targetId: ben.playerId, amount: -1000 })
     send(table.server, ben.connection, { type: 'rebuy' })
     expect(failureOf(ben.connection)).toContain('used all 1 rebuy')
-    expect(ledgerOf(table).settings).toEqual({ allowRebuys: true, maxRebuys: 1, chipValue: 1 })
+    expect(ledgerOf(table).settings).toMatchObject({ allowRebuys: true, maxRebuys: 1 })
 
     send(table.server, table.host.connection, { type: 'update_table_settings', maxRebuys: -3 })
     send(table.server, table.host.connection, { type: 'update_table_settings', chipValue: 0 })

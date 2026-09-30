@@ -273,7 +273,10 @@ export function LedgerPanel({
   const [venmoDraft, setVenmoDraft] = useState(savedVenmo.replace(/^@/, ''))
   const [allowRebuys, setAllowRebuys] = useState(ledger.settings.allowRebuys)
   const [maxRebuys, setMaxRebuys] = useState<number | ''>(ledger.settings.maxRebuys)
-  const [chipValue, setChipValue] = useState<number | ''>(ledger.settings.chipValue)
+  const stackChips = Math.max(1, ledger.buyInAmount || state.startingStack)
+  const toBuyInDollars = (value: number) => Math.round(value * stackChips * 100) / 100
+  const savedBuyIn = toBuyInDollars(ledger.settings.chipValue)
+  const [buyInDollars, setBuyInDollars] = useState<number | ''>(savedBuyIn)
 
   useEffect(() => {
     setVenmoDraft(savedVenmo.replace(/^@/, ''))
@@ -281,16 +284,16 @@ export function LedgerPanel({
   useEffect(() => {
     setAllowRebuys(ledger.settings.allowRebuys)
     setMaxRebuys(ledger.settings.maxRebuys)
-    setChipValue(ledger.settings.chipValue)
-  }, [ledger.settings.allowRebuys, ledger.settings.maxRebuys, ledger.settings.chipValue])
+    setBuyInDollars(savedBuyIn)
+  }, [ledger.settings.allowRebuys, ledger.settings.maxRebuys, savedBuyIn])
 
   const venmoValid = venmoDraft.trim() === '' || /^@?[A-Za-z0-9_-]{2,30}$/.test(venmoDraft.trim())
   const venmoChanged = venmoDraft.trim().replace(/^@/, '') !== savedVenmo.replace(/^@/, '')
   const rulesValid = maxRebuys !== '' && maxRebuys >= 0 && maxRebuys <= MAX_REBUYS_LIMIT &&
-    chipValue !== '' && chipValue > 0 && chipValue <= 1000
+    buyInDollars !== '' && buyInDollars > 0 && buyInDollars / stackChips <= 1000
   const rulesChanged = allowRebuys !== ledger.settings.allowRebuys ||
     maxRebuys !== ledger.settings.maxRebuys ||
-    chipValue !== ledger.settings.chipValue
+    buyInDollars !== savedBuyIn
 
   return (
     <div className="settings-modal-body ledger-panel">
@@ -341,7 +344,10 @@ export function LedgerPanel({
 
       <section className="settings-section">
         <div className="settings-section-title">Your Venmo</div>
-        <div className="settings-section-copy">Winners with a Venmo handle get a one-tap pay link on the settle-up.</div>
+        <div className="settings-section-copy">
+          Buy-in is <strong>{formatCents(Math.round(savedBuyIn * 100))}</strong> for {formatChips(stackChips)} in chips.
+          Winners with a Venmo handle get a one-tap pay link on the settle-up.
+        </div>
         <form
           className="ledger-venmo-form"
           onSubmit={event => {
@@ -404,19 +410,20 @@ export function LedgerPanel({
               />
             </label>
             <label className="settings-field">
-              <span>Chip value ($ per chip)</span>
+              <span>Buy-in ($ for {formatChips(stackChips)} in chips)</span>
               <input
                 type="number"
-                min={0.0001}
-                step={0.01}
-                value={chipValue}
-                onChange={event => setChipValue(event.target.value === '' ? '' : Number(event.target.value))}
+                min={0.01}
+                step={1}
+                inputMode="decimal"
+                value={buyInDollars}
+                onChange={event => setBuyInDollars(event.target.value === '' ? '' : Number(event.target.value))}
               />
             </label>
           </div>
           <div className="settings-footer">
             <span className="settings-save-status" role="status">
-              {!rulesValid ? 'Use 0-99 rebuys and a chip value above $0.' : rulesChanged ? 'Unsaved changes.' : 'Saved. Applies right away.'}
+              {!rulesValid ? 'Use 0-99 rebuys and a buy-in above $0.' : rulesChanged ? 'Unsaved changes.' : 'Saved. Applies right away.'}
             </span>
             <button
               type="button"
@@ -426,7 +433,7 @@ export function LedgerPanel({
                 type: 'update_table_settings',
                 allowRebuys,
                 maxRebuys: Number(maxRebuys),
-                chipValue: Number(chipValue),
+                chipValue: Number(buyInDollars) / stackChips,
               })}
             >
               Save money rules

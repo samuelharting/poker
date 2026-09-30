@@ -106,6 +106,7 @@ import {
 import { CHIP_FLICK_COOLDOWN_MS, HOUSE_ID, type PrankEvent, type PrankKind } from '../lib/pranks'
 import { computeHouseRules, WATERFALL_EVERY_HANDS } from '../lib/houseRules'
 import {
+  DEFAULT_BUY_IN_DOLLARS,
   DEFAULT_LEDGER_SETTINGS,
   MAX_CHIP_VALUE,
   MAX_REBUYS_LIMIT,
@@ -1553,7 +1554,8 @@ export default class PokerRoom implements PartyServer {
     return {
       allowRebuys: settings.allowRebuys ?? DEFAULT_LEDGER_SETTINGS.allowRebuys,
       maxRebuys: settings.maxRebuys ?? DEFAULT_LEDGER_SETTINGS.maxRebuys,
-      chipValue: settings.chipValue ?? DEFAULT_LEDGER_SETTINGS.chipValue,
+      // Default buy-in is $5 of real money for one starting stack.
+      chipValue: settings.chipValue ?? DEFAULT_BUY_IN_DOLLARS / Math.max(1, settings.startingStack),
     }
   }
 

@@ -675,7 +675,11 @@ function MobileEdgeSeat({
           {getSeatInitials(player.nickname)}
         </div>
         {player.hasCards && !isFolded && !hasVisibleHoleCards && (
-          <span className="mobile-edge-seat-cards" aria-label="Holding cards">
+          <span
+            className="mobile-edge-seat-cards"
+            aria-label={player.isPeeking ? 'Looking at their cards' : 'Holding cards'}
+            data-peeking={player.isPeeking ? 'true' : undefined}
+          >
             <span className="mobile-edge-card-back" />
             <span className="mobile-edge-card-back" />
           </span>

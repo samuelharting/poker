@@ -430,6 +430,28 @@
   transform: rotate(8deg);
 }
 
+/* Someone is looking at their cards: the little pair lifts and fans open a
+   touch and the backs go a shade lighter. Barely there on purpose. */
+.mobile-seat-puck .mobile-edge-card-back {
+  transition: transform 220ms var(--ease-out), background-color 220ms var(--ease-out), margin-left 220ms var(--ease-out);
+}
+
+.mobile-seat-puck .mobile-edge-seat-cards[data-peeking='true'] .mobile-edge-card-back {
+  background-color: color-mix(in srgb, var(--c-ruby-600) 72%, var(--c-cream-50));
+  transform: translateY(-2px) rotate(-15deg);
+}
+
+.mobile-seat-puck .mobile-edge-seat-cards[data-peeking='true'] .mobile-edge-card-back + .mobile-edge-card-back {
+  margin-left: -1px;
+  transform: translateY(-2px) rotate(15deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-seat-puck .mobile-edge-card-back {
+    transition: none;
+  }
+}
+
 /* Dealer button: a small chip beside the name, never over the avatar letter */
 .mobile-seat-dealer {
   flex: 0 0 auto;
