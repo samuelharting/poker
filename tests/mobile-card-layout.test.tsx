@@ -59,6 +59,9 @@ describe('2D layout cards and seats', () => {
     expect(table2dCss).not.toMatch(/\.mobile-hero-lane \.own-card-slot-(left|right)[^{]*\{[^}]*rotate\(/s)
     expect(table2dCss).toMatch(/\.mobile-hero-lane \.own-card-row \{[^}]*gap:\s*8px/s)
     expect(table2dCss).toMatch(
+      /\.mobile-hero-lane \.card-corner-bottom,\s*\[data-layout='2d'\] \.mobile-board-zone \.card-corner-bottom\s*\{[^}]*right:\s*8%;[^}]*bottom:\s*5%;/s
+    )
+    expect(table2dCss).not.toMatch(
       /\.mobile-hero-lane \.card-corner-bottom,\s*\[data-layout='2d'\] \.mobile-board-zone \.card-corner-bottom\s*\{[^}]*display:\s*none;/s
     )
     expect(table2dCss).toMatch(/--hero-card-w: clamp\(60px, 18vw, 96px\);/)
