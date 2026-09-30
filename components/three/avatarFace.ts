@@ -132,6 +132,8 @@ export interface AvatarFaceRig {
   /** Skeletons of this avatar, refreshed right before each render (see syncSkeletons). */
   skeletons: THREE.Skeleton[]
   sceneHooked: boolean
+  /** The scene the skeleton-sync hook lives on (checked every update, see ensureSceneHook). */
+  scene: THREE.Object3D | null
   /** A table emote the face is reacting to (set by the director, expires on the face clock). */
   emote: { emotion: FaceEmotion; until: number; amount: number } | null
   state: {
@@ -220,8 +222,17 @@ interface SyncedSkeleton {
   stamp: number
 }
 const syncedSkeletons: SyncedSkeleton[] = []
-const hookedScenes = new WeakSet<THREE.Object3D>()
 let syncToken = 0
+
+/** Our pre-render hook per scene, plus a watchdog (see ensureSceneHook). */
+interface SceneHook {
+  hook: NonNullable<THREE.Object3D['onBeforeRender']>
+  /** Times the hook ran; `seen` is the value at the last check, `stall` the checks since it moved. */
+  runs: number
+  seen: number
+  stall: number
+}
+const sceneHooks = new WeakMap<THREE.Object3D, SceneHook>()
 
 function collectSkeletons(model: THREE.Object3D) {
   const list: THREE.Skeleton[] = []
@@ -265,20 +276,53 @@ function beforeSceneRender() {
   }
 }
 
+/** Wraps whatever scene.onBeforeRender currently is so the skeleton sync runs first-class after it. */
+function installSceneHook(scene: THREE.Object3D) {
+  const previous = scene.onBeforeRender
+  const entry: SceneHook = {
+    hook: function (this: THREE.Object3D, renderer, sceneArg, camera, geometry, material, group) {
+      previous.call(this, renderer, sceneArg, camera, geometry, material, group)
+      entry.runs += 1
+      beforeSceneRender()
+    },
+    runs: 0,
+    seen: 0,
+    stall: 0,
+  }
+  sceneHooks.set(scene, entry)
+  scene.onBeforeRender = entry.hook
+}
+
+/**
+ * Watchdog, run cheaply on every face update: if some other code REPLACED scene.onBeforeRender
+ * without chaining ours (faces would float off their heads), wrap the new one again. A hook that
+ * chains ours keeps the run counter moving and is left alone; a paused renderer (no runs, but our
+ * hook still installed) is left alone too, so wrappers never pile up.
+ */
+function ensureSceneHook(scene: THREE.Object3D) {
+  const entry = sceneHooks.get(scene)
+  if (!entry) {
+    installSceneHook(scene)
+    return
+  }
+  if (entry.runs !== entry.seen) {
+    entry.seen = entry.runs
+    entry.stall = 0
+    return
+  }
+  entry.stall += 1
+  if (entry.stall > 20 && scene.onBeforeRender !== entry.hook) installSceneHook(scene)
+}
+
 function hookSkeletonSync(face: AvatarFaceRig) {
   let node: THREE.Object3D = face.headBone
   while (node.parent) node = node.parent
   const scene = node as THREE.Scene
   if (!scene.isScene) return // not mounted yet: try again next frame
   face.sceneHooked = true
+  face.scene = scene
   for (const skeleton of face.skeletons) registerSkeleton(skeleton)
-  if (hookedScenes.has(scene)) return
-  hookedScenes.add(scene)
-  const previous = scene.onBeforeRender
-  scene.onBeforeRender = function (this: THREE.Scene, renderer, sceneArg, camera, geometry, material, group) {
-    previous.call(this, renderer, sceneArg, camera, geometry, material, group)
-    beforeSceneRender()
-  }
+  ensureSceneHook(scene)
 }
 
 const RIGGED_ACCESSORY_SCALE = 0.0043
@@ -703,6 +747,7 @@ export function createAvatarFace(
     hairShade,
     skeletons: collectSkeletons(model),
     sceneHooked: false,
+    scene: null,
     emote: null,
     state: {
       seed,
@@ -776,12 +821,14 @@ const clamp = THREE.MathUtils.clamp
  * both capped by the moustache's size; a gaping (not smiling) mouth pulls them down a little.
  * `rest` levels an upturned crescent at rest (from the moustache's measured shape).
  */
-function moustacheLift(corner: number, restCorner: number, open: number, halfWidth: number, rest: number) {
+function moustacheLift(corner: number, restCorner: number, halfWidth: number, rest: number, smirk: number) {
   // A small dead zone: idle drift and faint in-hand asymmetry leave the moustache level.
   const raw = corner - restCorner
   const d = raw > 0 ? Math.max(0, raw - 0.1) : Math.min(0, raw + 0.1)
-  const bend = d < 0 ? Math.max(-0.38 * halfWidth, d * 0.9) : Math.min(0.28 * halfWidth, d * 0.55)
-  return rest + bend - 0.12 * open * clamp(1 - corner * 2, 0, 1)
+  // The lifted side of a smirk rises further and faster (the corner itself is hidden under the hair).
+  const upCap = (0.28 + 0.17 * smirk) * halfWidth
+  const bend = d < 0 ? Math.max(-Math.min(0.38 * halfWidth, 0.5), d * 0.9) : Math.min(upCap, d * (0.55 + 0.35 * smirk))
+  return rest + bend
 }
 
 /** Largest moustache tip motion per second (eye radii), so a frame hitch never snaps it. */
@@ -790,6 +837,7 @@ const MOUSTACHE_TIP_RATE = 3
 /** Applies emotion, blink, gaze, lids, brows, mouth and skin decals for this frame. */
 export function updateAvatarFace(face: AvatarFaceRig, input: FaceInput) {
   if (!face.sceneHooked) hookSkeletonSync(face)
+  else if (face.scene) ensureSceneHook(face.scene)
   if (input.skip) return
   const costStart = process.env.NODE_ENV !== 'production' ? performance.now() : 0
   updateAvatarFaceInner(face, input)
@@ -845,7 +893,14 @@ function updateAvatarFaceInner(face: AvatarFaceRig, input: FaceInput) {
     }
   }
   state.time = face.emotion.time
+  // How lopsided the smile is beyond the resting habit (+: the dominant "A" side is up), 0..1.
+  let hairSmirk = 0
   if (face.mouth.facialHair) {
+    // A smirk corner hides under the moustache: carry it with that side's cheek and lower lid.
+    const asym = p[CH.smileA]! - p[CH.smileB]! - 0.4 * face.personality.baseSmile
+    hairSmirk = clamp((Math.abs(asym) - 0.12) / 0.45, 0, 1) * Math.sign(asym)
+    if (hairSmirk > 0) p[CH.lidLA] = Math.min(1, p[CH.lidLA]! + hairSmirk * 0.32)
+    else if (hairSmirk < 0) p[CH.lidLB] = Math.min(1, p[CH.lidLB]! - hairSmirk * 0.32)
     // The moustache hides most of the mouth, so the smile also reads through cheeks and eyes.
     const smile = Math.max(0, (p[CH.smileA]! + p[CH.smileB]!) * 0.5 - 0.08)
     p[CH.lidLA] = Math.min(1, p[CH.lidLA]! + smile * 0.32)
@@ -1008,9 +1063,13 @@ function updateAvatarFaceInner(face: AvatarFaceRig, input: FaceInput) {
       const restB = 0.05 + person.baseSmile * 0.6 + FACIAL_HAIR_SMILE_BIAS
       const width = bend.z
       const level = -clamp((face.hairShade.moustache?.tipRise ?? 0) * 0.85, 0, 0.4 * width)
-      const wantL = moustacheLift(shape.cornerL, smirkSide === 1 ? restB : restA, shape.open, width, level)
-      const wantR = moustacheLift(shape.cornerR, smirkSide === 1 ? restA : restB, shape.open, width, level)
-      const wantC = shape.open * 0.12 + p[CH.teeth]! * 0.04 - p[CH.press]! * 0.04
+      const smirkR = Math.max(0, smirkSide === 1 ? hairSmirk : -hairSmirk)
+      const smirkL = Math.max(0, smirkSide === 1 ? -hairSmirk : hairSmirk)
+      const wantL = moustacheLift(shape.cornerL, smirkSide === 1 ? restB : restA, width, level, smirkL)
+      const wantR = moustacheLift(shape.cornerR, smirkSide === 1 ? restA : restB, width, level, smirkR)
+      // An open, unsmiling mouth (surprise, shock) lifts the moustache's middle so an "O" shows under it.
+      const unsmiling = clamp(1 - 2 * Math.max(0, (shape.cornerL + shape.cornerR) * 0.5 - FACIAL_HAIR_SMILE_BIAS), 0, 1)
+      const wantC = shape.open * (0.12 + 0.1 * unsmiling) + p[CH.teeth]! * 0.04 - p[CH.press]! * 0.04
       if (instant) {
         bend.x = wantL
         bend.y = wantR
@@ -1061,8 +1120,10 @@ function updateAvatarFaceInner(face: AvatarFaceRig, input: FaceInput) {
     const smilePlus = smirkSide === 1 ? p[CH.smileA]! : p[CH.smileB]!
     const smileMinus = smirkSide === 1 ? p[CH.smileB]! : p[CH.smileA]!
     const creaseGain = face.mouth.facialHair ? 1.7 : 1
-    a.creaseA = Math.max(0, smilePlus - 0.15) * 0.34 * creaseGain + wrinkle * 0.2
-    a.creaseB = Math.max(0, smileMinus - 0.15) * 0.34 * creaseGain + wrinkle * 0.2
+    // Under a moustache the smirk side's cheek crease carries the lopsided smile.
+    const smirkPlus = (smirkSide === 1 ? hairSmirk : -hairSmirk)
+    a.creaseA = Math.max(0, smilePlus - 0.15) * 0.34 * creaseGain + wrinkle * 0.2 + Math.max(0, smirkPlus) * 0.22
+    a.creaseB = Math.max(0, smileMinus - 0.15) * 0.34 * creaseGain + wrinkle * 0.2 + Math.max(0, -smirkPlus) * 0.22
     a.furrow = p[CH.furrow]! * 0.26
     a.noseWrinkle = Math.max(0, wrinkle - 0.1) * 0.5
     updateOverlayColors(face.overlay, a, 0.94, state.dim)

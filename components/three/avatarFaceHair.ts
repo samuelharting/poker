@@ -222,14 +222,17 @@ export function installFacialHairShade(
       float zone = smoothstep(-1.2, -0.5, hy) * (1.0 - smoothstep(0.9, 1.5, hy)) * (1.0 - smoothstep(1.5, 2.3, hx));
       float lower = 1.0 - smoothstep(-0.1, 0.75, hy);
       float tips = smoothstep(0.35, 1.25, hx);
-      float shade = zone * (0.12 + uHairShade.x * (0.36 * lower + 0.34 * tips));
-      outgoingLight *= 1.0 - shade;
-      outgoingLight = mix(outgoingLight, outgoingLight * vec3(0.9, 0.88, 0.9), zone * 0.5);
+      float shade = min(0.45, zone * (0.12 + uHairShade.x * (0.36 * lower + 0.34 * tips)));
+      // Shade towards a deeper, richer version of the hair's own colour (plain darkening turned
+      // gold and blond moustaches a muddy olive).
+      vec3 deep = diffuseColor.rgb * diffuseColor.rgb * 0.75;
+      outgoingLight = mix(outgoingLight, deep * (outgoingLight / max(diffuseColor.rgb, vec3(0.05))) * 0.8, shade);
+      outgoingLight = mix(outgoingLight, outgoingLight * vec3(0.96, 0.94, 0.96), zone * 0.5);
     }
     #include <opaque_fragment>`
       )
   }
-  material.customProgramCacheKey = () => 'avatar-facial-hair-shade-v3'
+  material.customProgramCacheKey = () => 'avatar-facial-hair-shade-v4'
   material.needsUpdate = true
 
   // The ink hull of the same mesh: same bend, or the outline would stay behind as a ghost moustache.

@@ -479,6 +479,7 @@ export function directEmotions(state: EmotionState, ctx: FaceContext, person: Fa
     t[EMOTION_INDEX.bored] = 0
     t[EMOTION_INDEX.sad] = 0
     t[EMOTION_INDEX.thinking] = 0
+    t[EMOTION_INDEX.worried] = 0
   }
 
   if (ctx.tilt > 0 && !ctx.winner) {
@@ -539,9 +540,11 @@ export function directEmotions(state: EmotionState, ctx: FaceContext, person: Fa
     add('surprised', 0.35)
   }
   if (ctx.hungover) {
-    set('hungover', 0.95)
+    // Even a hangover cracks a (pained) grin for a win.
+    set('hungover', ctx.winner ? 0.5 : 0.95)
     t[EMOTION_INDEX.smirk] = 0
-    t[EMOTION_INDEX.joy] = 0
+    t[EMOTION_INDEX.joy] = ctx.winner ? Math.max(0.65, Math.min(0.75, t[EMOTION_INDEX.joy]!)) : 0
+    if (ctx.winner) t[EMOTION_INDEX.worried] = 0
   }
   if (ctx.passedOut) {
     t.fill(0)
