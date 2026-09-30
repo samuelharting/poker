@@ -1647,6 +1647,54 @@ input:focus-visible {
     align-self: center;
   }
 
+  /* ‹ slider › : step the bet one big blind at a time. */
+  .table-scene[data-desktop-three='true'] .raise-slider-track {
+    grid-column: 1;
+    grid-row: 2;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-slider-track input[type='range'].raise-slider {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-step-btn {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--c-brass-400) 45%, transparent);
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--c-ink-800) 85%, transparent);
+    color: var(--c-brass-200);
+    font: 800 17px / 1 var(--font-ui);
+    cursor: pointer;
+    transition: background 120ms ease, transform 120ms ease;
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-step-btn span {
+    margin-top: -2px;
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-step-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--c-brass-500) 28%, var(--c-ink-800));
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-step-btn:active:not(:disabled) {
+    transform: scale(0.92);
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-step-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+
   .table-scene[data-desktop-three='true'] .raise-input {
     grid-column: 2;
     grid-row: 1 / 3;

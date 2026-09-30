@@ -3375,17 +3375,39 @@ export function PokerTable({
                   ))}
                 </div>
 
-                <input
-                  type="range"
-                  className="raise-slider"
-                  min={effectiveMin}
-                  max={maxRaise}
-                  step={Math.max(state.bigBlind, 1)}
-                  value={displayRaiseAmount}
-                  disabled={isTrayReconnecting}
-                  aria-label={state.currentBet > 0 ? 'Raise amount' : 'Bet amount'}
-                  onChange={event => setClampedRaiseAmount(Number(event.target.value))}
-                />
+                <div className="raise-slider-track">
+                  <button
+                    type="button"
+                    className="raise-step-btn"
+                    disabled={isTrayReconnecting || displayRaiseAmount <= effectiveMin}
+                    aria-label={`Lower by ${formatAmount(Math.max(state.bigBlind, 1))}`}
+                    title={`- ${formatAmount(Math.max(state.bigBlind, 1))}`}
+                    onClick={() => setClampedRaiseAmount(displayRaiseAmount - Math.max(state.bigBlind, 1))}
+                  >
+                    <span aria-hidden="true">‹</span>
+                  </button>
+                  <input
+                    type="range"
+                    className="raise-slider"
+                    min={effectiveMin}
+                    max={maxRaise}
+                    step={Math.max(state.bigBlind, 1)}
+                    value={displayRaiseAmount}
+                    disabled={isTrayReconnecting}
+                    aria-label={state.currentBet > 0 ? 'Raise amount' : 'Bet amount'}
+                    onChange={event => setClampedRaiseAmount(Number(event.target.value))}
+                  />
+                  <button
+                    type="button"
+                    className="raise-step-btn"
+                    disabled={isTrayReconnecting || displayRaiseAmount >= maxRaise}
+                    aria-label={`Raise by ${formatAmount(Math.max(state.bigBlind, 1))}`}
+                    title={`+ ${formatAmount(Math.max(state.bigBlind, 1))}`}
+                    onClick={() => setClampedRaiseAmount(displayRaiseAmount + Math.max(state.bigBlind, 1))}
+                  >
+                    <span aria-hidden="true">›</span>
+                  </button>
+                </div>
 
                 <label className={`raise-input-wrap ${raiseDraftHint ? `is-${raiseDraftHint}` : ''}`}>
                   <input

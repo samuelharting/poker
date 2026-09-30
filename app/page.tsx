@@ -94,6 +94,12 @@ export default function LandingPage() {
             <p className="landing-subtitle">
               Deal a private table for your crew. Share the code, grab a seat, shuffle up.
             </p>
+            <ul className="landing-features" aria-label="What's at the table">
+              <li><span aria-hidden="true">♠</span>3D table</li>
+              <li><span aria-hidden="true">⇄</span>Run it twice</li>
+              <li><span aria-hidden="true">♥</span>Drinks</li>
+              <li><span aria-hidden="true">$</span>Venmo payouts</li>
+            </ul>
           </header>
 
           <section className="landing-panel-wrap card-panel" aria-label="Get a seat">
@@ -210,7 +216,7 @@ export default function LandingPage() {
             )}
 
             <p className="landing-footnote">
-              <span>Play money</span>
+              <span>Free to play</span>
               <span>Up to 8 seats</span>
               <span>No sign-up</span>
             </p>

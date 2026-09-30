@@ -4181,3 +4181,97 @@
     font-size: 12px;
   }
 }
+
+
+/* --- Landing polish: feature row, gold-trimmed panel, CTA sheen, hover fan --- */
+.landing-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landing-features li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 6px;
+  border: 1px solid color-mix(in srgb, var(--c-brass-400) 32%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-ink-900) 70%, transparent);
+  color: var(--c-cream-100, #f4ecd9);
+  font: 700 11.5px / 1 var(--font-ui);
+  white-space: nowrap;
+  animation: landingFeatureIn 520ms var(--ease-pop) both;
+}
+
+.landing-features li:nth-child(2) { animation-delay: 80ms; }
+.landing-features li:nth-child(3) { animation-delay: 160ms; }
+.landing-features li:nth-child(4) { animation-delay: 240ms; }
+
+.landing-features li span {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: linear-gradient(160deg, var(--c-brass-300, #f2c766), var(--c-brass-500, #b8862b));
+  color: var(--c-ink-950, #0b0f10);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+@keyframes landingFeatureIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.landing-panel-wrap.card-panel {
+  border-color: color-mix(in srgb, var(--c-brass-400) 38%, transparent);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 214, 110, 0.06) inset,
+    0 0 48px rgba(255, 196, 70, 0.08);
+}
+
+.landing-panel-wrap .entry-submit {
+  position: relative;
+  overflow: hidden;
+}
+
+.landing-panel-wrap .entry-submit::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 32%, rgba(255, 255, 255, 0.5) 50%, transparent 68%);
+  transform: translateX(-120%);
+  animation: landingSheen 3.6s ease-in-out 1.2s infinite;
+  pointer-events: none;
+}
+
+@keyframes landingSheen {
+  0% { transform: translateX(-120%); }
+  40%, 100% { transform: translateX(120%); }
+}
+
+/* The hand fans a little wider when you point at it. */
+.landing-art:hover .landing-card-back { --card-rot: -32deg; --card-x: -56%; }
+.landing-art:hover .landing-card-a { --card-rot: -12deg; --card-x: -28%; }
+.landing-art:hover .landing-card-b { --card-rot: 16deg; --card-x: 38%; }
+
+.landing-card {
+  transition: transform 420ms var(--ease-pop, cubic-bezier(0.2, 1.3, 0.4, 1));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-features li,
+  .landing-panel-wrap .entry-submit::after {
+    animation: none;
+  }
+
+  .landing-card {
+    transition: none;
+  }
+}
