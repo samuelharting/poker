@@ -226,8 +226,11 @@ const pivotRotated = new THREE.Vector3()
 const decomposePosition = new THREE.Vector3()
 const decomposeScale = new THREE.Vector3()
 
-/** Advances the hair spring. Call once per frame after the head bone is final. */
-export function updateHairSway(head: THREE.Object3D | undefined, dt: number, reducedMotion: boolean) {
+/**
+ * Advances the hair spring. Call once per frame after the head bone is final.
+ * `amount` scales the whole sway (a hat pressing the hair down moves it less).
+ */
+export function updateHairSway(head: THREE.Object3D | undefined, dt: number, reducedMotion: boolean, amount = 1) {
   if (!head) return
   let state = swayByHead.get(head)
   if (!state) return
@@ -262,29 +265,31 @@ export function updateHairSway(head: THREE.Object3D | undefined, dt: number, red
   gravityLocal.set(0, -1, 0).applyQuaternion(delta.copy(headQuaternion).invert())
   const down = Math.max(0.2, -gravityLocal.y)
   // (Held to 60% of the cap so a tilted head still leaves room to swing.)
-  const hangMax = config.maxAngle * 0.6
-  const eqX = Math.max(-hangMax * config.forward, Math.min(hangMax, config.gravity * Math.atan2(-gravityLocal.z, down)))
-  const eqZ = Math.max(-hangMax * config.side, Math.min(hangMax * config.side, config.gravity * Math.atan2(gravityLocal.x, down)))
+  const scale = Math.max(0, Math.min(1, amount))
+  const hangMax = config.maxAngle * 0.6 * scale
+  const eqX = Math.max(-hangMax * config.forward, Math.min(hangMax, config.gravity * scale * Math.atan2(-gravityLocal.z, down)))
+  const eqZ = Math.max(-hangMax * config.side, Math.min(hangMax * config.side, config.gravity * scale * Math.atan2(gravityLocal.x, down)))
 
   const w = config.omega
   const k = w * w
   const c = 2 * config.zeta * w
-  const g = config.gain
+  const g = config.gain * scale
   const h = step / 2
   for (let sub = 0; sub < 2; sub += 1) {
     velocity.x += (k * (eqX - angle.x) - c * velocity.x - g * accel.x) * h
-    velocity.y += (k * -angle.y - c * velocity.y - g * 0.4 * accel.y) * h
+    // (The twist about the neck gets a gentler push: it used to sit on its cap through a head shake.)
+    velocity.y += (k * -angle.y - c * velocity.y - g * 0.22 * accel.y) * h
     velocity.z += (k * (eqZ - angle.z) - c * velocity.z - g * accel.z) * h
     angle.addScaledVector(velocity, h)
   }
   // Soft limits: past the cap the ends stop (no bounce off a wall).
-  const max = config.maxAngle
+  const max = config.maxAngle * scale
   const maxForward = max * config.forward
   const maxSide = max * config.side
   if (angle.x > max) { angle.x = max; velocity.x = Math.min(0, velocity.x) }
   if (angle.x < -maxForward) { angle.x = -maxForward; velocity.x = Math.max(0, velocity.x) }
-  if (angle.y > max / 3) { angle.y = max / 3; velocity.y = Math.min(0, velocity.y) }
-  if (angle.y < -max / 3) { angle.y = -max / 3; velocity.y = Math.max(0, velocity.y) }
+  if (angle.y > max / 2) { angle.y = max / 2; velocity.y = Math.min(0, velocity.y) }
+  if (angle.y < -max / 2) { angle.y = -max / 2; velocity.y = Math.max(0, velocity.y) }
   if (angle.z > maxSide) { angle.z = maxSide; velocity.z = Math.min(0, velocity.z) }
   if (angle.z < -maxSide) { angle.z = -maxSide; velocity.z = Math.max(0, velocity.z) }
   if (!Number.isFinite(angle.x + angle.y + angle.z + velocity.x + velocity.y + velocity.z)) {

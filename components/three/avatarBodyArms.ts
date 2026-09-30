@@ -80,6 +80,9 @@ interface SideState {
   limitQ: THREE.Quaternion[]
   limitRate: number[]
   limitValid: boolean
+  /** The raised-arm hand frame's weight, eased (it follows the hand height, which can cross its band quickly). */
+  raiseW: number
+  raiseV: number
 }
 
 interface ArmState {
@@ -91,7 +94,7 @@ interface ArmState {
 const armStates = new WeakMap<object, ArmState>()
 
 function createSideState(): SideState {
-  return { push: new THREE.Vector3(), lift: 0, liftVel: 0, reach: 0, reachVel: 0, length: 0, lengthScale: 0, twistRaw: 0, twist: 0, twistVel: 0, blendQ: [new THREE.Quaternion(), new THREE.Quaternion(), new THREE.Quaternion(), new THREE.Quaternion()], blendValid: [false, false, false, false], limitQ: [new THREE.Quaternion(), new THREE.Quaternion(), new THREE.Quaternion()], limitRate: [0, 0, 0], limitValid: false }
+  return { push: new THREE.Vector3(), lift: 0, liftVel: 0, reach: 0, reachVel: 0, length: 0, lengthScale: 0, twistRaw: 0, twist: 0, twistVel: 0, blendQ: [new THREE.Quaternion(), new THREE.Quaternion(), new THREE.Quaternion(), new THREE.Quaternion()], blendValid: [false, false, false, false], limitQ: [new THREE.Quaternion(), new THREE.Quaternion(), new THREE.Quaternion()], limitRate: [0, 0, 0], limitValid: false, raiseW: 0, raiseV: 0 }
 }
 
 function buildSideRig(bones: ReadonlyMap<string, THREE.Bone>, side: 'R' | 'L'): SideRig | null {
@@ -407,14 +410,16 @@ function solveAvatarArmsInner(ctx: ArmSolveContext, pose: AvatarPose, options: A
     const { chain } = sideRig
     ikTarget.set(hand[0], hand[1], hand[2])
     const raise = raiseAll * smoothstep(shoulder[1] - 0.05, shoulder[1] + 0.2, hand[1])
-    if (raise > 0.01 && guardRadius > 0) {
-      // Hands up at the head (laced behind it, rubbing it) go where the head
-      // is now: the targets are laid out against the upright rest pose, and a
-      // lounge or flinch moves the skull back by a hand's width.
+    // Hands at the head (laced behind it, rubbing it, head in hands, fixing a
+    // hat) go where the head is now: the targets are laid out against the
+    // upright rest pose, and a lounge, flinch or slump moves the skull by a
+    // hand's width.
+    const carry = Math.max(raise, clamp(pose.headFollow, 0, 1))
+    if (carry > 0.01 && guardRadius > 0) {
       const restHead = anchors.chin
-      ikTarget.x += (faceGuardCenter.x - restHead[0]) * raise
-      ikTarget.y += (faceGuardCenter.y - 0.13 - (restHead[1] - 0.02)) * raise
-      ikTarget.z += (faceGuardCenter.z - (restHead[2] + 0.26)) * raise
+      ikTarget.x += (faceGuardCenter.x - restHead[0]) * carry
+      ikTarget.y += (faceGuardCenter.y - 0.13 - (restHead[1] - 0.02)) * carry
+      ikTarget.z += (faceGuardCenter.z - (restHead[2] + 0.26)) * carry
     }
     // Never through the hole cards: a hand whose palm or fingers would land
     // on them is lifted clear (fingers hang below the wrist plane), faded in
@@ -747,11 +752,17 @@ function orientHand(
   restInward.set(0, 0, -1).transformDirection(root.matrixWorld).setY(0).normalize()
   restFingers.copy(forearm).setY(0)
   if (restFingers.lengthSq() < 1e-8) restFingers.copy(restInward)
-  restFingers.normalize().multiplyScalar(0.25).addScaledVector(restInward, 0.75).normalize()
+  // (Half along the forearm, half toward the table: turned in any further the
+  // resting wrist sat on its sideways limit, creasing the skin at the wrist.)
+  restFingers.normalize().multiplyScalar(0.45).addScaledVector(restInward, 0.55).normalize()
   // resting: cross(fingers, up) * out, tipped so the pinky edge sits a touch lower
   tmpA.crossVectors(restFingers, WORLD_UP).normalize().multiplyScalar(out)
   tmpA.addScaledVector(WORLD_UP, -0.15).normalize()
-  restFingers.addScaledVector(WORLD_UP, -0.04).normalize()
+  // Fingers draping over the crown of the cushion, dipping with the forearm's
+  // own slope (a flat hand on a steeply sloping forearm otherwise bends back
+  // to its extension limit and the wrist creases).
+  restFingers.y = Math.min(0, forearm.y) * 0.7 - 0.1
+  restFingers.normalize()
   // In the air: fingers along the forearm, palm toward the body a little.
   naturalF.copy(forearm)
   // (Side = the seat's lateral axis made perpendicular to the forearm. The
@@ -803,7 +814,16 @@ function orientHand(
 
   // Raised arms (hands behind the head): fingers up and back over the skull,
   // palms to the head, instead of jutting straight inward across the face.
-  const raise = clamp(pose.elbowUp, 0, 1) * smoothstep(anchors.shoulderR[1] - 0.05, anchors.shoulderR[1] + 0.2, hand[1])
+  const raiseGoal = clamp(pose.elbowUp, 0, 1) * smoothstep(anchors.shoulderR[1] - 0.05, anchors.shoulderR[1] + 0.2, hand[1])
+  if (pose.instant) {
+    st.raiseW = raiseGoal
+    st.raiseV = 0
+  } else {
+    smoothScalar(st.raiseW, st.raiseV, raiseGoal, 9, dt)
+    st.raiseW = scalarOut.v
+    st.raiseV = scalarOut.vel
+  }
+  const raise = clamp(st.raiseW, 0, 1)
   if (raise > 0.01) {
     gestureF.set(0, 0.4, 0.92).transformDirection(root.matrixWorld)
     gestureS.set(0, -0.6, 0.8).transformDirection(root.matrixWorld)
@@ -868,11 +888,14 @@ const wristSide = new THREE.Vector3()
  */
 export function limitWristBend(f: THREE.Vector3, s: THREE.Vector3, forearmDir: THREE.Vector3, out: 1 | -1) {
   // Palm normal of the requested frame (see orientHand), made perpendicular to the forearm.
-  wristN.crossVectors(s, f).multiplyScalar(-out)
-  wristN.addScaledVector(forearmDir, -wristN.dot(forearmDir))
-  if (wristN.lengthSq() < 1e-8) return
-  wristN.normalize()
-  wristSide.crossVectors(forearmDir, wristN)
+  // The frame round the forearm is built from the hand's side (index-to-pinky)
+  // axis, which stays well away from the forearm line; the palm normal does
+  // not (a steep forearm over a flat palm), and a split built on it mislabels
+  // extension as a sideways bend and pins the wrist on the sideways limit.
+  wristSide.copy(s).addScaledVector(forearmDir, -s.dot(forearmDir))
+  if (wristSide.lengthSq() < 1e-8) return
+  wristSide.normalize()
+  wristN.crossVectors(wristSide, forearmDir).multiplyScalar(-out)
   const along = f.dot(forearmDir)
   const flex = Math.atan2(f.dot(wristN), along)
   const deviate = Math.atan2(f.dot(wristSide), along)

@@ -108,8 +108,19 @@ export function updateHatSecondary(
   dt: number,
   reducedMotion: boolean
 ) {
-  updateHairSway(head, dt, reducedMotion)
   const group = set?.groups[0]
+  // Under a hat the hair is pressed down (and a crest would swing through the
+  // crown): it sways a third as much.
+  let hatWorn = false
+  if (group) {
+    for (const child of group.children) {
+      if (child.userData.accessoryKind === 'hat' && ((child as THREE.Mesh).isMesh || child.children.length > 0)) {
+        hatWorn = true
+        break
+      }
+    }
+  }
+  updateHairSway(head, dt, reducedMotion, hatWorn ? 0.3 : 1)
   if (!set || !group || !head) return
   let state = states.get(set)
   if (!state) {
