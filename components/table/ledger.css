@@ -13,6 +13,11 @@
   transform: translateX(400%);
 }
 
+/* Four tabs (Settings, Outfit, Players, Leaderboard): the leaderboard is last. */
+.settings-tabs[data-count='4'][data-active='ledger']::before {
+  transform: translateX(300%);
+}
+
 .ledger-panel {
   --ledger-up: var(--c-felt-300, #39c795);
   --ledger-down: var(--c-ruby-500, #e2505c);
@@ -128,6 +133,19 @@
 
 .ledger-table th:first-child {
   padding-left: 0;
+  text-align: left;
+  white-space: normal;
+}
+
+/* Rank column first, then the name column reads left-aligned. */
+.ledger-table .ledger-rank,
+.ledger-table .ledger-rank-col {
+  padding-left: 0;
+  padding-right: 8px;
+  text-align: left;
+}
+
+.ledger-table th:nth-child(2) {
   text-align: left;
   white-space: normal;
 }
@@ -652,4 +670,49 @@
   .ledger-dialog-actions button {
     flex: 1;
   }
+}
+
+
+/* Leaderboard ranks: gold, silver and bronze for the top winners. */
+.ledger-rank-col {
+  width: 34px;
+}
+
+.ledger-rank span {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--c-ink-600, #2a3336) 80%, transparent);
+  color: var(--c-text-2, #b9b3a4);
+  font: 800 12px / 1 var(--font-display, system-ui);
+}
+
+.ledger-table tr[data-medal='1'] .ledger-rank span {
+  background: linear-gradient(160deg, #ffe38a, #c9921f);
+  color: #2a1c00;
+  box-shadow: 0 0 12px rgba(255, 200, 80, 0.45);
+}
+
+.ledger-table tr[data-medal='2'] .ledger-rank span {
+  background: linear-gradient(160deg, #f1f3f5, #9aa3ab);
+  color: #1d2327;
+}
+
+.ledger-table tr[data-medal='3'] .ledger-rank span {
+  background: linear-gradient(160deg, #f0b27a, #9a5a26);
+  color: #2a1404;
+}
+
+.ledger-table tr[data-medal='1'] .ledger-name {
+  color: #ffe08a;
+}
+
+.ledger-net-dollars {
+  display: block;
+  margin-top: 2px;
+  opacity: 0.75;
+  font-size: 11px;
+  font-weight: 700;
 }

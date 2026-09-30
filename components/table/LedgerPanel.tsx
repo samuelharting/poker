@@ -136,7 +136,13 @@ export function SettleUpSummary({
   const [copied, setCopied] = useState<'idle' | 'done' | 'failed'>('idle')
   const chipValue = ledger.settings.chipValue
   const showMoney = chipValue !== 1
-  const humanRows = ledger.rows
+  // Ranked: biggest winner first (ties keep the server's order).
+  const humanRows = [...ledger.rows].sort((a, b) => b.net - a.net)
+  const formatDollars = (chips: number) => {
+    const cents = Math.round(chips * chipValue * 100)
+    const sign = cents > 0 ? '+' : cents < 0 ? '-' : ''
+    return `${sign}$${(Math.abs(cents) / 100).toLocaleString(undefined, { minimumFractionDigits: cents % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`
+  }
 
   useEffect(() => {
     if (copied === 'idle') return
@@ -162,6 +168,7 @@ export function SettleUpSummary({
       <table className="ledger-table">
         <thead>
           <tr>
+            <th scope="col" className="ledger-rank-col"><span className="landing-sr-only">Rank</span></th>
             <th scope="col">Player</th>
             <th scope="col">In</th>
             <th scope="col">Now</th>
@@ -169,10 +176,15 @@ export function SettleUpSummary({
           </tr>
         </thead>
         <tbody>
-          {humanRows.map(row => {
+          {humanRows.map((row, index) => {
             const isYou = Boolean(yourId) && row.playerId === yourId
+            const place = index + 1
+            const medal = row.net > 0 && place <= 3 ? place : 0
             return (
-              <tr key={row.key} data-you={isYou ? 'true' : 'false'} data-where={row.where}>
+              <tr key={row.key} data-you={isYou ? 'true' : 'false'} data-where={row.where} data-medal={medal || undefined}>
+                <td className="ledger-rank" aria-label={`Rank ${place}`}>
+                  <span>{place}</span>
+                </td>
                 <th scope="row">
                   <span className="ledger-name">{isYou ? `${row.name} (you)` : row.name}</span>
                   <span className="ledger-name-meta">
@@ -187,6 +199,7 @@ export function SettleUpSummary({
                 <td>{formatChips(row.chips)}</td>
                 <td className="ledger-net" data-sign={row.net > 0 ? 'up' : row.net < 0 ? 'down' : 'even'}>
                   {formatNetChips(row.net)}
+                  {showMoney && row.net !== 0 && <small className="ledger-net-dollars">{formatDollars(row.net)}</small>}
                 </td>
               </tr>
             )
@@ -194,6 +207,7 @@ export function SettleUpSummary({
         </tbody>
         <tfoot>
           <tr>
+            <td />
             <th scope="row">Table</th>
             <td>{formatChips(ledger.totalBoughtIn)}</td>
             <td>{formatChips(ledger.totalChips)}</td>

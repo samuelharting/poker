@@ -4448,7 +4448,7 @@ export function SettingsModal({
           </button>
         </div>
 
-        <div className="settings-tabs" data-active={activeTab} data-count="5">
+        <div className="settings-tabs" data-active={activeTab} data-count="4">
           <button
             type="button"
             className={`settings-tab ${activeTab === 'general' ? 'is-active' : ''}`}
