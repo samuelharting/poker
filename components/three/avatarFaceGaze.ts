@@ -58,6 +58,8 @@ export interface GazeState {
   blinkKick: boolean
   seed: number
   count: number
+  /** During a quick glance: the target to return to afterwards (-1 = none). */
+  returnKind: number
 }
 
 export function createGazeState(seed: number): GazeState {
@@ -77,6 +79,7 @@ export function createGazeState(seed: number): GazeState {
     blinkKick: false,
     seed,
     count: 0,
+    returnKind: -1,
   }
 }
 
@@ -159,13 +162,28 @@ export function updateGaze(
   if (targets && time >= state.fixUntil) {
     const previous = state.kind
     state.count += 1
-    state.kind = pickKind(state, targets, time)
     const r1 = faceHash01(time * 3.9 + state.seed * 17 + state.count)
     const r2 = faceHash01(time * 2.1 + state.seed * 29 + state.count * 1.3)
     let hold = 1.2 + r1 * 2.6
-    if (state.kind === GAZE.viewer) hold = 0.8 + r1 * 1.3
-    else if (state.kind === GAZE.cards) hold = 1.4 + r1 * 2.2
-    else if (state.kind === GAZE.away) hold = 0.7 + r1 * 1.4
+    if (state.returnKind >= 0 && targets.available[state.returnKind] && targets.weights[state.returnKind]! > 0) {
+      // Back from a quick glance to what the eyes were on before.
+      state.kind = state.returnKind
+      state.returnKind = -1
+      hold = 0.9 + r1 * 1.8
+    } else {
+      state.returnKind = -1
+      state.kind = pickKind(state, targets, time)
+      if (state.kind === GAZE.viewer) hold = 0.8 + r1 * 1.3
+      else if (state.kind === GAZE.cards) hold = 1.4 + r1 * 2.2
+      else if (state.kind === GAZE.away) hold = 0.7 + r1 * 1.4
+      // Some looks are just a glance: a flick to a neighbour, the acting player or the cards,
+      // then straight back. Restless eyes glance more.
+      const glanceable = state.kind === GAZE.other || state.kind === GAZE.acting || state.kind === GAZE.cards || state.kind === GAZE.viewer
+      if (glanceable && previous !== state.kind && previous !== GAZE.away && faceHash01(time * 5.3 + state.seed * 43 + state.count * 2.1) < 0.2 + restless * 0.3) {
+        state.returnKind = previous
+        hold = (0.35 + r2 * 0.4) / (1.5 - restless * 0.9)
+      }
+    }
     hold *= 1.5 - restless * 0.9
     if (opts.tripping) hold *= 0.55
     state.fixUntil = time + hold * (1 + opts.heavy * 0.6)

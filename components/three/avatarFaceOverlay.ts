@@ -467,6 +467,9 @@ export function createOverlayMaterial(atlasTexture: THREE.Texture, gradientMap: 
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
+    // A flat decal sheet on the skin: one pass is enough (three.js would otherwise draw
+    // transparent double-sided meshes twice, back faces then front faces).
+    forceSinglePass: true,
     gradientMap,
     polygonOffset: true,
     polygonOffsetFactor: -2,

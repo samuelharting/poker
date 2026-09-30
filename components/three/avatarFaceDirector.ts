@@ -32,7 +32,14 @@ export interface FaceDirectorSeat {
   isHero: boolean
   funPose?: { hungover?: boolean; tripping?: boolean; blackoutElapsed?: number | null; dazedElapsed?: number | null }
   flipOff: { startedAt: number; targetId: string } | null
+  /** This frame's body pose (drinkLift: the glass is at the lips 0..1). */
+  lastPose?: { drinkLift: number } | null
+  /** When the current drink started (same clock as env.time). */
+  drinkStartedAt?: number
 }
+
+/** Seconds of a drink (matches drinkProps DRINK_DURATION); the "aah" follows the swallow near the end. */
+const DRINK_SECONDS = 2.6
 
 export interface FaceDirectorEnv {
   delta: number
@@ -75,6 +82,11 @@ function headPosition(seat: FaceDirectorSeat, out: THREE.Vector3): boolean {
 }
 
 const scratch = new THREE.Vector3()
+
+function smooth01(x: number) {
+  const c = Math.min(1, Math.max(0, x))
+  return c * c * (3 - 2 * c)
+}
 
 /** A table emote was sent: the sender makes the face for it, the target reacts. */
 export function triggerFaceEmote(face: AvatarFaceRig | null | undefined, emoji: string, role: 'sender' | 'target') {
@@ -153,7 +165,11 @@ function buildFaceInputInner(face: AvatarFaceRig, seat: FaceDirectorSeat, env: F
 
   const inHand = seat.hadCards && seat.cards.visible && !seat.folded
   if (seat.loser && !st.prevLoser) st.lossStreak = Math.min(4, st.lossStreak + 1)
-  if (seat.winner && !st.prevWinner) st.lossStreak = 0
+  if (seat.winner && !st.prevWinner) {
+    st.lossStreak = 0
+    // Snap out of whatever the eyes were on (often the pot, i.e. down) a beat after the win lands.
+    face.gazeState.fixUntil = Math.min(face.gazeState.fixUntil, face.emotion.time + 0.25)
+  }
   st.prevLoser = seat.loser
   st.prevWinner = seat.winner
   ctx.tilt = st.lossStreak >= 2 ? Math.min(1, (st.lossStreak - 1) * 0.4) : 0
@@ -181,6 +197,12 @@ function buildFaceInputInner(face: AvatarFaceRig, seat: FaceDirectorSeat, env: F
   ctx.otherActing = env.actingVisualSeat !== null && env.actingVisualSeat !== seat.visualSeat
   ctx.anyWinner = env.anyWinner
   ctx.actingFor = seat.acting ? ctx.actingFor + delta : 0
+  const lift = seat.lastPose?.drinkLift ?? 0
+  ctx.drinkLift = seat.passedOut || !(lift > 0) ? 0 : Math.min(1, lift)
+  const sinceDrink = env.time - (seat.drinkStartedAt ?? Number.NEGATIVE_INFINITY) - (DRINK_SECONDS - 0.85)
+  ctx.drinkAfter = seat.passedOut || !(sinceDrink > 0 && sinceDrink < 1.6)
+    ? 0
+    : smooth01(sinceDrink / 0.25) * (1 - smooth01((sinceDrink - 0.8) / 0.6))
   prepareFrame(env)
   let received = false
   for (let i = 0; i < frameSeats.length; i += 1) {
@@ -247,19 +269,40 @@ function buildFaceInputInner(face: AvatarFaceRig, seat: FaceDirectorSeat, env: F
       if (other !== seat && other.root.visible && other.avatar) count += 1
     }
     if (count > 0) {
-      const pick = (face.gazeState.count * 3 + Math.floor(face.state.seed * 7)) % count
-      let n = 0
-      for (let i = 0; i < frameSeats.length; i += 1) {
-        const other = frameSeats[i]!
-        if (other === seat || !other.root.visible || !other.avatar) continue
-        if (n === pick) {
-          if (headPosition(other, scratch)) {
-            pos[GAZE.other]!.copy(scratch)
-            avail[GAZE.other] = 1
+      // Most glances go to a neighbour (alternating sides), the rest anywhere round the table.
+      const gazeCount = face.gazeState.count
+      let chosen: FaceDirectorSeat | null = null
+      if (((gazeCount * 7 + Math.floor(face.state.seed * 11)) % 5) < 3) {
+        const wantAbove = (gazeCount & 1) === 0
+        let best = Infinity
+        for (let i = 0; i < frameSeats.length; i += 1) {
+          const other = frameSeats[i]!
+          if (other === seat || !other.root.visible || !other.avatar) continue
+          const diff = other.visualSeat - seat.visualSeat
+          // Nearest seat on the wanted side; the far end of the other side stands in for wrap-around.
+          const rank = wantAbove ? (diff > 0 ? diff : 100 + diff) : (diff < 0 ? -diff : 100 - diff)
+          if (rank < best) {
+            best = rank
+            chosen = other
           }
-          break
         }
-        n += 1
+      }
+      if (!chosen) {
+        const pick = (gazeCount * 3 + Math.floor(face.state.seed * 7)) % count
+        let n = 0
+        for (let i = 0; i < frameSeats.length; i += 1) {
+          const other = frameSeats[i]!
+          if (other === seat || !other.root.visible || !other.avatar) continue
+          if (n === pick) {
+            chosen = other
+            break
+          }
+          n += 1
+        }
+      }
+      if (chosen && headPosition(chosen, scratch)) {
+        pos[GAZE.other]!.copy(scratch)
+        avail[GAZE.other] = 1
       }
     }
   }
@@ -275,9 +318,11 @@ function buildFaceInputInner(face: AvatarFaceRig, seat: FaceDirectorSeat, env: F
     w[GAZE.away] = 0.08
     targets.awayMode = 'think'
   } else if (seat.winner) {
-    w[GAZE.viewer] = 0.25 + contact * 0.5
-    w[GAZE.pot] = 0.3
-    w[GAZE.other] = 0.3
+    // The first beats of a win look up and out (at the table, the viewer), not down at the pot.
+    const fresh = face.emotion.time - face.emotion.winAt < 3
+    w[GAZE.viewer] = 0.25 + contact * 0.5 + (fresh ? 0.2 : 0)
+    w[GAZE.pot] = fresh ? 0.04 : 0.3
+    w[GAZE.other] = fresh ? 0.45 : 0.3
     w[GAZE.acting] = 0.05
   } else if (seat.loser) {
     w[GAZE.cards] = 0.3

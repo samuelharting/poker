@@ -312,6 +312,8 @@ const EYE_APERTURE_HALF_WIDTH = 0.5
 const SKIN_SATURATION = 0.88
 /** Where the moustache's lower edge sits above the (lowered) mouth, in eye radii. */
 const HAIR_EDGE_OFFSET = 0.3
+/** Extra mouth-corner lift under facial hair (the moustache hides most of the smile). */
+const FACIAL_HAIR_SMILE_BIAS = 0.12
 
 export function createAvatarFace(
   model: THREE.Object3D,
@@ -474,22 +476,30 @@ export function createAvatarFace(
     }
     colDepth[c] = depth + radius * (hasFacialHair ? 0.11 : 0.05)
   }
-  // A light moustache would read as a grin: shade it in the mouth region (see avatarFaceHair.ts).
+  // A rigid moustache reads as a grin: bend it with the mouth corners, and shade it when it is
+  // light (see avatarFaceHair.ts).
   let hairShade: FacialHairShade | null = null
   if (hasFacialHair && hairMaterial && hairMaterial.color) {
     const hairLuma = hairMaterial.color.r * 0.299 + hairMaterial.color.g * 0.587 + hairMaterial.color.b * 0.114
-    if (hairLuma > 0.35) {
-      let hairMesh: THREE.SkinnedMesh | null = null
+    let hairMesh: THREE.SkinnedMesh | null = null
+    model.traverse(object => {
+      const mesh = object as THREE.SkinnedMesh
+      if (!hairMesh && mesh.isSkinnedMesh && !Array.isArray(mesh.material) && mesh.material === hairMaterial) hairMesh = mesh
+    })
+    const hm = hairMesh as THREE.SkinnedMesh | null
+    const hi = hm ? hm.skeleton.bones.indexOf(headBone) : -1
+    if (hm && hi >= 0) {
+      const toHead = new THREE.Matrix4().multiplyMatrices(hm.skeleton.boneInverses[hi]!, hm.bindMatrix)
+      const edgeY = mouthY + radius * HAIR_EDGE_OFFSET
+      let outline: THREE.SkinnedMesh | null = null
       model.traverse(object => {
         const mesh = object as THREE.SkinnedMesh
-        if (!hairMesh && mesh.isSkinnedMesh && !Array.isArray(mesh.material) && mesh.material === hairMaterial) hairMesh = mesh
+        if (!outline && mesh.isSkinnedMesh && mesh.name === `${hm.name}-outline`) outline = mesh
       })
-      const hm = hairMesh as THREE.SkinnedMesh | null
-      const hi = hm ? hm.skeleton.bones.indexOf(headBone) : -1
-      if (hm && hi >= 0) {
-        const toHead = new THREE.Matrix4().multiplyMatrices(hm.skeleton.boneInverses[hi]!, hm.bindMatrix)
-        hairShade = installFacialHairShade(hairMaterial, toHead, mouthY + radius * HAIR_EDGE_OFFSET, radius, eyeMid.x)
-      }
+      hairShade = installFacialHairShade(hairMaterial, hm, toHead, edgeY, radius, eyeMid.x, {
+        light: hairLuma > 0.35,
+        outline,
+      })
     }
   }
   const mouthGeometry = createMouthGeometry()
@@ -512,6 +522,13 @@ export function createAvatarFace(
     toneAmount: personality.lipTone,
     facialHair: hasFacialHair,
   })
+  const moustache = hairShade?.moustache ?? null
+  if (moustache) {
+    // The lips never draw over the moustache: the mouth is clipped to its (bent) lower edge.
+    const edge = new Float32Array(moustache.lowerEdge.length)
+    for (let b = 0; b < edge.length; b += 1) edge[b] = moustache.lowerEdge[b]! - mouthY
+    mouth.hairClip = { edge, halfWidth: moustache.halfWidth * radius, liftL: 0, liftR: 0, centre: 0 }
+  }
   headBone.add(mouth.mesh)
 
   // ---- brows + skin decals (one overlay mesh) ----
@@ -753,6 +770,23 @@ const LIGHT_WORLD = new THREE.Vector3(-0.22, 0.86, 0.46).normalize()
 
 const clamp = THREE.MathUtils.clamp
 
+/**
+ * Moustache tip lift (eye radii) for a mouth corner, measured from that corner's RESTING height (so a
+ * resting smirk or idle drift never turns into a sneer): a frown droops the tips, a smile lifts them,
+ * both capped by the moustache's size; a gaping (not smiling) mouth pulls them down a little.
+ * `rest` levels an upturned crescent at rest (from the moustache's measured shape).
+ */
+function moustacheLift(corner: number, restCorner: number, open: number, halfWidth: number, rest: number) {
+  // A small dead zone: idle drift and faint in-hand asymmetry leave the moustache level.
+  const raw = corner - restCorner
+  const d = raw > 0 ? Math.max(0, raw - 0.1) : Math.min(0, raw + 0.1)
+  const bend = d < 0 ? Math.max(-0.38 * halfWidth, d * 0.9) : Math.min(0.28 * halfWidth, d * 0.55)
+  return rest + bend - 0.12 * open * clamp(1 - corner * 2, 0, 1)
+}
+
+/** Largest moustache tip motion per second (eye radii), so a frame hitch never snaps it. */
+const MOUSTACHE_TIP_RATE = 3
+
 /** Applies emotion, blink, gaze, lids, brows, mouth and skin decals for this frame. */
 export function updateAvatarFace(face: AvatarFaceRig, input: FaceInput) {
   if (!face.sceneHooked) hookSkeletonSync(face)
@@ -816,8 +850,23 @@ function updateAvatarFaceInner(face: AvatarFaceRig, input: FaceInput) {
     const smile = Math.max(0, (p[CH.smileA]! + p[CH.smileB]!) * 0.5 - 0.08)
     p[CH.lidLA] = Math.min(1, p[CH.lidLA]! + smile * 0.32)
     p[CH.lidLB] = Math.min(1, p[CH.lidLB]! + smile * 0.32)
-    p[CH.smileA] += 0.12
-    p[CH.smileB] += 0.12
+    // ...and so does a frown: brows push further from rest, the furrow deepens, the upper lids
+    // sag and the lower lids tighten, so a sad or angry face never leans on the mouth alone.
+    const frown = clamp(-(p[CH.smileA]! + p[CH.smileB]!) * 0.5, 0, 1)
+    if (frown > 0.01) {
+      const gain = 1 + frown * 0.45
+      p[CH.browIA] = p[CH.browIA]! * gain
+      p[CH.browIB] = p[CH.browIB]! * gain
+      p[CH.browOA] = p[CH.browOA]! * gain
+      p[CH.browOB] = p[CH.browOB]! * gain
+      p[CH.furrow] = Math.min(1, p[CH.furrow]! + frown * 0.3)
+      p[CH.lidUA] = p[CH.lidUA]! - frown * 0.1
+      p[CH.lidUB] = p[CH.lidUB]! - frown * 0.1
+      p[CH.lidLA] = Math.min(1, p[CH.lidLA]! + frown * 0.15)
+      p[CH.lidLB] = Math.min(1, p[CH.lidLB]! + frown * 0.15)
+    }
+    p[CH.smileA] += FACIAL_HAIR_SMILE_BIAS
+    p[CH.smileB] += FACIAL_HAIR_SMILE_BIAS
   }
 
   // ---- blink ----
@@ -889,9 +938,12 @@ function updateAvatarFaceInner(face: AvatarFaceRig, input: FaceInput) {
     const browI = isA ? p[CH.browIA]! : p[CH.browIB]!
     const browO = isA ? p[CH.browOA]! : p[CH.browOB]!
     const u = eye.uniforms
-    gazeVector(gazeState.yaw[i]!, gazeState.pitch[i]!, u.uGaze.value)
+    // An eye roll takes over from wherever the eyes were looking: up and over, relative to straight ahead.
+    const rollHand = 1 - face.emotion.rollEnv
+    const eyePitch = Math.min(0.46, gazeState.pitch[i]! * rollHand + face.emotion.rollPitch)
+    gazeVector(gazeState.yaw[i]! * rollHand + face.emotion.rollYaw, eyePitch, u.uGaze.value)
     // Lids follow the eyeball: looking down lowers the upper lid, up lifts it.
-    const follow = gazeState.pitch[i]! * 0.17
+    const follow = eyePitch * 0.17
     const open = clamp((lidU + follow) * (1 - blink), 0, 1.32)
     const lower = clamp(lidL, -0.4, 1)
     const lowerAmp = 0.17 * (1 - 0.85 * lower) * (1 - 0.3 * blink)
@@ -947,6 +999,35 @@ function updateAvatarFaceInner(face: AvatarFaceRig, input: FaceInput) {
     const cornerMean = (shape.cornerL + shape.cornerR) * 0.5
     shape.cornerL += (cornerMean - shape.cornerL) * evenOut
     shape.cornerR += (cornerMean - shape.cornerR) * evenOut
+    if (face.hairShade) {
+      // The moustache follows the mouth corners (without the facial-hair smile bias): tips droop on
+      // a frown, one side lifts on a smirk, the upper lip rises when the mouth opens or snarls.
+      const bend = face.hairShade.uniforms.uHairBend.value
+      const person = face.personality
+      const restA = 0.05 + person.baseSmile + FACIAL_HAIR_SMILE_BIAS
+      const restB = 0.05 + person.baseSmile * 0.6 + FACIAL_HAIR_SMILE_BIAS
+      const width = bend.z
+      const level = -clamp((face.hairShade.moustache?.tipRise ?? 0) * 0.85, 0, 0.4 * width)
+      const wantL = moustacheLift(shape.cornerL, smirkSide === 1 ? restB : restA, shape.open, width, level)
+      const wantR = moustacheLift(shape.cornerR, smirkSide === 1 ? restA : restB, shape.open, width, level)
+      const wantC = shape.open * 0.12 + p[CH.teeth]! * 0.04 - p[CH.press]! * 0.04
+      if (instant) {
+        bend.x = wantL
+        bend.y = wantR
+        bend.w = wantC
+      } else {
+        const step = MOUSTACHE_TIP_RATE * Math.min(delta, 0.05)
+        bend.x += clamp(wantL - bend.x, -step, step)
+        bend.y += clamp(wantR - bend.y, -step, step)
+        bend.w += clamp(wantC - bend.w, -step, step)
+      }
+      const clip = face.mouth.hairClip
+      if (clip) {
+        clip.liftL = bend.x * face.eyes[0]!.radius
+        clip.liftR = bend.y * face.eyes[0]!.radius
+        clip.centre = bend.w * face.eyes[0]!.radius
+      }
+    }
     shape.width = p[CH.width]!
     shape.press = p[CH.press]!
     shape.purse = p[CH.purse]!
@@ -1037,6 +1118,9 @@ export function describeFace(face: AvatarFaceRig) {
   return {
     eyewear: face.eyewear,
     eyeRadius: face.eyes[0]?.radius,
+    moustache: face.hairShade?.moustache
+      ? { halfWidth: face.hairShade.moustache.halfWidth, tipRise: face.hairShade.moustache.tipRise, bend: face.hairShade.uniforms.uHairBend.value.toArray() }
+      : null,
     personality: face.personality,
     channels: Array.from(face.emotion.params),
     gaze: { kind: face.gazeState.kind, yaw: [...face.gazeState.yaw], pitch: [...face.gazeState.pitch] },

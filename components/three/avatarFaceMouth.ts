@@ -61,6 +61,27 @@ export interface FaceMouth {
   toneAmount: number
   /** A moustache/beard sits over the mouth: keep the mouth tame so it never pokes past it. */
   facialHair: boolean
+  /**
+   * The moustache's lower edge (mouth-space y per bin across -halfWidth..+halfWidth, bind pose) plus its
+   * current bend (tip lifts per half and centre lift, Head units). Lips are clipped to stay below it,
+   * so they never draw over the hair. Null when there is no separate moustache piece.
+   */
+  hairClip: { edge: Float32Array; halfWidth: number; liftL: number; liftR: number; centre: number } | null
+}
+
+/** The moustache's current lower edge at mouth-space x (matches the hair shader's bend). */
+function hairEdgeAt(clip: NonNullable<FaceMouth['hairClip']>, x: number) {
+  const bins = clip.edge.length
+  const u = x / clip.halfWidth
+  if (u <= -1 || u >= 1) return Infinity
+  const f = (u + 1) * 0.5 * (bins - 1)
+  const i = Math.min(bins - 2, Math.floor(f))
+  const t = f - i
+  const base = clip.edge[i]! * (1 - t) + clip.edge[i + 1]! * t
+  const ax = Math.min(1.1, Math.abs(u))
+  const s = Math.min(1, ax / 0.7)
+  const centreFade = 1 - s * s * (3 - 2 * s)
+  return base + (u < 0 ? clip.liftL : clip.liftR) * ax * ax + clip.centre * centreFade
 }
 
 const CAVITY = new THREE.Color('#2a0c0c')
@@ -162,6 +183,7 @@ export function createMouth(options: {
     hairColor: options.hairColor,
     toneAmount: options.toneAmount,
     facialHair: Boolean(options.facialHair),
+    hairClip: null,
   }
 }
 
@@ -246,7 +268,11 @@ export function updateMouth(mouth: FaceMouth, shape: MouthShape, skin: THREE.Col
     Math.abs(last[3]! - shape.width) + Math.abs(last[4]! - shape.press) + Math.abs(last[5]! - shape.purse) +
     Math.abs(last[6]! - shape.teeth) + Math.abs(last[7]! - shape.shift)
   const skinMoved = Math.abs(last[8]! - skinSig) > 0.004
-  if (delta < 0.012 && !skinMoved) return
+  const clip = mouth.hairClip
+  const clipSig = clip ? (clip.liftL + clip.liftR * 1.7 + clip.centre * 2.3) / mouth.lip : 0
+  const clipMoved = Math.abs(last[9]! - clipSig) > 0.05
+  if (delta < 0.012 && !skinMoved && !clipMoved) return
+  last[9] = clipSig
   last[0] = shape.cornerL
   last[1] = shape.cornerR
   last[2] = shape.open
@@ -314,6 +340,11 @@ export function updateMouth(mouth: FaceMouth, shape: MouthShape, skin: THREE.Col
     rowsY[9] = yBotCav
     rowsY[10] = yBotCav - tL * 0.5
     rowsY[11] = yBotCav - tL
+    if (clip) {
+      // Hidden behind the moustache: nothing of the mouth shows above its lower edge.
+      const edge = hairEdgeAt(clip, x)
+      if (edge < rowsY[0]!) for (let r = 0; r < ROWS_TOTAL; r += 1) if (rowsY[r]! > edge) rowsY[r] = edge
+    }
     for (let r = 0; r < ROWS_TOTAL; r += 1) {
       const y = rowsY[r]!
       const o = (r * COLS + c) * 3
