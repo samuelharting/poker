@@ -3218,6 +3218,22 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
 }
 
 const overlayScratch = new THREE.Vector3()
+
+/** How long the 3D table may stay down (lost context, failed restarts) before the page reloads. */
+const TABLE_DOWN_RELOAD_MS = 12_000
+const TABLE_RELOAD_KEY = 'poker-night:3d-reload-at'
+
+function reloadForBrokenTable() {
+  try {
+    const last = Number(window.sessionStorage.getItem(TABLE_RELOAD_KEY) ?? 0)
+    if (Date.now() - last < 60_000) return
+    window.sessionStorage.setItem(TABLE_RELOAD_KEY, String(Date.now()))
+  } catch {
+    // No session storage: still reload; the page can't loop faster than the 12s wait.
+  }
+  console.warn('3D table could not recover; reloading the page.')
+  window.location.reload()
+}
 const overlayBetPositions = new WeakMap<HTMLElement, { x: number; y: number }>()
 const betLabelScratch: Array<{ x: number; y: number }> = []
 const BET_LABEL_WIDTH = 90
@@ -3932,9 +3948,14 @@ function createSceneRuntime(
     // Black-canvas watchdog: the room is never pure black (the walls, the
     // felt, the fog colour), so an all-black frame means the output path broke.
     if (renderedFrames === 30 || renderedFrames === 120) checkForBlackFrame()
+    else if (renderedFrames > 120 && time - lastBlackCheckAt >= 3) {
+      lastBlackCheckAt = time
+      checkForBlackFrame()
+    }
   }
   const blackProbe = new Uint8Array(4)
   let blackSuspected = false
+  let lastBlackCheckAt = 0
   const checkForBlackFrame = () => {
     const gl = renderer.getContext()
     if (gl.isContextLost()) return
@@ -3953,7 +3974,8 @@ function createSceneRuntime(
     // sample (a few frames later) is black too.
     if (!blackSuspected) {
       blackSuspected = true
-      renderedFrames = renderedFrames >= 120 ? 110 : 20
+      renderedFrames = renderedFrames >= 120 ? Math.max(121, renderedFrames) : 20
+      if (renderedFrames > 120) lastBlackCheckAt -= 2.5
       return
     }
     blackSuspected = false
@@ -4077,6 +4099,8 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
    */
   const [sceneGeneration, setSceneGeneration] = useState(0)
   const failedStartsRef = useRef(0)
+  /** performance.now() when the 3D table stopped showing (context lost / failed start), or null while it's up. */
+  const downSinceRef = useRef<number | null>(null)
 
   viewRef.current = view
   highlightRef.current = highlightedCards
@@ -4100,6 +4124,7 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
       event.preventDefault()
       if (!disposed) {
         runtimeRef.current?.pause()
+        downSinceRef.current ??= performance.now()
         setWebGLStatus('error')
         rebuild(2_000)
       }
@@ -4119,6 +4144,7 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
         rebuild(0)
       }
       failedStartsRef.current = 0
+      downSinceRef.current = null
       if (process.env.NODE_ENV !== 'production') {
         // Development-only handle for inspecting the live scene from devtools.
         ;(host as HTMLDivElement & { __pokerRuntime?: SceneRuntime }).__pokerRuntime = runtime
@@ -4144,6 +4170,7 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
       setWebGLStatus('ready')
     } catch (error) {
       console.error('Unable to start the desktop 3D poker room.', error)
+      downSinceRef.current ??= performance.now()
       setWebGLStatus('error')
       // A start can fail transiently (context limit, GPU busy): retry a few times.
       // Never give up for good: a black table with a stuck message is the worst
@@ -4158,6 +4185,15 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
     let stalledChecks = 0
     const watchdog = window.setInterval(() => {
       const runtime = runtimeRef.current
+      // Chrome can refuse a page any new WebGL context after a GPU reset (Mac
+      // sleep, app switching) until it reloads: the table would sit blank
+      // behind the nameplates forever. After a real try at recovering, reload
+      // (the room rejoins the seat), at most once a minute.
+      const downFor = downSinceRef.current === null ? 0 : performance.now() - downSinceRef.current
+      if (!disposed && !document.hidden && downFor > TABLE_DOWN_RELOAD_MS) {
+        reloadForBrokenTable()
+        return
+      }
       if (disposed || !runtime || runtime.disposed || document.hidden) {
         stalledChecks = 0
         return
