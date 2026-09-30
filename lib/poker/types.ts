@@ -228,6 +228,10 @@ export interface TableState {
   handHistory?: HandHistoryEntry[]
   /** Drinks and Lady Luck; absent means on. */
   funModeEnabled?: boolean
+  /** Blinds double every BLINDS_UP_EVERY_MS (between hands). */
+  autoBlindsUp?: boolean
+  /** When the next blind raise is due (ms epoch), or null when off. */
+  nextBlindsUpAt?: number | null
   /** "Lady Luck" win-streak companion; null/absent when nobody is hot. */
   companion?: LadyLuckCompanionState | null
   /** Buy-ins, rebuys, host adjustments and the settle-up for the night. */

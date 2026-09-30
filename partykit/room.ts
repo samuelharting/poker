@@ -105,6 +105,11 @@ import {
 } from '../lib/stickyNote'
 import { CHIP_FLICK_COOLDOWN_MS, HOUSE_ID, type PrankEvent, type PrankKind } from '../lib/pranks'
 import { computeHouseRules, WATERFALL_EVERY_HANDS } from '../lib/houseRules'
+/** Blinds-up mode: how long each blind level lasts. */
+const BLINDS_UP_EVERY_MS = 30 * 60_000
+/** Extra thinking time on a turn that faces an all-in. */
+export const ALL_IN_EXTRA_TIME_MS = 15_000
+
 import {
   DEFAULT_BUY_IN_DOLLARS,
   DEFAULT_LEDGER_SETTINGS,
@@ -140,6 +145,9 @@ interface TableSettings {
   sevenTwoBountyPercent: number
   /** Drinks and Lady Luck. Optional so rooms saved before it existed default to on. */
   funModeEnabled?: boolean
+  /** Blinds double every BLINDS_UP_EVERY_MS; the clock restarts when it is switched on. */
+  autoBlindsUp?: boolean
+  blindsLevelStartedAt?: number
   /** Self-serve rebuys (default on), cap per player (0 = unlimited) and $ per chip. */
   allowRebuys?: boolean
   maxRebuys?: number
@@ -1195,6 +1203,16 @@ export default class PokerRoom implements PartyServer {
       }
     }
 
+    if (msg.autoBlindsUp !== undefined) {
+      this.data.tableSettings.autoBlindsUp = msg.autoBlindsUp
+      this.data.tableSettings.blindsLevelStartedAt = msg.autoBlindsUp ? Date.now() : undefined
+      if (Object.keys(msg).every(key => key === 'type' || key === 'autoBlindsUp')) {
+        this.sendActionResult(conn, msg.autoBlindsUp ? 'Blinds now double every 30 minutes.' : 'Blinds stay where they are.')
+        this.broadcastState()
+        return
+      }
+    }
+
     if (msg.funModeEnabled !== undefined) {
       // Cosmetic, so it applies immediately instead of waiting for the next hand.
       this.setFunMode(msg.funModeEnabled)
@@ -1485,6 +1503,27 @@ export default class PokerRoom implements PartyServer {
       playerId,
       message: `${account.name} rebought ${formatCurrency(amount)}`,
     })
+  }
+
+  /** Blinds-up mode: between hands, double the blinds once each level's time is up. */
+  private raiseBlindsIfDue(now = Date.now()) {
+    const settings = this.data.tableSettings
+    if (!settings.autoBlindsUp) return
+    const startedAt = settings.blindsLevelStartedAt ?? now
+    settings.blindsLevelStartedAt = startedAt
+    if (now - startedAt < BLINDS_UP_EVERY_MS) return
+    const smallBlind = Math.min(500_000, settings.smallBlind * 2)
+    const bigBlind = Math.min(1_000_000, settings.bigBlind * 2)
+    settings.blindsLevelStartedAt = now
+    if (smallBlind === settings.smallBlind && bigBlind === settings.bigBlind) return
+    settings.smallBlind = smallBlind
+    settings.bigBlind = bigBlind
+    this.data.gameState.smallBlind = smallBlind
+    this.data.gameState.bigBlind = bigBlind
+    this.data.gameState.minRaise = bigBlind * 2
+    const state = this.data.gameState
+    state.recentActions = [`Blinds up: ${smallBlind}/${bigBlind}`, ...state.recentActions].slice(0, 20)
+    this.broadcastNotice({ kind: 'ledger', message: `Blinds are up: ${smallBlind}/${bigBlind}` })
   }
 
   /**
@@ -3404,6 +3443,7 @@ export default class PokerRoom implements PartyServer {
     if (this.data.gameState.phase !== 'in_hand') {
       // Before busted players are swept to the rail, so a queued rebuy keeps its seat.
       this.applyShotCharges()
+      this.raiseBlindsIfDue()
       this.applyQueuedRebuys()
       this.applyPendingTableSettings()
       this.clearAutoFold()
@@ -3780,6 +3820,10 @@ export default class PokerRoom implements PartyServer {
         lobbyPlayers: this.buildLobbyPlayers(),
         handHistory: this.data.handHistory ?? [],
         funModeEnabled: this.isFunModeEnabled(),
+        autoBlindsUp: this.data.tableSettings.autoBlindsUp === true,
+        nextBlindsUpAt: this.data.tableSettings.autoBlindsUp
+          ? (this.data.tableSettings.blindsLevelStartedAt ?? Date.now()) + BLINDS_UP_EVERY_MS
+          : null,
         companion: this.isFunModeEnabled()
           ? getVisibleLadyLuck(this.data.ladyLuck, this.getSeatedPlayerIds())
           : null,
@@ -4261,6 +4305,12 @@ export default class PokerRoom implements PartyServer {
     this.clearBotAction()
     this.clearAutoFold(false)
     this.autoFoldPlayerId = playerId
+    // Facing an all-in is the big decision of the night: that turn gets extra time.
+    const state = this.data.gameState
+    const player = state.players.find(candidate => candidate.id === playerId)
+    const facingAllIn = Boolean(player) && player!.bet < state.currentBet &&
+      state.players.some(candidate => candidate.id !== playerId && candidate.status === 'all_in' && candidate.bet > player!.bet)
+    state.actionTimerDuration = this.data.tableSettings.actionTimerDuration + (facingAllIn ? ALL_IN_EXTRA_TIME_MS : 0)
     this.data.gameState.actionTimerStart = Date.now()
     this.autoFoldDeadline = this.data.gameState.actionTimerStart + this.data.gameState.actionTimerDuration
     void this.room.storage.setAlarm(this.autoFoldDeadline + AUTO_FOLD_GRACE_MS)

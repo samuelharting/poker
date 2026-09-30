@@ -119,6 +119,7 @@ interface PokerTableProps {
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
     funModeEnabled?: boolean
+    autoBlindsUp?: boolean
   }) => void
   onRemovePlayer: (targetId: string) => void
   onAdjustPlayerStack: (targetId: string, amount: number) => void
@@ -4211,6 +4212,7 @@ export function SettingsModal({
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
     funModeEnabled?: boolean
+    autoBlindsUp?: boolean
   }) => void
   onRemovePlayer: (targetId: string) => void
   onAdjustPlayerStack: (targetId: string, amount: number) => void
@@ -4659,6 +4661,37 @@ export function SettingsModal({
                         aria-pressed={state.funModeEnabled === false}
                         disabled={!isConnected}
                         onClick={() => onUpdateSettings({ funModeEnabled: false })}
+                      >
+                        Off
+                      </button>
+                    </div>
+                  </div>
+                  <div className="settings-rule-row">
+                    <div>
+                      <div className="settings-rule-name">Blinds up every 30 min</div>
+                      <div className="settings-rule-copy">
+                        Doubles the small and big blind every 30 minutes, between hands.
+                        {state.autoBlindsUp && state.nextBlindsUpAt
+                          ? ` Next raise in about ${Math.max(0, Math.ceil((state.nextBlindsUpAt - Date.now()) / 60_000))} min.`
+                          : ''}
+                      </div>
+                    </div>
+                    <div className="settings-toggle-row">
+                      <button
+                        type="button"
+                        className={`settings-pill ${state.autoBlindsUp ? 'is-active' : ''}`}
+                        aria-pressed={state.autoBlindsUp === true}
+                        disabled={!isConnected}
+                        onClick={() => onUpdateSettings({ autoBlindsUp: true })}
+                      >
+                        On
+                      </button>
+                      <button
+                        type="button"
+                        className={`settings-pill ${!state.autoBlindsUp ? 'is-active' : ''}`}
+                        aria-pressed={!state.autoBlindsUp}
+                        disabled={!isConnected}
+                        onClick={() => onUpdateSettings({ autoBlindsUp: false })}
                       >
                         Off
                       </button>

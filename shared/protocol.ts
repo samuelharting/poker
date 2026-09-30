@@ -78,6 +78,8 @@ export type C2SMessage =
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
     funModeEnabled?: boolean
+    /** Double the blinds every 30 minutes (applies immediately). */
+    autoBlindsUp?: boolean
     /** Self-serve rebuys on/off (applies immediately). */
     allowRebuys?: boolean
     /** Rebuys each player may take tonight; 0 = unlimited. */
@@ -309,6 +311,9 @@ export function parseC2S(raw: string): C2SMessage | null {
         }
         if (typeof parsed.funModeEnabled === 'boolean') {
           next.funModeEnabled = parsed.funModeEnabled
+        }
+        if (typeof parsed.autoBlindsUp === 'boolean') {
+          next.autoBlindsUp = parsed.autoBlindsUp
         }
         if (typeof parsed.allowRebuys === 'boolean') {
           next.allowRebuys = parsed.allowRebuys

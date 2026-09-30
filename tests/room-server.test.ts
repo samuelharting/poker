@@ -1588,6 +1588,55 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
     expect(snapshot?.state.phase).toBe('waiting')
   })
 
+  it('blinds-up mode doubles the blinds once 30 minutes have passed, at the end of a hand', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-31T12:00:00.000Z'))
+    const { room, server } = createHarness()
+    const host = joinPlayer(server, room, 'host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+    const guest = joinPlayer(server, room, 'guest', 'Bob')
+    seatPlayer(server, guest.connection, 1)
+
+    send(server, host.connection, { type: 'update_table_settings', autoBlindsUp: true })
+    expect(lastMessage(host.connection, 'room_snapshot')?.state).toMatchObject({ autoBlindsUp: true, smallBlind: 10, bigBlind: 20 })
+
+    send(server, host.connection, { type: 'start_game' })
+    vi.advanceTimersByTime(30 * 60_000)
+    const hooks = server as unknown as { raiseBlindsIfDue: (now?: number) => void; broadcastState: () => void; data: { gameState: { phase: string } } }
+    hooks.data.gameState.phase = 'between_hands'
+    hooks.raiseBlindsIfDue()
+    hooks.broadcastState()
+    const after = lastMessage(host.connection, 'room_snapshot')!.state
+    expect(after.smallBlind).toBe(20)
+    expect(after.bigBlind).toBe(40)
+    // Only once per level.
+    hooks.raiseBlindsIfDue(Date.now() + 10 * 60_000)
+    hooks.broadcastState()
+    expect(lastMessage(host.connection, 'room_snapshot')!.state.smallBlind).toBe(20)
+  })
+
+  it('gives extra time to a player facing an all-in', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-31T12:00:00.000Z'))
+    const { room, server } = createHarness()
+    const host = joinPlayer(server, room, 'host', 'Alice')
+    seatPlayer(server, host.connection, 0)
+    const guest = joinPlayer(server, room, 'guest', 'Bob')
+    seatPlayer(server, guest.connection, 1)
+    send(server, host.connection, { type: 'start_game' })
+
+    const live = lastMessage(host.connection, 'room_snapshot')!.state
+    const aliceId = live.players.find(player => player.nickname === 'Alice')!.id
+    const [shover, caller] = live.actingPlayerId === aliceId ? [host, guest] : [guest, host]
+    expect(live.actionTimerDuration).toBe(13_000)
+    send(server, shover.connection, { type: 'player_action', action: 'all_in' })
+
+    const facing = lastMessage(caller.connection, 'room_snapshot')!.state
+    expect(facing.actionTimerDuration).toBe(13_000 + 15_000)
+    const runtime = server as unknown as { autoFoldDeadline: number | null }
+    expect(runtime.autoFoldDeadline).toBe(Date.now() + 28_000)
+  })
+
   it('rejects invalid table-setting ranges and relationships', () => {
     const { room, server } = createHarness()
     const host = joinPlayer(server, room, 'host', 'Alice')

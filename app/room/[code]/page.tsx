@@ -301,6 +301,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
     funModeEnabled?: boolean
+    autoBlindsUp?: boolean
   }) => {
     if (typeof settings.startingStack === 'number' && Number.isFinite(settings.startingStack)) {
       rememberStartingStack(settings.startingStack)
