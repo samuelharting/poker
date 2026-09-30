@@ -480,7 +480,7 @@
   }
 
   .table-scene[data-desktop-three='true'] .own-hand-strength {
-    padding: 5px 14px;
+    padding: 6px 16px;
     border: 1px solid var(--line-brass);
     border-radius: var(--r-pill);
     background: var(--surface-glass-strong);
@@ -490,9 +490,10 @@
   .table-scene[data-desktop-three='true'] .own-hand-strength-value {
     color: var(--c-brass-200);
     font-family: var(--font-display);
-    font-size: 12px;
+    font-size: 15px;
     font-weight: 700;
     letter-spacing: 0.02em;
+    white-space: nowrap;
   }
 
   .table-scene[data-desktop-three='true'] .own-hand-turn-chip {
@@ -764,9 +765,13 @@
     transform: none;
   }
 
+  /* The strength label rides centred just above the cards. */
   .table-scene[data-desktop-three='true'] .own-hand-area .own-hand-strength {
-    top: 22%;
-    bottom: auto;
+    top: auto;
+    right: auto;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
   }
 
   .table-scene[data-desktop-three='true'] .own-hand-area .own-hand-turn-chip {
@@ -775,7 +780,7 @@
   }
 
   .table-scene[data-desktop-three='true'] .own-hand-area.has-strength .own-hand-turn-chip {
-    top: calc(22% + 38px);
+    top: 50%;
     bottom: auto;
   }
 

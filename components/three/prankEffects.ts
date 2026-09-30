@@ -509,7 +509,7 @@ export function queuePrank(runtime: PrankRuntime, event: PrankEvent, context: Pr
   if (event.kind === 'shot' || event.kind === 'house_shot') {
     const cheers = event.kind === 'house_shot' && event.rule === 'cheers'
     if (context.reducedMotion) {
-      addPop(runtime, 'shot', time, target.isHero ? { seatId: null, world: null, screen: { x: 0.5, y: 0.62 } } : { seatId: target.playerId, world: null, screen: null })
+      // Reduced motion: no flying glass and no big 🥃 pop either.
       return
     }
     const sender = event.kind === 'shot' ? context.seats.get(event.fromId) : undefined
@@ -702,9 +702,7 @@ function updateShot(runtime: PrankRuntime, shot: ShotPrank, frame: PrankFrame) {
   }
   if (!shot.popped && local >= SHOT_SLAM_AT) {
     shot.popped = true
-    if (!shot.toHero) {
-      addPop(runtime, 'shot', time, { seatId: seat.playerId, world: null, screen: null })
-    }
+    // No big 🥃 over the seat (owner): the glass and the slam are the tell.
   }
   if (shot.toHero && !shot.flashed && local >= SHOT_SLAM_AT) {
     shot.flashed = true
