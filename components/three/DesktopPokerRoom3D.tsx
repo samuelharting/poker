@@ -3947,25 +3947,74 @@ function createSceneRuntime(
     if (renderedFrames === 4) host.dataset.sceneReady = 'true'
     // Black-canvas watchdog: the room is never pure black (the walls, the
     // felt, the fog colour), so an all-black frame means the output path broke.
+    collectBlackProbe()
     if (renderedFrames === 30 || renderedFrames === 120) checkForBlackFrame()
-    else if (renderedFrames > 120 && time - lastBlackCheckAt >= 3) {
+    else if (renderedFrames > 120 && time - lastBlackCheckAt >= (isWebGL2 ? 3 : 15)) {
       lastBlackCheckAt = time
       checkForBlackFrame()
     }
   }
-  const blackProbe = new Uint8Array(4)
+  // Black-frame probe. On WebGL2 the pixels are copied into a pixel-pack
+  // buffer and read back a few frames later once a fence says the GPU is done,
+  // so the check never stalls the CPU (a blocking readPixels was a ~150ms hitch
+  // under load). WebGL1 falls back to a rare blocking read.
+  const BLACK_POINTS: ReadonlyArray<readonly [number, number]> = [[0.5, 0.5], [0.25, 0.3], [0.75, 0.3], [0.25, 0.75], [0.75, 0.75]]
+  const blackProbe = new Uint8Array(BLACK_POINTS.length * 4)
   let blackSuspected = false
   let lastBlackCheckAt = 0
+  let blackPackBuffer: WebGLBuffer | null = null
+  let blackFence: WebGLSync | null = null
+  let blackFenceAt = 0
+  const isWebGL2 = typeof WebGL2RenderingContext !== 'undefined' && renderer.getContext() instanceof WebGL2RenderingContext
+  const probeIsBlack = () => {
+    for (let index = 0; index < BLACK_POINTS.length; index += 1) {
+      // The grade and FXAA lift true black to ~1-3 per channel; the lit room is far above this.
+      if (blackProbe[index * 4]! + blackProbe[index * 4 + 1]! + blackProbe[index * 4 + 2]! > 12) return false
+    }
+    return true
+  }
+  /** Finishes a pending async probe when the GPU is done; true once the sample was judged. */
+  const collectBlackProbe = () => {
+    if (!blackFence) return
+    const gl = renderer.getContext() as WebGL2RenderingContext
+    if (gl.isContextLost()) {
+      blackFence = null
+      return
+    }
+    const status = gl.clientWaitSync(blackFence, 0, 0)
+    if (status === gl.TIMEOUT_EXPIRED && performance.now() - blackFenceAt < 2_000) return
+    gl.deleteSync(blackFence)
+    blackFence = null
+    if (status === gl.WAIT_FAILED || status === gl.TIMEOUT_EXPIRED) return
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, blackPackBuffer)
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, blackProbe)
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
+    judgeBlackFrame(probeIsBlack())
+  }
   const checkForBlackFrame = () => {
     const gl = renderer.getContext()
-    if (gl.isContextLost()) return
+    if (gl.isContextLost() || blackFence) return
     const width = gl.drawingBufferWidth
     const height = gl.drawingBufferHeight
-    const points: Array<[number, number]> = [[0.5, 0.5], [0.25, 0.3], [0.75, 0.3], [0.25, 0.75], [0.75, 0.75]]
-    const black = points.every(([u, v]) => {
-      gl.readPixels(Math.floor(width * u), Math.floor(height * v), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, blackProbe)
-      return blackProbe[0]! + blackProbe[1]! + blackProbe[2]! === 0
+    if (isWebGL2) {
+      const gl2 = gl as WebGL2RenderingContext
+      blackPackBuffer ??= gl2.createBuffer()
+      gl2.bindBuffer(gl2.PIXEL_PACK_BUFFER, blackPackBuffer)
+      gl2.bufferData(gl2.PIXEL_PACK_BUFFER, blackProbe.byteLength, gl2.STREAM_READ)
+      BLACK_POINTS.forEach(([u, v], index) => {
+        gl2.readPixels(Math.floor(width * u), Math.floor(height * v), 1, 1, gl2.RGBA, gl2.UNSIGNED_BYTE, index * 4)
+      })
+      gl2.bindBuffer(gl2.PIXEL_PACK_BUFFER, null)
+      blackFence = gl2.fenceSync(gl2.SYNC_GPU_COMMANDS_COMPLETE, 0)
+      blackFenceAt = performance.now()
+      return
+    }
+    BLACK_POINTS.forEach(([u, v], index) => {
+      gl.readPixels(Math.floor(width * u), Math.floor(height * v), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, blackProbe.subarray(index * 4, index * 4 + 4))
     })
+    judgeBlackFrame(probeIsBlack())
+  }
+  const judgeBlackFrame = (black: boolean) => {
     if (!black) {
       blackSuspected = false
       return
