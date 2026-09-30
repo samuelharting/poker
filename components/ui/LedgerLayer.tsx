@@ -5,7 +5,8 @@ import type { TableState } from '@/lib/poker/types'
 import {
   REBUY_REQUEST_EVENT,
   SettleUpSummary,
-  formatChips,
+  formatRebuyCash,
+  formatStackChips,
   getRebuyStatus,
   requestRebuy,
   type LedgerC2SMessage,
@@ -102,11 +103,9 @@ export function LedgerLayer({
   const ledger = tableState.ledger
   const chipValue = ledger?.settings.chipValue ?? 1
   // Real-money price of one rebuy, when the table uses a buy-in price.
-  const buyInDollars = chipValue !== 1 && rebuy.amount > 0
-    ? `$${(Math.round(rebuy.amount * chipValue * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
-    : null
+  const buyInDollars = formatRebuyCash(rebuy.amount, chipValue)
   // Chips are counted as chips here, so they never sit next to real money in the same "$".
-  const stackChips = `${Math.max(0, Math.round(rebuy.amount)).toLocaleString('en-US')} chips`
+  const stackChips = formatStackChips(rebuy.amount)
 
   return (
     <>
@@ -149,12 +148,12 @@ export function LedgerLayer({
             aria-describedby="ledger-confirm-copy"
             onClick={event => event.stopPropagation()}
           >
-            <h2 id="ledger-confirm-title">Rebuy for {formatChips(rebuy.amount)}?</h2>
+            <h2 id="ledger-confirm-title">Rebuy {stackChips}?</h2>
             <p id="ledger-confirm-copy">
               {rebuy.canRebuy
                 ? <>
-                    Adds {formatChips(rebuy.amount)} to your stack and to your buy-in on the leaderboard
-                    {rebuy.row ? ` (you'd be in for ${formatChips(rebuy.row.boughtIn + rebuy.amount)})` : ''}.
+                    Adds {stackChips} to your stack and to your buy-in on the leaderboard
+                    {rebuy.row ? ` (you'd be in for ${formatStackChips(rebuy.row.boughtIn + rebuy.amount)})` : ''}.
                     {rebuy.queues ? ' You are in a hand, so it lands as soon as this hand ends.' : ''}
                     {buyInDollars ? ` It costs ${buyInDollars} cash, settled at the end of the night.` : ''}
                     {rebuy.rebuysLeft !== null ? ` ${rebuy.rebuysLeft - 1} rebuy${rebuy.rebuysLeft - 1 === 1 ? '' : 's'} left after this.` : ''}
@@ -175,7 +174,7 @@ export function LedgerLayer({
                   setConfirmOpen(false)
                 }}
               >
-                {rebuy.queues ? 'Rebuy after this hand' : `Rebuy ${formatChips(rebuy.amount)}`}
+                {rebuy.queues ? 'Rebuy after this hand' : `Rebuy ${stackChips}`}
               </button>
             </div>
           </div>

@@ -39,18 +39,18 @@ test('a player rebuys themselves and everyone gets the settle-up at the end of t
     const dialog = await openSettings(guest.page)
     await dialog.getByRole('button', { name: 'Leaderboard', exact: true }).click()
     await expect(dialog.getByText('Your night')).toBeVisible()
-    await dialog.getByRole('button', { name: 'Rebuy $1,000' }).click()
-    const confirm = guest.page.getByRole('alertdialog', { name: 'Rebuy for $1,000?' })
+    await dialog.getByRole('button', { name: 'Rebuy 1,000 chips' }).click()
+    const confirm = guest.page.getByRole('alertdialog', { name: 'Rebuy 1,000 chips?' })
     await expect(confirm).toBeVisible()
     await snap(guest.page, 'ledger-rebuy-confirm-mobile')
-    await confirm.getByRole('button', { name: 'Rebuy $1,000' }).click()
+    await confirm.getByRole('button', { name: 'Rebuy 1,000 chips' }).click()
     await expect(confirm).toHaveCount(0)
     await waitForSnapshot(guest, state => state.players.find((p: any) => p.nickname === guest.name)?.stack === 1400, 'rebuy landed')
     await expect(host.page.getByRole('status').filter({ hasText: `${guest.name} rebought $1,000` })).toBeVisible()
     expect(ledgerRow(guest, guest.name)).toMatchObject({ boughtIn: 1400, chips: 1400, net: 0, rebuys: 1 })
 
     // At the full stack another rebuy is refused, with the reason on screen.
-    await expect(dialog.getByRole('button', { name: 'Rebuy $1,000' })).toBeDisabled()
+    await expect(dialog.getByRole('button', { name: 'Rebuy 1,000 chips' })).toBeDisabled()
 
     // Winners get a Venmo pay link.
     await dialog.getByLabel('Venmo username').fill('ldg-guest')

@@ -51,7 +51,7 @@ import {
 } from '@/lib/poker/turnGuidance'
 import { PRE_ACTION_SHORTCUT_KEYS, PreActionBar } from './PreActionBar'
 import { PeekStylePicker } from './PeekStylePicker'
-import { LedgerPanel, getRebuyStatus, requestRebuy, type LedgerC2SMessage } from './LedgerPanel'
+import { LedgerPanel, formatRebuyCash, formatStackChips, getRebuyStatus, requestRebuy, type LedgerC2SMessage } from './LedgerPanel'
 import {
   AVATAR_CELEBRATION_OPTIONS,
   AVATAR_GLASSES_OPTIONS,
@@ -601,6 +601,18 @@ function HoldStepButton({
       {children}
     </button>
   )
+}
+
+/** "$1,236,837" -> "$1.24M", "$876,543" -> "$877K", "$12,345" -> "$12.3K": big sums fit an action button (the full sum stays in its label). */
+export function compactAmountLabel(label: string | undefined): string | undefined {
+  if (!label) return label
+  const match = /^\$([\d,]+)$/.exec(label.trim())
+  if (!match) return label
+  const value = Number(match[1]!.replace(/,/g, ''))
+  if (!Number.isFinite(value) || value < 10_000) return label
+  if (value >= 1_000_000) return `$${Number((value / 1_000_000).toFixed(2))}M`
+  if (value >= 100_000) return `$${Math.round(value / 1000)}K`
+  return `$${Number((value / 1000).toFixed(1))}K`
 }
 
 type SeatTimerStyle = CSSProperties & { '--turn-pct'?: number }
@@ -2004,12 +2016,18 @@ export function PokerTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [heroTurnKey, isMobileViewport])
 
+  const settingsOpenRef = useRef(settingsOpen)
+  settingsOpenRef.current = settingsOpen
+  const onCloseSettingsRef = useRef(onCloseSettings)
+  onCloseSettingsRef.current = onCloseSettings
   // Phones: your turn starting folds the player card away, so the clock and
   // the action tray are never hidden behind it (chat closes itself the same way).
   useEffect(() => {
     if (!heroTurnKey || !isMobileViewport) return
     setTargetEmotePlayerId(null)
     setTargetEmotePickerOpen(false)
+    // The table menu too: on a phone it covers the whole tray.
+    if (settingsOpenRef.current) onCloseSettingsRef.current()
   }, [heroTurnKey, isMobileViewport])
 
   const maxRaise = me ? me.stack + me.bet : 0
@@ -2272,6 +2290,13 @@ export function PokerTable({
       ? me.nickname.toUpperCase()
       : 'TABLE VIEW'
   // One short line: the action bar already shows what a call costs.
+  // Run it twice pays per board: what you took across both runs.
+  const runItTwiceWon = acceptedRunItTwice?.boards
+    ? acceptedRunItTwice.boards
+      .flatMap(board => board.winners)
+      .filter(winner => winner.playerId === yourId)
+      .reduce((sum, winner) => sum + winner.amount, 0)
+    : 0
   const mobileHeroStatus = !isConnected
     ? 'Reconnecting'
     : betweenHands && isPayoutPending
@@ -2279,9 +2304,13 @@ export function PokerTable({
       : betweenHands
       ? showWinnerResults && myWinnerAmount > 0
         ? `Won ${formatAmount(myWinnerAmount)}`
-        : isBustedViewer
-          ? 'Out of chips'
-          : 'Waiting'
+        : runItTwiceWon > 0
+          ? `Won ${formatAmount(runItTwiceWon)}`
+          : isBustedViewer
+            ? 'Out of chips'
+            : hasHandResult
+              ? 'Hand over'
+              : 'Waiting'
       : isMyTurn
         ? 'Your turn'
         : me?.status === 'folded'
@@ -3219,6 +3248,7 @@ export function PokerTable({
           onLeaveGame={onLeaveGame}
           onFeedback={onFeedback}
           onSendLedgerMessage={onSendLedgerMessage}
+          turnSecondsLeft={hasActionTray ? turnTimer.secondsLeft : undefined}
         />
       )}
 
@@ -3523,17 +3553,15 @@ export function PokerTable({
 
                 <label
                   className={`raise-input-wrap ${raiseDraftHint ? `is-${raiseDraftHint}` : ''}`}
-                  data-digits={Math.min(7, Math.max(String(maxRaise).length, (raiseDraft ?? String(raiseAmount)).length))}
+                  data-digits={Math.min(9, Math.max(maxRaise.toLocaleString('en-US').length, (raiseDraft ?? raiseAmount.toLocaleString('en-US')).length))}
                 >
                   <input
                     ref={raiseInputRef}
-                    type="number"
+                    type="text"
                     inputMode="numeric"
+                    autoComplete="off"
                     className="raise-input"
-                    min={effectiveMin}
-                    max={maxRaise}
-                    step={Math.max(state.bigBlind, 1)}
-                    value={raiseDraft ?? String(raiseAmount)}
+                    value={raiseDraft ?? raiseAmount.toLocaleString('en-US')}
                     disabled={isTrayReconnecting}
                     aria-label={`${state.currentBet > 0 ? 'Raise to' : 'Bet'} amount, minimum ${formatAmount(effectiveMin)}`}
                     aria-invalid={raiseDraftHint ? true : undefined}
@@ -3574,7 +3602,7 @@ export function PokerTable({
               {actionButtons.map(actionButton => {
                 const shortcut = ACTION_SHORTCUT_KEYS[actionButton.key]
                 const isFreeCheckFold = actionButton.key === 'fold' && trayActions.includes('check')
-                const subLabel = isFreeCheckFold ? 'Check is free' : actionButton.amountLabel
+                const subLabel = isFreeCheckFold ? 'Check is free' : compactAmountLabel(actionButton.amountLabel)
                 return (
                   <button
                     key={actionButton.key}
@@ -4382,12 +4410,15 @@ export function SettingsModal({
   onLeaveGame = () => {},
   onFeedback,
   onSendLedgerMessage,
+  turnSecondsLeft,
 }: {
   state: TableState
   yourId: string
   isHost: boolean
   isConnected: boolean
   onSendLedgerMessage?: (message: LedgerC2SMessage) => void
+  /** Set while it is your turn: the clock stays in sight and one tap gets back to the table. */
+  turnSecondsLeft?: number
   suitColorMode: 'two' | 'four'
   soundMuted?: boolean
   soundVolume?: number
@@ -4612,6 +4643,16 @@ export function SettingsModal({
         aria-labelledby="table-settings-dialog-title"
         onClick={event => event.stopPropagation()}
       >
+        {typeof turnSecondsLeft === 'number' && (
+          <button
+            type="button"
+            className={`panel-turn-strip settings-turn-strip ${turnSecondsLeft <= 5 ? 'is-low' : ''}`}
+            onClick={onClose}
+          >
+            <span>Your turn · {turnSecondsLeft}s</span>
+            <b>Back to the table</b>
+          </button>
+        )}
         <div className="settings-modal-header">
           <div className="settings-modal-heading">
             <div className="table-panel-kicker">Table console</div>
@@ -4678,9 +4719,9 @@ export function SettingsModal({
                   <div className="settings-section-title">Your stats</div>
                   <div className="targeted-player-stats" aria-label="Your stats">
                     {formatPlayerStatsSummary(me.stats).map(stat => (
-                      <div key={stat.label} className="targeted-player-stat">
-                        <span>{stat.label}</span>
-                        <strong>{stat.value}</strong>
+                      <div key={stat.label} className="targeted-player-stat" title={STAT_HINTS[stat.label]}>
+                        <span>{STAT_LABELS[stat.label] ?? stat.label}</span>
+                        <strong>{stat.label === 'Fold' && !(me.stats?.handsPlayed) ? '—' : stat.value}</strong>
                       </div>
                     ))}
                   </div>
@@ -5239,9 +5280,7 @@ export function SettingsModal({
                         >
                           {state.phase === 'in_hand' ? 'Kick (folds now)' : 'Kick player'}
                         </button>
-                      ) : (
-                        <span className="table-chip table-chip-soft">Self removal blocked</span>
-                      )}
+                      ) : null /* Your own row: nothing to kick, and no fake button saying so. */}
                     </div>}
                   </div>
                 )
@@ -5534,10 +5573,9 @@ function MobileBetweenHandsDock({
   // Rebuys are self-serve: any busted player can buy back in (host rules permitting).
   const canRebuy = isBusted && isConnected && !rebuyBlockedReason
   // Real money (a buy-in price) is always labelled "cash", never a bare $ next to chip amounts.
-  const chipValue = state.ledger?.settings.chipValue ?? 1
-  const cashPrice = chipValue !== 1
-    ? `$${(Math.round(state.startingStack * chipValue * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
-    : null
+  const rebuyAmount = state.ledger?.buyInAmount || state.startingStack
+  const cashPrice = formatRebuyCash(rebuyAmount, state.ledger?.settings.chipValue ?? 1)
+  const rebuyChips = formatStackChips(rebuyAmount)
   const showDeal = isHost && state.phase !== 'in_hand'
   // Busted hosts still run the table; Fill seats steps aside for the rebuy.
   const showFillSeats = canAddBots && openSeats > 1 && !canRebuy
@@ -5557,8 +5595,8 @@ function MobileBetweenHandsDock({
     ? rebuyBlockedReason
       ? `${rebuyBlockedReason} Ask the host for chips to keep playing.`
       : cashPrice
-        ? `A fresh ${formatAmount(state.startingStack)} stack costs ${cashPrice} cash on the settle-up.`
-        : `Rebuy for ${formatAmount(state.startingStack)} to keep playing.`
+        ? `Rebuy a fresh stack of ${rebuyChips} for ${cashPrice} cash (paid on the settle-up).`
+        : `Rebuy a fresh stack of ${rebuyChips} to keep playing.`
     : [
         `${seatedCount} seated`,
         lobbyMe?.isSpectator ? 'Watching' : me ? `Stack ${formatAmount(me.stack)}` : null,
@@ -5600,7 +5638,7 @@ function MobileBetweenHandsDock({
                 className="mobile-between-hands-btn mobile-between-hands-btn-primary"
                 onClick={onRebuy}
               >
-                Rebuy {formatAmount(state.startingStack)}
+                {cashPrice ? `Rebuy · ${cashPrice} cash` : `Rebuy ${rebuyChips}`}
               </button>
             )}
             {canAddBots && (

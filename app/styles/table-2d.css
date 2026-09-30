@@ -3118,10 +3118,22 @@
   .mobile-seat-status .mobile-seat-hand {
     display: block;
     flex-basis: 100%;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
     color: var(--c-brass-200);
     font-size: var(--fs-11);
     font-weight: 700;
     line-height: 1.2;
+    text-overflow: ellipsis;
+    text-transform: none;
+    white-space: nowrap;
+  }
+
+  /* The result card under the seats names the hand in full; the winner's
+     tile keeps just the amount so it never grows over its neighbour. */
+  .mobile-arena:has(.mobile-edge-winners) .mobile-seat-status .mobile-seat-hand {
+    display: none;
   }
 
   .mobile-seat-status.is-win {

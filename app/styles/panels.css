@@ -4321,8 +4321,22 @@
 
 /* Landing v2: the error takes the hint's slot (no jump), the crest stays
    clear of the chip stacks, and the feature chips fit one row on phones. */
-[role='tabpanel']:has(> .entry-error) .entry-hint {
-  display: none;
+/* (v2 r2) The error floats just under the submit button, over the footnote,
+   so nothing above it moves when it appears. */
+[role='tabpanel'].entry-panel {
+  position: relative;
+}
+
+[role='tabpanel'].entry-panel > .entry-error {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  top: calc(100% + 8px);
+}
+
+[role='tabpanel'].entry-panel:has(> .entry-error) ~ .landing-footnote {
+  visibility: hidden;
 }
 
 .landing-art-crest {

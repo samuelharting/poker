@@ -81,6 +81,8 @@ export function MembershipLayer({
   const showBustedBar = isBusted && tableState?.phase === 'in_hand'
   const isSittingOut = Boolean(me?.isAway) && !isBusted
   const rebuy = showBustedBar && tableState ? getRebuyStatus(tableState, yourId) : null
+  // Still holding live cards: the bar slims down and moves off the hand.
+  const holdingCards = Boolean(me?.hasCards && me.status !== 'folded') ? 'true' : 'false'
 
   return (
     <>
@@ -99,7 +101,7 @@ export function MembershipLayer({
         </div>
       )}
       {showBustedBar && rebuy && (
-        <div className="membership-sitout is-busted" role="status" aria-live="polite">
+        <div className="membership-sitout is-busted" data-holding-cards={holdingCards} role="status" aria-live="polite">
           <span className="membership-sitout-copy">
             <strong>Out of chips</strong>
             <span>
@@ -121,7 +123,7 @@ export function MembershipLayer({
         </div>
       )}
       {isSittingOut && (
-        <div className="membership-sitout" role="status" aria-live="polite">
+        <div className="membership-sitout" data-holding-cards={holdingCards} role="status" aria-live="polite">
           <span className="membership-sitout-copy">
             <strong>Sitting out</strong>
             <span>You keep your seat and chips but are not dealt in.</span>

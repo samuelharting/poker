@@ -1065,3 +1065,244 @@
     margin-left: 2px;
   }
 }
+
+/* ==========================================================================
+   UI pass v2, review round 2: the showdown pill clears the top bar at 1024,
+   the sitting-out bar never covers your cards or the board, winners keep
+   their shine, folded plates dim only the plate, and the tray's big numbers
+   and key badges stop colliding.
+   ========================================================================== */
+
+@media (min-width: 1024px) and (max-width: 1279px) {
+  /* The top bar reaches past the centre here: the narration drops below it. */
+  .table-scene[data-desktop-three='true'] .showdown-table-sequence {
+    top: calc(76px + env(safe-area-inset-top));
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1180px) {
+  /* Narrower pre-action dock so it clears the hero plate. */
+  .table-scene[data-desktop-three='true'] > .check-fold-pre-action-dock {
+    width: 340px;
+  }
+}
+
+@media (min-width: 1024px) {
+  /* Still holding live cards while sitting out: a slim pill above the drinks
+     row instead of a card over your hand (and your own turn). */
+  .room-shell .membership-sitout[data-holding-cards='true'] {
+    top: auto;
+    right: auto;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    left: calc(20px + env(safe-area-inset-left));
+    gap: 10px;
+    padding: 5px 5px 5px 14px;
+    border-radius: var(--r-pill);
+    transform: none;
+  }
+
+  .room-shell .membership-sitout[data-holding-cards='true'] .membership-sitout-copy span {
+    display: none;
+  }
+
+  .room-shell .membership-sitout[data-holding-cards='true'] .membership-sitout-copy strong {
+    font-size: 13px;
+  }
+
+  .room-shell .membership-sitout[data-holding-cards='true'] .membership-sitout-back {
+    min-height: 32px;
+    padding: 0 14px;
+    font-size: 12px;
+  }
+
+  .room-shell:has(> .membership-sitout[data-holding-cards='true']) .table-scene[data-desktop-three='true'] .table-seat-winner-announcements {
+    bottom: 136px;
+  }
+
+  /* Your hand's name in full: one line up to ~380px, then two. */
+  .table-scene[data-desktop-three='true'] .own-hand-area .own-hand-strength,
+  .table-scene[data-desktop-three='true'][data-hero-seat='true'] .own-hand-area .own-hand-strength {
+    width: max-content;
+    max-width: min(380px, 42vw);
+    white-space: normal;
+    text-align: center;
+  }
+
+  .table-scene[data-desktop-three='true'] .own-hand-area .own-hand-strength-value {
+    overflow: visible;
+    white-space: normal;
+    line-height: 1.2;
+  }
+
+  /* Amounts keep clear of the corner key badge; "Check is free" may wrap. */
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action-sub {
+    box-sizing: border-box;
+    max-width: 100%;
+    /* Room on the right for the key badge in the corner. */
+    padding: 0 15px 0 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-action.btn-fold.is-check-free .btn-action-sub {
+    white-space: normal;
+    line-height: 1.05;
+    text-align: center;
+  }
+
+  /* Bet box with thousands separators: the font steps down by length. */
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-input-wrap[data-digits='5'] .raise-input {
+    font-size: 16px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-input-wrap[data-digits='6'] .raise-input {
+    font-size: 14px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-input-wrap[data-digits='7'] .raise-input {
+    font-size: 12.5px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-input-wrap:is([data-digits='8'], [data-digits='9']) .raise-input {
+    padding-inline: 6px;
+    font-size: 10.5px;
+  }
+
+  /* The clock's tick grows away from its "s", never into it. */
+  .table-scene[data-desktop-three='true'] .timer-bar-seconds b {
+    margin-right: 3px;
+    transform-origin: 100% 85%;
+  }
+
+  /* Run it twice vote: over the empty board, clear of the opponent's plate. */
+  .table-scene[data-desktop-three='true'] > .run-it-twice-prompt {
+    top: clamp(280px, 41vh, 370px);
+  }
+
+  /* All in: slams over the board, not over the shover's own plate. */
+  .table-scene[data-desktop-three='true'] > .all-in-announcement {
+    top: clamp(340px, 50vh, 460px);
+  }
+
+  /* Winning: your cards and hand name stay bright, your plate goes gold. */
+  .table-scene[data-phase='between_hands'] .own-hand-area.is-winner .own-card-row,
+  .table-scene[data-phase='between_hands'] .own-hand-area.is-winner .own-hand-strength {
+    opacity: 1;
+  }
+
+  .table-scene[data-desktop-three='true'] .hero-bottom-summary.is-winner {
+    border-color: var(--c-brass-400);
+    background:
+      linear-gradient(180deg, rgba(242, 199, 102, 0.24), rgba(242, 199, 102, 0.05)),
+      var(--surface-glass-strong);
+    box-shadow: var(--shadow-2), var(--glow-brass);
+  }
+
+  .table-scene[data-desktop-three='true'] .hero-bottom-summary.is-winner .hero-bottom-summary-name {
+    color: var(--c-brass-200);
+  }
+
+  /* Folded: dim the plate and its cards, never their chat bubble. */
+  .desktop-3d-stage .cinematic-seat.is-folded {
+    opacity: 1;
+    filter: none;
+  }
+
+  .desktop-3d-stage .cinematic-seat.is-folded .cinematic-seat-panel,
+  .desktop-3d-stage .cinematic-seat.is-folded .cinematic-hole-cards {
+    opacity: 0.55;
+    filter: saturate(0.4);
+  }
+
+  /* Ask / See sits on the plate's lower corner, off any speech bubble. */
+  .desktop-3d-stage .cinematic-seat .card-reveal-seat-button,
+  .desktop-3d-stage .cinematic-seat .cinematic-card-reveal-control {
+    top: auto;
+    bottom: -10px;
+    right: -8px;
+  }
+
+  /* Winner card: "Flush, Jack-high" stays on one line. */
+  .table-scene[data-desktop-three='true'] .table-hand-result-summary {
+    min-width: 300px;
+  }
+
+  .table-scene[data-desktop-three='true'] .table-hand-result-player small {
+    white-space: nowrap;
+  }
+}
+
+/* Turn strip on top of the table menu. */
+.settings-modal > .settings-turn-strip {
+  margin: 0 0 12px;
+}
+
+/* Phones: the sitting-out / out-of-chips bar docks at the bottom like the
+   tray, and the table makes room for it; with another dock down there it
+   moves under the top bar instead. Toasts sit in the top bar, off the seats. */
+@media (max-width: 1023px), (hover: none) and (pointer: coarse) {
+  .room-shell:has(.table-scene[data-layout='2d']) > .membership-sitout,
+  .room-shell:has(.table-scene[data-layout='2d']) > .membership-notice ~ .membership-sitout {
+    top: auto;
+    right: calc(8px + env(safe-area-inset-right));
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    left: calc(8px + env(safe-area-inset-left));
+    width: auto;
+    max-width: 520px;
+    margin-inline: auto;
+    padding: 8px 8px 8px 16px;
+    border-radius: 18px;
+    transform: none;
+  }
+
+  .room-shell:has(.table-scene[data-layout='2d']) > .membership-sitout .membership-sitout-copy {
+    flex: 1 1 auto;
+  }
+
+  .room-shell:has(.table-scene[data-layout='2d']) > .membership-sitout .membership-sitout-copy span {
+    display: none;
+  }
+
+  .room-shell:has(.table-scene[data-layout='2d']) > .membership-sitout .membership-sitout-back {
+    min-height: 44px;
+  }
+
+  .room-shell:has(> .membership-sitout) .table-scene[data-layout='2d'] .mobile-poker-field {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+  }
+
+  /* Your turn: the tray owns the bottom edge. */
+  .room-shell:has(.table-scene[data-layout='2d'][data-tray-open='true']) > .membership-sitout {
+    display: none;
+  }
+
+  .room-shell:has(.table-scene[data-layout='2d'] > :is(.mobile-between-hands-dock, .rabbit-hunt-dock, .check-fold-pre-action-dock, .run-it-twice-prompt, .card-reveal-consent)) > .membership-sitout {
+    top: calc(var(--hud-h, 56px) + env(safe-area-inset-top) + 6px);
+    bottom: auto;
+  }
+
+  .room-shell:has(.table-scene[data-layout='2d'] > :is(.mobile-between-hands-dock, .rabbit-hunt-dock, .check-fold-pre-action-dock, .run-it-twice-prompt, .card-reveal-consent)):has(> .membership-sitout) .table-scene[data-layout='2d'] .mobile-poker-field {
+    padding-bottom: 8px !important;
+  }
+
+  .room-shell:has(.table-scene[data-layout='2d']) > .membership-notice {
+    /* Over the top bar's centre (not under it), for its five seconds. */
+    z-index: 400;
+    background: var(--c-ink-900);
+    top: calc(env(safe-area-inset-top) + 6px);
+    max-width: calc(100vw - 200px);
+    padding: 6px 10px;
+    border-radius: 14px;
+    font-size: 12px;
+    line-height: 1.25;
+    text-align: center;
+  }
+}
+@media (min-width: 1024px) and (max-width: 1180px) {
+  /* Narrow desktop: the centred sit-out bar is just its title and button, so
+     it clears the hand-winner card in the bottom-left corner. */
+  .room-shell .membership-sitout .membership-sitout-copy span {
+    display: none;
+  }
+}

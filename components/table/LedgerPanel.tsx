@@ -43,6 +43,17 @@ const EMPTY_LEDGER: LedgerSnapshot = {
   settleUpAt: null,
 }
 
+/** A rebuy counted as chips ("1,000 chips"), so it never shares a "$" with real cash. */
+export function formatStackChips(amount: number): string {
+  return `${Math.max(0, Math.round(amount)).toLocaleString('en-US')} chips`
+}
+
+/** Real-money price of one rebuy ("$5"), or null when the table has no buy-in price. */
+export function formatRebuyCash(amount: number, chipValue: number): string | null {
+  if (chipValue === 1 || amount <= 0) return null
+  return `$${(Math.round(amount * chipValue * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+}
+
 export function formatChips(amount: number): string {
   return `$${Math.max(0, Math.round(amount)).toLocaleString('en-US')}`
 }
@@ -333,8 +344,11 @@ export function LedgerPanel({
             disabled={!isConnected || !rebuy.canRebuy}
             onClick={requestRebuy}
           >
-            {rebuy.row?.rebuyQueued ? 'Rebuy queued' : `Rebuy ${formatChips(rebuy.amount)}`}
+            {rebuy.row?.rebuyQueued ? 'Rebuy queued' : `Rebuy ${formatStackChips(rebuy.amount)}`}
           </button>
+          {rebuy.canRebuy && formatRebuyCash(rebuy.amount, ledger.settings.chipValue) && (
+            <span className="ledger-rebuy-reason">Costs {formatRebuyCash(rebuy.amount, ledger.settings.chipValue)} cash</span>
+          )}
           {!rebuy.canRebuy && rebuy.reason && rebuy.row && <span className="ledger-rebuy-reason">{rebuy.reason}</span>}
           {rebuy.canRebuy && rebuy.queues && <span className="ledger-rebuy-reason">Lands when this hand ends.</span>}
         </div>

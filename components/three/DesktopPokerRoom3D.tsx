@@ -3167,7 +3167,7 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
     if (!plate.h) plate.h = fallbackHeight + plate.extra
   }
   plates.sort((a, b) => a.y - b.y)
-  for (let pass = 0; pass < 4; pass += 1) {
+  for (let pass = 0; pass < 6; pass += 1) {
     for (let i = 0; i < plates.length; i += 1) {
       for (let j = i + 1; j < plates.length; j += 1) {
         const a = plates[i]!
@@ -3177,11 +3177,19 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
         const overlapX = (upper.w + lower.w) / 2 + PLATE_GAP - Math.abs(upper.x - lower.x)
         const overlapY = Math.min(upper.y, lower.y) - Math.max(upper.y - upper.h, lower.y - lower.h) + PLATE_GAP
         if (overlapX <= 0 || overlapY <= 0) continue
-        if (overlapY < overlapX) lower.y += overlapY
-        else lower.x += (lower.x >= upper.x ? 1 : -1) * overlapX
-        // Clamp inside the pass so the screen edge can't undo a nudge.
+        if (overlapY < overlapX) {
+          lower.y += overlapY
+          continue
+        }
+        lower.x += (lower.x >= upper.x ? 1 : -1) * overlapX
+        // Clamp inside the pass so the screen edge can't undo a nudge; if the
+        // edge stops the sideways move, step the plate down instead.
         const edge = Math.max(110, lower.w / 2 + 6)
-        lower.x = THREE.MathUtils.clamp(lower.x, edge, width - edge)
+        const clampedX = THREE.MathUtils.clamp(lower.x, edge, width - edge)
+        if (clampedX !== lower.x && (upper.w + lower.w) / 2 + PLATE_GAP - Math.abs(upper.x - clampedX) > 0) {
+          lower.y += overlapY
+        }
+        lower.x = clampedX
       }
     }
   }
