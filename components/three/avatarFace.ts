@@ -311,7 +311,7 @@ function ensureSceneHook(scene: THREE.Object3D) {
     return
   }
   entry.stall += 1
-  if (entry.stall > 20 && scene.onBeforeRender !== entry.hook) installSceneHook(scene)
+  if (entry.stall > 8 && scene.onBeforeRender !== entry.hook) installSceneHook(scene)
 }
 
 function hookSkeletonSync(face: AvatarFaceRig) {
@@ -826,9 +826,10 @@ function moustacheLift(corner: number, restCorner: number, halfWidth: number, re
   const raw = corner - restCorner
   const d = raw > 0 ? Math.max(0, raw - 0.1) : Math.min(0, raw + 0.1)
   // The lifted side of a smirk rises further and faster (the corner itself is hidden under the hair).
-  const upCap = (0.28 + 0.17 * smirk) * halfWidth
-  const bend = d < 0 ? Math.max(-Math.min(0.38 * halfWidth, 0.5), d * 0.9) : Math.min(upCap, d * (0.55 + 0.35 * smirk))
-  return rest + bend
+  // It also drops the rest levelling on that side, so the tip kinks up past the moustache's own crescent.
+  const upCap = (0.28 + 0.2 * smirk) * halfWidth
+  const bend = d < 0 ? Math.max(-Math.min(0.38 * halfWidth, 0.5), d * 0.9) : Math.min(upCap, d * (0.55 + 0.45 * smirk))
+  return rest * (1 - smirk) + bend
 }
 
 /** Largest moustache tip motion per second (eye radii), so a frame hitch never snaps it. */
@@ -1091,6 +1092,15 @@ function updateAvatarFaceInner(face: AvatarFaceRig, input: FaceInput) {
     shape.press = p[CH.press]!
     shape.purse = p[CH.purse]!
     shape.teeth = p[CH.teeth]!
+    if (face.mouth.facialHair) {
+      // Under a moustache a gasp should read as a round "O", not a wide toothy "ah": narrower,
+      // a touch rounder, fewer teeth.
+      const unsmilingO = clamp(1 - 2 * Math.max(0, (smileA + smileB) * 0.5 - FACIAL_HAIR_SMILE_BIAS), 0, 1)
+      const gasp = clamp(shape.open * 1.4, 0, 1) * unsmilingO
+      shape.width -= 0.3 * gasp
+      shape.purse = Math.min(1, shape.purse + 0.25 * gasp)
+      shape.teeth *= 1 - 0.6 * gasp
+    }
     shape.shift = p[CH.jaw]! * smirkSide * (1 - evenOut)
     ;(face.mouth.mesh.material as THREE.MeshToonMaterial).color.setScalar(state.dim)
     const skinForMouth = face.skinSource ? face.skinSource.color : scratchSkin
@@ -1103,7 +1113,9 @@ function updateAvatarFaceInner(face: AvatarFaceRig, input: FaceInput) {
     const smileAvg = (p[CH.smileA]! + p[CH.smileB]!) * 0.5
     const warmth = face.personality.warmth
     const sweat = p[CH.sweat]!
-    const blush = Math.min(0.2, 0.04 + 0.02 * warmth + p[CH.blush]! * 0.3 + Math.max(0, smileAvg) * 0.04)
+    // Drink shows as rosy cheeks here (the skin itself only warms a little, see flushCheeks).
+    const flush = clamp(face.context.drunk / 10, 0, 1)
+    const blush = Math.min(0.2 + 0.22 * flush, 0.04 + 0.02 * warmth + p[CH.blush]! * 0.3 + Math.max(0, smileAvg) * 0.04 + flush * 0.3)
     a.blushA = blush
     a.blushB = blush
     const tired = clamp(p[CH.pallor]! * 0.7 + p[CH.red]! * 0.35 + (1 - p[CH.lidUA]!) * 0.14 + heavy * 0.2 + arousal * 0.08, 0, 1)

@@ -2603,11 +2603,11 @@ const drinkGripTarget = new THREE.Vector3()
 const drinkElbowPole = new THREE.Vector3()
 const drinkSide = new THREE.Vector3()
 
-/** Rosy cheeks creep in as the beers go down. */
+/** The skin warms a little as the beers go down (the rosy cheeks themselves are face decals). */
 function flushCheeks(seat: SeatRuntime) {
   const skin = seat.avatar?.materials.find(material => /^skin$/i.test(material.name)) as THREE.MeshToonMaterial | undefined
   if (!skin?.color || !seat.skinBaseColor) return
-  const flush = Math.min(1, seat.drunkLevel / 10) * 0.38
+  const flush = Math.min(1, seat.drunkLevel / 10) * 0.12
   skin.color.copy(seat.skinBaseColor).lerp(DRUNK_FLUSH, flush)
   if (seat.folded) skin.color.multiplyScalar(0.5)
 }
