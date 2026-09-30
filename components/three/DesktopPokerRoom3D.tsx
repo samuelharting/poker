@@ -53,6 +53,7 @@ import {
   updateFirstPersonDrink,
   type FirstPersonDrink,
 } from './firstPersonDrink'
+import { CHILL_BLOOM_SCALE, applySceneMode, type SceneMode } from './sceneMode'
 import {
   animateConfetti,
   animateLightCone,
@@ -205,6 +206,8 @@ interface DesktopPokerRoom3DProps {
   actingTimerPercent?: number
   /** Settings: classic two-color deck or four-color suits (applies to every 3D card). */
   suitColorMode?: SuitColorMode
+  /** 'chill' hides decoration and ambient effects; the table and play are unchanged. */
+  sceneMode?: SceneMode
 }
 
 interface SeatRuntime {
@@ -362,6 +365,8 @@ interface SceneRuntime {
   firstPersonDrink: FirstPersonDrink
   /** Shots, chip flicks and house-rule icon pops. */
   pranks: PrankRuntime
+  /** Chill room: no confetti or shockwaves, softer bloom. */
+  chill: boolean
   effects: { cone: LightCone; confetti: Confetti; shockwave: Shockwave; winnerKey: string; allInKey: string }
   /** Scene time when community cards last landed. */
   boardRevealAt: number
@@ -3376,7 +3381,7 @@ function animateEffects(runtime: SceneRuntime, time: number, delta: number, redu
   const effects = runtime.effects
   const winners = [...runtime.seats.values()].filter(seat => seat.winner)
   const winnerKey = winners.map(seat => seat.playerId).join(',')
-  if (winnerKey && winnerKey !== effects.winnerKey && !reducedMotion) {
+  if (winnerKey && winnerKey !== effects.winnerKey && !reducedMotion && !runtime.chill) {
     for (const seat of winners) {
       // The hero's burst rains over the table rather than into the camera.
       if (seat.root.visible) seat.root.getWorldPosition(effectPoint)
@@ -3395,7 +3400,7 @@ function animateEffects(runtime: SceneRuntime, time: number, delta: number, redu
     effects.allInKey = seat.actionKey
     const anchor = getTableWagerAnchor(toVisualSeat(seat.visualSeat))
     effectPoint.set(anchor[0], FELT_TOP_Y + 0.01, anchor[2])
-    if (!reducedMotion) triggerShockwave(effects.shockwave, effectPoint, time)
+    if (!reducedMotion && !runtime.chill) triggerShockwave(effects.shockwave, effectPoint, time)
   }
 
   animateLightCone(effects.cone, time, reducedMotion, winners.length > 0 ? 1 : 0)
@@ -3732,6 +3737,7 @@ function createSceneRuntime(
     disposed: false as boolean,
     suspended: document.hidden,
     reducedMotion: motionPreference.matches,
+    chill: false as boolean,
     pause: () => {},
     resume: () => {},
     dispose: () => {},
@@ -3999,7 +4005,7 @@ function createSceneRuntime(
     }
     if (runtime.postFx && quality < 2) {
       funFx.beforeRender(time, viewportWidth, viewportHeight)
-      runtime.postFx.bloom.strength = 0.22 + (winnerSeat ? 0.1 : 0) + allInImpact.strength * 0.1
+      runtime.postFx.bloom.strength = (0.22 + (winnerSeat ? 0.1 : 0) + allInImpact.strength * 0.1) * (runtime.chill ? CHILL_BLOOM_SCALE : 1)
       runtime.postFx.composer.render(delta)
     } else {
       renderer.render(scene, camera)
@@ -4195,6 +4201,7 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
   highlightedCards = NO_HIGHLIGHTED_CARDS,
   actingTimerPercent,
   suitColorMode = 'two',
+  sceneMode = 'classic',
 }: DesktopPokerRoom3DProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -4347,6 +4354,14 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
     }
     applySuitColorMode(cards, suitColorMode)
   }, [suitColorMode, sceneGeneration])
+
+  // Chill room: hide the clutter by name and calm the effects, in place.
+  useEffect(() => {
+    const runtime = runtimeRef.current
+    if (!runtime) return
+    runtime.chill = sceneMode === 'chill'
+    applySceneMode(runtime.scene, sceneMode)
+  }, [sceneMode, sceneGeneration])
 
   // Pranks and house-rule drinks: each server event plays exactly once.
   useEffect(() => {

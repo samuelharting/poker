@@ -1,5 +1,6 @@
 'use client'
 
+import type { SceneMode } from '@/components/three/sceneMode'
 import dynamic from 'next/dynamic'
 import React, { type CSSProperties, useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import type { Card, CardRevealRequest, HandHistoryEntry, TableState, SeatPlayer, LobbyPlayer, ShowCardsMode, PlayerStats } from '@/lib/poker/types'
@@ -95,6 +96,7 @@ interface PokerTableProps {
   startingStackSetting: number
   settingsOpen: boolean
   suitColorMode: 'two' | 'four'
+  sceneMode?: SceneMode
   soundMuted?: boolean
   soundVolume?: number
   avatarCustomization?: PlayerAvatarCustomization
@@ -130,6 +132,7 @@ interface PokerTableProps {
   onRequestCardReveal?: (targetId: string) => void
   onRespondCardReveal?: (requesterId: string, allow: boolean) => void
   onSetSuitColorMode: (mode: 'two' | 'four') => void
+  onSetSceneMode?: (mode: SceneMode) => void
   onSetSoundMuted?: (muted: boolean) => void
   onSetSoundVolume?: (volume: number) => void
   onUpdateAvatar?: (avatar: PlayerAvatarCustomization) => void
@@ -330,6 +333,7 @@ interface DesktopPokerRoom3DProps {
   highlightedCards?: ReadonlyArray<Pick<Card, 'rank' | 'suit'>>
   actingTimerPercent?: number
   suitColorMode?: 'two' | 'four'
+  sceneMode?: SceneMode
 }
 
 const DesktopPokerRoom3D = dynamic<DesktopPokerRoom3DProps>(
@@ -1347,6 +1351,7 @@ export function PokerTable({
   startingStackSetting,
   settingsOpen,
   suitColorMode,
+  sceneMode = 'classic',
   soundMuted = false,
   soundVolume = 0.65,
   avatarCustomization = DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
@@ -1368,6 +1373,7 @@ export function PokerTable({
   onRequestCardReveal = () => {},
   onRespondCardReveal = () => {},
   onSetSuitColorMode,
+  onSetSceneMode = () => {},
   onSetSoundMuted = () => {},
   onSetSoundVolume = () => {},
   onUpdateAvatar = () => {},
@@ -2747,6 +2753,7 @@ export function PokerTable({
           highlightedCards={highlightedWinningCards}
           actingTimerPercent={opponentTimerVisible ? turnTimer.percent : undefined}
           suitColorMode={suitColorMode}
+          sceneMode={sceneMode}
         />
       ) : null}
       {!isMobileViewport && showdownCinematic}
@@ -3229,6 +3236,7 @@ export function PokerTable({
           isHost={isHost}
           isConnected={isConnected}
           suitColorMode={suitColorMode}
+          sceneMode={sceneMode}
           soundMuted={soundMuted}
           soundVolume={soundVolume}
           avatarCustomization={avatarCustomization}
@@ -3236,6 +3244,7 @@ export function PokerTable({
           canShareRoom={canShareRoom}
           onClose={onCloseSettings}
           onSetSuitColorMode={onSetSuitColorMode}
+          onSetSceneMode={onSetSceneMode}
           onSetSoundMuted={onSetSoundMuted}
           onSetSoundVolume={onSetSoundVolume}
           onUpdateAvatar={onUpdateAvatar}
@@ -4391,6 +4400,7 @@ export function SettingsModal({
   isHost,
   isConnected,
   suitColorMode,
+  sceneMode = 'classic',
   soundMuted = false,
   soundVolume = 0.65,
   avatarCustomization = DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
@@ -4398,6 +4408,7 @@ export function SettingsModal({
   canShareRoom,
   onClose,
   onSetSuitColorMode,
+  onSetSceneMode = () => {},
   onSetSoundMuted = () => {},
   onSetSoundVolume = () => {},
   onUpdateAvatar = () => {},
@@ -4420,6 +4431,7 @@ export function SettingsModal({
   /** Set while it is your turn: the clock stays in sight and one tap gets back to the table. */
   turnSecondsLeft?: number
   suitColorMode: 'two' | 'four'
+  sceneMode?: SceneMode
   soundMuted?: boolean
   soundVolume?: number
   avatarCustomization?: PlayerAvatarCustomization
@@ -4427,6 +4439,7 @@ export function SettingsModal({
   canShareRoom: boolean
   onClose: () => void
   onSetSuitColorMode: (mode: 'two' | 'four') => void
+  onSetSceneMode?: (mode: SceneMode) => void
   onSetSoundMuted?: (muted: boolean) => void
   onSetSoundVolume?: (volume: number) => void
   onUpdateAvatar?: (avatar: PlayerAvatarCustomization) => void
@@ -4780,6 +4793,30 @@ export function SettingsModal({
                     onClick={() => onSetSuitColorMode('four')}
                   >
                     4-color suits
+                  </button>
+                </div>
+              </div>
+              <div className="settings-rule-row">
+                <div>
+                  <div className="settings-rule-name">Room</div>
+                  <div className="settings-rule-copy">Chill hides the decor and ambient effects for a calmer table.</div>
+                </div>
+                <div className="settings-toggle-row">
+                  <button
+                    type="button"
+                    className={`settings-pill ${sceneMode === 'classic' ? 'is-active' : ''}`}
+                    aria-pressed={sceneMode === 'classic'}
+                    onClick={() => onSetSceneMode('classic')}
+                  >
+                    Lounge
+                  </button>
+                  <button
+                    type="button"
+                    className={`settings-pill ${sceneMode === 'chill' ? 'is-active' : ''}`}
+                    aria-pressed={sceneMode === 'chill'}
+                    onClick={() => onSetSceneMode('chill')}
+                  >
+                    Chill
                   </button>
                 </div>
               </div>

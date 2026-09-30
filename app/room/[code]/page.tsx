@@ -1,5 +1,6 @@
 'use client'
 
+import { normalizeSceneMode, type SceneMode } from '@/components/three/sceneMode'
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
@@ -164,6 +165,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
   const [startingStackSetting, setStartingStackSetting] = useState(1000)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [suitColorMode, setSuitColorMode] = useState<'two' | 'four'>('two')
+  const [sceneMode, setSceneMode] = useState<SceneMode>('classic')
   const [soundPreferences, setSoundPreferences] = useState<PokerSoundPreferences>({
     ...DEFAULT_POKER_SOUND_PREFERENCES,
   })
@@ -228,6 +230,10 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
   }, [])
 
   useEffect(() => {
+    setSceneMode(normalizeSceneMode(sessionStorage.getItem('poker_scene_mode')))
+  }, [])
+
+  useEffect(() => {
     setSoundPreferences(loadPokerSoundPreferences())
     setSoundPreferencesReady(true)
   }, [])
@@ -252,6 +258,11 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
   const handleSuitColorMode = useCallback((mode: 'two' | 'four') => {
     setSuitColorMode(mode)
     sessionStorage.setItem('poker_suit_color_mode', mode)
+  }, [])
+
+  const handleSceneMode = useCallback((mode: SceneMode) => {
+    setSceneMode(mode)
+    sessionStorage.setItem('poker_scene_mode', mode)
   }, [])
 
   const updateSoundPreferences = useCallback((update: Partial<PokerSoundPreferences>) => {
@@ -385,6 +396,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           startingStackSetting={startingStackSetting}
           settingsOpen={settingsOpen}
           suitColorMode={suitColorMode}
+          sceneMode={sceneMode}
           soundMuted={soundPreferences.muted}
           soundVolume={soundPreferences.volume}
           avatarCustomization={currentProfile.avatar ?? DEFAULT_PLAYER_AVATAR_CUSTOMIZATION}
@@ -409,6 +421,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           onRespondCardReveal={(requesterId: string, allow: boolean) =>
             sendMessage({ type: 'respond_card_reveal', requesterId, allow })}
           onSetSuitColorMode={handleSuitColorMode}
+          onSetSceneMode={handleSceneMode}
           onSetSoundMuted={muted => updateSoundPreferences({ muted })}
           onSetSoundVolume={volume => updateSoundPreferences({ volume })}
           onUpdateAvatar={handleUpdateAvatar}
