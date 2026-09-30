@@ -100,22 +100,32 @@ export function LedgerLayer({
   )
   const showBustedCard = !isTwoDLayout && isBusted && !settingsOpen && !confirmOpen && !showSettle
   const ledger = tableState.ledger
+  const chipValue = ledger?.settings.chipValue ?? 1
+  // Real-money price of one rebuy, when the table uses a buy-in price.
+  const buyInDollars = chipValue !== 1 && rebuy.amount > 0
+    ? `$${(Math.round(rebuy.amount * chipValue * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+    : null
 
   return (
     <>
       {showBustedCard && (
-        <div className="ledger-busted-card" role="status" aria-live="polite">
+        <div className={`ledger-busted-card ${rebuy.canRebuy ? 'is-cashier' : ''}`} role="status" aria-live="polite">
+          <span className="ledger-busted-chips" aria-hidden="true">
+            <i /><i /><i /><i />
+          </span>
           <div className="ledger-busted-copy">
-            <strong>You&apos;re out of chips</strong>
+            <small>{rebuy.canRebuy ? 'The cashier is open' : 'Out of chips'}</small>
+            <strong>{rebuy.canRebuy ? `Grab a fresh ${formatChips(rebuy.amount)} stack` : "You're out of chips"}</strong>
             <span>
               {rebuy.canRebuy
-                ? `Rebuy for ${formatChips(rebuy.amount)} to keep playing.`
+                ? (buyInDollars ? `Buy back in for ${buyInDollars} and jump into the next hand.` : 'Jump straight back into the next hand.')
                 : rebuy.reason ?? 'Ask the host for chips to keep playing.'}
             </span>
           </div>
           {rebuy.canRebuy && (
-            <button type="button" className="btn-gold" disabled={!isConnected} onClick={requestRebuy}>
-              Rebuy {formatChips(rebuy.amount)}
+            <button type="button" className="btn-gold ledger-busted-cta" disabled={!isConnected} onClick={requestRebuy}>
+              <span>Buy back in</span>
+              <b>{buyInDollars ?? formatChips(rebuy.amount)}</b>
             </button>
           )}
         </div>

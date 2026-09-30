@@ -473,6 +473,109 @@
   white-space: nowrap;
 }
 
+/* Cashier look: felt-green card, gold trim, a little chip stack and a
+   shimmering buy-back button. Exciting, never pushy (no timers, no nagging). */
+.ledger-busted-card.is-cashier {
+  gap: 18px;
+  padding: 14px 14px 14px 16px;
+  border: 1.5px solid rgba(255, 214, 110, 0.75);
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(255, 214, 110, 0.16), transparent 55%),
+    linear-gradient(160deg, #0f3a2c 0%, #0b2a21 55%, #081c17 100%);
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.6),
+    0 0 0 4px rgba(255, 214, 110, 0.08),
+    0 0 32px rgba(255, 196, 70, 0.22);
+}
+
+.ledger-busted-chips {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 44px;
+}
+
+.ledger-busted-chips i {
+  position: absolute;
+  left: 4px;
+  width: 36px;
+  height: 10px;
+  border-radius: 50%;
+  background: repeating-conic-gradient(from 0deg, #fff6e0 0 12deg, var(--chip, #c8323f) 12deg 45deg);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45), inset 0 0 0 2px rgba(0, 0, 0, 0.18);
+  animation: ledger-chip-drop 520ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+.ledger-busted-chips i:nth-child(1) { bottom: 2px; --chip: #1f5fbf; animation-delay: 60ms; }
+.ledger-busted-chips i:nth-child(2) { bottom: 9px; --chip: #c8323f; animation-delay: 160ms; }
+.ledger-busted-chips i:nth-child(3) { bottom: 16px; --chip: #1c8a52; animation-delay: 260ms; }
+.ledger-busted-chips i:nth-child(4) { bottom: 23px; --chip: #1a1a22; animation-delay: 360ms; }
+
+.ledger-busted-card:not(.is-cashier) .ledger-busted-chips {
+  opacity: 0.35;
+  filter: grayscale(0.8);
+}
+
+.ledger-busted-copy small {
+  color: rgba(255, 224, 150, 0.75);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.ledger-busted-card.is-cashier .ledger-busted-copy strong {
+  color: #ffe08a;
+  font-size: 17px;
+  text-shadow: 0 0 14px rgba(255, 200, 80, 0.35);
+}
+
+.ledger-busted-cta {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  min-height: 50px !important;
+  padding: 0 20px !important;
+  overflow: hidden;
+  line-height: 1.05;
+}
+
+.ledger-busted-cta span {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ledger-busted-cta b {
+  font-size: 19px;
+}
+
+.ledger-busted-cta::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.55) 48%, transparent 66%);
+  transform: translateX(-120%);
+  animation: ledger-shimmer 2.8s ease-in-out 0.8s infinite;
+  pointer-events: none;
+}
+
+.ledger-busted-cta:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: 0 0 24px rgba(255, 200, 80, 0.45);
+}
+
+@keyframes ledger-chip-drop {
+  from { opacity: 0; transform: translateY(-18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ledger-shimmer {
+  0% { transform: translateX(-120%); }
+  45%, 100% { transform: translateX(120%); }
+}
+
 @keyframes ledger-fade {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -491,7 +594,9 @@
 @media (prefers-reduced-motion: reduce) {
   .ledger-overlay,
   .ledger-dialog,
-  .ledger-busted-card {
+  .ledger-busted-card,
+  .ledger-busted-chips i,
+  .ledger-busted-cta::after {
     animation: none;
   }
 }
