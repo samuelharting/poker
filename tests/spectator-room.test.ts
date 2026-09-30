@@ -91,7 +91,7 @@ describe('getting onto the rail', () => {
     expect(lobbyEntry(ben!.connection, cat!.playerId)?.isSpectator).toBe(false)
   })
 
-  it('benching mid-hand folds them now, shows them the live hands, and clears the seat next hand', () => {
+  it('benching mid-hand folds them now, hides the live hands from them, and clears the seat next hand', () => {
     const harness = createHarness()
     const seats = seatTable(harness, ['Ann', 'Ben', 'Cat'])
     const [ann, , cat] = seats
@@ -101,9 +101,11 @@ describe('getting onto the rail', () => {
     const catSeat = harness.internals.data.gameState.players.find(player => player.id === cat!.playerId)!
     expect(catSeat.status).toBe('folded')
     const catView = snapshot(cat!.connection)
-    expect(catView.handOdds?.mode).toBe('spectator')
+    // Anti-cheat: a benched watcher sees no live cards or odds while betting is open.
+    expect(catView.handOdds).toBeUndefined()
     const liveOthers = catView.players.filter(player => player.id !== cat!.playerId && player.status !== 'folded')
-    expect(liveOthers.every(player => player.holeCards?.length === 2)).toBe(true)
+    expect(liveOthers.length).toBeGreaterThan(0)
+    expect(liveOthers.every(player => player.holeCards === undefined)).toBe(true)
 
     playHandPassively(harness, seats.filter(seat => seat !== cat))
     vi.advanceTimersByTime(30_000)
@@ -137,7 +139,7 @@ describe('getting onto the rail', () => {
 })
 
 describe('what the rail sees', () => {
-  it('sees every live hand with odds; seated players never do while betting is open', () => {
+  it('sees no live hands or odds while betting is open, just like seated players', () => {
     const harness = createHarness()
     const seats = seatTable(harness, ['Ann', 'Ben', 'Cat'])
     const rails = ['R1', 'R2', 'R3', 'R4', 'R5'].map(name => joinPlayer(harness.server, harness.room, `conn-${name}`, name))
@@ -152,8 +154,8 @@ describe('what the rail sees', () => {
       if (phase !== 'in_hand') return
       for (const rail of rails) {
         const view = snapshot(rail.connection)
-        expect(view.handOdds?.mode).toBe('spectator')
-        expect(view.players.every(player => player.holeCards?.length === 2)).toBe(true)
+        expect(view.handOdds).toBeUndefined()
+        expect(view.players.every(player => player.holeCards === undefined)).toBe(true)
         expect(seatIds(harness.internals)).not.toContain(rail.playerId)
         expect(harness.internals.data.gameState.actingPlayerId).not.toBe(rail.playerId)
       }
@@ -167,11 +169,19 @@ describe('what the rail sees', () => {
       streetsChecked += 1
     })
     expect(streetsChecked).toBeGreaterThan(3)
-    // Five spectators, one computation per distinct street: never per viewer.
-    expect(getHandOddsComputationCount()).toBeLessThanOrEqual(4)
+    // Showdown: the rail sees the hands everyone sees.
+    const final = harness.internals.data.gameState
+    expect(final.phase).toBe('between_hands')
+    expect(final.round).toBe('showdown')
+    for (const rail of rails) {
+      const view = snapshot(rail.connection)
+      expect(view.players.some(player => player.holeCards?.length === 2)).toBe(true)
+    }
+    // No all-in, so betting never closed: no odds were computed for anyone.
+    expect(getHandOddsComputationCount()).toBe(0)
   })
 
-  it('keeps spectator status and the hole-card cam across a reconnect', () => {
+  it('keeps spectator status across a reconnect without gaining live hands', () => {
     const harness = createHarness()
     const seats = seatTable(harness, ['Ann', 'Ben'])
     const rail = joinPlayer(harness.server, harness.room, 'conn-rail', 'Rail')
@@ -183,12 +193,15 @@ describe('what the rail sees', () => {
     expect(back.playerId).toBe(rail.playerId)
     expect(lobbyEntry(back.connection, rail.playerId)?.isSpectator).toBe(true)
     expect(seatIds(harness.internals)).not.toContain(rail.playerId)
-    expect(snapshot(back.connection).handOdds?.mode).toBe('spectator')
+    const backView = snapshot(back.connection)
+    expect(backView.phase).toBe('in_hand')
+    expect(backView.handOdds).toBeUndefined()
+    expect(backView.players.every(player => player.holeCards === undefined)).toBe(true)
   })
 })
 
 describe('the rail is never a player', () => {
-  it('takes a seat mid-hand only for the next deal, and loses the hole-card cam once seated', () => {
+  it('takes a seat mid-hand only for the next deal, and stays out of live hands once seated', () => {
     const harness = createHarness()
     const seats = seatTable(harness, ['Ann', 'Ben'])
     const rail = joinPlayer(harness.server, harness.room, 'conn-rail', 'Rail')

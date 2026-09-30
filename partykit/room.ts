@@ -107,6 +107,8 @@ import { CHIP_FLICK_COOLDOWN_MS, HOUSE_ID, type PrankEvent, type PrankKind } fro
 import { computeHouseRules, WATERFALL_EVERY_HANDS } from '../lib/houseRules'
 /** Blinds-up mode: how long each blind level lasts. */
 const BLINDS_UP_EVERY_MS = 30 * 60_000
+/** After a water, random house beers leave that player alone this long. */
+const WATER_AUTO_BEER_SHIELD_MS = 60_000
 /** Extra thinking time on a turn that faces an all-in. */
 export const ALL_IN_EXTRA_TIME_MS = 15_000
 
@@ -2466,6 +2468,10 @@ export default class PokerRoom implements PartyServer {
       if (!this.isDrinkCapable(player)) continue
       const entry = this.drinkLedger[player.id] ??= this.newSeatedDrinkEntry()
       if (entry.passedOut || this.autoBeerRandom() >= BUZZ.autoBeerChance) continue
+      // Someone sobering up on purpose isn't handed a random beer: a water
+      // (or one still landing) keeps the house off them for a minute.
+      const lastWater = entry.lastDrink?.kind === 'water' ? entry.lastDrink.at : null
+      if (entry.pendingWaters.length > 0 || (lastWater !== null && now - lastWater < WATER_AUTO_BEER_SHIELD_MS)) continue
       const blackedOut = forceBeers(entry, 1, { drinkId: generateId(10), now, handNumber: state.handNumber })
       this.broadcastDrinkEvent(player.id, 'house_beer', 1)
       if (blackedOut) this.handlePassedOut(player.id)
@@ -3762,11 +3768,12 @@ export default class PokerRoom implements PartyServer {
       viewerSeat.holeCards.length > 0 &&
       (viewerSeat.status === 'active' || viewerSeat.status === 'all_in')
     )
-    const spectatorCanSeeLiveHands = (
-      isSpectatorViewer &&
-      !viewerIsLiveInHand &&
-      this.data.gameState.phase === 'in_hand'
-    )
+    // Watchers (busted, benched, on the rail) never see live hole cards: they
+    // could pass them to someone still in the hand. They see what everyone
+    // sees (tabled all-in hands, showdown).
+    const spectatorCanSeeLiveHands = false as boolean
+    void isSpectatorViewer
+    void viewerIsLiveInHand
     const bettingClosed = isBettingClosed(this.data.gameState)
     const isCardRevealWindow = this.data.gameState.phase === 'in_hand' || (
       this.data.gameState.phase === 'between_hands' && Boolean(this.data.gameState.winners?.length)

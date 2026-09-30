@@ -405,6 +405,23 @@ describe('PokerRoom random thirst', () => {
     expect(seatState(bob, bob.playerId)!.drinks!.level).toBeGreaterThanOrEqual(1)
   })
 
+  it('leaves a player alone for a minute after they drink water', () => {
+    vi.useFakeTimers()
+    const { server, join } = createTable()
+    const alice = join('alice', 'Alice', 0)
+    const bob = join('bob', 'Bob', 1)
+    alice.send({ type: 'set_drink_capable', capable: true })
+    setLevel(server, alice, 5)
+    alice.send({ type: 'order_drink', kind: 'water' })
+    server.autoBeerRandom = () => 0
+    vi.advanceTimersByTime(30_050)
+    // The water landed (-1.5) and no random beer undid it.
+    expect(seatState(bob, alice.playerId)?.drinks?.level).toBe(3.5)
+    // After the shield, the house can pour again.
+    vi.advanceTimersByTime(60_000)
+    expect(seatState(bob, alice.playerId)!.drinks!.level).toBeGreaterThan(3.5)
+  })
+
   it('never fires with fun mode off', () => {
     vi.useFakeTimers()
     const { server, join } = createTable()
