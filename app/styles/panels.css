@@ -4318,3 +4318,28 @@
     white-space: nowrap;
   }
 }
+
+/* Landing v2: the error takes the hint's slot (no jump), the crest stays
+   clear of the chip stacks, and the feature chips fit one row on phones. */
+[role='tabpanel']:has(> .entry-error) .entry-hint {
+  display: none;
+}
+
+.landing-art-crest {
+  font-size: calc(var(--card-w) * 0.1);
+  letter-spacing: 0.2em;
+}
+
+@media (max-width: 440px) {
+  .landing-features {
+    flex-wrap: nowrap;
+    justify-content: center;
+    gap: 5px;
+  }
+
+  .landing-features li {
+    gap: 4px;
+    padding: 4px 8px 4px 4px;
+    font-size: 10.5px;
+  }
+}

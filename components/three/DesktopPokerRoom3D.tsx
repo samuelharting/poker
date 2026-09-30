@@ -42,7 +42,7 @@ import { getArmChain, solveArmIK } from './avatarIK'
 import { updateAvatarHands } from './avatarHands'
 import { solveAvatarArms, type ArmSolveContext } from './avatarBodyArms'
 import { updateHatSecondary } from './avatarBodySecondary'
-import { applyBlink, getBlinkAmount, stylizeAvatar, type StylizedAvatar } from './avatarStyle'
+import { applyAvatarAccessoryFabrics, applyBlink, getBlinkAmount, stylizeAvatar, type StylizedAvatar } from './avatarStyle'
 import { disposeStickyNoteFx, syncStickyNoteFx, type StickyNoteFx } from './stickyNote'
 import { createAvatarFace, disposeAvatarFace, updateAvatarFace, type AvatarFaceRig } from './avatarFace'
 import { buildFaceInput, setFaceViewer, triggerFaceEmote } from './avatarFaceDirector'
@@ -1284,6 +1284,7 @@ async function requestRiggedAvatar(
       avatar.bones,
       seat.avatarProfile
     )
+    applyAvatarAccessoryFabrics(seat.riggedAccessories)
     avatar.model.traverse(object => {
       const mesh = object as THREE.Mesh
       if (mesh.isMesh) mesh.renderOrder = 2
@@ -1337,6 +1338,7 @@ function syncSeatAppearance(
     seat.riggedAccessories = seat.avatar
       ? createRiggedAvatarAccessories(seat.avatar.root, seat.avatar.bones, profile)
       : null
+    applyAvatarAccessoryFabrics(seat.riggedAccessories)
   }
   seat.appearanceKey = nextAppearanceKey
 }
@@ -2669,6 +2671,9 @@ function animateSeat(
     tableHeat,
     idleTell: seat.avatarProfile.idleTell,
     celebration: seat.avatarProfile.celebration,
+    headwear: seat.avatarProfile.hat !== 'none' || seat.requestedAvatarKey === 'worker' ? 'hat' : seat.avatarProfile.glasses !== 'none' ? 'glasses' : 'none',
+    // Only needed while a cue is reaching for the chips.
+    stackHeight: playback.isActive ? seat.stackFx.tallestLevels * (CHIP_HEIGHT + 0.002) / seat.root.scale.x : 0,
     anchors: seat.anchors,
     drinkElapsed: time - seat.drinkStartedAt < DRINK_DURATION ? time - seat.drinkStartedAt : null,
     drunkLevel: seat.drunkLevel,
@@ -3032,6 +3037,8 @@ function disposeObject(root: THREE.Object3D) {
 /** Head-top anchor, in seat-root space, that each DOM nameplate follows. */
 const NAMEPLATE_ANCHOR = new THREE.Vector3(0, 2.32, 0.08)
 const WAGER_LABEL_LIFT = 0.14
+/** How far in front of the board (toward the camera) the pot readout sits. */
+const POT_LABEL_BOARD_OFFSET = 0.95
 const BOARD_LABEL_HALF_SPAN = BOARD_XS[4]! + BOARD_CARD_WIDTH / 2 + 0.2
 const BOARD_LABEL_CLEARANCE = Math.sin(BOARD_CARD_TILT) * BOARD_CARD_DEPTH + 0.05
 
@@ -3059,7 +3066,7 @@ function getTableHeat(runtime: SceneRuntime, time: number) {
  */
 function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width: number, height: number) {
   const scratch = overlayScratch
-  const placedPlates: Array<{ element: HTMLElement; x: number; y: number; extra: number }> = []
+  const placedPlates: Array<{ element: HTMLElement; x: number; y: number; extra: number; w: number; h: number }> = []
   // Everything below is computed first and written last: no DOM read (hover,
   // querySelector) ever follows a style write in the same frame, so the frame
   // never forces a synchronous style recalc.
@@ -3067,11 +3074,9 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
   // is written on the two readouts themselves, never on .table-scene: a custom
   // property changed on the scene root is inherited by (and re-styles) the whole
   // table DOM every frame.
-  scratch.copy(runtime.pot.group.position)
-  // Just past the mound's left edge: the hero's bet (and its label) sits to
-  // the pot's right, so the two readouts never stack on each other.
-  scratch.x -= 0.74
-  scratch.y += 0.12
+  // Centred on the felt just in front of the board: the one place players
+  // look for the pot, and it no longer rides out to the left with the mound.
+  scratch.set(0, FELT_TOP_Y + 0.02, BOARD_Z + POT_LABEL_BOARD_OFFSET)
   scratch.project(runtime.camera)
   const potX = (scratch.x * 0.5 + 0.5) * width
   const potY = (-scratch.y * 0.5 + 0.5) * height
@@ -3089,8 +3094,12 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
     }
     let element = runtime.overlayElements.get(seat.playerId)
     if (!element || !element.isConnected) {
+      if (element) unobservePlateBox(element)
       element = host.querySelector<HTMLElement>(`[data-seat-player="${CSS.escape(seat.playerId)}"]`) ?? undefined
-      if (element) runtime.overlayElements.set(seat.playerId, element)
+      if (element) {
+        runtime.overlayElements.set(seat.playerId, element)
+        observePlateBox(element)
+      }
     }
     if (!element) continue
 
@@ -3112,9 +3121,11 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
       : THREE.MathUtils.clamp((-scratch.y * 0.5 + 0.5) * height, 150, height - 260)
     const pinned = !nearSpectated && x !== rawX
     const isLocal = element.classList.contains('is-local-player')
-    // Revealed hole cards sit above the plate and need clearance too.
-    const extra = !isLocal && element.querySelector('.has-revealed-cards') ? 62 : 0
-    placedPlates.push({ element, x, y, extra: isLocal ? -1 : extra })
+    // The measured box already includes revealed hole cards; before the first
+    // measurement they need clearance added by hand.
+    const box = isLocal ? undefined : plateBoxes.get(element)
+    const extra = !isLocal && !box && element.querySelector('.has-revealed-cards') ? 62 : 0
+    placedPlates.push({ element, x, y, extra: isLocal ? -1 : extra, w: box?.w ?? 0, h: box?.h ?? 0 })
     toggleClass(element, 'is-edge-pinned', pinned)
     toggleClass(element, 'is-near-spectated', nearSpectated)
     setStyleVar(element, '--seat-depth', (TABLE_SEAT_SCALES[toVisualSeat(seat.visualSeat)] ?? 1).toFixed(3))
@@ -3143,23 +3154,34 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
   betLabelScratch.length = 0
   // Resolve collisions: nudge plates apart so no two nameplates overlap, even
   // when the camera pushes in or neighbours pin to the same screen edge.
+  // Each plate is a box centred on x with its bottom edge on y, sized from its
+  // real measured width and height (a long name, badges, an ACTING pill or
+  // revealed cards all count), plus a small gap so neighbours never touch.
   const compact = width < 1366 || height < 820
-  const plateWidth = compact ? 168 : 196
-  const plateHeight = compact ? 62 : 72
+  const fallbackWidth = compact ? 168 : 196
+  const fallbackHeight = compact ? 62 : 72
+  const PLATE_GAP = 8
   const plates = placedPlates.filter(plate => plate.extra >= 0)
+  for (const plate of plates) {
+    if (!plate.w) plate.w = fallbackWidth
+    if (!plate.h) plate.h = fallbackHeight + plate.extra
+  }
   plates.sort((a, b) => a.y - b.y)
-  for (let pass = 0; pass < 3; pass += 1) {
+  for (let pass = 0; pass < 4; pass += 1) {
     for (let i = 0; i < plates.length; i += 1) {
       for (let j = i + 1; j < plates.length; j += 1) {
-        const upper = plates[i]!
-        const lower = plates[j]!
-        const overlapX = plateWidth - Math.abs(upper.x - lower.x)
-        const overlapY = plateHeight + lower.extra - Math.abs(lower.y - upper.y)
+        const a = plates[i]!
+        const b = plates[j]!
+        const upper = a.y <= b.y ? a : b
+        const lower = upper === a ? b : a
+        const overlapX = (upper.w + lower.w) / 2 + PLATE_GAP - Math.abs(upper.x - lower.x)
+        const overlapY = Math.min(upper.y, lower.y) - Math.max(upper.y - upper.h, lower.y - lower.h) + PLATE_GAP
         if (overlapX <= 0 || overlapY <= 0) continue
         if (overlapY < overlapX) lower.y += overlapY
         else lower.x += (lower.x >= upper.x ? 1 : -1) * overlapX
         // Clamp inside the pass so the screen edge can't undo a nudge.
-        lower.x = THREE.MathUtils.clamp(lower.x, 110, width - 110)
+        const edge = Math.max(110, lower.w / 2 + 6)
+        lower.x = THREE.MathUtils.clamp(lower.x, edge, width - edge)
       }
     }
   }
@@ -3168,8 +3190,11 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
   const tableScene = host.closest<HTMLElement>('.table-scene')
   // Whole pixels: the camera's slow breathing would otherwise nudge these by a
   // fraction of a pixel (and cost a style pass) on every single frame.
+  // The hero's own bet label rides on their chips just in front of the board:
+  // when the two would meet, the pot readout steps down below it.
+  const potClearY = heroBet && Math.abs(heroBet.x - potX) < 150 ? Math.max(potY, heroBet.y + 26) : potY
   const potXValue = `${Math.round(potX)}px`
-  const potYValue = `${Math.round(potY)}px`
+  const potYValue = `${Math.round(potClearY)}px`
   for (const readout of [cachedQuery(tableScene, '.table-surface .pot-display'), cachedQuery(host, '.payout-pot-readout')]) {
     if (!readout) continue
     setStyleVar(readout, '--pot-x', potXValue)
@@ -3307,6 +3332,34 @@ function cachedQuery(root: Element | null, selector: string): HTMLElement | null
 }
 
 const plateScreenPositions = new WeakMap<HTMLElement, { x: number; y: number }>()
+
+/**
+ * Each nameplate's on-screen box (depth scale included), measured by a
+ * ResizeObserver whenever its content changes (name, badges, status pill,
+ * revealed cards). The per-frame collision pass reads these numbers and never
+ * touches layout itself.
+ */
+const plateBoxes = new WeakMap<HTMLElement, { w: number; h: number }>()
+let plateBoxObserver: ResizeObserver | null = null
+function observePlateBox(seatElement: HTMLElement) {
+  if (typeof ResizeObserver === 'undefined') return
+  const target = seatElement.querySelector<HTMLElement>('.cinematic-seat-target')
+  if (!target) return
+  plateBoxObserver ??= new ResizeObserver(entries => {
+    for (const entry of entries) {
+      const seat = (entry.target as HTMLElement).closest<HTMLElement>('.cinematic-seat')
+      if (!seat) continue
+      // Layout is clean inside an observer callback, so this read is cheap.
+      const rect = entry.target.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) plateBoxes.set(seat, { w: rect.width, h: rect.height })
+    }
+  })
+  plateBoxObserver.observe(target)
+}
+function unobservePlateBox(seatElement: HTMLElement) {
+  const target = seatElement.querySelector<HTMLElement>('.cinematic-seat-target')
+  if (target) plateBoxObserver?.unobserve(target)
+}
 
 const effectPoint = new THREE.Vector3()
 
@@ -4412,7 +4465,9 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
         {view.players.map(player => {
           const reaction = emoteReactions.find(item => item.targetId === player.id)
           const chatMessage = chatMessages.find(item => item.targetId === player.id)
-          const statusLabel = getStatusLabel(player)
+          // Once the hand is over, last-street action tags ("Called $20") are stale:
+          // only an away / sitting-out note stays on a non-winner's plate.
+          const statusLabel = view.phase === 'in_hand' || player.awayLabel ? getStatusLabel(player) : ''
           // Committed chips this street; a fold-win ends the hand with bets still set, but the chips are gone.
           const showBetChip = player.bet > 0 && view.phase === 'in_hand'
           const cardRevealAction = cardRevealActions.find(action => action.playerId === player.id)

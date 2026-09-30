@@ -119,15 +119,15 @@
 
   .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-panel {
     position: relative;
-    border-color: rgba(150, 220, 255, 0.95);
+    border-color: rgba(160, 240, 210, 0.95);
     background:
-      linear-gradient(180deg, rgba(127, 208, 255, 0.2), rgba(127, 208, 255, 0.05)),
+      linear-gradient(180deg, rgba(116, 232, 189, 0.2), rgba(116, 232, 189, 0.05)),
       rgba(10, 17, 18, 0.88);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34), 0 0 0 3px rgba(127, 208, 255, 0.32), 0 0 30px rgba(127, 208, 255, 0.5);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34), 0 0 0 3px rgba(116, 232, 189, 0.32), 0 0 30px rgba(116, 232, 189, 0.5);
     animation: ui-acting-ring 1.3s ease-in-out infinite;
   }
 
-  /* Soft light-blue pool of light under the plate, spilling toward the player. */
+  /* Soft mint pool of light under the plate, spilling toward the player. */
   .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-target::before {
     content: '';
     position: absolute;
@@ -135,21 +135,21 @@
     bottom: -34px;
     width: 150%;
     height: 56px;
-    background: radial-gradient(closest-side, rgba(127, 208, 255, 0.42), rgba(127, 208, 255, 0.12) 60%, rgba(127, 208, 255, 0));
+    background: radial-gradient(closest-side, rgba(116, 232, 189, 0.42), rgba(116, 232, 189, 0.12) 60%, rgba(116, 232, 189, 0));
     transform: translateX(-50%);
     pointer-events: none;
     z-index: -1;
     animation: ui-acting-pool 1.3s ease-in-out infinite;
   }
 
-  /* Pointer: the plate's tail becomes a bold light-blue arrow at the player. */
+  /* Pointer: the plate's tail becomes a bold mint arrow at the player. */
   .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-target::after {
     bottom: -9px;
     width: 14px;
     height: 14px;
-    border-color: rgba(150, 220, 255, 0.95);
-    background: #7fd0ff;
-    box-shadow: 0 0 12px rgba(127, 208, 255, 0.7);
+    border-color: rgba(160, 240, 210, 0.95);
+    background: #74e8bd;
+    box-shadow: 0 0 12px rgba(116, 232, 189, 0.7);
     animation: ui-acting-arrow 1.3s ease-in-out infinite;
   }
 
@@ -162,7 +162,7 @@
     font-size: 10.5px;
     font-weight: 800;
     letter-spacing: 0.08em;
-    box-shadow: 0 0 10px rgba(127, 208, 255, 0.55);
+    box-shadow: 0 0 10px rgba(116, 232, 189, 0.55);
   }
 
   .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-meta small::before {
@@ -264,10 +264,10 @@
   @keyframes ui-acting-ring {
     0%,
     100% {
-      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34), 0 0 0 3px rgba(127, 208, 255, 0.3), 0 0 24px rgba(127, 208, 255, 0.4);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34), 0 0 0 3px rgba(116, 232, 189, 0.3), 0 0 24px rgba(116, 232, 189, 0.4);
     }
     50% {
-      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34), 0 0 0 6px rgba(127, 208, 255, 0.16), 0 0 40px rgba(127, 208, 255, 0.72);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34), 0 0 0 6px rgba(116, 232, 189, 0.16), 0 0 40px rgba(116, 232, 189, 0.72);
     }
   }
 
@@ -735,5 +735,333 @@
   .room-shell .social-dock-toggle:hover,
   .room-shell .drink-button:hover {
     transform: none;
+  }
+}
+
+/* ==========================================================================
+   UI pass v2 (review round 1): plates that never collide or clip, one bet
+   readout per player, a centred pot, a calmer tray at 1024, the cashier
+   clear of the table controls, and gold/green accents only.
+   ========================================================================== */
+
+@media (min-width: 1024px) {
+  /* Nameplates: grow to fit a full name before anything truncates. The 3D
+     loop measures each plate and keeps neighbours apart. */
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-panel,
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-panel:has(.cinematic-seat-in-bet) {
+    min-width: 120px;
+    max-width: 236px;
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-topline strong {
+    max-width: 168px;
+  }
+
+  /* The bet already sits on its own chips on the felt: no second copy on the
+     plate. A plate pinned to the screen edge has no felt label, so it keeps it. */
+  .desktop-3d-stage .cinematic-seat:not(.is-edge-pinned) .cinematic-seat-in-bet {
+    display: none;
+  }
+
+  /* Stack left, status pill right; the pill is never cut by the plate. */
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-meta {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-seat-meta small,
+  .desktop-3d-stage .cinematic-seat.is-acting .cinematic-seat-meta small {
+    flex: none;
+    max-width: none;
+    overflow: visible;
+  }
+
+  /* The winning hand gets its own full row: "Flush, Queen high" in full. */
+  .desktop-3d-stage .cinematic-seat.is-winner .cinematic-seat-meta .cinematic-winner-label {
+    flex: 1 0 100%;
+    max-width: none;
+    overflow: visible;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.25;
+  }
+
+  /* The hero's bet reads like every other bet: a dark pill with a gold rim
+     and a nib on its chips, not a second "pot" in the middle of the felt. */
+  .table-scene[data-desktop-three='true'] .hero-table-bet {
+    min-height: 0;
+    gap: 0;
+    padding: 2px 9px 3px;
+    border: 1.5px solid rgba(255, 217, 106, 0.9);
+    background: rgba(8, 14, 15, 0.94);
+    box-shadow: 0 5px 12px rgba(0, 0, 0, 0.55);
+    backdrop-filter: none;
+  }
+
+  .table-scene[data-desktop-three='true'] .hero-table-bet::before {
+    left: 50%;
+    bottom: -5px;
+    width: 7px;
+    height: 7px;
+    border-radius: 0;
+    border-right: 1.5px solid rgba(255, 217, 106, 0.9);
+    border-bottom: 1.5px solid rgba(255, 217, 106, 0.9);
+    background: rgba(8, 14, 15, 0.94);
+    transform: translateX(-50%) rotate(45deg);
+    z-index: 0;
+  }
+
+  .table-scene[data-desktop-three='true'] .hero-table-bet-chip-rail,
+  .table-scene[data-desktop-three='true'] .hero-table-bet-kicker {
+    display: none;
+  }
+
+  .table-scene[data-desktop-three='true'] .hero-table-bet-value {
+    color: #ffe9a3;
+    font-size: 14.5px;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    line-height: 1.15;
+    text-shadow: none;
+  }
+
+  /* "Act now" repeated the tray's YOUR TURN and sat on the cards at 1024. */
+  .table-scene[data-desktop-three='true'] .own-hand-area .own-hand-turn-chip {
+    display: none;
+  }
+
+  /* Run it twice: the pot sits just below the two boards, never under them
+     (above them it would cover the far player's plate). */
+  .table-scene[data-desktop-three='true'][data-run-it-twice='accepted'] .table-surface .pot-display {
+    transform: translate3d(50vw, calc(50vh + 146px), 0) translate(-50%, 0);
+  }
+
+  /* The vote says "Heads-up all-in" itself: no all-in card behind it. */
+  .table-scene[data-desktop-three='true']:has(> .run-it-twice-prompt) > .all-in-announcement {
+    display: none;
+  }
+
+  /* Hand winner card: full names, the hand wraps instead of cutting off. */
+  .table-scene[data-desktop-three='true'] .table-hand-result-summary {
+    max-width: min(440px, calc(50vw - 100px));
+  }
+
+  .table-scene[data-desktop-three='true'] .table-hand-result-player {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .table-scene[data-desktop-three='true'] .table-hand-result-player strong {
+    max-width: none;
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 16px;
+    line-height: 1.15;
+  }
+
+  .table-scene[data-desktop-three='true'] .table-hand-result-amount {
+    flex: none;
+  }
+
+  /* Showdown narration names the hand once its five cards light up. */
+  .showdown-table-sequence-copy .showdown-table-hand {
+    color: var(--c-brass-200);
+    font-style: normal;
+    font-weight: 800;
+  }
+
+  /* Slider steppers: a real 34px target, an obvious "can't go further" state. */
+  .table-scene[data-desktop-three='true'] .raise-step-btn {
+    width: 34px;
+    height: 34px;
+    font-size: 22px;
+    touch-action: manipulation;
+    user-select: none;
+  }
+
+  .table-scene[data-desktop-three='true'] .raise-step-btn:disabled {
+    border-color: var(--line-soft);
+    background: transparent;
+    color: var(--c-text-3);
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-slider-row {
+    grid-template-rows: 32px 34px;
+  }
+
+  /* Bet box: sized for the biggest possible bet, right-aligned, and the font
+     steps down for long numbers so "1,000" or "12,500" never clips. */
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-input-wrap .raise-input {
+    padding-inline: 8px;
+    text-align: right;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-input-wrap[data-digits='4'] .raise-input {
+    font-size: 17px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-input-wrap[data-digits='5'] .raise-input {
+    font-size: 15px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-input-wrap:is([data-digits='6'], [data-digits='7']) .raise-input {
+    font-size: 13px;
+  }
+
+  .table-scene[data-desktop-three='true'] .btn-quick-frac {
+    font-size: 1.2em;
+    line-height: 1;
+  }
+
+  /* Timer label a touch larger; 9px caps were hard to read. */
+  .table-scene[data-desktop-three='true'] .betting-tray .timer-bar-header {
+    font-size: 10px;
+  }
+
+  /* Player card: wider, one-line title, readable stat labels. */
+  .table-panel.targeted-emote-panel {
+    width: min(268px, calc(100vw - 40px));
+  }
+
+  .targeted-emote-panel .table-panel-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .targeted-emote-panel .targeted-player-stat span {
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+  }
+
+  /* Top bar: Sound and Settings are one family of buttons. */
+  .room-shell .room-hud .hud-sound-trigger,
+  .room-shell .room-hud .hud-settings-trigger {
+    min-height: 38px;
+    padding: 0 14px;
+    border-radius: var(--r-pill);
+    color: var(--c-text-1);
+    font: 700 13px / 1 var(--font-ui);
+    letter-spacing: 0.01em;
+  }
+
+  .room-shell .room-hud .hud-sound-trigger:hover,
+  .room-shell .room-hud .hud-settings-trigger:hover {
+    background: rgba(255, 255, 255, 0.07);
+  }
+
+  /* Chat open: your own speech bubble moves above your cards instead of
+     hiding under the chat panel. */
+  .table-scene[data-desktop-three='true']:has(.social-dock.is-open) .own-hand-area .own-hand-social {
+    right: auto;
+    left: 50%;
+    bottom: calc(100% + 52px);
+    align-items: center;
+    transform: translateX(-50%);
+  }
+
+  /* The cashier (out of chips) sits where your cards would be, above the
+     drink dock; with the table controls up it centres beside them. */
+  .room-shell .ledger-busted-card {
+    bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+
+  .room-shell:has(.table-side-panels) .ledger-busted-card {
+    left: calc((100vw - 316px) / 2);
+    max-width: calc(100vw - 316px - 32px);
+  }
+
+  /* Sitting out / out of chips mid-hand: a bar at the bottom, where your
+     cards would be, never over the nameplates. */
+  .room-shell .membership-sitout,
+  .room-shell .membership-notice ~ .membership-sitout {
+    top: auto;
+    bottom: calc(110px + env(safe-area-inset-bottom));
+  }
+}
+
+/* Narrow desktop (1024-1180): fraction glyphs and a single "4s" clock. */
+@media (min-width: 1024px) and (max-width: 1180px) {
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-quick-unit,
+  .table-scene[data-desktop-three='true'] .betting-tray .timer-bar-label,
+  .table-scene[data-desktop-three='true'] .betting-tray .timer-bar-left {
+    display: none;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .timer-bar-shell {
+    min-width: 0;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .btn-quick {
+    font-size: 11px;
+  }
+
+  .table-scene[data-desktop-three='true'] .betting-tray .raise-slider-row {
+    grid-template-columns: minmax(0, 1fr) 84px;
+  }
+
+  /* A narrower chat panel so the pot and your cards stay in view. */
+  .table-scene[data-layout='desktop'] .social-dock-panel {
+    width: 300px;
+  }
+}
+
+.room-shell .membership-sitout.is-busted {
+  border-color: rgba(255, 214, 110, 0.75);
+}
+
+/* "Your turn" strip on top of the chat and player panels. */
+.panel-turn-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  margin: 0;
+  padding: 6px 12px;
+  border: 1px solid rgba(116, 232, 189, 0.6);
+  border-radius: var(--r-md);
+  background: rgba(116, 232, 189, 0.14);
+  color: var(--c-text-1);
+  font: 800 13px / 1.1 var(--font-ui);
+  cursor: pointer;
+}
+
+.panel-turn-strip b {
+  color: var(--c-sky-400);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.panel-turn-strip.is-low {
+  border-color: rgba(255, 122, 61, 0.8);
+  background: rgba(255, 122, 61, 0.16);
+}
+
+.social-dock-panel > .panel-turn-strip {
+  width: auto;
+  margin: 10px 10px 0;
+}
+
+@media (min-width: 1024px) {
+  .room-shell .room-hud .hud-sound-trigger > span,
+  .room-shell .room-hud .hud-settings-trigger .hud-settings-trigger-label {
+    font: 700 13px / 1 var(--font-ui);
+    letter-spacing: 0.01em;
+    text-transform: none;
+  }
+
+  .room-shell .room-hud .hud-sound-trigger-glyph,
+  .room-shell .room-hud .hud-settings-trigger-glyph {
+    width: 15px;
+    height: 15px;
+  }
+
+  .table-scene[data-desktop-three='true'] .btn-quick-unit {
+    margin-left: 2px;
   }
 }

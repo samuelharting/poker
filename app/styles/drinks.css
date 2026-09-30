@@ -80,8 +80,8 @@
 }
 
 .drink-button.is-water {
-  border-color: rgba(127, 208, 255, 0.28);
-  background: linear-gradient(180deg, rgba(127, 208, 255, 0.13), rgba(127, 208, 255, 0.03));
+  border-color: rgba(116, 232, 189, 0.28);
+  background: linear-gradient(180deg, rgba(116, 232, 189, 0.13), rgba(116, 232, 189, 0.03));
 }
 
 .drink-button-glyph {
@@ -97,7 +97,7 @@
 }
 
 .drink-button.is-water .drink-button-glyph {
-  background: rgba(127, 208, 255, 0.18);
+  background: rgba(116, 232, 189, 0.18);
 }
 
 .drink-button:hover:not(:disabled),
@@ -110,7 +110,7 @@
 
 .drink-button.is-water:hover:not(:disabled),
 .drink-button.is-water:focus-visible {
-  border-color: rgba(127, 208, 255, 0.6);
+  border-color: rgba(116, 232, 189, 0.6);
   box-shadow: var(--glow-sky);
 }
 
@@ -230,7 +230,7 @@
 }
 
 .drink-controls.is-mobile .drink-button.is-water {
-  border-color: rgba(127, 208, 255, 0.4);
+  border-color: rgba(116, 232, 189, 0.4);
 }
 
 .drink-controls.is-mobile .drink-button-label {
@@ -325,12 +325,12 @@
 
 .drink-toast.is-water,
 .drink-toast.is-water-kicked-in {
-  --toast-accent: rgba(127, 208, 255, 0.5);
+  --toast-accent: rgba(116, 232, 189, 0.5);
 }
 
 .drink-toast.is-water .drink-toast-icon,
 .drink-toast.is-water-kicked-in .drink-toast-icon {
-  background: rgba(127, 208, 255, 0.16);
+  background: rgba(116, 232, 189, 0.16);
 }
 
 .drink-toast.is-passed-out {
@@ -481,14 +481,22 @@
     hue-rotate(calc(var(--drunk-phase) * -12deg));
 }
 
-:root[data-drunk-tier] .table-scene {
+/* Double vision ghosts the room and the seat labels only (text-shadow
+   inherits, so it is never set on .table-scene as a whole). */
+:root[data-drunk-tier] :is(.desktop-3d-stage, .table-surface, .table-seat-ring, .mobile-poker-field > :not(.mobile-hero-lane)) {
   text-shadow:
     calc(var(--drunk-ghost, 0px) * var(--drunk-phase)) calc(var(--drunk-ghost, 0px) * var(--drunk-phase) * 0.35) 0
     color-mix(in srgb, currentColor 42%, transparent);
 }
 
-/* The decision itself stays sharp: no ghosting on the action tray. */
-:root[data-drunk-tier] .table-scene :is(.betting-tray, .mobile-betting-panel) {
+/* Everything you read or decide with stays sharp: the action tray, menus,
+   dialogs, chat, the player popup, the cashier and your own plate. */
+:root[data-drunk-tier] :is(
+  .betting-tray, .mobile-betting-panel, .settings-modal, .targeted-emote-panel,
+  .social-dock, [role='dialog'], [role='alertdialog'], .ledger-busted-card,
+  .hero-bottom-summary, .cinematic-seat.is-local-player, .table-side-panels,
+  .hero-inline-status, .pre-action-dock
+) {
   text-shadow: none;
 }
 
@@ -615,7 +623,7 @@
 }
 
 .drunk-sip.is-water::before {
-  background: radial-gradient(circle at 50% 78%, rgba(127, 208, 255, 0.26), transparent 58%);
+  background: radial-gradient(circle at 50% 78%, rgba(116, 232, 189, 0.26), transparent 58%);
 }
 
 .drunk-sip-glass {
@@ -826,8 +834,8 @@
 }
 
 @keyframes drink-pending-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(127, 208, 255, 0.55); }
-  50% { box-shadow: 0 0 0 5px rgba(127, 208, 255, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(116, 232, 189, 0.55); }
+  50% { box-shadow: 0 0 0 5px rgba(116, 232, 189, 0); }
 }
 
 @keyframes drink-toast-in {

@@ -521,13 +521,97 @@ function MobileBetIndicator({
   )
 }
 
+/** Raise-size quick buttons read as fractions (¼ ½ ¾); the full name stays the button's label. */
+const QUICK_BET_GLYPHS: Record<string, string> = {
+  '1/4 Pot': '¼',
+  '1/2 Pot': '½',
+  '3/4 Pot': '¾',
+}
+
+/**
+ * A ‹ › / − + bet stepper that repeats while held: one step on press, then
+ * faster and faster, and five steps at a time once it has run for a while.
+ * A keyboard press (Enter / Space) is still exactly one step.
+ */
+function HoldStepButton({
+  className,
+  disabled,
+  onStep,
+  children,
+  ...rest
+}: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onClick'> & {
+  onStep: (multiplier: number) => void
+}) {
+  const stepRef = useRef(onStep)
+  stepRef.current = onStep
+  const timerRef = useRef<number | null>(null)
+  const pointerStepRef = useRef(false)
+
+  const stop = useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => stop, [stop])
+  useEffect(() => {
+    if (!disabled) return
+    // Hitting the limit mid-hold: no click follows on a disabled button.
+    stop()
+    pointerStepRef.current = false
+  }, [disabled, stop])
+
+  const start = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (disabled || event.button !== 0) return
+    pointerStepRef.current = true
+    stop()
+    stepRef.current(1)
+    let delay = 380
+    let repeats = 0
+    const tick = () => {
+      repeats += 1
+      stepRef.current(repeats > 14 ? 5 : 1)
+      delay = Math.max(40, delay * (repeats === 1 ? 0.3 : 0.86))
+      timerRef.current = window.setTimeout(tick, delay)
+    }
+    timerRef.current = window.setTimeout(tick, delay)
+    window.addEventListener('pointerup', stop, { once: true })
+    window.addEventListener('pointercancel', stop, { once: true })
+  }
+
+  return (
+    <button
+      type="button"
+      {...rest}
+      className={className}
+      disabled={disabled}
+      onPointerDown={start}
+      onPointerLeave={stop}
+      onContextMenu={event => event.preventDefault()}
+      onClick={() => {
+        // The press already stepped; a keyboard click steps once.
+        if (pointerStepRef.current) {
+          pointerStepRef.current = false
+          return
+        }
+        stepRef.current(1)
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
 type SeatTimerStyle = CSSProperties & { '--turn-pct'?: number }
 
 function AllInAnnouncement({ announcement }: { announcement: AllInAnnouncementView }) {
   const amountLabel = announcement.amountLabel?.replace(/\d{4,}/g, digits => Number(digits).toLocaleString())
   const amountCopy = amountLabel
     ? `${amountLabel} in the middle`
-    : 'Stack in the middle'
+    : announcement.isHero ? 'Your stack is in the middle' : 'Stack in the middle'
+  // Your own shove reads "You", never your name in the third person.
+  const playerName = announcement.isHero ? 'You' : announcement.nickname
 
   return (
     <div
@@ -546,7 +630,7 @@ function AllInAnnouncement({ announcement }: { announcement: AllInAnnouncementVi
         ))}
       </div>
       <span className="all-in-kicker">All in</span>
-      <strong className="all-in-player">{announcement.nickname}</strong>
+      <strong className="all-in-player">{playerName}</strong>
       <span className="all-in-amount">{amountCopy}</span>
     </div>
   )
@@ -580,6 +664,7 @@ function MobileEdgeSeat({
   timerPercent,
   isWinner = false,
   winnerAmount,
+  winnerHandDescription,
   winningCards = [],
   cardRevealControl,
   onNameClick,
@@ -595,6 +680,8 @@ function MobileEdgeSeat({
   timerPercent?: number
   isWinner?: boolean
   winnerAmount?: number
+  /** "Flush, Queen high": named under the winner's amount. */
+  winnerHandDescription?: string
   winningCards?: Card[]
   cardRevealControl?: React.ReactNode
   onNameClick?: (playerId: string) => void
@@ -611,7 +698,8 @@ function MobileEdgeSeat({
   // Sat down while a hand was running: dealt in from the next one.
   const isJoiningNextHand = player.status === 'waiting' && !player.hasCards && isHandLive
   const blindRole = player.isBB ? 'big' : player.isSB ? 'small' : null
-  const mobileSeatName = getMobileSeatName(player)
+  // Your own chair (lobby, rail layout) reads "You" and is marked, never like an opponent.
+  const mobileSeatName = isSelf ? 'You' : getMobileSeatName(player)
   const targetTitle = `Target ${player.nickname} for emojis`
   const holeCards = player.holeCards ?? []
   const { left: visibleLeftCard, right: visibleRightCard } = getVisibleSeatCards(
@@ -619,7 +707,8 @@ function MobileEdgeSeat({
     holeCards
   )
   const hasVisibleHoleCards = Boolean(visibleLeftCard || visibleRightCard)
-  const actionChip = getSeatActionChip(player)
+  // Once the hand is over, last-street tags ("Call", "Raise") are stale.
+  const actionChip = isHandLive ? getSeatActionChip(player) : null
   const statusTone = isWinner && typeof winnerAmount === 'number' && winnerAmount > 0
     ? 'win'
     : (isDisconnected || isSittingOut) && !isFolded
@@ -636,6 +725,7 @@ function MobileEdgeSeat({
     hasVisibleHoleCards ? 'has-visible-cards' : '',
     isDisconnected ? 'is-disconnected' : '',
     cardRevealControl ? 'has-reveal-control' : '',
+    isSelf ? 'is-self' : '',
   ].filter(Boolean).join(' ')
   const seatStyle: SeatTimerStyle | undefined = isActing && typeof timerPercent === 'number'
     ? { '--turn-pct': Math.round(timerPercent * 10) / 10 }
@@ -727,7 +817,10 @@ function MobileEdgeSeat({
 
       <div className={`mobile-seat-status is-${statusTone}`}>
         {statusTone === 'win' ? (
-          <span className="mobile-seat-action">+{formatAmount(winnerAmount ?? 0)}</span>
+          <>
+            <span className="mobile-seat-action">+{formatAmount(winnerAmount ?? 0)}</span>
+            {winnerHandDescription && <small className="mobile-seat-hand">{winnerHandDescription}</small>}
+          </>
         ) : isJoiningNextHand ? (
           <span className="mobile-seat-action">Next hand</span>
         ) : statusTone === 'away' ? (
@@ -1911,6 +2004,14 @@ export function PokerTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [heroTurnKey, isMobileViewport])
 
+  // Phones: your turn starting folds the player card away, so the clock and
+  // the action tray are never hidden behind it (chat closes itself the same way).
+  useEffect(() => {
+    if (!heroTurnKey || !isMobileViewport) return
+    setTargetEmotePlayerId(null)
+    setTargetEmotePickerOpen(false)
+  }, [heroTurnKey, isMobileViewport])
+
   const maxRaise = me ? me.stack + me.bet : 0
   const effectiveMin = Math.min(state.minRaise, maxRaise)
   const [raiseAmount, setRaiseAmount] = useState(effectiveMin)
@@ -2407,7 +2508,7 @@ export function PokerTable({
     : state.players.length < 2
       ? 'Share the room code and fill the open seats to kick off the next hand.'
       : isHost
-        ? 'The table is ready. Deal whenever everyone looks settled.'
+        ? `The table is ready. Press ${state.phase === 'between_hands' ? 'Deal next hand' : 'Start game'} when everyone is set.`
         : 'The table is ready. Waiting for the game creator to deal.'
   const waitingStatusText = getWaitingStatusText(state, lobbyMe, isConnected)
   const desktopWaitingBannerTitle = !isConnected
@@ -2620,7 +2721,8 @@ export function PokerTable({
         />
       ) : null}
       {!isMobileViewport && showdownCinematic}
-      {!isMobileViewport && lobbyMe?.isSpectator && spectatorRailState && !settingsOpen ? (
+      {/* Busted: the cashier card is the one status, so no Watching bar on top of it. */}
+      {!isMobileViewport && lobbyMe?.isSpectator && spectatorRailState && !settingsOpen && !isRailBusted ? (
         <div className="spectator-watch-bar" role="status" aria-label="Watching">
           <span className="spectator-watch-live" aria-hidden="true" />
           <strong>Watching</strong>
@@ -2711,11 +2813,13 @@ export function PokerTable({
                       timerPercent={isActingSeat ? turnTimer.percent : undefined}
                       isWinner={betweenHands && showWinnerHighlights && winnerAmounts.has(player.id)}
                       winnerAmount={winnerTotals.get(player.id)}
+                      winnerHandDescription={winnerDescriptions.get(player.id)}
                       winningCards={winnerCardsByPlayer.get(player.id)}
                       cardRevealControl={cardRevealActionByPlayerId.has(player.id) ? (
                         <CardRevealSeatButton
                           action={cardRevealActionByPlayerId.get(player.id)!}
                           onRequest={onRequestCardReveal}
+                          iconOnly
                         />
                       ) : null}
                       onNameClick={handleSelectEmoteTarget}
@@ -2942,7 +3046,7 @@ export function PokerTable({
               </div>
             )}
 
-            {showDesktopWaitingBanner ? (
+            {showDesktopWaitingBanner && !isBustedViewer && !isRailBusted ? (
               <TableWaitingBanner
                 title={desktopWaitingBannerTitle}
                 playerCount={state.players.length}
@@ -3125,6 +3229,8 @@ export function PokerTable({
           isConnected={isConnected}
           onSendChat={onSendChat}
           onSendEmote={onSendEmote}
+          closeOnTurnKey={isMobileViewport ? heroTurnKey : null}
+          turnSecondsLeft={hasActionTray ? turnTimer.secondsLeft : undefined}
         />
       )}
 
@@ -3142,6 +3248,8 @@ export function PokerTable({
           onAddBots={onAddBots}
           onSeatMe={onSeatMe}
           onFeedback={onFeedback}
+          roomCode={roomCode}
+          onShareRoom={onShareRoom}
         />
       )}
 
@@ -3193,26 +3301,26 @@ export function PokerTable({
             {raiseSizingOpen && canMobileRaise && (
               <div className="mobile-raise-sizing" role="group" aria-label="Raise size">
                 <div className="mobile-raise-control">
-                  <button
-                    type="button"
+                  <HoldStepButton
                     className="mobile-raise-step"
-                    onClick={() => adjustRaiseAmount(-mobileRaiseStep)}
+                    disabled={raiseAmount <= effectiveMin}
+                    onStep={multiplier => adjustRaiseAmount(-mobileRaiseStep * multiplier)}
                     aria-label="Decrease bet"
                   >
                     −
-                  </button>
+                  </HoldStepButton>
                   <div className="mobile-bet-amount" aria-live="polite">
                     <strong>{formatAmount(raiseAmount)}</strong>
                     <span className="mobile-raise-bb">{mobileRaiseBlindCount} BB</span>
                   </div>
-                  <button
-                    type="button"
+                  <HoldStepButton
                     className="mobile-raise-step"
-                    onClick={() => adjustRaiseAmount(mobileRaiseStep)}
+                    disabled={raiseAmount >= maxRaise}
+                    onStep={multiplier => adjustRaiseAmount(mobileRaiseStep * multiplier)}
                     aria-label="Increase bet"
                   >
                     +
-                  </button>
+                  </HoldStepButton>
                   <button
                     type="button"
                     className="mobile-raise-close"
@@ -3337,9 +3445,9 @@ export function PokerTable({
               data-urgency={turnTimer.percent <= 28 || turnTimer.secondsLeft <= 3 ? 'low' : turnTimer.percent <= 55 ? 'warn' : 'calm'}
             >
               <div className="timer-bar-header">
-                <span>Time to act</span>
+                <span className="timer-bar-label">Time to act</span>
                 <span className={`timer-bar-seconds ${turnTimer.secondsLeft <= 5 ? 'is-low' : ''}`}>
-                  <b key={turnTimer.secondsLeft}>{turnTimer.secondsLeft}</b>s left
+                  <b key={turnTimer.secondsLeft}>{turnTimer.secondsLeft}</b>s<span className="timer-bar-left"> left</span>
                 </span>
               </div>
               <div className="timer-bar">
@@ -3367,25 +3475,30 @@ export function PokerTable({
                       type="button"
                       className="btn-quick"
                       disabled={isTrayReconnecting}
+                      aria-label={quickBet.label}
                       title={`${state.currentBet > 0 ? 'Raise to' : 'Bet'} ${formatAmount(quickBet.amount)}`}
                       onClick={() => setClampedRaiseAmount(quickBet.amount)}
                     >
-                      {quickBet.label}
+                      {QUICK_BET_GLYPHS[quickBet.label] ? (
+                        <>
+                          <span className="btn-quick-frac" aria-hidden="true">{QUICK_BET_GLYPHS[quickBet.label]}</span>
+                          <span className="btn-quick-unit" aria-hidden="true"> Pot</span>
+                        </>
+                      ) : quickBet.label}
                     </button>
                   ))}
                 </div>
 
                 <div className="raise-slider-track">
-                  <button
-                    type="button"
+                  <HoldStepButton
                     className="raise-step-btn"
                     disabled={isTrayReconnecting || displayRaiseAmount <= effectiveMin}
                     aria-label={`Lower by ${formatAmount(Math.max(state.bigBlind, 1))}`}
-                    title={`- ${formatAmount(Math.max(state.bigBlind, 1))}`}
-                    onClick={() => setClampedRaiseAmount(displayRaiseAmount - Math.max(state.bigBlind, 1))}
+                    title={`- ${formatAmount(Math.max(state.bigBlind, 1))} (hold to repeat)`}
+                    onStep={multiplier => adjustRaiseAmount(-Math.max(state.bigBlind, 1) * multiplier)}
                   >
                     <span aria-hidden="true">‹</span>
-                  </button>
+                  </HoldStepButton>
                   <input
                     type="range"
                     className="raise-slider"
@@ -3397,19 +3510,21 @@ export function PokerTable({
                     aria-label={state.currentBet > 0 ? 'Raise amount' : 'Bet amount'}
                     onChange={event => setClampedRaiseAmount(Number(event.target.value))}
                   />
-                  <button
-                    type="button"
+                  <HoldStepButton
                     className="raise-step-btn"
                     disabled={isTrayReconnecting || displayRaiseAmount >= maxRaise}
                     aria-label={`Raise by ${formatAmount(Math.max(state.bigBlind, 1))}`}
-                    title={`+ ${formatAmount(Math.max(state.bigBlind, 1))}`}
-                    onClick={() => setClampedRaiseAmount(displayRaiseAmount + Math.max(state.bigBlind, 1))}
+                    title={`+ ${formatAmount(Math.max(state.bigBlind, 1))} (hold to repeat)`}
+                    onStep={multiplier => adjustRaiseAmount(Math.max(state.bigBlind, 1) * multiplier)}
                   >
                     <span aria-hidden="true">›</span>
-                  </button>
+                  </HoldStepButton>
                 </div>
 
-                <label className={`raise-input-wrap ${raiseDraftHint ? `is-${raiseDraftHint}` : ''}`}>
+                <label
+                  className={`raise-input-wrap ${raiseDraftHint ? `is-${raiseDraftHint}` : ''}`}
+                  data-digits={Math.min(7, Math.max(String(maxRaise).length, (raiseDraft ?? String(raiseAmount)).length))}
+                >
                   <input
                     ref={raiseInputRef}
                     type="number"
@@ -3499,6 +3614,7 @@ export function PokerTable({
                 lobbyMe={lobbyMe}
                 isHost={isHost}
                 isConnected={isConnected}
+                isBusted={isBustedViewer || isRailBusted}
                 onStartGame={onStartGame}
                 onAddBots={onAddBots}
                 onSeatMe={onSeatMe}
@@ -3541,6 +3657,7 @@ export function PokerTable({
               fullPickerOpen={targetEmotePickerOpen}
               onToggleFullPicker={() => setTargetEmotePickerOpen(current => !current)}
               quickEmotes={canPrankTarget ? withoutFlipOff(targetQuickEmotes) : targetQuickEmotes}
+              turnSecondsLeft={hasActionTray ? turnTimer.secondsLeft : undefined}
             />
           )}
     </div>
@@ -3588,14 +3705,24 @@ function TableSocialDock({
   isConnected,
   onSendChat,
   onSendEmote,
+  closeOnTurnKey = null,
+  turnSecondsLeft,
 }: {
   chatLog: TableChatEntry[]
   yourId: string
   isConnected: boolean
   onSendChat: (message: string) => void
   onSendEmote: (emote: string) => void
+  /** A new value (your turn starting, phones) folds the panel away so the clock is never hidden. */
+  closeOnTurnKey?: string | null
+  /** Set while it is your turn: shown on top of the open panel. */
+  turnSecondsLeft?: number
 }) {
   const [isOpen, setIsOpen] = useState(false)
+
+  useEffect(() => {
+    if (closeOnTurnKey) setIsOpen(false)
+  }, [closeOnTurnKey])
   const [message, setMessage] = useState('')
   // Only messages that arrive after the table loads count as unread.
   const [lastSeenAt, setLastSeenAt] = useState(() => latestChatAt(chatLog))
@@ -3651,6 +3778,16 @@ function TableSocialDock({
     >
       {isOpen && (
         <div className="social-dock-panel">
+          {typeof turnSecondsLeft === 'number' && (
+            <button
+              type="button"
+              className={`panel-turn-strip ${turnSecondsLeft <= 5 ? 'is-low' : ''}`}
+              onClick={() => setIsOpen(false)}
+            >
+              <span>Your turn · {turnSecondsLeft}s</span>
+              <b>Back to the table</b>
+            </button>
+          )}
           <div className="social-dock-header">
             <div>
               <span className="social-dock-kicker">Table talk</span>
@@ -3809,20 +3946,35 @@ function createCardRevealSeatAction(
 function CardRevealSeatButton({
   action,
   onRequest,
+  iconOnly = false,
 }: {
   action: CardRevealSeatAction
   onRequest: (targetId: string) => void
+  /** Phones: a small eye per seat instead of a row of "SEE" pills. */
+  iconOnly?: boolean
 }) {
+  const showIcon = iconOnly && !action.status
   return (
     <button
       type="button"
-      className={`card-reveal-seat-button${action.status ? ` is-${action.status}` : ''}`}
+      className={`card-reveal-seat-button${action.status ? ` is-${action.status}` : ''}${showIcon ? ' is-icon' : ''}`}
       disabled={action.disabled}
       onClick={() => onRequest(action.playerId)}
       aria-label={action.ariaLabel}
       title={action.ariaLabel}
     >
-      {action.label}
+      {showIcon ? (
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+          <path
+            d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinejoin="round"
+          />
+          <circle cx="12" cy="12" r="3" fill="currentColor" />
+        </svg>
+      ) : action.label}
     </button>
   )
 }
@@ -3872,6 +4024,14 @@ function ShowCardsControl({
   )
 }
 
+/** Player-card stat names spelled out ("FOLD 0%" read like an instruction). */
+const STAT_LABELS: Record<string, string> = { Fold: 'Fold rate', Games: 'Hands', Won: 'Won' }
+const STAT_HINTS: Record<string, string> = {
+  Fold: 'How often they fold',
+  Games: 'Hands played tonight',
+  Won: 'Hands won tonight',
+}
+
 function TargetedEmotePanel({
   target,
   isConnected,
@@ -3883,6 +4043,7 @@ function TargetedEmotePanel({
   quickEmotes,
   prankControls = null,
   stickyControls = null,
+  turnSecondsLeft,
 }: {
   target: SeatPlayer
   isConnected: boolean
@@ -3894,8 +4055,11 @@ function TargetedEmotePanel({
   fullPickerOpen: boolean
   onToggleFullPicker: () => void
   quickEmotes: readonly string[]
+  /** Set while it is your turn: the clock stays in sight and one tap gets back to the table. */
+  turnSecondsLeft?: number
 }) {
   const statSummary = formatPlayerStatsSummary(target.stats)
+  const hasHands = (target.stats?.handsPlayed ?? 0) > 0
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const [message, setMessage] = useState('')
 
@@ -3934,10 +4098,20 @@ function TargetedEmotePanel({
       role="dialog"
       aria-label={`Message or react to ${target.nickname}`}
     >
+      {typeof turnSecondsLeft === 'number' && (
+        <button
+          type="button"
+          className={`panel-turn-strip ${turnSecondsLeft <= 5 ? 'is-low' : ''}`}
+          onClick={onClose}
+        >
+          <span>Your turn · {turnSecondsLeft}s</span>
+          <b>Back to the table</b>
+        </button>
+      )}
       <div className="table-panel-header">
         <div>
-          <div className="table-panel-kicker">Opponent</div>
-          <div className="table-panel-title">Send to {target.nickname}</div>
+          <div className="table-panel-kicker">Send to</div>
+          <div className="table-panel-title" title={target.nickname}>{target.nickname}</div>
         </div>
         <button
           ref={closeButtonRef}
@@ -3954,9 +4128,9 @@ function TargetedEmotePanel({
         <>
           <div className="targeted-player-stats" aria-label={`${target.nickname} stats`}>
             {statSummary.map(stat => (
-              <div key={stat.label} className="targeted-player-stat">
-                <span>{stat.label}</span>
-                <strong>{stat.value}</strong>
+              <div key={stat.label} className="targeted-player-stat" title={STAT_HINTS[stat.label]}>
+                <span>{STAT_LABELS[stat.label] ?? stat.label}</span>
+                <strong>{stat.label === 'Fold' && !hasHands ? '—' : stat.value}</strong>
               </div>
             ))}
           </div>
@@ -3969,7 +4143,7 @@ function TargetedEmotePanel({
               type="text"
               value={message}
               maxLength={140}
-              placeholder={`Message ${target.nickname}`}
+              placeholder="Say something…"
               disabled={!isConnected}
               onChange={event => setMessage(event.target.value)}
               onKeyDown={event => {
@@ -4955,7 +5129,8 @@ export function SettingsModal({
             </div>
 
             <div className="settings-player-list">
-              {state.lobbyPlayers.map(player => {
+              {/* You first, then everyone else in seat order. */}
+              {[...state.lobbyPlayers].sort((a, b) => Number(b.id === yourId) - Number(a.id === yourId)).map(player => {
                 const chipDraft = getPlayerChipDraft(player.id)
                 const hasValidChipDraft = typeof chipDraft === 'number' && Number.isFinite(chipDraft) && chipDraft > 0
                 const manageAmount = hasValidChipDraft
@@ -5201,6 +5376,7 @@ function WaitingPanel({
   onAddBots,
   onSeatMe,
   onFeedback,
+  isBusted = false,
 }: {
   state: TableState
   me?: SeatPlayer
@@ -5211,19 +5387,28 @@ function WaitingPanel({
   onAddBots: (count: number) => void
   onSeatMe: () => void
   onFeedback: (message: string, tone?: FeedbackTone) => void
+  /** Out of chips: the cashier card is the one status, this panel only runs the table. */
+  isBusted?: boolean
 }) {
-  const statusText = getWaitingStatusText(state, lobbyMe, isConnected)
+  const statusText = isBusted
+    ? 'You’re out of chips.'
+    : getWaitingStatusText(state, lobbyMe, isConnected)
   const seatedCount = state.players.length
   const canStart = isHost && seatedCount >= 2 && isConnected
   const canAddBots = isHost && isConnected && seatedCount < 8
   const openSeats = Math.max(0, 8 - seatedCount)
-  const spectatorRail = getSpectatorRailState(lobbyMe, isConnected, { openSeats: Math.max(0, 8 - state.players.length) })
+  const spectatorRail = isBusted
+    ? null
+    : getSpectatorRailState(lobbyMe, isConnected, { openSeats: Math.max(0, 8 - state.players.length) })
+  const dealLabel = state.phase === 'between_hands' ? 'Deal next hand' : 'Start game'
 
   return (
-    <div className="table-panel status-panel">
+    <div className="table-panel status-panel" data-busted={isBusted ? 'true' : 'false'}>
       <div className="table-panel-header">
         <div className="table-panel-kicker">Table controls</div>
-        {lobbyMe?.isSpectator && <span className="table-chip chip-warning">Spectating</span>}
+        {isBusted
+          ? <span className="table-chip chip-warning">Out of chips</span>
+          : lobbyMe?.isSpectator && <span className="table-chip chip-warning">Spectating</span>}
       </div>
       <div className="table-panel-title">{statusText}</div>
       <div className="status-panel-seats">
@@ -5245,14 +5430,18 @@ function WaitingPanel({
         </div>
       </dl>
       <div className="table-panel-note">
-        {spectatorRail
+        {isBusted
+          ? isHost
+            ? `Rebuy at the cashier to play, or press ${dealLabel} to deal the others in.`
+            : 'Rebuy at the cashier to be dealt into the next hand.'
+          : spectatorRail
           ? spectatorRail.message
           : !isHost
             ? 'The game creator manages players and starts the table.'
             : me
               ? seatedCount < 2
                 ? 'Add a bot or share the room code to fill a seat.'
-                : 'Everyone settled? Deal the cards.'
+                : `Everyone set? Press ${dealLabel}.`
               : 'Seat assignment is being restored.'}
       </div>
       {spectatorRail && (
@@ -5296,7 +5485,7 @@ function WaitingPanel({
               onStartGame()
             }}
           >
-            {state.phase === 'between_hands' ? 'Deal next hand' : 'Start game'}
+            {dealLabel}
           </button>
         )}
       </div>
@@ -5317,6 +5506,8 @@ function MobileBetweenHandsDock({
   onAddBots,
   onSeatMe,
   onFeedback,
+  roomCode,
+  onShareRoom,
 }: {
   state: TableState
   me?: SeatPlayer
@@ -5324,6 +5515,9 @@ function MobileBetweenHandsDock({
   isHost: boolean
   isConnected: boolean
   isBusted: boolean
+  /** Lobby: the code and a one-tap invite, so nobody has to dig through Settings. */
+  roomCode?: string
+  onShareRoom?: () => void
   /** Why a self-serve rebuy is not available (rebuys off, cap reached), if so. */
   rebuyBlockedReason?: string | null
   onRebuy: () => void
@@ -5339,6 +5533,11 @@ function MobileBetweenHandsDock({
   const spectatorRail = getSpectatorRailState(lobbyMe, isConnected, { openSeats: Math.max(0, 8 - state.players.length) })
   // Rebuys are self-serve: any busted player can buy back in (host rules permitting).
   const canRebuy = isBusted && isConnected && !rebuyBlockedReason
+  // Real money (a buy-in price) is always labelled "cash", never a bare $ next to chip amounts.
+  const chipValue = state.ledger?.settings.chipValue ?? 1
+  const cashPrice = chipValue !== 1
+    ? `$${(Math.round(state.startingStack * chipValue * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+    : null
   const showDeal = isHost && state.phase !== 'in_hand'
   // Busted hosts still run the table; Fill seats steps aside for the rebuy.
   const showFillSeats = canAddBots && openSeats > 1 && !canRebuy
@@ -5357,7 +5556,9 @@ function MobileBetweenHandsDock({
   const detail = isBusted
     ? rebuyBlockedReason
       ? `${rebuyBlockedReason} Ask the host for chips to keep playing.`
-      : `Rebuy for ${formatAmount(state.startingStack)} to keep playing.`
+      : cashPrice
+        ? `A fresh ${formatAmount(state.startingStack)} stack costs ${cashPrice} cash on the settle-up.`
+        : `Rebuy for ${formatAmount(state.startingStack)} to keep playing.`
     : [
         `${seatedCount} seated`,
         lobbyMe?.isSpectator ? 'Watching' : me ? `Stack ${formatAmount(me.stack)}` : null,
@@ -5366,6 +5567,18 @@ function MobileBetweenHandsDock({
   return (
     <div className="mobile-between-hands-dock" data-busted={isBusted ? 'true' : 'false'}>
       <div className="mobile-between-hands-card">
+        {roomCode && state.phase === 'waiting' && !isBusted && (
+          <button
+            type="button"
+            className="mobile-between-hands-room"
+            onClick={onShareRoom}
+            aria-label={`Invite friends to room ${roomCode}`}
+          >
+            <span>Room</span>
+            <b>{roomCode}</b>
+            <em>Invite</em>
+          </button>
+        )}
         <div className="mobile-between-hands-copy">
           <div className="mobile-between-hands-title">{title}</div>
           <div className="mobile-between-hands-meta">{detail}</div>

@@ -124,7 +124,7 @@ describe('ShowdownCinematic', () => {
     expect(markup).toContain('data-stage="highlight"')
     expect(markup).toContain('showdown-table-sequence')
     expect(markup).toContain('Showdown')
-    expect(markup).toContain('Winning five')
+    expect(markup).toContain('The winning hand')
     expect(markup).not.toContain('showdown-cinematic-vignette')
     expect(markup).not.toContain('Alice')
     expect(markup).not.toContain('A of spades')

@@ -31,7 +31,7 @@
   --c-ember-300: #ffb27f;
   --c-ruby-600: #c23a47;
   --c-ruby-500: #e2505c;
-  --c-sky-400: #7fd0ff;
+  --c-sky-400: #74e8bd;
   --c-violet-400: #a98bff;
   --c-cream-50: #fff8ea;
   --c-cream-200: #efe3c8;
@@ -100,7 +100,7 @@
   --glow-brass: 0 0 0 1px rgba(242, 199, 102, 0.55), 0 0 24px rgba(242, 199, 102, 0.35);
   --glow-felt: 0 0 0 1px rgba(57, 199, 149, 0.55), 0 0 24px rgba(57, 199, 149, 0.3);
   --glow-ember: 0 0 0 1px rgba(255, 122, 61, 0.6), 0 0 28px rgba(255, 122, 61, 0.4);
-  --glow-sky: 0 0 0 2px rgba(127, 208, 255, 0.85), 0 0 18px rgba(127, 208, 255, 0.35);
+  --glow-sky: 0 0 0 2px rgba(116, 232, 189, 0.85), 0 0 18px rgba(116, 232, 189, 0.35);
 
   /* Motion */
   --dur-fast: 120ms;

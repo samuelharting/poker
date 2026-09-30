@@ -86,9 +86,9 @@ export function useShowdownPresentation(state: TableState): ShowdownPresentation
 }
 
 function getStageCopy(presentation: ShowdownPresentation): string {
-  if (presentation.stage === 'intro') return 'Cards on their backs'
-  if (presentation.stage === 'reveal') return 'Revealing hands'
-  if (presentation.stage === 'highlight') return 'Winning five'
+  if (presentation.stage === 'intro') return 'Revealing hands…'
+  if (presentation.stage === 'reveal') return 'Revealing hands…'
+  if (presentation.stage === 'highlight') return 'The winning hand'
   if (presentation.stage === 'payout') return 'Pot awarded'
   return 'Hand complete'
 }
@@ -183,6 +183,10 @@ export function ShowdownCinematic({
       <div className="showdown-table-sequence-copy" role="status" aria-live="polite" aria-atomic="true">
         <span>Showdown</span>
         <strong>{getStageCopy(presentation)}</strong>
+        {/* Name the hand as soon as its five cards light up (who won comes with the result). */}
+        {presentation.stage === 'highlight' && winners[0]?.handDescription && (
+          <em className="showdown-table-hand">{winners[0].handDescription}</em>
+        )}
       </div>
 
       {presentation.payoutStarted && (

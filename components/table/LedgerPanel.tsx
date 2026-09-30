@@ -176,9 +176,10 @@ export function SettleUpSummary({
           </tr>
         </thead>
         <tbody>
-          {humanRows.map((row, index) => {
+          {humanRows.map(row => {
             const isYou = Boolean(yourId) && row.playerId === yourId
-            const place = index + 1
+            // Ties share a rank (1, 2, 2, 4), like a real leaderboard.
+            const place = 1 + humanRows.filter(other => other.net > row.net).length
             const medal = row.net > 0 && place <= 3 ? place : 0
             return (
               <tr key={row.key} data-you={isYou ? 'true' : 'false'} data-where={row.where} data-medal={medal || undefined}>
@@ -199,7 +200,7 @@ export function SettleUpSummary({
                 <td>{formatChips(row.chips)}</td>
                 <td className="ledger-net" data-sign={row.net > 0 ? 'up' : row.net < 0 ? 'down' : 'even'}>
                   {formatNetChips(row.net)}
-                  {showMoney && row.net !== 0 && <small className="ledger-net-dollars">{formatDollars(row.net)}</small>}
+                  {showMoney && row.net !== 0 && <small className="ledger-net-dollars">{formatDollars(row.net)} cash</small>}
                 </td>
               </tr>
             )

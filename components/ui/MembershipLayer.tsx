@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import Link from 'next/link'
 import type { TableState } from '@/lib/poker/types'
 import type { RoomNotice, SessionEnded } from '@/hooks/useRoom'
+import { getRebuyStatus, requestRebuy } from '@/components/table/LedgerPanel'
 import './membership-layer.css'
 
 const NOTICE_LIFETIME_MS = 5_000
@@ -72,7 +73,14 @@ export function MembershipLayer({
   }
 
   const me = tableState?.players.find(player => player.id === yourId)
-  const isSittingOut = Boolean(me?.isAway)
+  // No chips and not in the hand (an all-in player also shows a $0 stack).
+  const isLiveInHand = Boolean(me?.hasCards && (me.status === 'active' || me.status === 'all_in'))
+  const isBusted = Boolean(me && me.stack <= 0 && !isLiveInHand)
+  // Busted mid-hand: say so right away and point at the rebuy. Between hands
+  // the cashier card (desktop) or the between-hands dock (phones) takes over.
+  const showBustedBar = isBusted && tableState?.phase === 'in_hand'
+  const isSittingOut = Boolean(me?.isAway) && !isBusted
+  const rebuy = showBustedBar && tableState ? getRebuyStatus(tableState, yourId) : null
 
   return (
     <>
@@ -88,6 +96,28 @@ export function MembershipLayer({
             {latestNotice.kind === 'ledger' ? '$' : latestNotice.kind === 'error' ? '!' : '★'}
           </span>
           <span>{getNoticeText(latestNotice, yourId)}</span>
+        </div>
+      )}
+      {showBustedBar && rebuy && (
+        <div className="membership-sitout is-busted" role="status" aria-live="polite">
+          <span className="membership-sitout-copy">
+            <strong>Out of chips</strong>
+            <span>
+              {rebuy.canRebuy
+                ? 'Rebuy now and you are dealt into the next hand.'
+                : rebuy.reason ?? 'Ask the host for chips to keep playing.'}
+            </span>
+          </span>
+          {rebuy.canRebuy && (
+            <button
+              type="button"
+              className="btn-gold membership-sitout-back"
+              disabled={!isConnected}
+              onClick={requestRebuy}
+            >
+              Rebuy
+            </button>
+          )}
         </div>
       )}
       {isSittingOut && (

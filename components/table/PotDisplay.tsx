@@ -18,19 +18,24 @@ function formatAmount(amount: number): string {
 export function PotDisplay({ totalPot, pots, currentBet, toCall }: PotDisplayProps) {
   if (totalPot === 0 && currentBet === 0) return null
 
+  // A "pot" only one player can win is their own uncalled chips coming back,
+  // not a side pot: it stays in the total but is never listed as "Side 1".
+  const contestedPots = pots.filter(pot => pot.eligiblePlayerIds.length > 1)
+  const showBreakdown = contestedPots.length > 1
+
   return (
     <div className="pot-display">
       <div className="pot-display-card">
         <div className="pot-display-label">
-          {pots.length > 1 ? 'Total Pot' : 'Pot'}
+          {showBreakdown ? 'Total Pot' : 'Pot'}
         </div>
         <div className="pot-display-value">
           {formatAmount(totalPot)}
         </div>
 
-        {pots.length > 1 && (
+        {showBreakdown && (
           <div className="pot-side-list">
-            {pots.map((pot, i) => (
+            {contestedPots.map((pot, i) => (
               <div key={i} className="pot-side-row">
                 {i === 0 ? 'Main' : `Side ${i}`}: {formatAmount(pot.amount)}
               </div>

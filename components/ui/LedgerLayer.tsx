@@ -105,27 +105,35 @@ export function LedgerLayer({
   const buyInDollars = chipValue !== 1 && rebuy.amount > 0
     ? `$${(Math.round(rebuy.amount * chipValue * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
     : null
+  // Chips are counted as chips here, so they never sit next to real money in the same "$".
+  const stackChips = `${Math.max(0, Math.round(rebuy.amount)).toLocaleString('en-US')} chips`
 
   return (
     <>
       {showBustedCard && (
-        <div className={`ledger-busted-card ${rebuy.canRebuy ? 'is-cashier' : ''}`} role="status" aria-live="polite">
+        <div
+          className={`ledger-busted-card ${rebuy.canRebuy ? 'is-cashier' : ''}`}
+          role="status"
+          aria-live="polite"
+        >
           <span className="ledger-busted-chips" aria-hidden="true">
             <i /><i /><i /><i />
           </span>
           <div className="ledger-busted-copy">
-            <small>{rebuy.canRebuy ? 'The cashier is open' : 'Out of chips'}</small>
-            <strong>{rebuy.canRebuy ? `Grab a fresh ${formatChips(rebuy.amount)} stack` : "You're out of chips"}</strong>
+            <small>{rebuy.canRebuy ? 'Out of chips · the cashier is open' : 'Out of chips'}</small>
+            <strong>{rebuy.canRebuy ? `Rebuy a fresh stack of ${stackChips}` : "You're out of chips"}</strong>
             <span>
               {rebuy.canRebuy
-                ? (buyInDollars ? `Buy back in for ${buyInDollars} and jump into the next hand.` : 'Jump straight back into the next hand.')
+                ? (buyInDollars
+                    ? `Costs ${buyInDollars} cash on the settle-up. You're dealt into the next hand.`
+                    : "You're dealt straight into the next hand.")
                 : rebuy.reason ?? 'Ask the host for chips to keep playing.'}
             </span>
           </div>
           {rebuy.canRebuy && (
             <button type="button" className="btn-gold ledger-busted-cta" disabled={!isConnected} onClick={requestRebuy}>
-              <span>Buy back in</span>
-              <b>{buyInDollars ?? formatChips(rebuy.amount)}</b>
+              <span>Rebuy</span>
+              <b>{buyInDollars ? `${buyInDollars} cash` : stackChips}</b>
             </button>
           )}
         </div>
@@ -148,6 +156,7 @@ export function LedgerLayer({
                     Adds {formatChips(rebuy.amount)} to your stack and to your buy-in on the leaderboard
                     {rebuy.row ? ` (you'd be in for ${formatChips(rebuy.row.boughtIn + rebuy.amount)})` : ''}.
                     {rebuy.queues ? ' You are in a hand, so it lands as soon as this hand ends.' : ''}
+                    {buyInDollars ? ` It costs ${buyInDollars} cash, settled at the end of the night.` : ''}
                     {rebuy.rebuysLeft !== null ? ` ${rebuy.rebuysLeft - 1} rebuy${rebuy.rebuysLeft - 1 === 1 ? '' : 's'} left after this.` : ''}
                   </>
                 : rebuy.reason}
