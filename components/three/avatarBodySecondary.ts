@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { AvatarAccessorySet } from './avatarCustomization'
+import { updateHairSway } from './avatarBodyHair'
 
 /**
  * Secondary motion: things that ride on the head but are not part of it lag
@@ -11,8 +12,8 @@ import type { AvatarAccessorySet } from './avatarCustomization'
  * budget), so the hat is every object under the head accessories group tagged
  * `userData.accessoryKind === 'hat'`. Glasses stay rigid on the face.
  *
- * Hair is skinned rigidly to the Head bone in these models, so it cannot lag
- * without extra bones; only accessories move here.
+ * Hair gets its own sway joint (avatarBodyHair); it is advanced here too so
+ * the room has one secondary-motion call per seat.
  */
 
 interface HatPiece {
@@ -107,6 +108,7 @@ export function updateHatSecondary(
   dt: number,
   reducedMotion: boolean
 ) {
+  updateHairSway(head, dt, reducedMotion)
   const group = set?.groups[0]
   if (!set || !group || !head) return
   let state = states.get(set)

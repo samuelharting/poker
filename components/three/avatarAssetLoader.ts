@@ -6,6 +6,7 @@ import {
   type RealisticAvatarModelConfig,
   type RealisticAvatarModelKey,
 } from './avatarModelCatalog'
+import { attachHairSway, prepareHairSwayTemplate } from './avatarBodyHair'
 
 export const AVATAR_CLIP_NAMES = {
   idleNeutral: 'CharacterArmature|Idle_Neutral',
@@ -128,6 +129,8 @@ export function createAvatarAssetInstanceFromTemplate(
 ): AvatarAssetInstance {
   const model = cloneSkeleton(template.scene)
   shareClonedSkeletons(model)
+  // Hair secondary motion: one extra joint on the shared skeleton (see avatarBodyHair).
+  attachHairSway(model)
   const materialClones = new Map<THREE.Material, THREE.Material>()
 
   model.traverse(object => {
@@ -252,6 +255,7 @@ function createAvatarAssetTemplate(
 ): AvatarAssetTemplate {
   validateAvatarScene(modelKey, gltf.scene)
   stripFingerTracks(gltf.animations)
+  prepareHairSwayTemplate(modelKey, gltf.scene)
 
   return {
     modelKey,

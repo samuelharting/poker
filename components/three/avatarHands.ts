@@ -215,10 +215,15 @@ interface HandSpring {
   pos: Float32Array
   vel: Float32Array
   goal: Float32Array
+  /** Idle half-rate: time owed since the last update, and whether this frame is skipped. */
+  owed: number
+  skip: boolean
+  /** Fastest joint (rad/s) at the last update. */
+  speed: number
 }
 
 function createHandSpring(): HandSpring {
-  const spring = { pos: new Float32Array(JOINTS), vel: new Float32Array(JOINTS), goal: new Float32Array(JOINTS) }
+  const spring = { pos: new Float32Array(JOINTS), vel: new Float32Array(JOINTS), goal: new Float32Array(JOINTS), owed: 0, skip: false, speed: 0 }
   spring.pos.set(SHAPE_TABLE.relaxed)
   return spring
 }
@@ -233,8 +238,12 @@ export interface AvatarHandsState {
   fidgetHand: 0 | 1
 }
 
-export function createAvatarHandsState(): AvatarHandsState {
-  return { R: createHandSpring(), L: createHandSpring(), initialized: false, fidgetAt: 3, fidgetFinger: 1, fidgetHand: 0 }
+export function createAvatarHandsState(seed = 0): AvatarHandsState {
+  const state: AvatarHandsState = { R: createHandSpring(), L: createHandSpring(), initialized: false, fidgetAt: 3, fidgetFinger: 1, fidgetHand: 0 }
+  // Stagger the idle half-rate: odd players and the left hand start on the other frame.
+  state.R.skip = seed >= 0.5
+  state.L.skip = seed < 0.5
+  return state
 }
 
 /** Dev override for shape review: window.__handDebug = { R: 'fist', L: 'pinch' }. */
@@ -338,6 +347,7 @@ function updateOneHand(
   }
   // Springs: pinky lags index, splay and twist are slower than flexion.
   const speed = target.speed
+  let fastest = 0
   for (let f = 0; f < FINGERS.length; f += 1) {
     for (let k = 0; k < DOF; k += 1) {
       const index = f * DOF + k
@@ -356,8 +366,22 @@ function updateOneHand(
         pos[index] = goal[index]!
         vel[index] = 0
       }
+      const v = vel[index]! < 0 ? -vel[index]! : vel[index]!
+      if (v > fastest) fastest = v
     }
   }
+  spring.speed = fastest
+}
+
+/**
+ * A resting hand (relaxed shape, no drumming, fingers barely moving) only
+ * drifts on slow idle cycles, so it is updated every other frame with the
+ * time owed (the springs are closed-form, so a double step lands exactly
+ * where two single steps would). Anything livelier runs every frame.
+ */
+function isLazyHand(spring: HandSpring, target: HandTarget) {
+  return target.weights[RELAXED]! > 0.97 && target.drum < 0.01 && target.spread < 0.01 &&
+    target.speed <= 1 && target.curl < 0.3 && spring.speed < 0.8
 }
 
 function clampFlex(value: number, joint: number) {
@@ -433,9 +457,25 @@ function updateAvatarHandsInner(
   const snap = input.reducedMotion || !state.initialized
   const idle = input.reducedMotion ? 0 : input.idle ?? 1
   const phase = input.seed * 40
-  updateOneHand(state.R, targetR, debugShape('R'), dt, input.time, phase, idle, snap)
-  updateOneHand(state.L, targetL, debugShape('L'), dt, input.time, phase + 2.3, idle, snap)
+  // (dev A/B switch: window.__handsFullRate = true updates every hand every frame)
+  const fullRate = process.env.NODE_ENV !== 'production' && Boolean((globalThis as { __handsFullRate?: boolean }).__handsFullRate)
+  for (let side = 0; side < 2; side += 1) {
+    const spring = side === 0 ? state.R : state.L
+    const target = side === 0 ? targetR : targetL
+    const debug = debugShape(side === 0 ? 'R' : 'L')
+    const rig = side === 0 ? rigs.R : rigs.L
+    const lazy = !snap && !debug && !fullRate && isLazyHand(spring, target)
+    spring.owed += dt
+    if (lazy && spring.skip) {
+      spring.skip = false
+      continue
+    }
+    // Seats (and the two hands) take turns on the skipped frames, never all at once.
+    spring.skip = lazy
+    const step = Math.min(0.1, spring.owed)
+    spring.owed = 0
+    updateOneHand(spring, target, debug, step, input.time, side === 0 ? phase : phase + 2.3, idle, snap)
+    if (rig) writeHand(rig, spring, side === 0 ? 1 : -1)
+  }
   state.initialized = true
-  if (rigs.R) writeHand(rigs.R, state.R, 1)
-  if (rigs.L) writeHand(rigs.L, state.L, -1)
 }

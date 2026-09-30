@@ -507,7 +507,7 @@ function solveAvatarArmsInner(ctx: ArmSolveContext, pose: AvatarPose, options: A
     st.limitValid = limitActive
     if (process.env.NODE_ENV !== 'production') {
       const diag = (globalThis as { __armDiag?: Record<string, unknown> }).__armDiag
-      if (diag) diag[out > 0 ? 'R' : 'L'] = { raise, handHigh, push: st.push.length(), twist: st.twist, twistRaw: st.twistRaw, target: [ikTarget.x, ikTarget.y, ikTarget.z], g: frame[0] }
+      if (diag) diag[out > 0 ? 'R' : 'L'] = { raise, handHigh, push: st.push.length(), twist: st.twist, twistRaw: st.twistRaw, target: [ikTarget.x, ikTarget.y, ikTarget.z], g: frame[0], rate: st.limitRate.slice() }
     }
   }
 }
@@ -841,7 +841,56 @@ function orientHand(
     rotateAbout(frameS, frameF, roll * out)
     rotateAbout(frameN, frameF, roll * out)
   }
+  // Anatomical limits (after the legacy offsets, which bend too): a wrist bends
+  // much further toward the palm than back, and only a little side to side.
+  // Past these the skinned wrist folds into a crease whose ink outline spikes.
+  if (!(flipTarget && pose.middleFinger > 0.5)) {
+    limitWristBend(frameF, frameS, forearm, out)
+    frameS.addScaledVector(frameF, -frameS.dot(frameF))
+    if (frameS.lengthSq() < 1e-8) return
+    frameS.normalize()
+  }
   alignHand(chain, sideRig, st, dt)
+}
+
+/** Wrist limits (radians): toward the palm, back toward the forearm, and side to side. */
+const WRIST_FLEX_MAX = 1.2
+const WRIST_EXTEND_MAX = 0.85
+const WRIST_DEVIATE_MAX = 0.8
+const wristN = new THREE.Vector3()
+const wristSide = new THREE.Vector3()
+
+/**
+ * Clamps the fingers direction `f` off the forearm into the wrist's range:
+ * flexion/extension about the palm's side axis and deviation about the palm
+ * normal, measured in a frame built round the forearm (so the two stay
+ * independent). `s` is the index-to-pinky direction (it keeps the roll).
+ */
+export function limitWristBend(f: THREE.Vector3, s: THREE.Vector3, forearmDir: THREE.Vector3, out: 1 | -1) {
+  // Palm normal of the requested frame (see orientHand), made perpendicular to the forearm.
+  wristN.crossVectors(s, f).multiplyScalar(-out)
+  wristN.addScaledVector(forearmDir, -wristN.dot(forearmDir))
+  if (wristN.lengthSq() < 1e-8) return
+  wristN.normalize()
+  wristSide.crossVectors(forearmDir, wristN)
+  const along = f.dot(forearmDir)
+  const flex = Math.atan2(f.dot(wristN), along)
+  const deviate = Math.atan2(f.dot(wristSide), along)
+  const flexC = clamp(flex, -WRIST_EXTEND_MAX, WRIST_FLEX_MAX)
+  const deviateC = clamp(deviate, -WRIST_DEVIATE_MAX, WRIST_DEVIATE_MAX)
+  if (process.env.NODE_ENV !== 'production') {
+    const diag = (globalThis as { __wristDiag?: { flex: number; ext: number; dev: number; n: number; last?: Record<string, number[]> } }).__wristDiag
+    if (diag) {
+      if (diag.last) diag.last[out > 0 ? 'R' : 'L'] = [flex, deviate, flexC, deviateC]
+      diag.flex = Math.max(diag.flex, flex)
+      diag.ext = Math.min(diag.ext, flex)
+      diag.dev = Math.max(diag.dev, Math.abs(deviate))
+      diag.n += 1
+    }
+    if ((globalThis as { __noWristLimit?: boolean }).__noWristLimit) return
+  }
+  if (flexC === flex && deviateC === deviate) return
+  f.copy(forearmDir).addScaledVector(wristN, Math.tan(flexC)).addScaledVector(wristSide, Math.tan(deviateC)).normalize()
 }
 
 /**

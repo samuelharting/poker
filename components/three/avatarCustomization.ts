@@ -242,10 +242,13 @@ export function measureHeadFit(
           ? 'detail'
           : 'skull'
     if (kind === 'detail') return
+    // Hair on the sway joint (avatarBodyHair, a child of Head at rest) still counts as head.
+    const swayIndex = mesh.skeleton.bones.findIndex(bone => bone.parent === headBone && bone.name === 'HairSway')
     for (let vertex = 0; vertex < position.count; vertex += 1) {
       let weight = 0
       for (let slot = 0; slot < 4; slot += 1) {
-        if (skinIndex.getComponent(vertex, slot) === headIndex) weight += skinWeight.getComponent(vertex, slot)
+        const joint = skinIndex.getComponent(vertex, slot)
+        if (joint === headIndex || joint === swayIndex) weight += skinWeight.getComponent(vertex, slot)
       }
       if (weight < 0.5) continue
       point.fromBufferAttribute(position, vertex).applyMatrix4(toHead).divideScalar(scale)
