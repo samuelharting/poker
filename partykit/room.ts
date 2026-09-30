@@ -367,6 +367,8 @@ export default class PokerRoom implements PartyServer {
   private stickyTargetCounts = new Map<string, { hand: number; count: number }>()
   /** Bought shots waiting for their target to be out of the hand, oldest first. */
   private shotQueue: QueuedShot[] = []
+  /** Shot prices (one small blind, buyer to target) waiting for a moment with no live hand. */
+  private pendingShotCharges: Array<{ fromId: string; toId: string; amount: number }> = []
   /** Shot took them to the edge mid-hand: blackout waits until they fold or the hand ends. */
   private pendingBlackouts = new Set<string>()
   /** House rules across hands: dealt-in folds in a row, and hands into the current orbit. */
@@ -1485,6 +1487,23 @@ export default class PokerRoom implements PartyServer {
     })
   }
 
+  /**
+   * Moves shot prices from buyer to drinker. Stacks never change during a live
+   * hand, so a charge waits until no hand is in progress.
+   */
+  private applyShotCharges() {
+    if (this.pendingShotCharges.length === 0 || this.data.gameState.phase === 'in_hand') return
+    for (const charge of this.pendingShotCharges) {
+      const from = this.getPlayer(charge.fromId)
+      const to = this.getPlayer(charge.toId)
+      if (!from || !to) continue
+      const amount = Math.min(charge.amount, Math.max(0, from.stack))
+      from.stack -= amount
+      to.stack += amount
+    }
+    this.pendingShotCharges = []
+  }
+
   /** Runs whenever no hand is live: land rebuys that were asked for mid-hand. */
   private applyQueuedRebuys() {
     const keys = Object.keys(this.data.ledger.pendingRebuys)
@@ -2302,7 +2321,22 @@ export default class PokerRoom implements PartyServer {
       return { ok: false, reason: blocked }
     }
 
+    // A shot costs the buyer one small blind (the table's current blind), paid to
+    // the player who drinks it, so no chips are created or lost.
+    const price = Math.max(0, this.data.tableSettings.smallBlind)
+    const buyer = this.getPlayer(buyerId)!
+    const buyerOwes = this.pendingShotCharges
+      .filter(charge => charge.fromId === buyerId)
+      .reduce((sum, charge) => sum + charge.amount, 0)
+    if (price > 0 && buyer.stack - buyerOwes < price) {
+      return { ok: false, reason: `A shot costs ${price} in chips` }
+    }
+
     recordShotBought(buyerEntry, this.data.gameState.handNumber)
+    if (price > 0) {
+      this.pendingShotCharges.push({ fromId: buyerId, toId: targetId, amount: price })
+      this.applyShotCharges()
+    }
     const shot: QueuedShot = {
       id: generateId(10),
       fromId: buyerId,
@@ -3369,6 +3403,7 @@ export default class PokerRoom implements PartyServer {
   private finalizeState() {
     if (this.data.gameState.phase !== 'in_hand') {
       // Before busted players are swept to the rail, so a queued rebuy keeps its seat.
+      this.applyShotCharges()
       this.applyQueuedRebuys()
       this.applyPendingTableSettings()
       this.clearAutoFold()

@@ -16,6 +16,7 @@ export function PrankControls({
   shotBlocked,
   shotNote,
   shotBadge,
+  shotPrice = 0,
   flickReadyAt,
   isConnected,
   onBuyShot,
@@ -29,6 +30,8 @@ export function PrankControls({
   shotNote: string
   /** Small number on the icon (hands of cooldown), or null. */
   shotBadge: number | null
+  /** Chips the buyer pays (the current small blind); 0 hides the price. */
+  shotPrice?: number
   /** Date.now() timestamp when the next chip is loaded (0 = ready). */
   flickReadyAt: number
   isConnected: boolean
@@ -54,14 +57,14 @@ export function PrankControls({
           disabled={!isConnected || shotBlocked}
           onClick={onBuyShot}
           title={shotNote}
-          aria-label={`Buy ${targetName} a shot. ${shotNote}`}
+          aria-label={`Buy ${targetName} a shot${shotPrice > 0 ? ` for ${shotPrice} chips` : ''}. ${shotNote}`}
         >
           <span className="prank-button-icon" aria-hidden="true">
             🥃
             {shotBadge !== null && <span className="prank-button-badge">{shotBadge}</span>}
           </span>
           <span className="prank-button-copy">
-            <strong>Buy a shot</strong>
+            <strong>{shotPrice > 0 ? `Shot $${shotPrice.toLocaleString()}` : 'Buy a shot'}</strong>
           </span>
         </button>
       )}

@@ -6,6 +6,7 @@ import {
   createDrinkLedgerEntry,
   DRINK_COOLDOWN_MS,
   ONE_BEER_PER_HAND_REASON,
+  SHOT_LEVEL_BOOST,
   WAKE_UP_LEVEL,
   WATER_KICK_IN_MS,
   type DrinkLedgerEntry,
@@ -418,21 +419,18 @@ describe('PokerRoom random thirst', () => {
 })
 
 describe('PokerRoom take a shot yourself', () => {
-  it('pours a +3 shot for yourself, as many as you like (just the order cooldown), and can black you out', () => {
+  it('pours a +6 shot for yourself, as many as you like (just the order cooldown), and can black you out', () => {
     vi.useFakeTimers()
     const { join } = createTable()
     const alice = join('alice', 'Alice', 0)
     const bob = join('bob', 'Bob', 1)
     alice.send({ type: 'set_drink_capable', capable: true })
     alice.send({ type: 'take_shot' })
-    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({ level: 3, shots: 1 })
+    expect(seatState(bob, alice.playerId)?.drinks).toMatchObject({ level: SHOT_LEVEL_BOOST, shots: 1 })
     alice.send({ type: 'take_shot' })
-    expect(seatState(bob, alice.playerId)?.drinks?.level).toBe(3)
+    expect(seatState(bob, alice.playerId)?.drinks?.level).toBe(SHOT_LEVEL_BOOST)
     vi.advanceTimersByTime(DRINK_COOLDOWN_MS)
-    alice.send({ type: 'take_shot' })
-    vi.advanceTimersByTime(DRINK_COOLDOWN_MS)
-    alice.send({ type: 'take_shot' })
-    vi.advanceTimersByTime(DRINK_COOLDOWN_MS)
+    // Two +6 shots black you out.
     alice.send({ type: 'take_shot' })
     expect(seatState(bob, alice.playerId)?.drinks?.passedOut).toBe(true)
   })

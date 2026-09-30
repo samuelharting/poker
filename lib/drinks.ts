@@ -26,7 +26,7 @@
  *   exempt.
  * - Rate limit: one drink per DRINK_COOLDOWN_MS (3s) per player.
  * - Shots: any seated player can buy another seated player a shot, any time:
- *   +SHOT_LEVEL_BOOST (3) levels, uncapped (it can black them out). So a shot
+ *   +SHOT_LEVEL_BOOST (6) levels, uncapped (it can black them out). So a shot
  *   can never interfere with a live hand, it is queued on the server and only
  *   DELIVERED while the target is not live (folded, sitting out, or between
  *   hands); the animation, the +3 and the chaser window all start at delivery.
@@ -98,7 +98,8 @@ export const WATER_KICK_IN_MS = 3_000
 /** An ordinary water lands this long after ordering (owner: fast, not next hand). */
 export const WATER_LANDS_MS = 5_000
 /** A bought shot hits harder than a beer. */
-export const SHOT_LEVEL_BOOST = 3
+/** Owner: a shot hits twice as hard as it used to (it was +3). */
+export const SHOT_LEVEL_BOOST = 6
 /** Each player may buy one shot for someone every this many hands. */
 export const SHOT_COOLDOWN_HANDS = 1
 /** Each player may be bought one shot every this many hands. */

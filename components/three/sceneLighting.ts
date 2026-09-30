@@ -163,6 +163,15 @@ export function createPostFx(
   const composer = new EffectComposer(renderer)
   composer.addPass(new RenderPass(scene, camera))
   const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.24, 0.32, 0.97)
+  // One NaN/Inf pixel from any shader would otherwise be blurred by the bloom
+  // mips across the whole frame and composited back: the table goes black until
+  // a reload. Scrub bad texels where the bloom reads the scene.
+  const highPass = bloom.materialHighPassFilter
+  highPass.fragmentShader = highPass.fragmentShader.replace(
+    'vec4 texel = texture2D( tDiffuse, vUv );',
+    'vec4 texel = texture2D( tDiffuse, vUv );\n\t\t\tif ( any( isnan( texel ) ) || any( isinf( texel ) ) ) texel = vec4( 0.0 );'
+  )
+  highPass.needsUpdate = true
   composer.addPass(bloom)
   const vignettePass = new ShaderPass(VignetteShader)
   // Drives the grain: the pass owns its uniforms, so stamp the clock as it renders.

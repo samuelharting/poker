@@ -3220,8 +3220,8 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
 const overlayScratch = new THREE.Vector3()
 const overlayBetPositions = new WeakMap<HTMLElement, { x: number; y: number }>()
 const betLabelScratch: Array<{ x: number; y: number }> = []
-const BET_LABEL_WIDTH = 74
-const BET_LABEL_HEIGHT = 36
+const BET_LABEL_WIDTH = 90
+const BET_LABEL_HEIGHT = 40
 const compareBetLabelY = (a: { y: number }, b: { y: number }) => a.y - b.y
 
 /**

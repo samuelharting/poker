@@ -180,10 +180,10 @@ describe('shot rules (pure)', () => {
   it('a chaser water applies instantly (-2) and is not also queued', () => {
     const entry = createDrinkLedgerEntry()
     deliverShot(entry, { handNumber: 1, targetIsLive: false, now: 1_000 })
-    expect(entry.level).toBe(3)
+    expect(entry.level).toBe(SHOT_LEVEL_BOOST)
     const result = orderDrink(entry, { kind: 'water', now: 2_000, drinkId: 'w1', handNumber: 1, isDealtIntoLiveHand: false })
     expect(result).toEqual({ ok: true, passedOut: false, chaser: true })
-    expect(entry.level).toBe(3 - CHASER_LEVELS)
+    expect(entry.level).toBe(SHOT_LEVEL_BOOST - CHASER_LEVELS)
     expect(entry.pendingWaters).toHaveLength(0)
     expect(entry.chaserUntil).toBeNull()
   })
@@ -203,9 +203,24 @@ describe('PokerRoom buy_shot', () => {
     for (const viewer of [sam, alex]) {
       expect(prankEvents(viewer.connection).map(event => event.kind)).toEqual(['shot'])
       expect(prankEvents(viewer.connection).at(-1)).toMatchObject({
-        fromId: sam.playerId, fromNickname: 'Sam', targetId: alex.playerId, targetNickname: 'Alex', levelAdded: 3, level: 3,
+        fromId: sam.playerId, fromNickname: 'Sam', targetId: alex.playerId, targetNickname: 'Alex', levelAdded: SHOT_LEVEL_BOOST, level: SHOT_LEVEL_BOOST,
       })
     }
+  })
+
+  it('a shot costs the buyer one small blind, paid to the drinker', () => {
+    vi.useFakeTimers()
+    const { join } = createTable()
+    const sam = join('sam', 'Sam', 0)
+    const alex = join('alex', 'Alex', 1)
+    const before = state(sam)
+    const stackOf = (players: typeof before.players, id: string) => players.find(player => player.id === id)!.stack
+
+    sam.send({ type: 'buy_shot', targetId: alex.playerId })
+
+    const after = last(sam.connection, 'room_snapshot')!.state
+    expect(stackOf(after.players, sam.playerId)).toBe(stackOf(before.players, sam.playerId) - before.smallBlind)
+    expect(stackOf(after.players, alex.playerId)).toBe(stackOf(before.players, alex.playerId) + before.smallBlind)
   })
 
   it('queues a shot for a live player and pours it the moment they fold', () => {
@@ -225,7 +240,7 @@ describe('PokerRoom buy_shot', () => {
 
     target.send({ type: 'player_action', action: 'fold' })
     expect(state(sam).players.find(player => player.id === target.playerId)?.status).toBe('folded')
-    expect(drinksOf(sam, target.playerId)).toMatchObject({ level: 3, shots: 1, shotsWaiting: 0 })
+    expect(drinksOf(sam, target.playerId)).toMatchObject({ level: SHOT_LEVEL_BOOST, shots: 1, shotsWaiting: 0 })
     expect(drinksOf(sam, target.playerId)!.chaserUntil).toBeGreaterThan(Date.now())
     expect(prankEvents(sam.connection).at(-1)).toMatchObject({ kind: 'shot', targetId: target.playerId })
   })
@@ -244,13 +259,13 @@ describe('PokerRoom buy_shot', () => {
 
     // A live player who isn't deciding right now gets it at once.
     buyer.send({ type: 'buy_shot', targetId: bystander.playerId })
-    expect(drinksOf(sam, bystander.playerId)).toMatchObject({ level: 3, shots: 1, shotsWaiting: 0 })
+    expect(drinksOf(sam, bystander.playerId)).toMatchObject({ level: SHOT_LEVEL_BOOST, shots: 1, shotsWaiting: 0 })
 
     // The player on the clock gets it the moment they act.
     bystander.send({ type: 'buy_shot', targetId: actor.playerId })
     expect(drinksOf(sam, actor.playerId)).toMatchObject({ level: 0, shotsWaiting: 1 })
     actor.send({ type: 'player_action', action: 'call' })
-    expect(drinksOf(sam, actor.playerId)).toMatchObject({ level: 3, shots: 1, shotsWaiting: 0 })
+    expect(drinksOf(sam, actor.playerId)).toMatchObject({ level: SHOT_LEVEL_BOOST, shots: 1, shotsWaiting: 0 })
   })
 
   it('a mid-hand shot that would black them out keeps them on the edge until they fold', () => {
@@ -333,7 +348,7 @@ describe('PokerRoom buy_shot', () => {
     sam.send({ type: 'buy_shot', targetId: alex.playerId })
     cy.send({ type: 'buy_shot', targetId: alex.playerId })
     expect(prankEvents(cy.connection).at(-1)).toMatchObject({ kind: 'shot_queued', fromId: cy.playerId })
-    expect(drinksOf(sam, alex.playerId)).toMatchObject({ shots: 1, level: 3, shotsWaiting: 1 })
+    expect(drinksOf(sam, alex.playerId)).toMatchObject({ shots: 1, level: SHOT_LEVEL_BOOST, shotsWaiting: 1 })
 
     playToHand(sam, [sam, alex, cy], SHOT_RECEIVE_COOLDOWN_HANDS - 1)
     expect(drinksOf(sam, alex.playerId)).toMatchObject({ shots: 1, shotsWaiting: 1 })
@@ -433,7 +448,7 @@ describe('PokerRoom bots buying shots', () => {
     hooks.maybeScheduleBotShot(new Map([[bot.id, 100_000]]))
     vi.advanceTimersByTime(2_500)
     expect(prankEvents(sam.connection).at(-1)).toMatchObject({ kind: 'shot', fromId: bot.id, targetId: sam.playerId })
-    expect(drinksOf(sam, sam.playerId)).toMatchObject({ level: 3, shots: 1 })
+    expect(drinksOf(sam, sam.playerId)).toMatchObject({ level: SHOT_LEVEL_BOOST, shots: 1 })
 
     // Bot cooldown: no second shot right away.
     hooks.maybeScheduleBotShot(new Map([[bot.id, 100_000]]))
@@ -469,7 +484,7 @@ describe('PokerRoom bots buying shots', () => {
     if (samActing) {
       expect(drinksOf(sam, sam.playerId)).toMatchObject({ level: levelBefore, shotsWaiting: 1 })
     } else {
-      expect(drinksOf(sam, sam.playerId)).toMatchObject({ level: levelBefore + 3, shotsWaiting: 0 })
+      expect(drinksOf(sam, sam.playerId)).toMatchObject({ level: levelBefore + SHOT_LEVEL_BOOST, shotsWaiting: 0 })
     }
     // Bot cooldown applies either way.
     expect(hooks.buyShotFor(bot.id, sam.playerId).ok).toBe(false)

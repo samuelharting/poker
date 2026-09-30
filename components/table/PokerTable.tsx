@@ -3495,6 +3495,7 @@ export function PokerTable({
                   shotBlocked={Boolean(shotBlockReason)}
                   shotNote={shotNote}
                   shotBadge={shotCooldownHands > 0 ? shotCooldownHands : null}
+                  shotPrice={state.smallBlind}
                   flickReadyAt={flickReadyAt}
                   isConnected={isConnected}
                   onBuyShot={handleBuyShot}
