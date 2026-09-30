@@ -1408,9 +1408,39 @@
   font-size: calc(var(--hero-card-w) * 0.36);
 }
 
+/* Balanced mobile face: index top-left, mirrored index bottom-right, and a
+   centre pip small enough to clear both indices. */
+[data-layout='2d'] .mobile-hero-lane .card-rank-top,
+[data-layout='2d'] .mobile-board-zone .card-rank-top {
+  font-size: 0.94em;
+}
+
+[data-layout='2d'] .mobile-hero-lane .card-corner-top,
+[data-layout='2d'] .mobile-board-zone .card-corner-top {
+  top: 5%;
+  left: 8%;
+  align-items: center;
+}
+
 [data-layout='2d'] .mobile-hero-lane .card-corner-bottom,
 [data-layout='2d'] .mobile-board-zone .card-corner-bottom {
-  display: none;
+  right: 8%;
+  bottom: 5%;
+  align-items: center;
+}
+
+[data-layout='2d'] .mobile-hero-lane .card-center-suit,
+[data-layout='2d'] .mobile-board-zone .card-center-suit {
+  width: 1.02em;
+  height: 1.02em;
+}
+
+[data-layout='2d'] .mobile-hero-lane .card-center-suit.card-suit-spades,
+[data-layout='2d'] .mobile-hero-lane .card-center-suit.card-suit-clubs,
+[data-layout='2d'] .mobile-board-zone .card-center-suit.card-suit-spades,
+[data-layout='2d'] .mobile-board-zone .card-center-suit.card-suit-clubs {
+  width: 0.96em;
+  height: 0.96em;
 }
 
 [data-layout='2d'] .mobile-hero-lane .card-deal-anim {
