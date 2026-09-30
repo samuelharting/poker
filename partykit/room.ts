@@ -105,13 +105,12 @@ import {
 } from '../lib/stickyNote'
 import { CHIP_FLICK_COOLDOWN_MS, HOUSE_ID, type PrankEvent, type PrankKind } from '../lib/pranks'
 import { computeHouseRules, WATERFALL_EVERY_HANDS } from '../lib/houseRules'
-/** Blinds-up mode: how long each blind level lasts. */
-const BLINDS_UP_EVERY_MS = 30 * 60_000
 /** After a water, random house beers leave that player alone this long. */
 const WATER_AUTO_BEER_SHIELD_MS = 60_000
 /** Extra thinking time on a turn that faces an all-in. */
 export const ALL_IN_EXTRA_TIME_MS = 15_000
 
+import { getBlindLevelMs, getBlindSchedule, getRaisedSmallBlind, type BlindScheduleId } from '../lib/poker/blindSchedule'
 import {
   DEFAULT_BUY_IN_DOLLARS,
   DEFAULT_LEDGER_SETTINGS,
@@ -147,8 +146,10 @@ interface TableSettings {
   sevenTwoBountyPercent: number
   /** Drinks and Lady Luck. Optional so rooms saved before it existed default to on. */
   funModeEnabled?: boolean
-  /** Blinds double every BLINDS_UP_EVERY_MS; the clock restarts when it is switched on. */
-  autoBlindsUp?: boolean
+  /** Blind schedule (lib/poker/blindSchedule); blinds double at the end of each level. */
+  blindSchedule?: BlindScheduleId
+  /** Current level index within the schedule and when it started. */
+  blindLevel?: number
   blindsLevelStartedAt?: number
   /** Self-serve rebuys (default on), cap per player (0 = unlimited) and $ per chip. */
   allowRebuys?: boolean
@@ -1205,11 +1206,14 @@ export default class PokerRoom implements PartyServer {
       }
     }
 
-    if (msg.autoBlindsUp !== undefined) {
-      this.data.tableSettings.autoBlindsUp = msg.autoBlindsUp
-      this.data.tableSettings.blindsLevelStartedAt = msg.autoBlindsUp ? Date.now() : undefined
-      if (Object.keys(msg).every(key => key === 'type' || key === 'autoBlindsUp')) {
-        this.sendActionResult(conn, msg.autoBlindsUp ? 'Blinds now double every 30 minutes.' : 'Blinds stay where they are.')
+    if (msg.blindSchedule !== undefined) {
+      // A new schedule starts its first level now.
+      this.data.tableSettings.blindSchedule = msg.blindSchedule
+      this.data.tableSettings.blindLevel = 0
+      this.data.tableSettings.blindsLevelStartedAt = msg.blindSchedule === 'off' ? undefined : Date.now()
+      if (Object.keys(msg).every(key => key === 'type' || key === 'blindSchedule')) {
+        const schedule = getBlindSchedule(msg.blindSchedule)
+        this.sendActionResult(conn, schedule.id === 'off' ? 'Blinds stay where they are.' : `${schedule.label}: ${schedule.description}`)
         this.broadcastState()
         return
       }
@@ -1510,12 +1514,15 @@ export default class PokerRoom implements PartyServer {
   /** Blinds-up mode: between hands, double the blinds once each level's time is up. */
   private raiseBlindsIfDue(now = Date.now()) {
     const settings = this.data.tableSettings
-    if (!settings.autoBlindsUp) return
+    const level = settings.blindLevel ?? 0
+    const levelMs = getBlindLevelMs(settings.blindSchedule, level)
+    if (levelMs === null) return
     const startedAt = settings.blindsLevelStartedAt ?? now
     settings.blindsLevelStartedAt = startedAt
-    if (now - startedAt < BLINDS_UP_EVERY_MS) return
-    const smallBlind = Math.min(500_000, settings.smallBlind * 2)
-    const bigBlind = Math.min(1_000_000, settings.bigBlind * 2)
+    if (now - startedAt < levelMs) return
+    settings.blindLevel = level + 1
+    const smallBlind = getRaisedSmallBlind(settings.smallBlind, getBlindSchedule(settings.blindSchedule).raiseSteps)
+    const bigBlind = Math.min(1_000_000, smallBlind * 2)
     settings.blindsLevelStartedAt = now
     if (smallBlind === settings.smallBlind && bigBlind === settings.bigBlind) return
     settings.smallBlind = smallBlind
@@ -3827,10 +3834,11 @@ export default class PokerRoom implements PartyServer {
         lobbyPlayers: this.buildLobbyPlayers(),
         handHistory: this.data.handHistory ?? [],
         funModeEnabled: this.isFunModeEnabled(),
-        autoBlindsUp: this.data.tableSettings.autoBlindsUp === true,
-        nextBlindsUpAt: this.data.tableSettings.autoBlindsUp
-          ? (this.data.tableSettings.blindsLevelStartedAt ?? Date.now()) + BLINDS_UP_EVERY_MS
-          : null,
+        blindSchedule: this.data.tableSettings.blindSchedule ?? 'off',
+        nextBlindsUpAt: (() => {
+          const levelMs = getBlindLevelMs(this.data.tableSettings.blindSchedule, this.data.tableSettings.blindLevel ?? 0)
+          return levelMs === null ? null : (this.data.tableSettings.blindsLevelStartedAt ?? Date.now()) + levelMs
+        })(),
         companion: this.isFunModeEnabled()
           ? getVisibleLadyLuck(this.data.ladyLuck, this.getSeatedPlayerIds())
           : null,

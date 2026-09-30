@@ -20,6 +20,7 @@ import { useDrinks } from './DrinkContext'
 import { PrankControls } from './PrankControls'
 import { StickyNoteChip } from './StickyNoteChip'
 import { StickyNoteControl } from './StickyNoteControl'
+import { BLIND_SCHEDULES, getBlindSchedule, getRaisedSmallBlind, type BlindScheduleId } from '@/lib/poker/blindSchedule'
 import { STICKY_NOTE_COOLDOWN_MS } from '@/lib/stickyNote'
 import { getShotBlockReasonFromState, isLiveInHand, type DrinkEvent } from '@/lib/drinks'
 import { CHIP_FLICK_COOLDOWN_MS, type PrankEvent } from '@/lib/pranks'
@@ -119,7 +120,7 @@ interface PokerTableProps {
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
     funModeEnabled?: boolean
-    autoBlindsUp?: boolean
+    blindSchedule?: BlindScheduleId
   }) => void
   onRemovePlayer: (targetId: string) => void
   onAdjustPlayerStack: (targetId: string, amount: number) => void
@@ -4212,7 +4213,7 @@ export function SettingsModal({
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
     funModeEnabled?: boolean
-    autoBlindsUp?: boolean
+    blindSchedule?: BlindScheduleId
   }) => void
   onRemovePlayer: (targetId: string) => void
   onAdjustPlayerStack: (targetId: string, amount: number) => void
@@ -4684,35 +4685,37 @@ export function SettingsModal({
                       </button>
                     </div>
                   </div>
-                  <div className="settings-rule-row">
+                  <div className="settings-rule-row settings-blind-schedule">
                     <div>
-                      <div className="settings-rule-name">Blinds up every 30 min</div>
+                      <div className="settings-rule-name">Blind schedule</div>
                       <div className="settings-rule-copy">
-                        Doubles the small and big blind every 30 minutes, between hands.
-                        {state.autoBlindsUp && state.nextBlindsUpAt
-                          ? ` Next raise in about ${Math.max(0, Math.ceil((state.nextBlindsUpAt - Date.now()) / 60_000))} min.`
+                        {getBlindSchedule(state.blindSchedule).description}
+                        {state.nextBlindsUpAt
+                          ? (() => {
+                              const nextSmall = getRaisedSmallBlind(state.smallBlind, getBlindSchedule(state.blindSchedule).raiseSteps)
+                              const minutes = Math.max(0, Math.ceil((state.nextBlindsUpAt - Date.now()) / 60_000))
+                              return ` Next: ${nextSmall.toLocaleString()}/${(nextSmall * 2).toLocaleString()} in about ${minutes} min.`
+                            })()
                           : ''}
                       </div>
                     </div>
-                    <div className="settings-toggle-row">
-                      <button
-                        type="button"
-                        className={`settings-pill ${state.autoBlindsUp ? 'is-active' : ''}`}
-                        aria-pressed={state.autoBlindsUp === true}
-                        disabled={!isConnected}
-                        onClick={() => onUpdateSettings({ autoBlindsUp: true })}
-                      >
-                        On
-                      </button>
-                      <button
-                        type="button"
-                        className={`settings-pill ${!state.autoBlindsUp ? 'is-active' : ''}`}
-                        aria-pressed={!state.autoBlindsUp}
-                        disabled={!isConnected}
-                        onClick={() => onUpdateSettings({ autoBlindsUp: false })}
-                      >
-                        Off
-                      </button>
+                    <div className="settings-toggle-row settings-blind-schedule-options">
+                      {BLIND_SCHEDULES.map(schedule => {
+                        const active = (state.blindSchedule ?? 'off') === schedule.id
+                        return (
+                          <button
+                            key={schedule.id}
+                            type="button"
+                            className={`settings-pill ${active ? 'is-active' : ''}`}
+                            aria-pressed={active}
+                            disabled={!isConnected}
+                            title={schedule.description}
+                            onClick={() => onUpdateSettings({ blindSchedule: schedule.id })}
+                          >
+                            {schedule.label}
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
                   <div className="settings-rule-row">

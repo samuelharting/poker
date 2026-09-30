@@ -7,6 +7,7 @@ import {
   validatePlayerProfile,
   type PlayerAvatarCustomization,
 } from '../lib/profile'
+import { isBlindScheduleId, type BlindScheduleId } from '../lib/poker/blindSchedule'
 import { DRINK_EVENT_KINDS, type DrinkEvent, type DrinkKind } from '../lib/drinks'
 import { isValidPrankEvent, type PrankEvent } from '../lib/pranks'
 import {
@@ -78,8 +79,8 @@ export type C2SMessage =
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
     funModeEnabled?: boolean
-    /** Double the blinds every 30 minutes (applies immediately). */
-    autoBlindsUp?: boolean
+    /** Blind schedule id (lib/poker/blindSchedule); applies immediately. */
+    blindSchedule?: BlindScheduleId
     /** Self-serve rebuys on/off (applies immediately). */
     allowRebuys?: boolean
     /** Rebuys each player may take tonight; 0 = unlimited. */
@@ -312,8 +313,8 @@ export function parseC2S(raw: string): C2SMessage | null {
         if (typeof parsed.funModeEnabled === 'boolean') {
           next.funModeEnabled = parsed.funModeEnabled
         }
-        if (typeof parsed.autoBlindsUp === 'boolean') {
-          next.autoBlindsUp = parsed.autoBlindsUp
+        if (isBlindScheduleId(parsed.blindSchedule)) {
+          next.blindSchedule = parsed.blindSchedule
         }
         if (typeof parsed.allowRebuys === 'boolean') {
           next.allowRebuys = parsed.allowRebuys

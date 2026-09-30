@@ -301,7 +301,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
     funModeEnabled?: boolean
-    autoBlindsUp?: boolean
+    blindSchedule?: import('@/lib/poker/blindSchedule').BlindScheduleId
   }) => {
     if (typeof settings.startingStack === 'number' && Number.isFinite(settings.startingStack)) {
       rememberStartingStack(settings.startingStack)

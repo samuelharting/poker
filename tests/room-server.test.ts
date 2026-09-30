@@ -1595,7 +1595,7 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
     expect(snapshot?.state.phase).toBe('waiting')
   })
 
-  it('blinds-up mode doubles the blinds once 30 minutes have passed, at the end of a hand', () => {
+  it('steady blind schedule steps the blinds up the ladder once 30 minutes have passed, at the end of a hand', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-03-31T12:00:00.000Z'))
     const { room, server } = createHarness()
@@ -1604,8 +1604,8 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
     const guest = joinPlayer(server, room, 'guest', 'Bob')
     seatPlayer(server, guest.connection, 1)
 
-    send(server, host.connection, { type: 'update_table_settings', autoBlindsUp: true })
-    expect(lastMessage(host.connection, 'room_snapshot')?.state).toMatchObject({ autoBlindsUp: true, smallBlind: 10, bigBlind: 20 })
+    send(server, host.connection, { type: 'update_table_settings', blindSchedule: 'steady' })
+    expect(lastMessage(host.connection, 'room_snapshot')?.state).toMatchObject({ blindSchedule: 'steady', smallBlind: 10, bigBlind: 20 })
 
     send(server, host.connection, { type: 'start_game' })
     vi.advanceTimersByTime(30 * 60_000)
@@ -1614,12 +1614,12 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
     hooks.raiseBlindsIfDue()
     hooks.broadcastState()
     const after = lastMessage(host.connection, 'room_snapshot')!.state
-    expect(after.smallBlind).toBe(20)
-    expect(after.bigBlind).toBe(40)
+    expect(after.smallBlind).toBe(15)
+    expect(after.bigBlind).toBe(30)
     // Only once per level.
     hooks.raiseBlindsIfDue(Date.now() + 10 * 60_000)
     hooks.broadcastState()
-    expect(lastMessage(host.connection, 'room_snapshot')!.state.smallBlind).toBe(20)
+    expect(lastMessage(host.connection, 'room_snapshot')!.state.smallBlind).toBe(15)
   })
 
   it('gives extra time to a player facing an all-in', () => {
