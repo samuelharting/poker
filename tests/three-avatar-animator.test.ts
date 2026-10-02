@@ -5,6 +5,7 @@ import {
   createAvatarAnimatorState,
   restingHands,
   FLIP_OFF_SECONDS,
+  LIVE_PEEK_MIN_HOLD_SECONDS,
   getFlipOffHand,
   updateAvatarAnimator,
   type AvatarAnimatorInput,
@@ -123,6 +124,38 @@ describe('avatar animator', () => {
       pose = updateAvatarAnimator(state, input({ ...base, winner: true, time: 0.016 * (frame + 2) }))
     }
     expect(pose.handR[1]).toBeGreaterThan(anchors.shoulderR[1] + 0.3)
+  })
+})
+
+describe('live peek tell', () => {
+  const peekInput = (time: number, peeking: boolean) => input({ time, peeking, hasCards: true, reducedMotion: false })
+
+  it('lifts the cards high, leans in and cocks the head so the tell reads across the table', () => {
+    const state = createAvatarAnimatorState('p1')
+    const rest = computeAvatarTargetPose(state, peekInput(0, false))
+    let pose = rest
+    for (let t = 0.1; t <= 1.5; t += 0.1) pose = computeAvatarTargetPose(state, peekInput(t, true))
+    expect(pose.cardLift).toBeGreaterThan(0.95)
+    // Leans over the cards (negative z is toward the table) and the elbows come out.
+    expect(pose.bodyPosition[2]).toBeLessThan(rest.bodyPosition[2] - 0.05)
+    expect(pose.elbowOut).toBeGreaterThan(0.3)
+    // A clear sideways head cock, whichever side this seat favours.
+    expect(Math.abs(pose.bones.Head[2]!)).toBeGreaterThan(0.12)
+    // Hands come up well above the cards' resting height.
+    expect(pose.handR[1]).toBeGreaterThan(anchors.cards[1] + 0.18)
+  })
+
+  it('keeps a quick tap on show for the minimum hold, then lets the cards down', () => {
+    const state = createAvatarAnimatorState('p1')
+    computeAvatarTargetPose(state, peekInput(0, true))
+    // The owner's tap ended almost at once, but observers still see the look.
+    const held = computeAvatarTargetPose(state, peekInput(LIVE_PEEK_MIN_HOLD_SECONDS - 0.1, false))
+    expect(held.cardLift).toBeGreaterThan(0.95)
+    let pose = held
+    for (let t = LIVE_PEEK_MIN_HOLD_SECONDS; t < LIVE_PEEK_MIN_HOLD_SECONDS + 1.5; t += 0.1) {
+      pose = computeAvatarTargetPose(state, peekInput(t, false))
+    }
+    expect(pose.cardLift).toBeLessThan(0.05)
   })
 })
 

@@ -818,6 +818,83 @@
   display: block;
 }
 
+/* Peek tell: an eye pill beside the name while that player looks at their
+   cards. It lingers ~1.1s after a quick tap so a glance is still catchable,
+   and collapses to zero width (no layout shift once gone). Only transform and
+   opacity animate. */
+.desktop-3d-stage .cinematic-seat .cinematic-peek-eye {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 0;
+  min-width: 0;
+  height: 20px;
+  margin: 0 -3px 0 0;
+  border-radius: 999px;
+  background: rgba(244, 196, 92, 0.96);
+  box-shadow: 0 0 12px rgba(244, 196, 92, 0.75);
+  color: #2b1d05;
+  opacity: 0;
+  overflow: visible;
+  transform: scale(0.6);
+  transition:
+    width 160ms var(--ease-out) 1.1s,
+    min-width 160ms var(--ease-out) 1.1s,
+    margin 160ms var(--ease-out) 1.1s,
+    opacity 220ms var(--ease-out) 1.1s,
+    transform 220ms var(--ease-out) 1.1s;
+  pointer-events: none;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-peek-eye[data-on='true'] {
+  width: 26px;
+  min-width: 26px;
+  margin: 0;
+  opacity: 1;
+  transform: scale(1);
+  transition-delay: 0s;
+  transition-timing-function: var(--ease-pop);
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-peek-eye svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+
+.desktop-3d-stage .cinematic-seat .cinematic-peek-eye[data-on='true']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid rgba(244, 196, 92, 0.9);
+  animation: peek-eye-ring 1.1s ease-out infinite;
+}
+
+@keyframes peek-eye-ring {
+  from {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-3d-stage .cinematic-seat .cinematic-peek-eye,
+  .desktop-3d-stage .cinematic-seat .cinematic-peek-eye[data-on='true'] {
+    transition: none;
+  }
+
+  .desktop-3d-stage .cinematic-seat .cinematic-peek-eye[data-on='true']::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+
 /* Hand result sits bottom-left, above the drink dock: never over opponents'
    revealed winning cards (top) or the board / your hand (centre). */
 .table-scene[data-desktop-three='true'] .table-seat-winner-announcements {

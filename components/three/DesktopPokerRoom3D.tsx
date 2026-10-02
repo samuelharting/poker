@@ -2832,7 +2832,7 @@ function animateSeat(
     const peekLift = pose.cardLift
     // Cards fly in from the dealer (table centre) and slide into place. A peek
     // tilts the near edge up (hinged on the far edge) so only the owner sees the faces.
-    const peekTilt = peekLift * 0.78
+    const peekTilt = peekLift * 1.0
     const foldToss = seat.avatar && playback.cue === 'fold' && playback.isActive && !seat.keepFoldedCardsVisible && !reducedMotion
       ? getFoldTossPose(seat, playback.elapsedMs / ACTION_ANIMATION_DURATION_MS, restY)
       : null
@@ -2842,8 +2842,8 @@ function animateSeat(
     } else {
       seat.cards.position.set(
         tablePose.cards.position[0],
-        restY + tablePose.cards.position[1] + Math.sin(peekTilt) * 0.13 + peekLift * 0.015,
-        seat.cardLocalZ + tablePose.cards.position[2] * 0.6 - (1 - Math.cos(peekTilt)) * 0.13
+        restY + tablePose.cards.position[1] + Math.sin(peekTilt) * 0.15 + peekLift * 0.03,
+        seat.cardLocalZ + tablePose.cards.position[2] * 0.6 - (1 - Math.cos(peekTilt)) * 0.15
       )
       seat.cards.rotation.set(
         tablePose.cards.rotation[0] - peekTilt,
@@ -4500,6 +4500,7 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
               key={player.id}
               data-seat-player={player.id}
               className={`cinematic-seat cinematic-seat-${player.visualSeat} ${player.isHero ? 'is-local-player' : ''} ${player.isActing ? 'is-acting' : ''} ${player.isWinner ? 'is-winner' : ''} ${player.isOutOfHand ? 'is-folded' : ''} ${selectedTargetId === player.id ? 'is-selected' : ''}`}
+              data-peeking={player.isPeeking && !player.isHero ? 'true' : undefined}
             >
               <button
                 type="button"
@@ -4560,6 +4561,22 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
                 >
                 <span className="cinematic-seat-topline">
                   <strong>{player.nickname}</strong>
+                  {!player.isHero && player.hasCards && !player.isOutOfHand && (
+                    // "Looking at their cards" tell. Always mounted so CSS can linger it
+                    // for a beat after a quick tap; hidden (and out of flow) otherwise.
+                    <em
+                      className="cinematic-peek-eye"
+                      data-on={player.isPeeking ? 'true' : 'false'}
+                      role="img"
+                      aria-label={player.isPeeking ? 'Looking at their cards' : undefined}
+                      aria-hidden={player.isPeeking ? undefined : 'true'}
+                    >
+                      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                        <path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12Z" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
+                        <circle cx="12" cy="12" r="3.4" fill="currentColor" />
+                      </svg>
+                    </em>
+                  )}
                   <StickyNoteChip note={player.stickyNote} />
                   {player.shotsWaiting > 0 && (
                     // A shot is lined up for them, poured once they're out of the hand.

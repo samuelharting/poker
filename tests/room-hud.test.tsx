@@ -13,7 +13,6 @@ describe('RoomHud mobile strip', () => {
 
     const markup = renderToStaticMarkup(
       <RoomHud
-        roomCode="ABCD"
         isConnected={true}
         isHost={true}
         playerCount={6}

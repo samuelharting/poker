@@ -100,8 +100,6 @@ interface PokerTableProps {
   soundMuted?: boolean
   soundVolume?: number
   avatarCustomization?: PlayerAvatarCustomization
-  roomCode: string
-  canShareRoom: boolean
   onAction: (
     action: 'fold' | 'check' | 'call' | 'raise' | 'all_in',
     amount?: number
@@ -140,8 +138,6 @@ interface PokerTableProps {
   /** You started/stopped privately peeking at your hole cards. */
   onPeekCards?: (peeking: boolean) => void
   onCloseSettings: () => void
-  onCopyRoom: () => void
-  onShareRoom: () => void
   onLeaveGame?: () => void
   onSendChat?: (message: string) => void
   onSendTargetChat?: (targetId: string, message: string) => void
@@ -792,6 +788,16 @@ function MobileEdgeSeat({
             <span className="mobile-edge-card-back" />
           </span>
         )}
+        {player.hasCards && !isFolded && !hasVisibleHoleCards && !isSelf && (
+          // Eye badge: the "looking at their cards" tell. Always mounted so CSS can
+          // keep it up for a beat after a quick tap.
+          <span className="mobile-peek-eye" data-on={player.isPeeking ? 'true' : 'false'} aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="11" height="11" focusable="false">
+              <path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12Z" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" />
+              <circle cx="12" cy="12" r="3.4" fill="currentColor" />
+            </svg>
+          </span>
+        )}
         {player.isDealer && (
           <span className="mobile-seat-dealer" title="Dealer" aria-label="Dealer">D</span>
         )}
@@ -1355,8 +1361,6 @@ export function PokerTable({
   soundMuted = false,
   soundVolume = 0.65,
   avatarCustomization = DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
-  roomCode,
-  canShareRoom,
   onAction,
   onStartGame,
   onAddBots,
@@ -1380,8 +1384,6 @@ export function PokerTable({
   onSoundCue = () => {},
   onPeekCards,
   onCloseSettings,
-  onCopyRoom,
-  onShareRoom,
   onLeaveGame = () => {},
   onSendChat = () => {},
   onSendTargetChat = () => {},
@@ -2541,7 +2543,7 @@ export function PokerTable({
   const tableWaitingCopy = !isConnected
     ? 'Restoring the room snapshot and reconnecting your seat.'
     : state.players.length < 2
-      ? 'Share the room code and fill the open seats to kick off the next hand.'
+      ? 'Fill the open seats to kick off the next hand.'
       : isHost
         ? `The table is ready. Press ${state.phase === 'between_hands' ? 'Deal next hand' : 'Start game'} when everyone is set.`
         : 'The table is ready. Waiting for the game creator to deal.'
@@ -3240,8 +3242,6 @@ export function PokerTable({
           soundMuted={soundMuted}
           soundVolume={soundVolume}
           avatarCustomization={avatarCustomization}
-          roomCode={roomCode}
-          canShareRoom={canShareRoom}
           onClose={onCloseSettings}
           onSetSuitColorMode={onSetSuitColorMode}
           onSetSceneMode={onSetSceneMode}
@@ -3252,8 +3252,6 @@ export function PokerTable({
           onRemovePlayer={onRemovePlayer}
           onAdjustPlayerStack={onAdjustPlayerStack}
           onSetPlayerSpectator={onSetPlayerSpectator}
-          onCopyRoom={onCopyRoom}
-          onShareRoom={onShareRoom}
           onLeaveGame={onLeaveGame}
           onFeedback={onFeedback}
           onSendLedgerMessage={onSendLedgerMessage}
@@ -3287,8 +3285,6 @@ export function PokerTable({
           onAddBots={onAddBots}
           onSeatMe={onSeatMe}
           onFeedback={onFeedback}
-          roomCode={roomCode}
-          onShareRoom={onShareRoom}
         />
       )}
 
@@ -4404,8 +4400,6 @@ export function SettingsModal({
   soundMuted = false,
   soundVolume = 0.65,
   avatarCustomization = DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
-  roomCode,
-  canShareRoom,
   onClose,
   onSetSuitColorMode,
   onSetSceneMode = () => {},
@@ -4416,8 +4410,6 @@ export function SettingsModal({
   onRemovePlayer,
   onAdjustPlayerStack,
   onSetPlayerSpectator,
-  onCopyRoom,
-  onShareRoom,
   onLeaveGame = () => {},
   onFeedback,
   onSendLedgerMessage,
@@ -4435,8 +4427,6 @@ export function SettingsModal({
   soundMuted?: boolean
   soundVolume?: number
   avatarCustomization?: PlayerAvatarCustomization
-  roomCode: string
-  canShareRoom: boolean
   onClose: () => void
   onSetSuitColorMode: (mode: 'two' | 'four') => void
   onSetSceneMode?: (mode: SceneMode) => void
@@ -4458,8 +4448,6 @@ export function SettingsModal({
   onRemovePlayer: (targetId: string) => void
   onAdjustPlayerStack: (targetId: string, amount: number) => void
   onSetPlayerSpectator: (targetId: string, spectator: boolean) => void
-  onCopyRoom: () => void
-  onShareRoom: () => void
   onLeaveGame?: () => void
   onFeedback: (message: string, tone?: FeedbackTone) => void
 }) {
@@ -4742,23 +4730,8 @@ export function SettingsModal({
               )
             })()}
             <div className="settings-section settings-room-section">
-              <div className="settings-section-title">Room</div>
-              <div className="settings-room-code">
-                <span>Room code: </span>
-                <strong>{roomCode}</strong>
-              </div>
+              <div className="settings-section-title">Table</div>
               <div className="settings-inline-controls">
-                <button type="button" className="btn-subtle" onClick={onCopyRoom}>
-                  Copy code
-                </button>
-                <button
-                  type="button"
-                  className="btn-subtle"
-                  onClick={onShareRoom}
-                  disabled={!canShareRoom}
-                >
-                  Share link
-                </button>
                 <button
                   type="button"
                   className="btn-subtle btn-subtle-danger"
@@ -5516,7 +5489,7 @@ function WaitingPanel({
             ? 'The game creator manages players and starts the table.'
             : me
               ? seatedCount < 2
-                ? 'Add a bot or share the room code to fill a seat.'
+                ? 'Add a bot or wait for a friend to fill a seat.'
                 : `Everyone set? Press ${dealLabel}.`
               : 'Seat assignment is being restored.'}
       </div>
@@ -5582,8 +5555,6 @@ function MobileBetweenHandsDock({
   onAddBots,
   onSeatMe,
   onFeedback,
-  roomCode,
-  onShareRoom,
 }: {
   state: TableState
   me?: SeatPlayer
@@ -5591,9 +5562,6 @@ function MobileBetweenHandsDock({
   isHost: boolean
   isConnected: boolean
   isBusted: boolean
-  /** Lobby: the code and a one-tap invite, so nobody has to dig through Settings. */
-  roomCode?: string
-  onShareRoom?: () => void
   /** Why a self-serve rebuy is not available (rebuys off, cap reached), if so. */
   rebuyBlockedReason?: string | null
   onRebuy: () => void
@@ -5642,18 +5610,6 @@ function MobileBetweenHandsDock({
   return (
     <div className="mobile-between-hands-dock" data-busted={isBusted ? 'true' : 'false'}>
       <div className="mobile-between-hands-card">
-        {roomCode && state.phase === 'waiting' && !isBusted && (
-          <button
-            type="button"
-            className="mobile-between-hands-room"
-            onClick={onShareRoom}
-            aria-label={`Invite friends to room ${roomCode}`}
-          >
-            <span>Room</span>
-            <b>{roomCode}</b>
-            <em>Invite</em>
-          </button>
-        )}
         <div className="mobile-between-hands-copy">
           <div className="mobile-between-hands-title">{title}</div>
           <div className="mobile-between-hands-meta">{detail}</div>

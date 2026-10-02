@@ -2,8 +2,6 @@
 
 import { normalizeSceneMode, type SceneMode } from '@/components/three/sceneMode'
 import { useState, useEffect, useCallback } from 'react'
-import { useParams } from 'next/navigation'
-import Link from 'next/link'
 import { PokerTable } from '@/components/table/PokerTable'
 import { RoomHud } from '@/components/ui/RoomHud'
 import { LandingHeroArt } from '@/components/ui/LandingHeroArt'
@@ -20,7 +18,7 @@ import {
   type PlayerAvatarCustomization,
   type PlayerProfile,
 } from '@/lib/profile'
-import { normalizeRoomCode } from '@/lib/roomCode'
+import { TABLE_ROOM_CODE } from '@/lib/roomCode'
 import type { ShowCardsMode } from '@/lib/poker/types'
 import {
   DEFAULT_POKER_SOUND_PREFERENCES,
@@ -43,8 +41,8 @@ import type { LedgerC2SMessage } from '@/components/table/LedgerPanel'
 const ignoreFeedback = () => {}
 
 export default function RoomPage() {
-  const params = useParams()
-  const code = normalizeRoomCode(typeof params.code === 'string' ? params.code : '')
+  // One table for the crew: any /room/<code> link opens it.
+  const code = TABLE_ROOM_CODE
 
   const [profile, setProfile] = useState<PlayerProfile | null>(null)
   const [profileInput, setProfileInput] = useState<PlayerProfile>({
@@ -84,19 +82,6 @@ export default function RoomPage() {
     setProfile(result.profile)
   }, [profileInput])
 
-  if (!code) {
-    return (
-      <main className="landing-bg landing-gate">
-        <section className="card-panel gate-panel" aria-labelledby="gate-title">
-          <span className="landing-kicker">Room unavailable</span>
-          <h1 id="gate-title" className="gate-title">Invalid room code</h1>
-          <p className="gate-copy">Double-check the code with your host, or start a new table.</p>
-          <Link className="btn-gold entry-submit" href="/">Back to Poker Night</Link>
-        </section>
-      </main>
-    )
-  }
-
   if (!profile && !profileChecked) {
     return (
       <main className="landing-bg landing-gate" aria-busy="true">
@@ -118,15 +103,6 @@ export default function RoomPage() {
           <LandingHeroArt compact />
           <span className="landing-kicker">Poker Night</span>
           <h1 id="gate-title" className="gate-title">Take your seat</h1>
-          <div className="gate-room-code" role="group" aria-label={`Room ${code}`}>
-            <span className="gate-room-code-label" aria-hidden="true">Room</span>
-            <span className="gate-room-code-tiles" aria-hidden="true">
-              {code.split('').map((character, index) => (
-                <b key={`${character}-${index}`}>{character}</b>
-              ))}
-            </span>
-          </div>
-
           <div className="entry-panel">
             <NicknameField
               value={profileInput.nickname}
@@ -161,7 +137,6 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     ...profile,
     avatar: normalizePlayerAvatarCustomization(profile.avatar),
   }))
-  const [shareUrl, setShareUrl] = useState('')
   const [startingStackSetting, setStartingStackSetting] = useState(1000)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [suitColorMode, setSuitColorMode] = useState<'two' | 'four'>('two')
@@ -209,10 +184,6 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
   }, [roomCode, sendMessage])
 
   useEffect(() => {
-    setShareUrl(window.location.href)
-  }, [])
-
-  useEffect(() => {
     const storedStack = sessionStorage.getItem(`poker_starting_stack_${roomCode}`)
     const parsed = storedStack ? Number(storedStack) : NaN
     if (Number.isFinite(parsed) && parsed > 0) {
@@ -237,11 +208,6 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     setSoundPreferences(loadPokerSoundPreferences())
     setSoundPreferencesReady(true)
   }, [])
-
-  const canShareRoom = typeof navigator !== 'undefined' && (
-    typeof navigator.share === 'function' ||
-    typeof navigator.clipboard?.writeText === 'function'
-  )
 
   const rememberStartingStack = useCallback((value: number) => {
     setStartingStackSetting(value)
@@ -272,35 +238,6 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
       return next
     })
   }, [])
-
-  const handleCopyRoom = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(roomCode)
-    } catch {
-      // Copy failures stay silent so the room never displays popup notifications.
-    }
-  }, [roomCode])
-
-  const handleShareRoom = useCallback(async () => {
-    if (!shareUrl) {
-      return
-    }
-
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: `Poker room ${roomCode}`,
-          text: `Join my poker table in room ${roomCode}.`,
-          url: shareUrl,
-        })
-        return
-      }
-
-      await navigator.clipboard.writeText(shareUrl)
-    } catch {
-      // Sharing failures and cancellations stay silent by design.
-    }
-  }, [roomCode, shareUrl])
 
   const handleUpdateSettings = useCallback((settings: {
     smallBlind?: number
@@ -373,7 +310,6 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     >
     <div className="room-shell">
       <RoomHud
-        roomCode={roomCode}
         isConnected={isConnected}
         isHost={isHost}
         playerCount={tableState?.players.length ?? 0}
@@ -400,8 +336,6 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           soundMuted={soundPreferences.muted}
           soundVolume={soundPreferences.volume}
           avatarCustomization={currentProfile.avatar ?? DEFAULT_PLAYER_AVATAR_CUSTOMIZATION}
-          roomCode={roomCode}
-          canShareRoom={canShareRoom}
           onAction={sendAction}
           onStartGame={() => sendMessage({ type: 'start_game' })}
           onAddBots={(count: number) => sendMessage({ type: 'add_bots', count })}
@@ -428,8 +362,6 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           onSoundCue={playSoundCue}
           onPeekCards={peeking => sendMessage({ type: 'peek_cards', peeking })}
           onCloseSettings={() => setSettingsOpen(false)}
-          onCopyRoom={handleCopyRoom}
-          onShareRoom={handleShareRoom}
           onLeaveGame={handleLeaveGame}
           onSendChat={handleSendChat}
           onSendTargetChat={(targetId: string, message: string) => {

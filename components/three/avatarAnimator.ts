@@ -261,6 +261,8 @@ export const DAZED_SECONDS = 2.6
 /** Winners rake the pot toward themselves before celebrating. */
 const WINNER_RAKE_SECONDS = 1.0
 const PEEK_DURATION = 2.1
+/** A server-driven peek reads on screen for at least this long, however short the tap. */
+export const LIVE_PEEK_MIN_HOLD_SECONDS = 1.8
 /** Big idles (see 7c): how many kinds, and how long each lasts. */
 const BIG_IDLE_KINDS = 8
 const BIG_IDLE_SECONDS = [2.8, 4.2, 2.8, 2.8, 3.2, 4.5, 3.4, 2.6] as const
@@ -593,7 +595,10 @@ function positiveModulo(value: number, divisor: number) {
  */
 function getLivePeekWeights(state: AvatarAnimatorState, input: AvatarAnimatorInput): { reach: number; lift: number } {
   const { time } = input
-  const able = Boolean(input.peeking) && input.hasCards && !input.folded && !input.passedOut && !input.winner && !input.loser
+  // A quick tap on the owner's phone is over in under a second, which an
+  // observer barely registers: keep the look on show for a minimum hold.
+  const holdingMinimum = Number.isFinite(state.livePeekSince) && time - state.livePeekSince < LIVE_PEEK_MIN_HOLD_SECONDS
+  const able = (Boolean(input.peeking) || holdingMinimum) && input.hasCards && !input.folded && !input.passedOut && !input.winner && !input.loser
   if (able && !Number.isFinite(state.livePeekSince)) {
     state.livePeekSince = time
     state.livePeekEndedAt = Number.NEGATIVE_INFINITY
@@ -1095,18 +1100,26 @@ export function computeAvatarTargetPose(
     state.nextPeekAt = Math.max(state.nextPeekAt, time + 4)
     // A small lean and a look down: enough to read as "checking my cards"
     // from across the table without the face disappearing under the hat.
-    add(bones.Torso, 0.03, 0, 0, reach)
+    // Pitch is capped further down (the hat brim hides the face past it), so
+    // the tell is carried by the whole body instead: shoulders lean in over the
+    // cards, the head cocks to one side, and the elbows come up and out.
+    add(bones.Torso, 0.04, 0, 0, reach)
     add(bones.Chest, 0.1, 0, 0, reach)
+    pose.bodyPosition[2] -= 0.1 * reach
+    pose.elbowOut = Math.max(pose.elbowOut, 0.4 * reach)
     // Face the cards: yaw back to centre, pitch down to look.
     bones.Neck[1] -= bones.Neck[1] * reach
     bones.Head[1] -= bones.Head[1] * reach
     bones.Neck[0] += (0.1 - bones.Neck[0]) * reach
     bones.Head[0] += (0.26 + 0.05 * lift - bones.Head[0]) * reach
-    add(bones.Head, 0, 0, 0.05 * Math.sin(time * 0.9 + seed), lift)
-    blendTo(pose.handR, offset(anchors.cards, 0.16, 0.07 + 0.085 * lift + wiggle, 0.13 - 0.035 * lift), reach)
-    blendTo(pose.handL, offset(anchors.cards, -0.16, 0.07 + 0.085 * lift - wiggle, 0.13 - 0.035 * lift), reach)
-    add(bones.WristR, -0.35 * lift, 0, 0.2, reach)
-    add(bones.WristL, -0.35 * lift, 0, -0.2, reach)
+    // A clear sideways head cock (a fixed side per seat, blended in absolutely so
+    // the idle sway can't cancel it) over a slow drift.
+    const cock = (seed < 0.5 ? 1 : -1) * 0.18 + 0.04 * Math.sin(time * 0.9 + seed)
+    bones.Head[2] += (cock - bones.Head[2]) * lift
+    blendTo(pose.handR, offset(anchors.cards, 0.15, 0.08 + 0.15 * lift + wiggle, 0.12 - 0.075 * lift), reach)
+    blendTo(pose.handL, offset(anchors.cards, -0.15, 0.08 + 0.15 * lift - wiggle, 0.12 - 0.075 * lift), reach)
+    add(bones.WristR, -0.45 * lift, 0, 0.2, reach)
+    add(bones.WristL, -0.45 * lift, 0, -0.2, reach)
     pose.fingerCurlR = pose.fingerCurlR + (0.62 - pose.fingerCurlR) * reach
     pose.fingerCurlL = pose.fingerCurlL + (0.62 - pose.fingerCurlL) * reach
     // Cupped round the near edge; lifting the corner tips the wrists back.
