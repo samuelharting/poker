@@ -57,7 +57,7 @@ export function isOwnHandTucked(phase: string | undefined, status: string | unde
 /** Holding longer than this turns a quick squeeze into a full look that lasts while held. */
 export const PEEK_HOLD_THRESHOLD_MS = 240
 /** A quick click/tap/Space tap squeezes the cards up this long, then they settle on their own. */
-export const QUICK_PEEK_MS = 900
+export const QUICK_PEEK_MS = 1800
 /** Freshly dealt cards stay face-up this long before flipping down on their own. */
 export const DEAL_REVEAL_MS = 3000
 const PEEKED_ONCE_STORAGE_KEY = 'poker-night:peeked-once'
