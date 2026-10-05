@@ -34,7 +34,7 @@ async function openTable(browser, name, contextOptions) {
   page.on('pageerror', error => console.log(`${name} pageerror:`, error.message))
   await page.goto(appUrl, { waitUntil: 'networkidle' })
   await page.getByLabel('Your nickname').fill('Peeker')
-  await page.getByRole('button', { name: 'Create Table' }).click()
+  await page.getByRole('button', { name: /Take a seat|Sit down as/ }).click()
   await page.waitForURL(/\/room\//)
   const deadline = Date.now() + 45000
   while (Date.now() < deadline) {

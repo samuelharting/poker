@@ -4,6 +4,7 @@ import { GAZE, type GazeTargets } from './avatarFaceGaze'
 import { emoteToEmotion } from './avatarFaceEmotion'
 import { BOARD_Z, FELT_TOP_Y } from './tableArt'
 import { TABLE_POT_POSITION } from './tableWagerLayout'
+import { chatLaughAmount, chatSmileAmount, chatTalkAmount, type TableChat } from './tableTalk'
 
 /**
  * Turns the live game state of a seat into the inputs the face system wants:
@@ -36,6 +37,10 @@ export interface FaceDirectorSeat {
   lastPose?: { drinkLift: number } | null
   /** When the current drink started (same clock as env.time). */
   drinkStartedAt?: number
+  /** This seat's part in an idle table conversation, set only while the animator has it taking part. */
+  chat?: TableChat | null
+  /** 0..1 yawn through the middle of the stretch idle (from the animator). */
+  yawn?: number
 }
 
 /** Seconds of a drink (matches drinkProps DRINK_DURATION); the "aah" follows the swallow near the end. */
@@ -203,6 +208,12 @@ function buildFaceInputInner(face: AvatarFaceRig, seat: FaceDirectorSeat, env: F
   ctx.drinkAfter = seat.passedOut || !(sinceDrink > 0 && sinceDrink < 1.6)
     ? 0
     : smooth01(sinceDrink / 0.25) * (1 - smooth01((sinceDrink - 0.8) / 0.6))
+  // Table talk (the animator only reports a chat while the seat is really taking part) and the yawn.
+  const chat = !env.reducedMotion && seat.chat ? seat.chat : null
+  ctx.talk = chat ? chatTalkAmount(chat) : 0
+  ctx.chatSmile = chat ? chatSmileAmount(chat) : 0
+  ctx.chatLaugh = chat ? chatLaughAmount(chat) * (chat.role === 'listen' ? 1 : 0.6) : 0
+  ctx.yawn = seat.passedOut || env.reducedMotion ? 0 : Math.max(0, Math.min(1, seat.yawn ?? 0))
   prepareFrame(env)
   let received = false
   for (let i = 0; i < frameSeats.length; i += 1) {
@@ -364,6 +375,26 @@ function buildFaceInputInner(face: AvatarFaceRig, seat: FaceDirectorSeat, env: F
     w[GAZE.away] += 0.25
     targets.awayMode = 'down'
   }
+  // In conversation the eyes stay on the other person (with the odd look away), from the first beat.
+  let chatting = false
+  if (chat) {
+    for (let i = 0; i < frameSeats.length; i += 1) {
+      const other = frameSeats[i]!
+      if (other.playerId === chat.partnerId && other !== seat && headPosition(other, pos[GAZE.other]!)) {
+        avail[GAZE.other] = 1
+        chatting = true
+        break
+      }
+    }
+  }
+  if (chatting) {
+    w.fill(0)
+    w[GAZE.other] = 0.86
+    w[GAZE.away] = 0.14
+    targets.awayMode = chat!.role === 'speak' ? 'think' : 'side'
+    if (!st.prevChatting) face.gazeState.fixUntil = Math.min(face.gazeState.fixUntil, face.emotion.time + 0.15)
+  }
+  st.prevChatting = chatting
 
   input.delta = delta
   input.blink = seat.passedOut ? 1 : 0

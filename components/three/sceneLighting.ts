@@ -135,10 +135,70 @@ const VignetteShader = {
   `,
 }
 
+/**
+ * Display-referred colour grade, folded into the OutputPass shader (after the
+ * ACES tone map and the sRGB transfer), so it costs a few ALU ops and no extra
+ * full-screen pass. The Lounge defaults are deliberately gentle; table themes
+ * can retune them live with `PostFx.setGrade`.
+ */
+export interface GradeSettings {
+  /** Lifted blacks: sRGB floor added to the darkest pixels (0.02 is about 5/255). */
+  lift: number
+  /** Filmic S-curve on luma, 0 = none. Colour ratios are kept, so it never shifts saturation. */
+  contrast: number
+  /** Warm push on the bright end (R up, B down), 0 = none. */
+  warmth: number
+  /** Cool tint of the lifted blacks (sRGB, roughly unit length). */
+  shadowTint: THREE.ColorRepresentation
+}
+
+/** Lounge grade: slightly lifted blacks, a soft S-curve and a faint warm shoulder. */
+export const GRADE_LIFT = 0.02
+export const GRADE_CONTRAST = 0.16
+export const GRADE_WARMTH = 0.03
+export const GRADE_SHADOW_TINT = '#cfe6f2'
+export const DEFAULT_GRADE: Readonly<GradeSettings> = {
+  lift: GRADE_LIFT,
+  contrast: GRADE_CONTRAST,
+  warmth: GRADE_WARMTH,
+  shadowTint: GRADE_SHADOW_TINT,
+}
+
+const GRADE_UNIFORMS_GLSL = /* glsl */ `
+	uniform float gradeLift;
+	uniform float gradeContrast;
+	uniform float gradeWarmth;
+	uniform vec3 gradeShadowTint;
+`
+
+const GRADE_GLSL = /* glsl */ `
+			// Display grade (sRGB in, sRGB out). Contrast bends luma only; the
+			// lift sits under it so shadows never go muddy or fully black.
+			vec3 gradeColor = gl_FragColor.rgb;
+			float gradeLuma = dot(gradeColor, vec3(0.2126, 0.7152, 0.0722));
+			float gradeCurved = gradeLuma * gradeLuma * (3.0 - 2.0 * gradeLuma);
+			gradeColor *= mix(1.0, gradeCurved / max(gradeLuma, 1e-3), gradeContrast * smoothstep(0.0, 0.04, gradeLuma));
+			gradeColor = gradeColor * (1.0 - gradeLift) + gradeShadowTint * gradeLift;
+			gradeColor *= mix(vec3(1.0), vec3(1.0 + gradeWarmth, 1.0, 1.0 - gradeWarmth * 1.4), smoothstep(0.45, 0.95, gradeLuma));
+			gl_FragColor.rgb = clamp(gradeColor, 0.0, 1.0);
+`
+
+/** Patches the grade into three's OutputShader source (idempotent per source string). */
+export function injectGrade(fragmentShader: string): string {
+  if (fragmentShader.includes('gradeLift')) return fragmentShader
+  return fragmentShader
+    .replace('varying vec2 vUv;', `varying vec2 vUv;\n${GRADE_UNIFORMS_GLSL}`)
+    .replace(/\}\s*$/, `${GRADE_GLSL}\n\t\t}`)
+}
+
 export interface PostFx {
   composer: EffectComposer
   bloom: UnrealBloomPass
   fxaa: ShaderPass
+  /** Retunes the display grade (see GradeSettings); omitted fields keep their value. */
+  setGrade: (grade: Partial<GradeSettings>) => void
+  /** Live grade uniforms, for tests and debugging. */
+  grade: Readonly<{ lift: { value: number }; contrast: { value: number }; warmth: { value: number }; shadowTint: { value: THREE.Vector3 } }>
   setSize: (width: number, height: number, pixelRatio: number) => void
   /** Full-resolution bloom (false) or a half-resolution bloom chain (true). */
   setReducedBloom: (reduced: boolean) => void
@@ -181,7 +241,24 @@ export function createPostFx(
     renderVignette(...args)
   }
   composer.addPass(vignettePass)
-  composer.addPass(new OutputPass())
+  const outputPass = new OutputPass()
+  // The colour grade rides inside the output pass (no extra full-screen pass).
+  const gradeUniforms = {
+    gradeLift: { value: DEFAULT_GRADE.lift },
+    gradeContrast: { value: DEFAULT_GRADE.contrast },
+    gradeWarmth: { value: DEFAULT_GRADE.warmth },
+    gradeShadowTint: { value: new THREE.Vector3() },
+  }
+  const writeShadowTint = (tint: THREE.ColorRepresentation) => {
+    // The tint is a display (sRGB) value: read it back un-linearised.
+    const rgb = new THREE.Color(tint).getRGB({ r: 0, g: 0, b: 0 }, THREE.SRGBColorSpace)
+    gradeUniforms.gradeShadowTint.value.set(rgb.r, rgb.g, rgb.b)
+  }
+  writeShadowTint(DEFAULT_GRADE.shadowTint)
+  Object.assign(outputPass.uniforms, gradeUniforms)
+  outputPass.material.fragmentShader = injectGrade(outputPass.material.fragmentShader)
+  outputPass.material.needsUpdate = true
+  composer.addPass(outputPass)
   const fxaa = new ShaderPass(FXAAShader)
   composer.addPass(fxaa)
   const maxSamples = renderer.capabilities.maxSamples ?? 0
@@ -200,6 +277,18 @@ export function createPostFx(
     composer,
     bloom,
     fxaa,
+    grade: {
+      lift: gradeUniforms.gradeLift,
+      contrast: gradeUniforms.gradeContrast,
+      warmth: gradeUniforms.gradeWarmth,
+      shadowTint: gradeUniforms.gradeShadowTint,
+    },
+    setGrade(grade) {
+      if (grade.lift !== undefined) gradeUniforms.gradeLift.value = THREE.MathUtils.clamp(grade.lift, 0, 0.2)
+      if (grade.contrast !== undefined) gradeUniforms.gradeContrast.value = THREE.MathUtils.clamp(grade.contrast, 0, 1)
+      if (grade.warmth !== undefined) gradeUniforms.gradeWarmth.value = THREE.MathUtils.clamp(grade.warmth, -0.2, 0.2)
+      if (grade.shadowTint !== undefined) writeShadowTint(grade.shadowTint)
+    },
     setSize(width, height, pixelRatio) {
       size.width = width
       size.height = height

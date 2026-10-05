@@ -149,6 +149,8 @@ export interface AvatarFaceRig {
     lossStreak: number
     prevLoser: boolean
     prevWinner: boolean
+    /** The director last saw this seat in a table conversation (to retarget the eyes when it starts). */
+    prevChatting?: boolean
     lastBrowAlpha: number
     mouthShape: MouthShape
     browParams: BrowParams
@@ -1044,7 +1046,8 @@ function updateAvatarFaceInner(face: AvatarFaceRig, input: FaceInput) {
     // Eye index 0 is the +x side, so it owns the mouth's right corner.
     shape.cornerR = smirkSide === 1 ? smileA : smileB
     shape.cornerL = smirkSide === 1 ? smileB : smileA
-    shape.open = p[CH.open]!
+    // A yawn stretches the jaw past the channel's range (a surprised "O" tops out at 0.9).
+    shape.open = p[CH.open]! * (1 + 0.4 * face.context.yawn)
     if (face.hairShade) {
       // Neutral and frowning faces get the full lip shadow; a smile lets the moustache stay bright.
       const smileAvgHair = (smileA + smileB) * 0.5

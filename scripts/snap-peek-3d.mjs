@@ -31,7 +31,7 @@ const host = await hostContext.newPage()
 host.on('pageerror', error => console.log('host pageerror:', error.message))
 await host.goto(appUrl, { waitUntil: 'networkidle' })
 await host.getByLabel('Your nickname').fill('Host')
-await host.getByRole('button', { name: 'Create Table' }).click()
+await host.getByRole('button', { name: /Take a seat|Sit down as/ }).click()
 await host.waitForURL(/\/room\//)
 const roomUrl = host.url()
 

@@ -887,10 +887,14 @@ function applyRiggedHeadwearCompatibility(
   const builtInHeadwear = avatarRoot.getObjectByName(meshName)
   if (!builtInHeadwear) return undefined
 
-  const wasVisible = builtInHeadwear.visible
-  builtInHeadwear.visible = false
+  // The ink hull of the hidden piece (stylizeAvatar adds `<name>-outline`) is a separate
+  // mesh; left on, it shows as a black silhouette of the hat/crest poking through the new hat.
+  const hidden = [builtInHeadwear, avatarRoot.getObjectByName(`${meshName}-outline`)]
+    .filter((object): object is THREE.Object3D => Boolean(object))
+  const wasVisible = hidden.map(object => object.visible)
+  hidden.forEach(object => { object.visible = false })
   return () => {
-    builtInHeadwear.visible = wasVisible
+    hidden.forEach((object, index) => { object.visible = wasVisible[index]! })
   }
 }
 

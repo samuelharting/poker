@@ -46,6 +46,28 @@ import { applyAvatarAccessoryFabrics, applyBlink, getBlinkAmount, stylizeAvatar,
 import { disposeStickyNoteFx, syncStickyNoteFx, type StickyNoteFx } from './stickyNote'
 import { createAvatarFace, disposeAvatarFace, updateAvatarFace, type AvatarFaceRig } from './avatarFace'
 import { buildFaceInput, setFaceViewer, triggerFaceEmote } from './avatarFaceDirector'
+import {
+  createDealerPose,
+  getDealFlightSeconds,
+  getDealerPose,
+  getHoleCardDelay,
+  getHoleDealTiming,
+  type DealerPose,
+  type DealTiming,
+} from './dealerDeal'
+import {
+  createBoardDeal,
+  createHoleDeal,
+  findBoardCardIndex,
+  findDealingSeat,
+  findHoleCardIndex,
+  getDealerReleaseWorld,
+  planDealerBoard,
+  type DealerRuntime,
+} from './dealerDealRuntime'
+import type { TableChat } from './tableTalk'
+import { getSeatTableChat } from './tableTalkSeats'
+import { animateSconceFlames, neonBuzz } from './roomLifeMotion'
 import { createDrinkProp, disposeDrinkProp, DRINK_DURATION, type DrinkProp } from './drinkProps'
 import {
   createFirstPersonDrink,
@@ -53,7 +75,15 @@ import {
   updateFirstPersonDrink,
   type FirstPersonDrink,
 } from './firstPersonDrink'
+import {
+  createFirstPersonHands,
+  disposeFirstPersonHands,
+  updateHeroHands,
+  type FirstPersonHands,
+} from './firstPersonHands'
 import { CHILL_BLOOM_SCALE, applySceneMode, type SceneMode } from './sceneMode'
+import { applyTableTheme, disposeTableTheme, getThemeBloomScale, setThemeQuality, type ThemeState } from './themeApply'
+import { useTableThemeId } from './useTableTheme'
 import {
   animateConfetti,
   animateLightCone,
@@ -80,6 +110,12 @@ import {
   type CompanionRuntime,
 } from './companion3D'
 import { DESKTOP_CAMERA_FRAMING } from './cameraFraming'
+import {
+  ShowdownDirector,
+  blendShowdownShot,
+  createShowdownShot,
+  createShowdownSnapshot,
+} from './showdownCamera'
 import { PERSONAL_STACK_MAX_CHIPS, PersonalChipStack, StackSparkles } from './personalChipStack'
 import {
   createPrankRuntime,
@@ -172,6 +208,8 @@ import {
   type TableVisualSeat,
 } from './tableWagerLayout'
 import { getAvatarHeadTurn } from './turnFocus'
+import { createAvatarSocialInput, type AvatarSocialInput } from './avatarReactions'
+import { createTableSocialFrame, fillSeatSocial, setSeatSocialStats, updateTableSocialFrame, type TableSocialFrame } from './avatarSocialFeed'
 import { FunFx, type FunPoseInput } from './funFx'
 import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
 import { StickyNoteChip } from '@/components/table/StickyNoteChip'
@@ -278,6 +316,15 @@ interface SeatRuntime {
   dealtHand?: number
   /** Per-card launch delays for the current deal (clockwise, one card a round). */
   dealDelays?: [number, number]
+  /** Seconds each hole card spends in the air (longer for a card pitched across the table). */
+  dealFlight?: number
+  /** This seat's place in the dealing order, and how many seats are dealt in. */
+  dealOrder?: number
+  dealCount?: number
+  /** Where each hole card left the dealer's hand (seat-local), once it has launched. */
+  dealOrigins?: [Vec3 | null, Vec3 | null]
+  /** The dealer's own pose scratch while they deal (allocated on first use). */
+  dealPose?: DealerPose
   /** Showdown flip per card: when it started and which way it is heading. */
   flipAnim?: Array<{ from: number; to: number; startedAt: number }>
   avatarGeneration: number
@@ -295,6 +342,13 @@ interface SeatRuntime {
   funPose?: FunPoseInput
   /** The lips, in the Head bone's local space (measured from the rig). */
   mouthInHead?: THREE.Vector3
+  /** What this seat sees of the table's social moment (hero action, all-in, winner, own stack at risk): see avatarSocialFeed. */
+  social: AvatarSocialInput
+  /** Idle table talk: this seat's part in a conversation right now (null when not talking), plus its own storage. */
+  chat?: TableChat | null
+  chatSlot?: TableChat
+  /** 0..1 yawn through the middle of the stretch idle. */
+  yawn?: number
 }
 
 interface WagerRuntime {
@@ -363,19 +417,31 @@ interface SceneRuntime {
   companion: CompanionRuntime | null
   /** The local player's own drink, seen first-person (their avatar is hidden). */
   firstPersonDrink: FirstPersonDrink
+  /** The local player's own forearms and hands, first-person (see firstPersonHands.ts). */
+  firstPersonHands: FirstPersonHands
   /** Shots, chip flicks and house-rule icon pops. */
   pranks: PrankRuntime
   /** Chill room: no confetti or shockwaves, softer bloom. */
   chill: boolean
+  /** Table theme layer (themeApply.ts): null while the original lounge is untouched. */
+  theme: ThemeState | null
+  /** Parks the pill-trip effect around a theme switch so its saved baselines stay current. */
+  retheme?: (apply: () => void) => void
   effects: { cone: LightCone; confetti: Confetti; shockwave: Shockwave; winnerKey: string; allInKey: string }
   /** Scene time when community cards last landed. */
   boardRevealAt: number
+  /** Showdown cinematic camera (see showdownCamera.ts); fed from the view, sampled each frame. */
+  showdown: ShowdownDirector
+  /** The dealer avatar's deal in progress (hole cards or a street), if one is physically dealing. */
+  dealer: DealerRuntime | null
   anyWinner: boolean
   chipInstancer: ChipInstancer
   /** Glints on personal stacks as chips land (one draw for the whole table). */
   stackSparkles: StackSparkles
   /** Development-only camera override used by scripts/snap-3d.mjs close-ups. */
   debugCamera: { position: Vec3; lookAt: Vec3; fov?: number } | null
+  /** Development-only per-seat avatar profile overrides (scripts/snap-avatar-sheet.mjs). */
+  avatarOverrides?: Map<string, Partial<ThreePlayerView['avatarProfile']>>
   feltMaterial: THREE.MeshStandardMaterial
   startTime: number
   animationFrame: number
@@ -1081,6 +1147,7 @@ function createSeatRuntime(player: ThreePlayerView, now: number): SeatRuntime {
     cardLocalZ: -1.02,
     peeking: false,
     animator: createAvatarAnimatorState(player.id),
+    social: createAvatarSocialInput(),
     chair: chairGroup,
     stack: personalStack,
     stackFx: personalStackFx,
@@ -1368,6 +1435,8 @@ interface SeatDealInfo {
   /** This seat's place in the dealing order and how many seats are dealt in. */
   order: number
   count: number
+  /** The dealer is physically dealing: when each card leaves their hand, and where from (world XZ). */
+  dealer?: { timing: DealTiming; x: number; z: number }
 }
 
 function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number, deal: SeatDealInfo = { order: 0, count: 1 }) {
@@ -1413,11 +1482,19 @@ function syncSeat(seat: SeatRuntime, player: ThreePlayerView, now: number, deal:
   const newHand = deal.handNumber !== undefined && seat.dealtHand !== undefined && seat.dealtHand !== deal.handNumber
   if (player.hasCards && (!seat.hadCards || newHand)) {
     seat.dealStartedAt = now
-    // One card per seat per round, clockwise from the button.
+    // One card per seat per round, clockwise from the button. A dealer avatar
+    // reaches for the deck first and pitches at its own pace (dealerDeal.ts).
+    const timing = deal.dealer?.timing ?? { lead: 0, step: DEAL_STEP_SECONDS }
     seat.dealDelays = [
-      deal.order * DEAL_STEP_SECONDS,
-      (deal.order + deal.count) * DEAL_STEP_SECONDS,
+      getHoleCardDelay(deal.order, 0, deal.count, timing),
+      getHoleCardDelay(deal.order, 1, deal.count, timing),
     ]
+    seat.dealOrder = deal.order
+    seat.dealCount = deal.count
+    seat.dealOrigins = [null, null]
+    seat.dealFlight = deal.dealer
+      ? getDealFlightSeconds(Math.hypot(seat.root.position.x - deal.dealer.x, seat.root.position.z - deal.dealer.z), DEAL_FLIGHT_SECONDS)
+      : DEAL_FLIGHT_SECONDS
     // The new cards arrive face down; never flip the old faces in place.
     seat.flipAnim = undefined
     seat.cardMeshes.forEach(card => { card.userData.flip = Math.PI })
@@ -1491,7 +1568,20 @@ function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
 
   const hasWinner = view.players.some(player => player.isWinner)
   const dealOrder = getDealOrder(view.players)
-  const displayPlayers = withDistinctOutfits(view.players)
+  // The dealer deals by hand when they can (a loaded rig, awake, in the hand);
+  // otherwise the cards launch from the deck point as before.
+  const dealerSeat = findDealingSeat(view.players, runtime.seats, runtime.reducedMotion, isDealerRigLoaded)
+  const dealerInfo = dealerSeat
+    ? { timing: getHoleDealTiming(dealOrder.size, true), x: dealerSeat.root.position.x, z: dealerSeat.root.position.z }
+    : undefined
+  const distinctPlayers = withDistinctOutfits(view.players)
+  const overrides = runtime.avatarOverrides
+  const displayPlayers = overrides && overrides.size > 0
+    ? distinctPlayers.map(player => {
+        const override = overrides.get(player.id)
+        return override ? { ...player, avatarProfile: { ...player.avatarProfile, ...override } } : player
+      })
+    : distinctPlayers
   for (const player of displayPlayers) {
     let seat = runtime.seats.get(player.id)
     if (!seat) {
@@ -1504,7 +1594,9 @@ function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
       handNumber: view.handNumber,
       order: dealOrder.get(player.id) ?? 0,
       count: Math.max(1, dealOrder.size),
+      dealer: dealerInfo,
     })
+    setSeatSocialStats(seat.social, player, view)
     // Personal chip stack: sized against the starting stack, from one short
     // column up to a chip tower. Winnings drop in once the payout has landed.
     const startingStack = view.startingStack > 0 ? view.startingStack : Math.max(1, view.bigBlind) * 100
@@ -1538,7 +1630,20 @@ function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
     }
   }
 
+  // A fresh hole-card deal this sync: the dealer's hands follow the same clock.
+  if (dealerSeat) {
+    const recipients = [...runtime.seats.values()]
+      .filter(seat => seat.hadCards && seat.dealStartedAt === now && seat.dealOrder !== undefined)
+      .sort((left, right) => (left.dealOrder ?? 0) - (right.dealOrder ?? 0))
+    if (recipients.length > 0) runtime.dealer = createHoleDeal(dealerSeat, recipients, now)
+  }
+
   updateAvatarDiagnostics(runtime)
+}
+
+/** The dealer's rig is loaded (so its fingertips can be read); the hero has none and is driven by the timeline. */
+function isDealerRigLoaded(seat: SeatRuntime) {
+  return seat.avatarLoadStatus === 'loaded' && seat.avatar !== null
 }
 
 const CHIP_RADIUS = 0.13
@@ -2618,6 +2723,8 @@ function flushCheeks(seat: SeatRuntime) {
 }
 
 const DRUNK_FLUSH = new THREE.Color('#ff6b6b')
+/** Per-frame scratch for the social reactions (latest action, winner, hero bearing); see avatarSocialFeed. */
+const tableSocialFrame = createTableSocialFrame()
 
 
 function animateSeat(
@@ -2630,7 +2737,9 @@ function animateSeat(
   runtimeSeats: ReadonlyMap<string, SeatRuntime> = new Map(),
   boardRevealAge = Number.POSITIVE_INFINITY,
   anyWinner = false,
-  prank: SeatPrankInput | null = null
+  prank: SeatPrankInput | null = null,
+  dealer: DealerRuntime | null = null,
+  socialFrame: TableSocialFrame | null = null
 ) {
   // Furniture and table props stay grounded. Only the player breathes, shifts,
   // and reacts to action playback.
@@ -2653,8 +2762,18 @@ function animateSeat(
     actionPoseOptions
   )
   const headTurn = getAvatarHeadTurn(seat.visualSeat, actingVisualSeat)
+  // Idle table talk: the schedule (tableTalk.ts) says who chats with whom; the animator decides
+  // whether this seat is free to (see state.chatOn). None of it under reduced motion.
+  const tableChat = reducedMotion ? null : getSeatTableChat(seat, runtimeSeats, time)
   // A passed-out player can't flick anyone off (the emote itself still sends).
   const flipOff = seat.passedOut ? null : getFlipOffInput(seat, time, runtimeSeats)
+  // The dealer's hands, head and fingers follow the deal's timeline (dealerDeal.ts).
+  let dealing: DealerPose | null = null
+  if (dealer && dealer.seatId === seat.playerId && !reducedMotion) {
+    const dealPose = seat.dealPose ?? (seat.dealPose = createDealerPose())
+    getDealerPose(time - dealer.schedule.startedAt, dealer.schedule, seat.anchors, dealPose)
+    if (dealPose.weight > 0) dealing = dealPose
+  }
   const pose = updateAvatarAnimator(seat.animator, {
     time,
     delta,
@@ -2690,9 +2809,14 @@ function animateSeat(
     cheersRaise: prank?.cheersRaise ?? 0,
     bonkElapsed: prank?.bonkElapsed ?? null,
     chipFlick: prank?.chipFlick ?? null,
+    dealing,
+    chat: tableChat,
+    social: socialFrame && !reducedMotion ? fillSeatSocial(seat, socialFrame, time) : undefined,
     ...seat.funPose,
   })
   seat.lastPose = pose
+  seat.chat = tableChat && seat.animator.chatOn ? tableChat : null
+  seat.yawn = seat.animator.yawn
 
   seat.body.position.set(
     pose.bodyPosition[0],
@@ -2860,7 +2984,7 @@ function animateSeat(
       const dealDelay = seat.dealDelays?.[index] ?? (seat.visualSeat + index * 8) * DEAL_STEP_SECONDS
       const cardProgress = reducedMotion
         ? 1
-        : THREE.MathUtils.clamp((time - seat.dealStartedAt - dealDelay) / DEAL_FLIGHT_SECONDS, 0, 1)
+        : THREE.MathUtils.clamp((time - seat.dealStartedAt - dealDelay) / (seat.dealFlight ?? DEAL_FLIGHT_SECONDS), 0, 1)
       const cardEase = 1 - Math.pow(1 - cardProgress, 3)
       card.visible = cardProgress > 0
       const baseX = Number(card.userData.baseX ?? (index === 0 ? -0.17 : 0.17))
@@ -2886,10 +3010,32 @@ function animateSeat(
       const launch = reducedMotion ? 1 : THREE.MathUtils.clamp((time - seat.dealStartedAt - dealDelay) / DEAL_LAUNCH_SECONDS, 0, 1)
       const baseScale = Number(card.userData.baseScale ?? (card.userData.baseScale = card.scale.x))
       card.scale.setScalar(baseScale * Math.max(0.001, launch))
+      // From the dealer's fingertips (where they were as it left their hand)
+      // when they deal by hand, else from the deck point.
+      let fromX = dealFrom[0]
+      let fromY = dealFrom[1]
+      let fromZ = dealFrom[2]
+      const origins = seat.dealOrigins
+      if (origins && dealer && cardProgress > 0 && !reducedMotion) {
+        let origin = origins[index]
+        if (!origin) {
+          const dealerSeat = runtimeSeats.get(dealer.seatId)
+          if (dealerSeat && getDealerReleaseWorld(dealer, dealerSeat, findHoleCardIndex(dealer, seat.dealOrder ?? 0, index), dealReleaseWorld)) {
+            seat.root.updateWorldMatrix(true, false)
+            seat.root.worldToLocal(dealReleaseWorld)
+            origin = origins[index] = [dealReleaseWorld.x, dealReleaseWorld.y, dealReleaseWorld.z]
+          }
+        }
+        if (origin) {
+          fromX = origin[0] - seat.cards.position.x
+          fromY = origin[1] - seat.cards.position.y
+          fromZ = origin[2] - seat.cards.position.z
+        }
+      }
       card.position.set(
-        baseX * cardEase + dealFrom[0] * travel,
-        index * 0.014 + flipArc + dealFrom[1] * travel + Math.sin(cardProgress * Math.PI) * 0.18,
-        dealFrom[2] * travel
+        baseX * cardEase + fromX * travel,
+        index * 0.014 + flipArc + fromY * travel + Math.sin(cardProgress * Math.PI) * 0.18,
+        fromZ * travel
       )
       // Cards skim in with a little spin and settle flat and square.
       card.rotation.set(0, baseYaw * cardEase + travel * Math.PI * 0.6, flip)
@@ -2900,6 +3046,7 @@ function animateSeat(
 }
 
 const foldWrist = new THREE.Vector3()
+const dealReleaseWorld = new THREE.Vector3()
 
 /**
  * A rigged player's fold, in the cards group's (seat-local) space: the hand
@@ -3646,6 +3793,11 @@ function createSceneRuntime(
   const baseCameraPosition = camera.position.clone()
   const baseCameraLookAt = cameraLookAt.clone()
   camera.lookAt(cameraLookAt)
+  // Showdown cinematic: the lens the window asks for (resize), and the live shot (see showdownCamera.ts).
+  let showdownBaseFov: number = DESKTOP_CAMERA_FRAMING.fov
+  /** Lens change this cinematic currently applies (added to camera.fov like FunFx's breathing lens). */
+  let showdownFovDelta = 0
+  const showdownShot = createShowdownShot()
 
   const environment = applyEnvironmentLighting(renderer, scene)
   const lights = createStageLights(scene)
@@ -3677,6 +3829,7 @@ function createSceneRuntime(
   // The camera joins the scene so the first-person drink can ride on it.
   scene.add(camera)
   const firstPersonDrink = createFirstPersonDrink(camera)
+  const firstPersonHands = createFirstPersonHands(camera)
   // One loose chip for flicks: the shared chip look, a touch oversized so it reads.
   const pranks = createPrankRuntime(scene, camera, host, () => {
     const chipMaterials = getSharedChipMaterials()
@@ -3722,9 +3875,12 @@ function createSceneRuntime(
     overlayElements: new Map<string, HTMLElement>(),
     companion,
     firstPersonDrink,
+    firstPersonHands,
     pranks,
     effects,
     boardRevealAt: Number.NEGATIVE_INFINITY,
+    showdown: new ShowdownDirector(),
+    dealer: null as DealerRuntime | null,
     anyWinner: false,
     chipInstancer: createChipInstancer(scene),
     stackSparkles: new StackSparkles(scene),
@@ -3738,11 +3894,19 @@ function createSceneRuntime(
     suspended: document.hidden,
     reducedMotion: motionPreference.matches,
     chill: false as boolean,
+    theme: null as ThemeState | null,
+    retheme: undefined as ((apply: () => void) => void) | undefined,
     pause: () => {},
     resume: () => {},
     dispose: () => {},
     onBroken: undefined as (() => void) | undefined,
   } satisfies SceneRuntime
+  // Board cards launch from the dealer's hand (the deck point when nobody deals by hand).
+  board.launch = (slotIndex, out) => {
+    const deal = runtime.dealer
+    const dealerSeat = deal ? runtime.seats.get(deal.seatId) : undefined
+    return Boolean(deal && dealerSeat && getDealerReleaseWorld(deal, dealerSeat, findBoardCardIndex(deal, slotIndex), out))
+  }
 
   // Blackout bonks, hangovers and the pill trip (see funFx.ts).
   const funFx = new FunFx({
@@ -3754,6 +3918,7 @@ function createSceneRuntime(
     chipMaterials: runtime.chipInstancer.meshes.flatMap(mesh => (Array.isArray(mesh.material) ? mesh.material : [mesh.material])),
     companionGroup: companion?.group ?? null,
   })
+  runtime.retheme = apply => funFx.retheme(apply)
   let lastTripFx = ''
 
   let viewportWidth = 1
@@ -3775,6 +3940,7 @@ function createSceneRuntime(
     runtime.postFx?.setMultisample(quality === 0 ? 4 : 0)
     runtime.postFx?.setSize(width, height, pixelRatio)
     runtime.postFx?.setReducedBloom(quality >= 1)
+    setThemeQuality(runtime, quality)
     host.dataset.postFx = !runtime.postFx || quality >= 2 ? 'off' : quality === 1 ? 'reduced' : 'on'
     runtime.frameBudget.settle((performance.now() - runtime.startTime) / 1000, 1.5)
     camera.aspect = width / height
@@ -3786,6 +3952,8 @@ function createSceneRuntime(
         : camera.aspect > 2.15
           ? 50
           : DESKTOP_CAMERA_FRAMING.fov
+    showdownBaseFov = camera.fov
+    showdownFovDelta = 0
     camera.updateProjectionMatrix()
   }
   const resizeObserver = new ResizeObserver(resize)
@@ -3800,6 +3968,11 @@ function createSceneRuntime(
   }
   host.addEventListener('pointerover', handlePointerOver)
   host.addEventListener('pointerleave', handlePointerLeave)
+  // Any click or key press skips the showdown cinematic (a quick ease back). Passive and
+  // observing only: it never blocks or consumes the event, so the action buttons stay live.
+  const skipShowdownShot = () => runtime.showdown.cancel((performance.now() - runtime.startTime) / 1000)
+  window.addEventListener('pointerdown', skipShowdownShot, { capture: true, passive: true })
+  window.addEventListener('keydown', skipShowdownShot, { capture: true, passive: true })
   runtime.resizeObserver = resizeObserver
   resize()
 
@@ -3860,12 +4033,15 @@ function createSceneRuntime(
     funFx.update(viewRef.current, runtime.seats, time)
     setFaceViewer(runtime.camera)
     const { heat, sourceId } = getTableHeat(runtime, time)
+    if (runtime.dealer && time - runtime.dealer.schedule.startedAt > runtime.dealer.schedule.duration + 0.5) runtime.dealer = null
+    updateTableSocialFrame(tableSocialFrame, runtime.seats.values(), runtime.camera, time)
     let winnerSeat: SeatRuntime | null = null
     for (const seat of runtime.seats.values()) {
       animateSeat(
         seat, time, delta, actingSeat, reducedMotion, seat.playerId === sourceId ? 0 : heat, runtime.seats,
         time - runtime.boardRevealAt, runtime.anyWinner,
-        reducedMotion ? null : getSeatPrankInput(runtime.pranks, seat, time, runtime.seats)
+        reducedMotion ? null : getSeatPrankInput(runtime.pranks, seat, time, runtime.seats),
+        runtime.dealer, tableSocialFrame
       )
       if (seat.winner && seat.root.visible && !winnerSeat) winnerSeat = seat
     }
@@ -3895,10 +4071,12 @@ function createSceneRuntime(
     accent.position.lerp(accentTarget, 1 - Math.exp(-delta * 4))
     const accentGoal = winnerSeat ? 8 : allInImpact.strength * 5
     accent.intensity += (accentGoal - accent.intensity) * (1 - Math.exp(-delta * 5))
-    const flicker = reducedMotion ? 1 : 1 + Math.sin(time * 23) * 0.012
+    // The sign buzzes and now and then stutters; the sconce shades flicker like flames (roomLifeMotion.ts).
+    const flicker = reducedMotion ? 1 : neonBuzz(time) * (1 + Math.sin(time * 23) * 0.012)
     runtime.neonMaterials.forEach(material => {
       material.emissiveIntensity = Number(material.userData.baseEmissive ?? 1) * flicker
     })
+    animateSconceFlames(scene, time, reducedMotion)
 
     // A living camera: a slow breathing drift, a subtle lean toward whoever is
     // acting, a punch-in on all-ins, and a push toward the showdown winner.
@@ -3947,11 +4125,29 @@ function createSceneRuntime(
       targetLook.x += (impactSeat?.[0] ?? 0) * allInImpact.strength * 0.035
       targetLook.z += (impactSeat?.[2] ?? 0) * allInImpact.strength * 0.025
     }
-    const smoothing = reducedMotion ? 1 : 1 - Math.exp(
+    // Showdown cinematic (showdownCamera.ts): a dolly/orbit through the revealed hands, a held
+    // board beat and a winner hero shot, mixed over the normal target. Reduced motion and the
+    // debug camera never get it. While a shot has weight the camera follows it closely so the
+    // shot's own easing (not this chase) shapes the move.
+    let showdownZoom = 1
+    let showdownWeight = 0
+    if (!runtime.debugCamera && runtime.showdown.sample(time, reducedMotion, showdownShot)) {
+      showdownWeight = showdownShot.weight
+      showdownZoom = blendShowdownShot(showdownShot, targetCamera, targetLook)
+    }
+    const smoothing = reducedMotion ? 1 : Math.max(showdownWeight, 1 - Math.exp(
       -delta * (allInImpact.strength > 0 ? 3.8 : winnerSeat ? 1.1 : 1.35)
-    )
+    ))
     camera.position.lerp(targetCamera, smoothing)
     cameraLookAt.lerp(targetLook, smoothing)
+    if (!runtime.debugCamera) {
+      const wantedFovDelta = showdownBaseFov * (showdownZoom - 1)
+      if (Math.abs(wantedFovDelta - showdownFovDelta) > 0.002) {
+        camera.fov += wantedFovDelta - showdownFovDelta
+        showdownFovDelta = wantedFovDelta
+        camera.updateProjectionMatrix()
+      }
+    }
     if (runtime.debugCamera) {
       camera.position.set(...runtime.debugCamera.position)
       cameraLookAt.set(...runtime.debugCamera.lookAt)
@@ -3990,6 +4186,16 @@ function createSceneRuntime(
     camera.updateMatrixWorld()
 
     updateLadyLuck(runtime, viewRef.current, host, time, delta, reducedMotion, viewportWidth, viewportHeight)
+    updateHeroHands(runtime, {
+      time,
+      delta,
+      width: viewportWidth,
+      height: viewportHeight,
+      reducedMotion,
+      hero: viewRef.current.players.find(player => player.isHero) ?? null,
+      firstPerson: !viewRef.current.players.some(player => player.visualSeat === 0 && !player.isHero),
+      host,
+    })
     projectSeatOverlays(runtime, host, viewportWidth, viewportHeight)
     updateChipInstances(runtime.chipInstancer, scene)
     for (const seat of runtime.seats.values()) {
@@ -4005,7 +4211,7 @@ function createSceneRuntime(
     }
     if (runtime.postFx && quality < 2) {
       funFx.beforeRender(time, viewportWidth, viewportHeight)
-      runtime.postFx.bloom.strength = (0.22 + (winnerSeat ? 0.1 : 0) + allInImpact.strength * 0.1) * (runtime.chill ? CHILL_BLOOM_SCALE : 1)
+      runtime.postFx.bloom.strength = (0.22 + (winnerSeat ? 0.1 : 0) + allInImpact.strength * 0.1) * (runtime.chill ? CHILL_BLOOM_SCALE : 1) * getThemeBloomScale(runtime)
       runtime.postFx.composer.render(delta)
     } else {
       renderer.render(scene, camera)
@@ -4141,6 +4347,8 @@ function createSceneRuntime(
     resizeObserver.disconnect()
     host.removeEventListener('pointerover', handlePointerOver)
     host.removeEventListener('pointerleave', handlePointerLeave)
+    window.removeEventListener('pointerdown', skipShowdownShot, { capture: true })
+    window.removeEventListener('keydown', skipShowdownShot, { capture: true })
     hoveredOverlayElement = null
     motionPreference.removeEventListener('change', handleMotionPreference)
     document.removeEventListener('visibilitychange', handleVisibilityChange)
@@ -4154,12 +4362,14 @@ function createSceneRuntime(
     funFx.dispose()
     if (runtime.companion) disposeCompanion(runtime.companion)
     disposeFirstPersonDrink(runtime.firstPersonDrink)
+    disposeFirstPersonHands(runtime.firstPersonHands)
     disposePrankRuntime(runtime.pranks)
     disposeLightCone(runtime.effects.cone)
     disposeConfetti(runtime.effects.confetti)
     disposeShockwave(runtime.effects.shockwave)
     runtime.postFx?.dispose()
     environment.dispose()
+    disposeTableTheme(runtime)
     disposeObject(scene)
     disposeSceneTextures()
     renderer.dispose()
@@ -4265,6 +4475,13 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
       if (process.env.NODE_ENV !== 'production') {
         // Development-only handle for inspecting the live scene from devtools.
         ;(host as HTMLDivElement & { __pokerRuntime?: SceneRuntime }).__pokerRuntime = runtime
+        // Development-only: force a seat's avatar profile (model/hat/glasses/jacket/colours) and resync.
+        ;(host as HTMLDivElement & { __setAvatarProfile?: (playerId: string, patch: Partial<ThreePlayerView['avatarProfile']> | null) => void }).__setAvatarProfile = (playerId, patch) => {
+          runtime.avatarOverrides ??= new Map()
+          if (patch) runtime.avatarOverrides.set(playerId, { ...runtime.avatarOverrides.get(playerId), ...patch })
+          else runtime.avatarOverrides.delete(playerId)
+          syncPlayers(runtime, viewRef.current)
+        }
         // Development-only: replay a prank locally (e.g. a house cheers) for visual checks.
         // Development-only: make a seat drink locally (animation review).
         ;(host as HTMLDivElement & { __playDrink?: (playerId: string, kind?: 'beer' | 'water') => void }).__playDrink = (playerId, kind = 'beer') => {
@@ -4363,6 +4580,19 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
     applySceneMode(runtime.scene, sceneMode)
   }, [sceneMode, sceneGeneration])
 
+  // Table theme (this player's own view): retunes the room in place, after the
+  // chill pass so the two layers agree on what is hidden. See themeApply.ts.
+  const tableTheme = useTableThemeId()
+  useEffect(() => {
+    const runtime = runtimeRef.current
+    if (!runtime) return
+    try {
+      applyTableTheme(runtime, tableTheme, { chill: sceneMode === 'chill' })
+    } catch (error) {
+      console.error('Table theme could not be applied; the room keeps its current look.', error)
+    }
+  }, [tableTheme, sceneMode, sceneGeneration])
+
   // Pranks and house-rule drinks: each server event plays exactly once.
   useEffect(() => {
     const runtime = runtimeRef.current
@@ -4411,6 +4641,10 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
       }
     }
     const liveRuntime = runtimeRef.current
+    // The showdown cinematic follows what the table view shows (cards turning, winner flags).
+    syncSafely('showdown camera', () => {
+      liveRuntime.showdown.sync(createShowdownSnapshot(view), (performance.now() - liveRuntime.startTime) / 1000)
+    })
     syncSafely('player', () => syncPlayers(liveRuntime, view))
     syncSafely('wager', () => syncWagers(liveRuntime, view))
     syncSafely('pot', () => syncPot(liveRuntime, view))
@@ -4421,13 +4655,30 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
       // A street that closed with bets out deals its cards once the chips
       // have been swept into the pot, not through the middle of the sweep.
       const sweepEndsAt = getWagerCollectEndsAt(liveRuntime, runtimeNow)
-      syncBoardRuntime(
+      // The dealer burns and lays out the new cards by hand when they can (the
+      // gesture and each card's launch share one clock); otherwise the board
+      // deals from the deck point as before.
+      const newSlots: number[] = []
+      view.communityCards.slice(0, 5).forEach((card, slot) => {
+        if (liveRuntime.board.slots[slot]?.key !== `${card.rank}${card.suit}`) newSlots.push(slot)
+      })
+      const boardDealer = newSlots.length > 0
+        ? findDealingSeat(view.players, liveRuntime.seats, liveRuntime.reducedMotion, isDealerRigLoaded)
+        : null
+      const boardPlan = boardDealer ? planDealerBoard(newSlots) : null
+      const dealStartsAt = syncBoardRuntime(
         liveRuntime.board,
         view.communityCards,
         highlightedCards,
         runtimeNow,
-        sweepEndsAt > runtimeNow ? sweepEndsAt + 0.1 : Number.NEGATIVE_INFINITY
+        sweepEndsAt > runtimeNow ? sweepEndsAt + 0.1 : Number.NEGATIVE_INFINITY,
+        boardPlan?.offsets
       )
+      if (boardDealer && boardPlan && dealStartsAt !== null) {
+        liveRuntime.dealer = createBoardDeal(boardDealer, boardPlan.plan, dealStartsAt)
+        // Everyone looks at the board as the first card lands, not while it is still being burned.
+        liveRuntime.boardRevealAt = dealStartsAt + (boardPlan.offsets[0] ?? 0)
+      }
       // New seats, avatars and accessories arrive with every sync.
       for (const seat of liveRuntime.seats.values()) {
         mergeAccessoryMeshes(seat.fallbackAccessories)

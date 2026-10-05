@@ -69,7 +69,7 @@ async function captureViewport(browser, viewport) {
     await shot(page, dir, '01-landing', log)
 
     await fillProfile(page, 'Hero')
-    await page.getByRole('button', { name: 'Create Table' }).click()
+    await page.getByRole('button', { name: /Take a seat|Sit down as/ }).click()
     await page.waitForURL(/\/room\/[A-Z0-9]{6}$/, { timeout: 60000 })
     const roomUrl = page.url()
 

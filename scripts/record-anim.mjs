@@ -45,7 +45,7 @@ async function film(name) {
 const host = await film('host')
 await host.page.goto(appUrl, { waitUntil: 'load', timeout: 120000 })
 await host.page.getByLabel('Your nickname').fill('Host')
-await host.page.getByRole('button', { name: 'Create Table' }).click()
+await host.page.getByRole('button', { name: /Take a seat|Sit down as/ }).click()
 await host.page.waitForURL(/\/room\//)
 const roomUrl = host.page.url()
 

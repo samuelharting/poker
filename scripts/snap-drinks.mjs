@@ -25,7 +25,7 @@ const browser = await chromium.launch({ args: ['--enable-gpu', '--ignore-gpu-blo
 const host = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 await host.goto(appUrl, { waitUntil: 'networkidle' })
 await host.getByLabel('Your nickname').fill('Host')
-await host.getByRole('button', { name: 'Create Table' }).click()
+await host.getByRole('button', { name: /Take a seat|Sit down as/ }).click()
 await host.waitForURL(/\/room\//)
 const roomUrl = host.url()
 

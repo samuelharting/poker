@@ -14,7 +14,7 @@ const context = await browser.newContext({ viewport: { width: 1440, height: 900 
 const page = await context.newPage()
 await page.goto(appUrl)
 await page.getByLabel('Your nickname').fill('Gpu')
-await page.getByRole('button', { name: 'Create Table' }).click()
+await page.getByRole('button', { name: /Take a seat|Sit down as/ }).click()
 await page.waitForURL(/\/room\//)
 await page.waitForSelector('.desktop-3d-stage[data-webgl-status="ready"]', { timeout: 60000 })
 for (let attempt = 0; attempt < 30; attempt += 1) {

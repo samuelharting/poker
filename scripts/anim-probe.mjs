@@ -21,7 +21,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 page.on('pageerror', error => console.log('pageerror:', error.message))
 await page.goto(appUrl, { waitUntil: 'load', timeout: 120000 })
 await page.getByLabel('Your nickname').fill('Hero')
-await page.getByRole('button', { name: 'Create Table' }).click()
+await page.getByRole('button', { name: /Take a seat|Sit down as/ }).click()
 await page.waitForURL(/\/room\//)
 for (let attempt = 0; attempt < 40; attempt += 1) {
   const seated = await page.evaluate(() => Number(document.querySelector('.desktop-3d-stage')?.dataset.riggedAvatarTargets ?? 0))

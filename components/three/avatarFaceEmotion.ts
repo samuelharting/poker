@@ -30,7 +30,7 @@ export type FaceEmotion =
   | 'focused' | 'thinking' | 'confident' | 'smirk' | 'happy' | 'joy' | 'laugh'
   | 'surprised' | 'sad' | 'angry' | 'fear' | 'tense' | 'disgust' | 'bored' | 'sleepy'
   | 'drunk' | 'hungover' | 'worried' | 'suspicious' | 'pain' | 'shock'
-  | 'smug' | 'wince' | 'relief' | 'sip'
+  | 'smug' | 'wince' | 'relief' | 'sip' | 'yawn'
   | 'mBrow' | 'mLip' | 'mNose' | 'mSquint' | 'mSwallow'
 
 const EMOTION_DEFS: Record<FaceEmotion, Sparse> = {
@@ -63,6 +63,8 @@ const EMOTION_DEFS: Record<FaceEmotion, Sparse> = {
   relief: { lidUA: -0.4, lidUB: -0.4, lidLA: 0.22, lidLB: 0.22, browIA: 0.5, browIB: 0.5, browOA: -0.1, browOB: -0.1, smileA: 0.4, smileB: 0.38, open: 0.16, width: 0.02, purse: 0.12 },
   // Lips on the rim of a glass: pursed, eyes half closed.
   sip: { lidUA: -0.48, lidUB: -0.48, lidLA: 0.25, lidLB: 0.25, browIA: 0.22, browIB: 0.22, browOA: 0.05, browOB: 0.05, open: 0.03, purse: 0.8, press: 0.35, width: -0.22 },
+  // A wide yawn: eyes squeezed shut, lower lids pushed up, brows lifted, the mouth stretched wide open (tongue showing).
+  yawn: { lidUA: -0.94, lidUB: -0.94, lidLA: 0.88, lidLB: 0.88, browIA: 0.7, browIB: 0.7, browOA: 0.42, browOB: 0.42, arch: 0.18, smileA: -0.12, smileB: -0.12, open: 1, width: -0.16, teeth: 0.2, wrinkle: 0.45, furrow: 0.1, pupil: -0.1 },
   mBrow: { browIA: 0.55, browIB: 0.55, browOA: 0.5, browOB: 0.5, lidUA: 0.12, lidUB: 0.12, arch: 0.3 },
   mLip: { smileA: 0.55, lidLA: 0.18, jaw: 0.2 },
   mNose: { wrinkle: 0.8, lidLA: 0.25, lidLB: 0.25, smileA: -0.1, smileB: -0.1 },
@@ -87,6 +89,8 @@ FACE_EMOTIONS.forEach((name, row) => {
 const MICRO_FIRST = EMOTION_INDEX.mBrow
 /** Mouth shapes that fight a glass at the lips. */
 const SIP_QUIET = (['smirk', 'smug', 'joy', 'laugh', 'happy', 'confident', 'surprised', 'shock', 'tense'] as const).map(name => EMOTION_INDEX[name])
+/** Everything that fights a wide yawn (it takes over the whole face). */
+const YAWN_QUIET = (['smirk', 'smug', 'joy', 'laugh', 'happy', 'confident', 'surprised', 'shock', 'tense', 'focused', 'thinking', 'bored', 'suspicious', 'worried', 'sad', 'sip'] as const).map(name => EMOTION_INDEX[name])
 /** Reactions a good poker face suppresses while the hand is live. */
 const POKER_FACE_DAMPED = (['sad', 'angry', 'fear', 'worried', 'surprised', 'happy', 'joy', 'smug', 'wince'] as const).map(name => EMOTION_INDEX[name])
 
@@ -151,6 +155,13 @@ export interface FaceContext {
   drinkLift: number
   /** 0..1 the satisfied exhale after putting a drink down. */
   drinkAfter: number
+  /** 0..1 talking at the table (the jaw flaps on syllables). */
+  talk: number
+  /** 0..1 a smile and a laugh in a table conversation (the listener's, or the speaker's at the punchline). */
+  chatSmile: number
+  chatLaugh: number
+  /** 0..1 a wide yawn (through the middle of the stretch idle). */
+  yawn: number
 }
 
 export function createFaceContext(): FaceContext {
@@ -159,6 +170,7 @@ export function createFaceContext(): FaceContext {
     dazed: false, drunk: 0, tableHeat: 0, cue: 'ready', cueElapsed: Infinity, cueStartedAt: 0, wager: 0, peeking: false, inHand: false,
     bonked: false, burning: false, cheers: 0, flipOffGiven: false, flipOffReceived: false, otherActing: false,
     anyWinner: false, actingFor: 0, emote: null, emoteAmount: 0, tilt: 0, drinkLift: 0, drinkAfter: 0,
+    talk: 0, chatSmile: 0, chatLaugh: 0, yawn: 0,
   }
 }
 
@@ -494,6 +506,28 @@ export function directEmotions(state: EmotionState, ctx: FaceContext, person: Fa
     if (ctx.emote !== 'focused' && ctx.emote !== 'thinking') t[EMOTION_INDEX.focused] = t[EMOTION_INDEX.focused]! * 0.3
   }
   if (ctx.cheers > 0) add('happy', 0.7 * ctx.cheers)
+  // Table talk: a talker's face loosens (the jaw itself is procedural, see updateEmotion), a listener
+  // warms into a smile, and a joke at the end becomes a laugh.
+  if (ctx.talk > 0.01) {
+    const loose = 1 - 0.8 * ctx.talk
+    t[EMOTION_INDEX.focused] = t[EMOTION_INDEX.focused]! * loose
+    t[EMOTION_INDEX.thinking] = t[EMOTION_INDEX.thinking]! * loose
+    add('happy', 0.14 * ctx.talk)
+  }
+  if (ctx.chatSmile > 0.01) {
+    add('happy', 0.6 * ctx.chatSmile)
+    t[EMOTION_INDEX.focused] = t[EMOTION_INDEX.focused]! * (1 - 0.7 * ctx.chatSmile)
+  }
+  if (ctx.chatLaugh > 0.01) {
+    add('laugh', 0.8 * ctx.chatLaugh)
+    add('joy', 0.3 * ctx.chatLaugh)
+  }
+  if (ctx.yawn > 0.01) {
+    // The whole face gives itself to the yawn.
+    set('yawn', ctx.yawn)
+    const rest = 1 - 0.92 * Math.min(1, ctx.yawn)
+    for (let i = 0; i < YAWN_QUIET.length; i += 1) t[YAWN_QUIET[i]!] = t[YAWN_QUIET[i]!]! * rest
+  }
   if (ctx.flipOffGiven) {
     set('smirk', 0.95)
     t[EMOTION_INDEX.focused] = 0
@@ -554,7 +588,7 @@ export function directEmotions(state: EmotionState, ctx: FaceContext, person: Fa
   // Expressiveness scales everything except sleep/illness and micro slots.
   for (let i = 0; i < MICRO_FIRST; i += 1) {
     const name = FACE_EMOTIONS[i]!
-    if (name === 'sleepy' || name === 'hungover' || name === 'drunk' || name === 'pain' || name === 'shock' || name === 'sip') continue
+    if (name === 'sleepy' || name === 'hungover' || name === 'drunk' || name === 'pain' || name === 'shock' || name === 'sip' || name === 'yawn') continue
     t[i] = t[i]! * (name === 'joy' || name === 'laugh' ? Math.min(1.1, ex) : ex)
   }
   // A good poker face suppresses reactions to the hand while it is live.
@@ -737,6 +771,32 @@ export function updateEmotion(
       p[CH.lidLB] = p[CH.lidLB]! + 0.12 * laughW * bounce
       p[CH.browIA] = p[CH.browIA]! + 0.06 * laughW * bounce
       p[CH.browIB] = p[CH.browIB]! + 0.06 * laughW * bounce
+    }
+    if (ctx.talk > 0.02) {
+      // Speech: the jaw flaps on syllables (4.5-6 a second), in words with pauses between, the
+      // vowels alternating wide ("ee") and round ("oo"), the brows punching the stressed words.
+      const rate = 4.5 + faceHash01(state.seed * 3.1) * 1.5
+      const syllable = Math.abs(Math.sin(time * rate * Math.PI + s * 0.7))
+      const phrase = smooth(0.5 + 0.9 * Math.sin(time * 1.7 + s * 0.13) + 0.45 * Math.sin(time * 3.1 + s * 0.31))
+      const amp = ctx.talk * (0.3 + 0.7 * phrase)
+      const vowel = 0.5 + 0.5 * Math.sin(time * 2.3 + s * 0.17 + syllable * 2)
+      const stress = Math.max(0, Math.sin(time * 5.3 + s * 0.4)) * phrase
+      p[CH.open] = p[CH.open]! + amp * (0.05 + 0.36 * syllable * (0.62 + 0.38 * vowel))
+      p[CH.width] = p[CH.width]! + amp * 0.09 * (1 - vowel) * syllable - amp * 0.07 * vowel * syllable
+      p[CH.purse] = p[CH.purse]! + amp * 0.2 * vowel * syllable
+      p[CH.teeth] = p[CH.teeth]! + amp * 0.2 * (1 - vowel) * syllable
+      p[CH.jaw] = p[CH.jaw]! + amp * 0.22 * Math.sin(time * 2.9 + s * 0.3)
+      p[CH.browIA] = p[CH.browIA]! + amp * 0.1 * stress
+      p[CH.browIB] = p[CH.browIB]! + amp * 0.1 * stress
+      p[CH.browOA] = p[CH.browOA]! + amp * 0.12 * stress
+      p[CH.browOB] = p[CH.browOB]! + amp * 0.12 * stress
+    }
+    if (ctx.yawn > 0.05) {
+      // The yawn trembles at its widest.
+      const tremble = Math.sin(time * 17 + s) * 0.03 * ctx.yawn
+      p[CH.open] = p[CH.open]! + tremble
+      p[CH.lidLA] = p[CH.lidLA]! + tremble
+      p[CH.lidLB] = p[CH.lidLB]! + tremble
     }
   }
   updateEyeRoll(state, time)

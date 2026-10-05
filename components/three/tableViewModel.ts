@@ -62,6 +62,8 @@ export interface ThreePlayerView {
   isHero: boolean
   stack: number
   bet: number
+  /** Total committed to the pot this hand (all streets); drives how nervous they look. */
+  committed?: number
   status: SeatPlayer['status']
   isActing: boolean
   isWinner: boolean
@@ -383,6 +385,7 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
         isHero: player.id === yourId,
         stack: player.stack,
         bet: player.bet,
+        committed: player.totalInPot,
         status: player.status,
         isActing: state.actingPlayerId === player.id,
         isWinner: Boolean(winner),

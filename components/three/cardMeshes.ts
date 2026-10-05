@@ -494,6 +494,12 @@ interface BoardSlot {
   highlightMesh: THREE.Mesh
   /** The small lip the propped card is seated in. */
   stand: THREE.Mesh
+  /** Where the card left the dealer's hand (world), once it has launched. */
+  origin: THREE.Vector3
+  /** The launch point has been asked for (once per deal of this slot). */
+  launched: boolean
+  /** The card flies from `origin` (the dealer's hand) instead of the deck point. */
+  fromHand: boolean
 }
 
 export interface BoardRuntime {
@@ -505,6 +511,11 @@ export interface BoardRuntime {
   slotOutlines: THREE.Mesh
   /** Shared stand geometry/material, disposed with the scene. */
   disposables: Array<{ dispose(): void }>
+  /**
+   * When set, asked once as a card launches: write where it leaves the dealer's
+   * hand (world) into `out` and return true, or return false to fly from the deck.
+   */
+  launch?: (slotIndex: number, out: THREE.Vector3) => boolean
 }
 
 /**
@@ -616,6 +627,9 @@ export function createBoardRuntime(scene: THREE.Scene): BoardRuntime {
       highlightMaterial,
       highlightMesh,
       stand,
+      origin: new THREE.Vector3(),
+      launched: false,
+      fromHand: false,
     }
   })
 
@@ -628,10 +642,16 @@ export function syncBoardRuntime(
   highlighted: ReadonlyArray<{ rank: string; suit: CardSuit }>,
   now: number,
   /** Scene time new cards may start dealing (e.g. once the bets are swept in). */
-  notBefore = Number.NEGATIVE_INFINITY
-) {
+  notBefore = Number.NEGATIVE_INFINITY,
+  /**
+   * Seconds after the deal starts that each newly dealt card launches, in deal
+   * order (a dealer avatar pitching them); default is a quick 0.16s stagger.
+   */
+  dealOffsets?: readonly number[]
+): number | null {
   const count = Math.min(5, cards.length)
   let dealtThisSync = 0
+  let startAt: number | null = null
   board.slots.forEach((slot, index) => {
     const card = cards[index]
     if (!card || index >= count) {
@@ -652,7 +672,11 @@ export function syncBoardRuntime(
       // Flop cards deal together with a stagger; turn and river on their own.
       // A new deal waits for the previous board to finish clearing.
       const clearing = Math.max(0, board.clearedAt + BOARD_CLEAR_SECONDS + 0.12 - now)
-      slot.dealtAt = Math.max(now + clearing, notBefore) + dealtThisSync * 0.16
+      const base = Math.max(now + clearing, notBefore)
+      slot.dealtAt = base + (dealOffsets ? dealOffsets[Math.min(dealtThisSync, dealOffsets.length - 1)] ?? 0 : dealtThisSync * 0.16)
+      slot.launched = false
+      slot.fromHand = false
+      startAt = base
       dealtThisSync += 1
       setCardFace(slot.card, { rank: card.rank, suit: card.suit })
     }
@@ -660,6 +684,8 @@ export function syncBoardRuntime(
     slot.highlighted = highlighted.some(item => item.rank === card.rank && item.suit === card.suit)
   })
   board.visibleCount = count
+  // When the new cards' deal begins (null when nothing new was dealt).
+  return startAt
 }
 
 const scratch = new THREE.Vector3()
@@ -710,7 +736,12 @@ export function animateBoardRuntime(board: BoardRuntime, time: number, reducedMo
     const progress = reducedMotion ? 1 : THREE.MathUtils.clamp((time - slot.dealtAt) / 0.62, 0, 1)
     const travel = 1 - Math.pow(1 - Math.min(1, progress / 0.62), 3)
     const flip = THREE.MathUtils.smoothstep(progress, 0.45, 1)
-    scratch.lerpVectors(DEAL_DECK_POINT, slotTarget, travel)
+    if (!slot.launched) {
+      // First frame in the air: ask where the dealer's hand is right now.
+      slot.launched = true
+      slot.fromHand = !reducedMotion && board.launch !== undefined && board.launch(index, slot.origin)
+    }
+    scratch.lerpVectors(slot.fromHand ? slot.origin : DEAL_DECK_POINT, slotTarget, travel)
     const launch = reducedMotion ? 1 : THREE.MathUtils.clamp((time - slot.dealtAt) / DEAL_LAUNCH_SECONDS, 0, 1)
     group.scale.setScalar(BOARD_CARD_WIDTH * Math.max(0.001, launch))
     scratch.y += Math.sin(travel * Math.PI) * 0.35 + (1 - flip) * 0.06

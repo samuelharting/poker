@@ -23,7 +23,7 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 page.on('pageerror', error => console.log('pageerror:', error.message))
 await page.goto(appUrl, { waitUntil: 'load', timeout: 120000 })
 await page.getByLabel('Your nickname').fill('Prober')
-await page.getByRole('button', { name: 'Create Table' }).click()
+await page.getByRole('button', { name: /Take a seat|Sit down as/ }).click()
 await page.waitForURL(/\/room\//)
 await page.waitForSelector('.desktop-3d-stage[data-webgl-status="ready"]', { timeout: 60000 })
 // Seat restoration can briefly disable Fill seats; retry until the bots sit.

@@ -283,8 +283,8 @@ export class FunFx {
   private readonly spiralMaterial: THREE.MeshBasicMaterial
   private readonly shadesMaterial: THREE.MeshStandardMaterial
   private readonly cat: THREE.Sprite
-  private readonly baseFelt: THREE.Color | null
-  private readonly baseLights: Array<{ light: THREE.Light; color: THREE.Color; intensity: number }>
+  private baseFelt: THREE.Color | null
+  private baseLights: Array<{ light: THREE.Light; color: THREE.Color; intensity: number }>
   private readonly baseChips: Array<{ material: THREE.MeshStandardMaterial; color: THREE.Color; emissive: THREE.Color }>
   private companionHidden: THREE.Object3D[] = []
   private heroId: string | null = null
@@ -564,6 +564,21 @@ export class FunFx {
       this.afterimage.enabled = trip > 0.05 && !this.reducedMotion
       const damp = (this.afterimage as unknown as { uniforms?: Record<string, THREE.IUniform> }).uniforms?.damp
       if (damp) damp.value = 0.62 + 0.2 * trip
+    }
+  }
+
+  /**
+   * Restyles the room (a table theme switch) with any trip effect parked first,
+   * then re-reads the felt and light baselines so the trip never restores the
+   * previous theme's colours when it ends.
+   */
+  retheme(apply: () => void) {
+    this.restoreScene()
+    try {
+      apply()
+    } finally {
+      this.baseFelt = this.options.feltMaterial ? this.options.feltMaterial.color.clone() : null
+      this.baseLights = this.options.lights.map(light => ({ light, color: light.color.clone(), intensity: light.intensity }))
     }
   }
 

@@ -13,7 +13,7 @@ const browser = await chromium.launch({ args: ['--enable-gpu', '--ignore-gpu-blo
 const host = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage()
 await host.goto(appUrl)
 await host.getByLabel('Your nickname').fill('Host')
-await host.getByRole('button', { name: 'Create Table' }).click()
+await host.getByRole('button', { name: /Take a seat|Sit down as/ }).click()
 await host.waitForURL(/\/room\//)
 await sleep(3000)
 await host.getByRole('button', { name: 'Fill seats' }).first().click({ timeout: 15000 })

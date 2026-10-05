@@ -99,7 +99,7 @@ await cdp.send('Performance.enable')
 
 await page.goto(appUrl, { waitUntil: 'load', timeout: 120000 })
 await page.getByLabel('Your nickname').fill('Prober')
-await page.getByRole('button', { name: 'Create Table' }).click()
+await page.getByRole('button', { name: /Take a seat|Sit down as/ }).click()
 await page.waitForURL(/\/room\//)
 if (!mobile) {
   await page.waitForSelector('.desktop-3d-stage[data-webgl-status="ready"]', { timeout: 60000 })

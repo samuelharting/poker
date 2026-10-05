@@ -6,6 +6,7 @@ import {
   type Vec3,
 } from './pokerActionPose'
 import type { ThreeActionCue } from './tableViewModel'
+import type { DealerPose } from './dealerDeal'
 import {
   blendHandShape,
   createAvatarHandsState,
@@ -26,6 +27,15 @@ import {
   SHOT_SHUDDER_END,
   SHOT_SLAM_AT,
 } from './prankTimeline'
+import {
+  computeSocialReactions,
+  createReactionState,
+  nervousDrumRate,
+  pickWinnerReaction,
+  type AvatarSocialInput,
+  type ReactionState,
+} from './avatarReactions'
+import { chatLaughAmount, chatTalkAmount, chatWeight, listenerNod, speechBeat, yawnAmount, type TableChat } from './tableTalk'
 
 /**
  * Procedural performance layer for seated rigged avatars.
@@ -161,6 +171,12 @@ export interface AvatarAnimatorInput {
   bonkElapsed?: number | null
   /** They are flicking a chip at another seat: seconds elapsed and the target (seat space). */
   chipFlick?: { elapsed: number; target: Vec3 } | null
+  /**
+   * The dealer's deal in progress (see dealerDeal.getDealerPose): hand targets,
+   * wrist / head offsets and a finger mix for pitching cards. Null / absent
+   * when this seat is not physically dealing.
+   */
+  dealing?: DealerPose | null
   /** Seconds since they blacked out (the head-bonk beat); null when not blacked out. */
   blackoutElapsed?: number | null
   /** Seconds since they came to from a blackout (dazed wobble); null when not dazed. */
@@ -176,6 +192,14 @@ export interface AvatarAnimatorInput {
   stackHeight?: number
   /** What they wear on the head, for the fix-your-hat / push-up-your-glasses idle. */
   headwear?: 'hat' | 'glasses' | 'none'
+  /** What this seat can see of the table's social moment (the hero's action, an all-in, the winner ...); see avatarReactions. */
+  social?: AvatarSocialInput
+  /**
+   * This seat's part in an idle table-talk conversation (see tableTalk.ts), or null. The animator
+   * decides whether the seat is free to take part (never while acting, peeking, drinking, flipping
+   * someone off, winning, losing, passed out...) and reports it in state.chatOn.
+   */
+  chat?: TableChat | null
 }
 
 interface Spring {
@@ -237,6 +261,12 @@ export interface AvatarAnimatorState {
   nextMicroAt: number
   microStartedAt: number
   microKind: 0 | 1 | 2 | 3 | 4
+  /** Social reaction memory (odds history, when a bad beat began, ...) and this frame's weights. */
+  reactions: ReactionState
+  /** Output: the seat is taking part in its table-talk conversation right now (the face talks, smiles or laughs with it). */
+  chatOn: boolean
+  /** Output: 0..1 how wide the yawn in the middle of the stretch big idle is (the face yawns with it). */
+  yawn: number
   /** Spring stiffness, eased toward its per-situation goal so a gesture never starts with a jolt. */
   omega: number
   /** Reused every frame (no per-frame allocation). */
@@ -324,6 +354,9 @@ export function createAvatarAnimatorState(seedSource: string): AvatarAnimatorSta
     nextMicroAt: 9 + random() * 22,
     microStartedAt: Number.NEGATIVE_INFINITY,
     microKind: 0,
+    reactions: createReactionState(),
+    chatOn: false,
+    yawn: 0,
     omega: 9,
     smoothed: new Array(CHANNEL_COUNT).fill(0),
     outPose: null,
@@ -700,6 +733,21 @@ function resetPose(pose: AvatarPose, shapeR: HandTarget, shapeL: HandTarget): Av
 }
 
 /**
+ * Is this seat free to chat right now? Never while acting, peeking, drinking, flipping someone
+ * off, winning, losing or passed out, mid-prank, while the table is hot or reacting to a pot or
+ * new board cards, or during one of its own idles (those finish first).
+ */
+function isFreeToChat(state: AvatarAnimatorState, input: AvatarAnimatorInput) {
+  return !input.acting && !input.cueActive && !input.winner && !input.loser && !input.passedOut && !input.peeking &&
+    !input.flipOff && !input.chipFlick && !input.dealing && !input.otherWinner && !input.tripping &&
+    input.drinkElapsed == null && input.shotElapsed == null && input.bonkElapsed == null &&
+    input.blackoutElapsed == null && input.dazedElapsed == null &&
+    input.tableHeat < 0.3 && (input.boardRevealAge ?? Number.POSITIVE_INFINITY) > 2.2 &&
+    !Number.isFinite(state.peekStartedAt) && !Number.isFinite(state.bigIdleStartedAt) && !Number.isFinite(state.microStartedAt) &&
+    !Number.isFinite(state.livePeekSince) && !(input.time - state.livePeekEndedAt < 1)
+}
+
+/**
  * Builds the unsmoothed target pose. Pass `out` to reuse a pooled pose object
  * (the render loop does); without it a fresh pose is returned.
  */
@@ -853,7 +901,13 @@ export function computeAvatarTargetPose(
   // Dev review switch: window.__animQuiet = true stops the random idles (peeks,
   // big idles, fidgets, reactions) so a pose can be reviewed on its own.
   const quiet = process.env.NODE_ENV !== 'production' && Boolean((globalThis as { __animQuiet?: boolean }).__animQuiet)
-  const canIdle = !quiet && !input.acting && !input.cueActive && !input.folded && !input.winner && !input.loser && !input.passedOut
+  // Table talk (section 8b): decided up front because a seat in conversation sits out the random
+  // idles (and an idle already under way delays the chat).
+  state.yawn = 0
+  const chat = input.chat ?? null
+  const chatOn = chat !== null && motion > 0 && !quiet && isFreeToChat(state, input)
+  state.chatOn = chatOn
+  const canIdle = !quiet && !chatOn && !input.acting && !input.cueActive && !input.folded && !input.winner && !input.loser && !input.passedOut
   if (canIdle && input.hasCards && time >= state.nextPeekAt && !Number.isFinite(state.peekStartedAt)) {
     state.peekStartedAt = time
   }
@@ -1353,6 +1407,8 @@ export function computeAvatarTargetPose(
     }
     switch (state.bigIdleKind) {
       case 0: { // stretch: arms right up over the head, fingers reaching
+        // ...with a wide yawn through the middle of it (the face rig reads state.yawn).
+        state.yawn = yawnAmount(elapsed) * Math.min(1, w * 2)
         const reachUp = smoothStep((elapsed - 0.35) / 0.6) * w
         blendTo(pose.handR, offset(anchors.shoulderR, 0.06, 0.66 + 0.06 * reachUp, 0.08), w)
         blendTo(pose.handL, offset(anchors.shoulderL, -0.06, 0.66 + 0.06 * reachUp, 0.08), w)
@@ -1485,6 +1541,8 @@ export function computeAvatarTargetPose(
       let kind = Math.floor(state.random() * 5)
       // A big pot (the table was heated) gets more grumbling than applause.
       if (input.tableHeat > 0.5 && kind === 0) kind = 3
+      // The hero scooping it: a friendly table claps or nods more (avatarReactions).
+      kind = pickWinnerReaction(kind, input.social, seed)
       state.reactionKind = kind
     }
     const since = time - state.reactionSince
@@ -1563,6 +1621,60 @@ export function computeAvatarTargetPose(
     handFrame(pose, 'L', settle, 0.7, 0.1, 0.35)
     pose.elbowOut = Math.max(pose.elbowOut, 0.55 * settle)
     pose.bodyPosition[2] += 0.08 * settle
+  }
+
+  // 8b. Table talk (see tableTalk.ts): a neighbour chats with another player. Both turn to face
+  // each other (head leads, the spine follows; this replaces the random glance). The speaker nods
+  // on the beats of speech and talks with one hand, palm up and lifted off the rail (the jaw flaps
+  // in the face rig, which reads state.chatOn); the listener nods along, hands staying down, and
+  // when the exchange ends in a joke gives a small laugh with a shoulder shake. Folded players
+  // keep their crossed arms but still turn and talk. isFreeToChat gated it above.
+  if (chatOn && chat) {
+    const w = chatWeight(chat) * motion
+    if (w > 0.001) {
+      const yaw = Math.max(-1.3, Math.min(1.3, chat.yaw))
+      blendAxis(bones.Torso, 1, yaw * 0.12, w)
+      blendAxis(bones.Chest, 1, yaw * 0.2, w)
+      blendAxis(bones.Neck, 1, yaw * 0.24, w)
+      blendAxis(bones.Head, 1, yaw * 0.32, w)
+      blendAxis(bones.Head, 0, -0.02, w * 0.7)
+      if (chat.role === 'speak') {
+        const talk = chatTalkAmount(chat) * w
+        const beat = speechBeat(time, seed)
+        add(bones.Head, 0.1 * beat, 0, 0.04 * Math.sin(time * 2.7 + seed * 5), talk)
+        add(bones.Neck, 0.03 * beat, 0, 0, talk)
+        add(bones.Chest, 0.02 * beat, 0, 0, talk)
+        add(bones.ShoulderR, 0, 0, 0.03 * beat, talk)
+        add(bones.ShoulderL, 0, 0, -0.03 * beat, talk)
+        if (!input.folded && talk > 0.001) {
+          // The hand on the listener's side (or the far one, by habit): palm up, forearm raised,
+          // punching the beats. A fixed hand per player, so it never swaps mid-sentence.
+          const toward = yaw >= 0 ? -1 : 1
+          const side: 1 | -1 = seed > 0.5 ? toward : toward === 1 ? -1 : 1
+          const letter: Side = side === 1 ? 'R' : 'L'
+          const hand = side === 1 ? pose.handR : pose.handL
+          add(hand, 0.05 * side + 0.02 * Math.sin(time * 2.1 + seed * 5), 0.17 + 0.07 * beat, -0.07 - 0.06 * beat, talk)
+          add(side === 1 ? bones.WristR : bones.WristL, -0.1 - 0.2 * beat, 0, 0.18 * side * Math.sin(time * 3.1 + seed), talk)
+          handShape(pose, letter, 'open', talk * 0.7)
+          handFrame(pose, letter, talk, -0.1, 0.45, 2.2)
+        }
+      } else {
+        const nod = listenerNod(time, seed)
+        add(bones.Head, 0.1 * nod, 0, 0.03 * Math.sin(time * 0.8 + seed), w)
+        add(bones.Neck, 0.03 * nod, 0, 0, w)
+        add(bones.Chest, 0.03, 0, 0, w)
+      }
+      // The punchline: a small laugh (the listener most of all), head back, shoulders bouncing.
+      const laugh = chatLaughAmount(chat) * (chat.role === 'listen' ? 1 : 0.55) * w
+      if (laugh > 0.001) {
+        const bounce = Math.sin(chat.elapsed * 15 + seed * 6) * 0.5 + 0.5
+        add(bones.Head, -0.2, 0.03 * Math.sin(chat.elapsed * 6), 0.06 * Math.sin(chat.elapsed * 4.2), laugh)
+        add(bones.Chest, -0.07 + 0.05 * bounce, 0, 0, laugh)
+        add(bones.ShoulderR, 0, 0, 0.14 * bounce, laugh)
+        add(bones.ShoulderL, 0, 0, -0.14 * bounce, laugh)
+        pose.bodyPosition[1] += 0.012 * bounce * laugh
+      }
+    }
   }
 
   // 9. Big bet elsewhere: hands off the rail, lean back — "whoa".
@@ -2120,6 +2232,43 @@ export function computeAvatarTargetPose(
     pose.bodyPosition[2] -= 0.05 * w
   }
 
+  // 17b. Dealing (the dealer's chair): the left hand steadies the deck, the
+  // right pinches a card, draws back and snaps it out at the recipient while
+  // the head swings from the deck to them. All the timing lives in dealerDeal
+  // (the card launches on the snap); this only lays it onto the pose. Anything
+  // louder in progress (a prank, a flick-off, the dealer's own action) wins.
+  const dealing = input.dealing
+  if (
+    dealing && dealing.weight > 0 && !input.passedOut && !input.folded && !input.cueActive && !input.flipOff &&
+    !input.chipFlick && input.shotElapsed == null && input.bonkElapsed == null
+  ) {
+    const w = dealing.weight
+    // A beer in the left hand (and the head tipped back for it) wins over the deck hold; the right hand keeps pitching.
+    const wl = input.drinkElapsed == null ? w : 0
+    const snap = dealing.snap * motion
+    blendTo(pose.handR, dealing.handR, w)
+    blendTo(pose.handL, dealing.handL, wl)
+    add(bones.WristR, dealing.wristR[0], dealing.wristR[1], dealing.wristR[2], w * motion)
+    pose.fingerCurlR = pose.fingerCurlR * (1 - w) + dealing.curlR * w
+    pose.fingerCurlL = pose.fingerCurlL * (1 - wl) + dealing.curlL * wl
+    // A relaxed pinch on the card, cocked behind the thumb, then it springs free.
+    handShape(pose, 'R', 'pinch', w * dealing.pinch)
+    handShape(pose, 'R', 'flickCock', w * dealing.cock * (1 - snap))
+    handShape(pose, 'R', 'flickSnap', w * snap)
+    pose.handShapeR.speed = 1 + 1.6 * snap
+    handFrame(pose, 'R', w, dealing.frameYaw, dealing.framePitch, dealing.frameRoll)
+    // The off hand cups the deck.
+    handShape(pose, 'L', 'card', wl * dealing.holdL)
+    blendAxis(bones.Head, 1, dealing.headYaw * 0.5, wl)
+    blendAxis(bones.Neck, 1, dealing.headYaw * 0.25, wl)
+    blendAxis(bones.Chest, 1, dealing.headYaw * 0.15, w)
+    blendAxis(bones.Torso, 1, dealing.headYaw * 0.1, w)
+    blendAxis(bones.Head, 0, dealing.headPitch * 0.65, wl)
+    blendAxis(bones.Neck, 0, dealing.headPitch * 0.35, wl)
+    add(bones.Chest, 0.06 * w, 0, 0)
+    pose.bodyPosition[2] -= 0.03 * w
+  }
+
   // 18. Bonked by a chip: the head snaps back and away, shoulders jump, then
   // a hand comes up to rub the sore spot on top of the head.
   if (input.bonkElapsed !== null && input.bonkElapsed !== undefined && input.bonkElapsed >= 0 && !input.passedOut) {
@@ -2221,6 +2370,168 @@ export function computeAvatarTargetPose(
     add(bones.Torso, 0.04 * swayZ, 0.05 * swayX, 0.12 * swayX)
     add(bones.Chest, -0.04, 0, 0.06 * swayZ)
     pose.bodyPosition[0] += 0.03 * swayX
+  }
+
+  // 23. Social reactions (avatarReactions.ts): eye contact and nods toward the
+  // hero or the pot winner, a gasp and head shake at an all-in or big raise,
+  // sweating a run-out, a bad beat or a hit out when the broadcast odds swing,
+  // stack-at-risk nervous tells, a shrug on folding to a big bet. Every weight is
+  // zero under reduced motion and while the seat is acting, mid-gesture or
+  // owned by a showdown / prank / drink pose; they enter and leave smoothly.
+  const social = input.social
+  if (social && motion > 0 && !quiet) {
+    const rx = state.reactions
+    const rc = rx.ctx
+    const staged = input.shotElapsed != null || input.bonkElapsed != null || input.blackoutElapsed != null ||
+      input.dazedElapsed != null || input.drinkElapsed != null || Boolean(input.flipOff) || Boolean(input.chipFlick)
+    rc.time = time
+    rc.seed = seed
+    rc.motion = motion
+    rc.acting = input.acting
+    rc.folded = input.folded
+    rc.beatFree = !input.acting && !input.passedOut && !input.winner && !staged && !input.tripping
+    rc.headFree = rc.beatFree && !input.loser && !input.cueActive
+    rc.handsFree = rc.headFree && !input.peeking && livePeek.reach < 0.05 && !Number.isFinite(state.bigIdleStartedAt) &&
+      !Number.isFinite(state.peekStartedAt) && !input.hungover && !(input.cheersRaise && input.cheersRaise > 0.01)
+    rc.loserAge = input.loser ? time - state.loserSince : Number.POSITIVE_INFINITY
+    rc.boardAge = input.boardRevealAge ?? Number.POSITIVE_INFINITY
+    const rw = computeSocialReactions(rx, social, rc)
+
+    // Face the person (the camera for the hero) and meet their eyes: the head
+    // and neck swing to the real bearing; the eyes lock on through the gaze rig.
+    if (rw.look > 0.001) {
+      const yawTo = Math.max(-0.9, Math.min(0.9, rw.lookYaw))
+      const pitchTo = Math.max(-0.3, Math.min(0.3, rw.lookPitch))
+      blendAxis(bones.Neck, 1, 0.35 * yawTo, rw.look)
+      blendAxis(bones.Head, 1, 0.65 * yawTo, rw.look)
+      blendAxis(bones.Chest, 1, 0.12 * yawTo, rw.look)
+      blendAxis(bones.Neck, 0, 0.35 * pitchTo, rw.look)
+      blendAxis(bones.Head, 0, 0.65 * pitchTo, rw.look)
+    }
+    // A nod (chin dips twice) or a small no.
+    if (rw.nod > 0.001) {
+      add(bones.Head, 0.17 * rw.nod, 0, 0)
+      add(bones.Neck, 0.05 * rw.nod, 0, 0)
+      add(bones.Chest, 0.025 * rw.nod, 0, 0)
+    }
+    if (rw.shake > 0.001 || rw.shake < -0.001) {
+      add(bones.Head, 0.01, 0.26 * rw.shake, 0.03 * rw.shake)
+      add(bones.Neck, 0, 0.06 * rw.shake, 0)
+      add(bones.Chest, 0, 0.03 * rw.shake, 0)
+    }
+    // Gasp: flinch back, shoulders up, a hand flies over the mouth.
+    if (rw.gasp > 0.001) {
+      const g = rw.gasp
+      add(bones.Chest, -0.1, 0, 0, g)
+      add(bones.Head, -0.08, 0, 0, g)
+      add(bones.ShoulderR, 0, 0, 0.1, g)
+      add(bones.ShoulderL, 0, 0, -0.1, g)
+      pose.bodyPosition[2] += 0.04 * g
+      if (!input.folded) {
+        const side: Side = rw.gaspSide > 0 ? 'R' : 'L'
+        const hand = side === 'R' ? pose.handR : pose.handL
+        blendTo(hand, offset(anchors.chin, 0.02 * rw.gaspSide, -0.01, -0.07), g * 0.95)
+        pose.headFollow = Math.max(pose.headFollow, g)
+        if (side === 'R') pose.fingerCurlR = pose.fingerCurlR * (1 - g) + 0.2 * g
+        else pose.fingerCurlL = pose.fingerCurlL * (1 - g) + 0.2 * g
+        // Fingers together over the lips, palm in.
+        handShape(pose, side, 'flat', g * 0.85)
+        handFrame(pose, side, g, 0.55, 1.3, 1.3)
+        // The other hand lifts off the rail, fingers spread.
+        const other = side === 'R' ? pose.handL : pose.handR
+        add(other, 0.05 * rw.gaspSide, 0.1, 0.05, g)
+        handShape(pose, side === 'R' ? 'L' : 'R', 'open', g * 0.6)
+      }
+    }
+    // Sweating a run-out: leaning in, a knuckle at the lips in bursts, jittery.
+    if (rw.sweat > 0.001) {
+      const s = rw.sweat
+      const side: Side = seed > 0.5 ? 'L' : 'R'
+      const sign = side === 'R' ? 1 : -1
+      const hand = side === 'R' ? pose.handR : pose.handL
+      add(bones.Chest, 0.07, 0, 0, s)
+      add(bones.Head, 0.03, 0, 0, s)
+      pose.bodyPosition[2] -= 0.03 * s
+      blendTo(hand, offset(anchors.chin, 0.03 * sign, -0.015, -0.06), s * 0.9)
+      pose.headFollow = Math.max(pose.headFollow, s * 0.9)
+      if (side === 'R') pose.fingerCurlR = pose.fingerCurlR * (1 - s) + 0.75 * s
+      else pose.fingerCurlL = pose.fingerCurlL * (1 - s) + 0.75 * s
+      handShape(pose, side, 'loose', s * 0.9)
+      handFrame(pose, side, s * 0.9, 0.55, 1.1, 1.25)
+      hand[1] += 0.004 * Math.sin(time * 23 + seed * 5) * s
+    }
+    // Bad beat: the odds collapsed. Hands fly to the head, sat back in disbelief.
+    if (rw.badBeat > 0.001) {
+      const b = rw.badBeat
+      const stunned = Math.sin(time * 3.1 + seed * 4) * 0.5 * b
+      add(bones.Chest, -0.1, 0, 0, b)
+      add(bones.Head, -0.1, 0.05 * stunned, 0.02 * stunned, b)
+      add(bones.Neck, 0.02, 0.03 * stunned, 0, b)
+      pose.bodyPosition[2] += 0.05 * b
+      blendTo(pose.handR, offset(anchors.chin, 0.2, 0.17, 0.1), b)
+      blendTo(pose.handL, offset(anchors.chin, -0.2, 0.17, 0.1), b)
+      aroundHead(pose.handR, b, 1)
+      aroundHead(pose.handL, b, -1)
+      pose.headFollow = Math.max(pose.headFollow, b)
+      pose.elbowUp = Math.max(pose.elbowUp, 0.6 * b)
+      pose.fingerCurlR = pose.fingerCurlR * (1 - b) + 0.3 * b
+      pose.fingerCurlL = pose.fingerCurlL * (1 - b) + 0.3 * b
+      handShape(pose, 'R', 'rub', b)
+      handShape(pose, 'L', 'rub', b)
+      handFrame(pose, 'R', b, 0.3, 1.4, 1.4)
+      handFrame(pose, 'L', b, 0.3, 1.4, 1.4)
+    }
+    // Hit the out: a long breath out, the whole body sagging into the chair.
+    if (rw.relief > 0.001) {
+      const r = rw.relief
+      const out = smoothStep((time - rx.reliefAt - 0.4) / 0.9)
+      add(bones.Chest, -0.07, 0, 0, r)
+      add(bones.Head, -0.12 + 0.05 * out, 0, 0.05, r)
+      add(bones.ShoulderR, 0, 0, 0.11 * (1 - out) - 0.04 * out, r)
+      add(bones.ShoulderL, 0, 0, -0.11 * (1 - out) + 0.04 * out, r)
+      pose.bodyPosition[1] -= 0.015 * out * r
+      pose.bodyPosition[2] += 0.04 * r
+    }
+    // Folded to a big bet: a shrug, head tipped to one side.
+    if (rw.shrug > 0.001) {
+      const s = rw.shrug
+      const tilt = seed < 0.5 ? 1 : -1
+      add(bones.ShoulderR, 0, 0, 0.3, s)
+      add(bones.ShoulderL, 0, 0, -0.3, s)
+      add(bones.Head, 0.02, 0.05 * tilt, 0.16 * tilt, s)
+      add(bones.Chest, -0.04, 0, 0, s)
+      add(pose.handR, 0.05, 0.1, 0.03, s)
+      add(pose.handL, -0.05, 0.1, 0.03, s)
+      handShape(pose, 'R', 'open', s * 0.5)
+      handShape(pose, 'L', 'open', s * 0.5)
+    }
+    // Nerves grow with the stack at risk: tight shoulders, shallow quick breaths,
+    // a bouncing knee through the torso, trembling hands, drumming in bursts,
+    // a glance down at the chips.
+    if (rw.nervous > 0.001) {
+      const n = rw.nervous
+      add(bones.ShoulderR, 0, 0, 0.05, n)
+      add(bones.ShoulderL, 0, 0, -0.05, n)
+      add(bones.Chest, 0.008 * Math.sin(time * 6.2 + seed * 5), 0, 0, n)
+      pose.bodyPosition[1] += 0.004 * Math.sin(time * 21 + seed * 3) * n
+      const tremble = 0.004 * n * n
+      pose.handR[0] += tremble * Math.sin(time * 37 + seed * 3)
+      pose.handR[2] += tremble * Math.sin(time * 41 + seed)
+      pose.handL[0] += tremble * Math.sin(time * 39 + seed * 7)
+      pose.handL[2] += tremble * Math.sin(time * 35 + seed * 2)
+    }
+    if (rw.drum > 0.001) {
+      pose.handShapeR.drum = Math.max(pose.handShapeR.drum, rw.drum)
+      pose.handShapeL.drum = Math.max(pose.handShapeL.drum, rw.drum * 0.7)
+      const beat = time * nervousDrumRate(rw.nervous) * 6.2832
+      pose.handR[1] += 0.004 * Math.max(0, Math.sin(beat + seed)) * rw.drum
+      pose.handL[1] += 0.003 * Math.max(0, Math.sin(beat * 0.9 + seed * 3)) * rw.drum
+    }
+    if (rw.chipGlance > 0.001) {
+      const stackYaw = Math.atan2(-anchors.stack[0], -anchors.stack[2])
+      blendAxis(bones.Head, 1, stackYaw * 0.8, rw.chipGlance)
+      add(bones.Head, 0.2 * rw.chipGlance, 0, 0)
+    }
   }
 
   // Dev-only close-up rig (see getHandLab): hands held out in front of the chest.
@@ -2382,7 +2693,7 @@ function updateAvatarAnimatorInner(
   // A calm seat (nothing quick going on) rebuilds its target every other
   // frame; the springs below still advance every frame, so the motion stays
   // smooth and the only cost is up to a frame of latency on slow idle cues.
-  const calm = state.initialized && !input.reducedMotion && !input.cueActive && !input.flipOff && !input.chipFlick &&
+  const calm = state.initialized && !input.reducedMotion && !input.cueActive && !input.flipOff && !input.chipFlick && !input.dealing &&
     input.shotElapsed == null && input.bonkElapsed == null && input.drinkElapsed == null && input.blackoutElapsed == null &&
     !input.winner && !input.loser && !input.passedOut && !input.otherWinner && (input.boardRevealAge ?? Infinity) > 2 &&
     !(process.env.NODE_ENV !== 'production' && (globalThis as { __animFullRate?: boolean }).__animFullRate)
@@ -2409,7 +2720,7 @@ function updateAvatarAnimatorInner(
   // Semi-implicit spring integration with fixed substeps: unconditionally
   // stable at any frame rate (a slow frame can never launch an avatar).
   // Flick-offs and hiccups need snap; passing out sinks slowly.
-  const prankActive = Boolean(input.chipFlick) ||
+  const prankActive = Boolean(input.chipFlick) || Boolean(input.dealing) ||
     (input.shotElapsed !== null && input.shotElapsed !== undefined) ||
     (input.bonkElapsed !== null && input.bonkElapsed !== undefined)
   // The blackout lands fast (a bonk, not a slow sink).

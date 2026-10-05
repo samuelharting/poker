@@ -11,7 +11,7 @@ const context = await browser.newContext(mobile ? { ...devices['Pixel 7'] } : { 
 const page = await context.newPage()
 await page.goto(appUrl)
 await page.getByLabel('Your nickname').fill('Anim')
-await page.getByRole('button', { name: 'Create Table' }).click()
+await page.getByRole('button', { name: /Take a seat|Sit down as/ }).click()
 await page.waitForURL(/\/room\//)
 for (let attempt = 0; attempt < 30; attempt += 1) {
   const seats = await page.evaluate(() => Number(document.querySelector('.table-scene')?.getAttribute('data-player-count') ?? 0))

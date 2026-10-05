@@ -52,6 +52,7 @@ import {
 } from '@/lib/poker/turnGuidance'
 import { PRE_ACTION_SHORTCUT_KEYS, PreActionBar } from './PreActionBar'
 import { PeekStylePicker } from './PeekStylePicker'
+import { TableThemePicker } from './TableThemePicker'
 import { LedgerPanel, formatRebuyCash, formatStackChips, getRebuyStatus, requestRebuy, type LedgerC2SMessage } from './LedgerPanel'
 import {
   AVATAR_CELEBRATION_OPTIONS,
@@ -4794,6 +4795,7 @@ export function SettingsModal({
                 </div>
               </div>
               <PeekStylePicker />
+              <TableThemePicker />
               <div className="settings-rule-row settings-audio-controls">
                 <div>
                   <div className="settings-rule-name">Soundscape</div>

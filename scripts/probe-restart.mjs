@@ -29,7 +29,7 @@ await page.addInitScript(() => {
 })
 await page.goto(appUrl)
 await page.getByLabel('Your nickname').fill('Restarter')
-await page.getByRole('button', { name: 'Create Table' }).click()
+await page.getByRole('button', { name: /Take a seat|Sit down as/ }).click()
 await page.waitForURL(/\/room\//)
 await page.waitForFunction(() => window.__state?.players?.some(player => player.id === window.__yourId), null, { timeout: 30000 })
 await page.getByRole('button', { name: 'Add bot' }).first().click()

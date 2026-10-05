@@ -31,7 +31,7 @@ const context = await browser.newContext(mobile ? { ...devices['Pixel 7'] } : { 
 const page = await context.newPage()
 await page.goto(appUrl, { waitUntil: 'load', timeout: 120000 })
 await page.getByLabel('Your nickname').fill('Prober')
-await page.getByRole('button', { name: 'Create Table' }).click()
+await page.getByRole('button', { name: /Take a seat|Sit down as/ }).click()
 await page.waitForURL(/\/room\//)
 if (!mobile) await page.waitForSelector('.desktop-3d-stage[data-webgl-status="ready"]', { timeout: 60000 })
 for (let attempt = 0; attempt < 40; attempt += 1) {
