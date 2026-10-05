@@ -148,6 +148,8 @@ interface Ring {
 }
 
 const TUBE_SIDES = 10
+/** Length of the wrist tube (m) the bend is spread over. */
+const WRIST_ARC = 0.092
 const ringPoint = new THREE.Vector3()
 
 /**
@@ -259,13 +261,23 @@ interface Built {
   thumbTip: THREE.Vector3
 }
 
-function buildShape(shape: Shape): Built {
+/** An explicit pose (the glass grip): curls and fan per finger, the thumb, and a bend of the forearm at the wrist. */
+interface PoseOverride {
+  curls: readonly Curl3[]
+  spreads: readonly number[]
+  thumb: ThumbSpec
+  /** Forearm bend (rad) about the wrist, toward the little-finger side (+X). */
+  wristBend?: number
+}
+
+function buildShape(shape: Shape, pose?: PoseOverride): Built {
   const pieces: THREE.BufferGeometry[] = []
   const identity = tmpA.identity().clone()
   // Flutter is stored as a delta on the relaxed shape: the curls add up.
   const addDelta = shape === 'flutter'
   const curlOf = (spec: FingerSpec, joint: number) =>
-    addDelta ? spec.curl.relaxed[joint]! + spec.curl.flutter[joint]! : spec.curl[shape][joint]!
+    pose ? pose.curls[FINGERS.indexOf(spec)]![joint]! : addDelta ? spec.curl.relaxed[joint]! + spec.curl.flutter[joint]! : spec.curl[shape][joint]!
+  const wristBend = pose?.wristBend ?? 0
   const fingertip = new THREE.Vector3()
   const thumbTip = new THREE.Vector3()
 
@@ -290,7 +302,7 @@ function buildShape(shape: Shape): Built {
   // domed tip. Each finger tapers from the knuckle to the tip.
   FINGERS.forEach((spec, fingerIndex) => {
     const chain = new THREE.Matrix4().makeTranslation(spec.x, 0, PALM_END)
-    chain.multiply(tmpB.makeRotationY(spec.spread[shape]))
+    chain.multiply(tmpB.makeRotationY(pose ? pose.spreads[fingerIndex]! : spec.spread[shape]))
     const r = spec.radius
     // Width / thickness of the section along the finger: knuckle, mid-phalanges, the two finger joints, the tip.
     const radiusAt = (u: number) => r * (1 - 0.2 * u + 0.035 * Math.max(0, 1 - Math.abs(u - 0.47) / 0.08) + 0.03 * Math.max(0, 1 - Math.abs(u - 0.78) / 0.07))
@@ -326,7 +338,7 @@ function buildShape(shape: Shape): Built {
 
   // Thumb: the same kind of tube, from inside the thenar pad (metacarpal along
   // the edge of the palm) through two phalanges that rest beside the index finger.
-  const thumb = THUMB[shape]
+  const thumb = pose ? pose.thumb : THUMB[shape]
   const chain = new THREE.Matrix4().makeTranslation(THUMB_BASE.x, THUMB_BASE.y, THUMB_BASE.z)
   const thumbRings: Ring[] = []
   thumbRings.push({ m: chain.clone().multiply(tmpB.makeRotationY(thumb.yaw[0]!)).multiply(tmpB.makeTranslation(0, 0, 0.012)), rx: THUMB_RADII[0] * 1.05, ry: THUMB_RADII[0] * 0.92, top: 0.92, under: 0.84, ink: 0 })
@@ -365,19 +377,31 @@ function buildShape(shape: Shape): Built {
   // The wrist: a smooth oval tube from inside the heel of the hand to inside the cuff,
   // a little narrower than the palm and filling out toward the forearm (rings run from the
   // cuff toward the hand, the direction tubeGeometry sweeps in).
-  const wristRing = (z: number, rx: number, ry: number, ink = 1): Ring => ({ m: new THREE.Matrix4().makeTranslation(0, -0.002, z), rx, ry, top: 0.95, under: 0.86, ink })
+  // A bent wrist (the glass grip) sweeps the same rings along a circular arc about the inner end.
+  const bendFrame = (z: number) => {
+    const frame = new THREE.Matrix4().makeTranslation(0, -0.002, z)
+    if (!wristBend) return frame
+    const arc = Math.max(0, z + 0.022)
+    const kappa = wristBend / WRIST_ARC
+    const phi = kappa * arc
+    frame.makeTranslation((1 - Math.cos(phi)) / kappa, -0.002, -0.022 + Math.sin(phi) / kappa)
+    return frame.multiply(tmpB.makeRotationY(phi))
+  }
+  const wristRing = (z: number, rx: number, ry: number, ink = 1): Ring => ({ m: bendFrame(z), rx, ry, top: 0.95, under: 0.86, ink })
   pieces.push(tubeGeometry([
     wristRing(0.07, 0.0328, 0.0228),
     wristRing(0.035, 0.0312, 0.0212),
     wristRing(0.006, 0.0298, 0.0196, 0.8),
     wristRing(-0.022, 0.028, 0.0165, 0),
   ], 0, SKIN))
+  // The cuff and sleeve ride rigidly on the far end of the wrist.
+  const forearm = bendFrame(0.07).multiply(new THREE.Matrix4().makeTranslation(0, 0.002, -0.07))
   const cuff = alongZ(0.036, 0.0352, 0.0362, 0.05, 16, 0.76)
-  pieces.push(part(cuff, identity, CUFF, 0.98))
+  pieces.push(part(cuff, identity, CUFF, 0.98).applyMatrix4(forearm))
   cuff.dispose()
   // The sleeve darkens with distance so it sinks into the shadow at the bottom of the view.
   const sleeve = alongZ(0.62, 0.0445, 0.064, 0.082, 18, 0.8)
-  pieces.push(part(sleeve, identity, SLEEVE, (_x, _y, z) => 0.96 - 0.62 * smoothstep(0.09, 0.62, z)))
+  pieces.push(part(sleeve, identity, SLEEVE, (_x, _y, z) => 0.96 - 0.62 * smoothstep(0.09, 0.62, z)).applyMatrix4(forearm))
   sleeve.dispose()
 
   const merged = mergeGeometries(pieces, false)
@@ -417,6 +441,167 @@ export function buildHandGeometry(): THREE.BufferGeometry {
   base.morphAttributes.normal = normals
   base.morphTargetsRelative = true
   for (let index = 1; index < shapes.length; index += 1) shapes[index]!.dispose()
+  base.computeBoundingSphere()
+  return base
+}
+
+// ---------------------------------------------------------------------------
+// The glass grip
+// ---------------------------------------------------------------------------
+
+/**
+ * What the glass-holding hand wraps: a vertical cylinder (the glass, or the bar
+ * of a mug handle) described in hand space. The hand is built "thumb up, palm
+ * toward the glass": its X axis runs along the cylinder, the fingers lie one
+ * above the other and each curls around it.
+ */
+export interface GripSpec {
+  /** Radius of the cylinder (hand-space units, metres at hand scale 1). */
+  radius: number
+  /** Where the cylinder's axis crosses the hand's YZ plane: y (negative is toward the palm side) and z (negative is toward the fingers). */
+  axis: readonly [number, number]
+  /** The thumb joints for this grip (the thumb is posed by hand, the fingers are solved). */
+  thumb: ThumbSpec
+  /** Fan of the fingers (rad). */
+  spread?: number
+  /** Bend of the forearm at the wrist (rad, toward the little-finger side). */
+  wristBend?: number
+}
+
+/** Finger joint positions in the hand's (y, z) plane and the curls that put them on the cylinder. */
+export interface GripWrap {
+  curl: Curl3
+  /** Knuckle, first joint, second joint and tip centre lines. */
+  points: Array<[number, number]>
+  /** Distance the finger centre lines keep from the cylinder axis. */
+  distance: number
+}
+
+/** Joint positions (hand (y, z) plane) of a finger with these curls, from the knuckle. */
+function fingerPoints(lengths: Curl3, curl: Curl3): Array<[number, number]> {
+  const points: Array<[number, number]> = [[0, PALM_END]]
+  let heading = 0
+  for (let joint = 0; joint < 3; joint += 1) {
+    heading += curl[joint]!
+    const last = points[joint]!
+    // Heading `a` points from -Z toward -Y: (y, z) = (-sin a, -cos a).
+    points.push([last[0] - Math.sin(heading) * lengths[joint]!, last[1] - Math.cos(heading) * lengths[joint]!])
+  }
+  return points
+}
+
+/**
+ * Curls that lay one finger's joints on a circle of radius `distance` about
+ * `center` (the cylinder axis in the hand's (y, z) plane), so the bones wrap the
+ * glass instead of cutting through it. A small direct search: the finger is a
+ * three-link chain, the circle a target for its three free joints, and a joint
+ * inside the circle (in the glass) costs more than one outside it.
+ */
+function wrapFinger(spec: FingerSpec, center: readonly [number, number], distance: number): GripWrap {
+  const loss = (curl: Curl3) => {
+    const points = fingerPoints(spec.lengths, curl)
+    let total = 0
+    for (let joint = 1; joint <= 3; joint += 1) {
+      const error = Math.hypot(points[joint]![0] - center[0], points[joint]![1] - center[1]) - distance
+      total += (error < 0 ? 4 : 1) * error * error
+    }
+    // Stay near a natural fist-like curl when several answers fit.
+    return total + 1e-6 * (curl[0] * curl[0] + curl[1] * curl[1] + curl[2] * curl[2])
+  }
+  let best: Curl3 = [0.9, 0.9, 0.6]
+  let bestLoss = Number.POSITIVE_INFINITY
+  for (let c0 = 0; c0 <= 1.9; c0 += 0.1) {
+    for (let c1 = 0; c1 <= 1.9; c1 += 0.1) {
+      for (let c2 = 0; c2 <= 1.5; c2 += 0.1) {
+        const value = loss([c0, c1, c2])
+        if (value < bestLoss) { bestLoss = value; best = [c0, c1, c2] }
+      }
+    }
+  }
+  for (let step = 0.05; step > 0.0004; step *= 0.6) {
+    for (let pass = 0; pass < 6; pass += 1) {
+      for (let axis = 0; axis < 3; axis += 1) {
+        for (const sign of [-1, 1]) {
+          const next: Curl3 = [best[0], best[1], best[2]]
+          next[axis] = Math.max(0, next[axis]! + sign * step)
+          const value = loss(next)
+          if (value < bestLoss) { bestLoss = value; best = next }
+        }
+      }
+    }
+  }
+  return { curl: best, points: fingerPoints(spec.lengths, best), distance }
+}
+
+/** The solved finger curls for a grip (for the geometry and for tests). */
+export function solveGripWrap(spec: GripSpec): GripWrap[] {
+  return FINGERS.map(finger => wrapFinger(finger, spec.axis, spec.radius + finger.radius * 0.9 + 0.0008))
+}
+
+const scaleCurl = (curl: Curl3, factor: number): Curl3 => [curl[0] * factor, curl[1] * factor, curl[2] * factor]
+const scaleThumb = (thumb: ThumbSpec, factor: number): ThumbSpec => ({ yaw: thumb.yaw, curl: scaleCurl(thumb.curl, factor) })
+
+/** Morph targets of the grip hand: a slack hold, a squeeze, the index and thumb lifted off, and the little fingers tapping. */
+export const GRIP_MORPH = { loose: 0, tight: 1, lift: 2, tap: 3 } as const
+
+type GripVariant = keyof typeof GRIP_MORPH | 'grip'
+
+function gripPose(spec: GripSpec, variant: GripVariant): PoseOverride {
+  const wraps = solveGripWrap(spec)
+  const spread = spec.spread ?? 0.02
+  const factor = (finger: number) => {
+    switch (variant) {
+      case 'loose': return 0.55
+      case 'tight': return 1.1
+      case 'lift': return finger === 0 ? 0.2 : finger === 1 ? 0.6 : 1
+      case 'tap': return finger >= 2 ? 0.45 : 1
+      default: return 1
+    }
+  }
+  return {
+    curls: wraps.map((wrap, index) => scaleCurl(wrap.curl, factor(index))),
+    spreads: wraps.map((_wrap, index) => (variant === 'loose' ? 1.8 : 1) * spread * [-1, -0.35, 0.35, 1][index]!),
+    thumb: variant === 'loose' ? scaleThumb(spec.thumb, 0.55) : variant === 'tight' ? scaleThumb(spec.thumb, 1.08) : variant === 'lift' ? scaleThumb(spec.thumb, 0.3) : spec.thumb,
+    wristBend: spec.wristBend ?? 0,
+  }
+}
+
+/** Relative morph targets (position and normal) from a base shape's geometry. */
+function addMorphTargets(base: THREE.BufferGeometry, targets: THREE.BufferGeometry[]) {
+  const basePosition = base.getAttribute('position')
+  const baseNormal = base.getAttribute('normal')
+  const positions: THREE.BufferAttribute[] = []
+  const normals: THREE.BufferAttribute[] = []
+  for (const target of targets) {
+    const position = target.getAttribute('position')
+    const normal = target.getAttribute('normal')
+    const dp = new Float32Array(position.count * 3)
+    const dn = new Float32Array(position.count * 3)
+    for (let i = 0; i < position.count * 3; i += 1) {
+      dp[i] = (position.array[i] as number) - (basePosition.array[i] as number)
+      dn[i] = (normal.array[i] as number) - (baseNormal.array[i] as number)
+    }
+    positions.push(new THREE.BufferAttribute(dp, 3))
+    normals.push(new THREE.BufferAttribute(dn, 3))
+    target.dispose()
+  }
+  base.morphAttributes.position = positions
+  base.morphAttributes.normal = normals
+  base.morphTargetsRelative = true
+}
+
+/**
+ * The hand of the glass grip: the same palm, finger and thumb tubes, wrist, cuff
+ * and sleeve as the resting hands, posed around a cylinder (see GripSpec) and
+ * with four morph targets (GRIP_MORPH). Four targets, like the resting hands, so
+ * it draws with the very same shader program. Dispose the geometry when done.
+ */
+export function buildGripHandGeometry(spec: GripSpec): THREE.BufferGeometry {
+  const base = buildShape('relaxed', gripPose(spec, 'grip')).geometry
+  const targets = (Object.keys(GRIP_MORPH) as Array<keyof typeof GRIP_MORPH>)
+    .sort((a, b) => GRIP_MORPH[a] - GRIP_MORPH[b])
+    .map(variant => buildShape('relaxed', gripPose(spec, variant)).geometry)
+  addMorphTargets(base, targets)
   base.computeBoundingSphere()
   return base
 }

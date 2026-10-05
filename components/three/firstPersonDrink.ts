@@ -1,10 +1,12 @@
 import * as THREE from 'three'
-import { createCelMaterial } from './firstPersonHandMesh'
+import type { GripSpec } from './firstPersonHandMesh'
+import { createGripHand, disposeGripHand, setGripInk, setGripPose, type GripHand } from './firstPersonGripHand'
 import { createDrinkProp, disposeDrinkProp, DRINK_DURATION, type DrinkKind, type DrinkProp } from './drinkProps'
 
 /**
- * The local player's own drink, seen first-person: a toon hand and sleeve
- * (in the hero's avatar colours, mirrored into a left hand) bring the glass up from the bottom-left,
+ * The local player's own drink, seen first-person: the hero's own hand and sleeve
+ * (the resting hands' mesh, posed around the glass: see firstPersonGripHand.ts,
+ * mirrored into a left hand) bring the glass up from the bottom-left,
  * tip it back for a few gulps while the level drops, then lower it away.
  * Everything lives in camera space, so it is always framed the same way.
  */
@@ -15,6 +17,8 @@ export interface FirstPersonDrink {
   colorKey: string
   prop: DrinkProp | null
   hand: THREE.Group | null
+  /** The glass-holding hand (two draw calls: the hand and its ink hull). */
+  grip: GripHand | null
   materials: THREE.Material[]
   geometries: THREE.BufferGeometry[]
   liquid: THREE.Mesh | null
@@ -31,11 +35,46 @@ export interface FirstPersonDrinkInput {
   drunkLevel: number
   time: number
   reducedMotion: boolean
+  /** Render height in pixels (the ink outline stays about a pixel and a half wide). */
+  renderHeight?: number
 }
 
 /** Glass rim sits at the group origin so tipping pivots at the lips. */
 const RIM_OFFSET: Record<DrinkKind, number> = { beer: 0.24, water: 0.22 }
-const GLASS_RADIUS: Record<DrinkKind, number> = { beer: 0.1, water: 0.075 }
+
+interface DrinkGrip {
+  spec: GripSpec
+  /** Hand space -> glass space. */
+  scale: number
+  yaw: number
+  /** Height of the middle of the finger stack, and the grip axis x (the mug's handle). */
+  height: number
+  axisX: number
+}
+
+/**
+ * How the hand holds each glass. The beer is held by its handle (a fist closed
+ * around the bar, thumb up along the glass); the water is wrapped around its
+ * body, fingers behind the glass and the thumb on the near side. Radii are in
+ * hand units (the mug's handle bar is 0.0125 thick, the tumbler about 0.07 wide
+ * at the grip).
+ */
+const DRINK_GRIP: Record<DrinkKind, DrinkGrip> = {
+  beer: {
+    spec: { radius: 0.0074, axis: [-0.027, -0.054], thumb: { yaw: [0.3, -0.1, 0], curl: [0.8, 0.7, 0.5] }, wristBend: 0.5 },
+    scale: 1.7,
+    yaw: 0.4,
+    height: 0.115,
+    axisX: 0.172,
+  },
+  water: {
+    spec: { radius: 0.04375, axis: [-0.065, -0.07], thumb: { yaw: [0.8, -0.25, 0], curl: [0.6, 0.45, 0.3] }, wristBend: 0.5 },
+    scale: 1.6,
+    yaw: 0.45,
+    height: 0.105,
+    axisX: 0,
+  },
+}
 
 // Rim anchors as (screen x, screen y in -1..1, camera-space depth), turned
 // into camera space every frame from the lens, so the framing holds at any
@@ -80,6 +119,7 @@ export function createFirstPersonDrink(camera: THREE.Camera): FirstPersonDrink {
     colorKey: '',
     prop: null,
     hand: null,
+    grip: null,
     materials: [],
     geometries: [],
     liquid: null,
@@ -91,6 +131,8 @@ export function createFirstPersonDrink(camera: THREE.Camera): FirstPersonDrink {
 function clearModel(drink: FirstPersonDrink) {
   disposeDrinkProp(drink.prop)
   drink.prop = null
+  disposeGripHand(drink.grip)
+  drink.grip = null
   drink.hand?.removeFromParent()
   drink.hand = null
   drink.materials.forEach(material => {
@@ -130,63 +172,15 @@ function buildModel(drink: FirstPersonDrink, kind: DrinkKind, skinColor: string,
     drink.liquidBase = { y: drink.liquid.position.y - params.height / 2, height: params.height }
   }
 
-  // The same cel look (tones, warm shadow, ink outline) as the resting hands, in the profile's colours.
-  const skin = createCelMaterial(new THREE.Color(skinColor).offsetHSL(0, 0.04, 0.02))
-  const sleeve = createCelMaterial(sleeveColor)
-  const cuff = createCelMaterial('#f4efe6')
-  drink.materials.push(skin, sleeve, cuff)
-
+  // The resting hands' own mesh, shader and ink, posed around the glass, in the profile's colours.
+  const config = DRINK_GRIP[kind]
+  const grip = createGripHand({ ...config, skin: skinColor, sleeve: sleeveColor })
   const hand = new THREE.Group()
   hand.position.y = -RIM_OFFSET[kind]
-  const add = (geometry: THREE.BufferGeometry, material: THREE.Material) => {
-    drink.geometries.push(geometry)
-    const mesh = new THREE.Mesh(geometry, material)
-    hand.add(mesh)
-    return mesh
-  }
-
-  const radius = GLASS_RADIUS[kind]
-  // Four curled fingers wrap the camera-facing side of the glass.
-  const fingerHeights = [0.07, 0.105, 0.14, 0.172]
-  fingerHeights.forEach((height, index) => {
-    const arc = 1.75 - index * 0.14
-    const finger = add(new THREE.TorusGeometry(radius + 0.013, 0.0145 - index * 0.0008, 7, 12, arc), skin)
-    finger.rotation.x = Math.PI / 2
-    finger.rotation.z = -0.12
-    finger.position.y = height
-    // Fingertip knuckle so the curl reads as fingers, not rings.
-    const tip = add(new THREE.SphereGeometry(0.0155 - index * 0.0008, 8, 6), skin)
-    tip.position.set(Math.cos(arc - 0.12) * (radius + 0.013), height, Math.sin(arc - 0.12) * (radius + 0.013))
-  })
-  // Palm and thumb on the outer (right) side.
-  const palm = add(new THREE.SphereGeometry(1, 14, 10), skin)
-  palm.scale.set(0.034, 0.068, 0.056)
-  palm.position.set(radius + 0.03, 0.12, -0.012)
-  const thumb = add(new THREE.CapsuleGeometry(0.014, 0.05, 4, 8), skin)
-  thumb.position.set(radius * 0.72, 0.2, radius * 0.55)
-  thumb.rotation.set(0.2, 0, -1.05)
-
-  // Wrist, cuff and sleeve run down-right toward the edge of the screen.
-  const armDirection = new THREE.Vector3(0.62, -0.62, 0.48).normalize()
-  const up = new THREE.Vector3(0, 1, 0)
-  const alongArm = new THREE.Quaternion().setFromUnitVectors(up, armDirection)
-  const wristStart = new THREE.Vector3(radius + 0.05, 0.09, -0.01)
-  const segment = (length: number, radiusTop: number, radiusBottom: number, offset: number, material: THREE.Material) => {
-    const mesh = add(new THREE.CylinderGeometry(radiusTop, radiusBottom, length, 14), material)
-    mesh.quaternion.copy(alongArm)
-    mesh.position.copy(wristStart).addScaledVector(armDirection, offset + length / 2)
-    return mesh
-  }
-  segment(0.07, 0.028, 0.032, 0, skin)
-  segment(0.03, 0.05, 0.05, 0.06, cuff)
-  segment(0.75, 0.056, 0.07, 0.085, sleeve)
-
-  hand.traverse(object => {
-    object.castShadow = false
-    object.receiveShadow = false
-  })
+  hand.add(grip.group)
   drink.root.add(hand)
   drink.hand = hand
+  drink.grip = grip
 }
 
 const easeOutBack = (t: number) => {
@@ -263,6 +257,17 @@ export function updateFirstPersonDrink(drink: FirstPersonDrink, input: FirstPers
     position.add(scratch)
   }
   drink.root.rotation.set(tip, 0, -0.18 * (1 - tip / MOUTH_TIP) + wobble * Math.sin(input.time * 2.2) * 0.08)
+
+  // The fingers settle on the glass as it arrives, squeeze a little as it is tipped, and let go as it is lowered.
+  const grip = drink.grip
+  if (grip) {
+    const lens = drink.root.parent as THREE.PerspectiveCamera | null
+    const tanHalf = Math.tan(THREE.MathUtils.degToRad((lens?.isPerspectiveCamera ? lens.fov : 60) / 2))
+    setGripInk(grip, grip.scale * VIEW_SCALE, input.renderHeight ?? 720, -HOLD.z, tanHalf)
+    const arriving = elapsed < raiseEnd ? 1 - easeInOut(clamp01(elapsed / raiseEnd)) : 0
+    const releasing = elapsed > sipEnd ? easeInOut(clamp01((elapsed - sipEnd) / (lowerEnd - sipEnd))) : 0
+    setGripPose(grip, { loose: 0.5 * arriving + 0.3 * releasing, tight: input.reducedMotion ? 0 : 0.5 * headTilt })
+  }
 
   const remaining = 1 - drain * 0.45
   if (drink.liquid) {

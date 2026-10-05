@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   DEAL_DEFAULT_STEP_SECONDS,
   DEAL_HOLE_LEAD_SECONDS,
+  DEAL_POSE_LEAD_FIRST_PERSON_SECONDS,
+  DEAL_POSE_LEAD_SECONDS,
   buildBoardDealSchedule,
   buildHoleDealSchedule,
   canDealerDeal,
@@ -132,6 +134,20 @@ describe('dealer pose timeline', () => {
     // The first stroke has no flick before it: calm until the snap is on its way.
     getDealerPose(schedule.cards[0]!.releaseAt - 0.12, schedule, anchors, pose, 0)
     expect(pose.snap).toBe(0)
+  })
+
+  it('leads the first-person hands less than the avatars (their quicker spring lands the flick on the release)', () => {
+    expect(DEAL_POSE_LEAD_FIRST_PERSON_SECONDS).toBeGreaterThan(0)
+    expect(DEAL_POSE_LEAD_FIRST_PERSON_SECONDS).toBeLessThan(DEAL_POSE_LEAD_SECONDS)
+    const schedule = holeSchedule()
+    const early = createDealerPose()
+    const late = createDealerPose()
+    const release = schedule.cards[2]!.releaseAt
+    // Evaluated this far ahead of the card, the snap is already fully on with the avatar lead and not yet with the smaller one.
+    getDealerPose(release - DEAL_POSE_LEAD_SECONDS, schedule, anchors, early)
+    getDealerPose(release - DEAL_POSE_LEAD_SECONDS, schedule, anchors, late, DEAL_POSE_LEAD_FIRST_PERSON_SECONDS)
+    expect(early.snap).toBeGreaterThan(0.95)
+    expect(late.snap).toBeLessThan(early.snap)
   })
 
   it('has the right hand at the release point on the release frame', () => {

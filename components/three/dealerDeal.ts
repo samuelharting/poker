@@ -71,6 +71,12 @@ const RETURN_SECONDS = 0.42
  * Pass 0 for hands that track the timeline exactly (first-person hands).
  */
 export const DEAL_POSE_LEAD_SECONDS = 0.09
+/**
+ * The hero's first-person hands follow the pose through a quicker spring (about 0.05 s
+ * of lag, measured on real deals: the fingers' peak opening landed ~40 ms before the
+ * card left), so they need less lead for the flick to land on the release.
+ */
+export const DEAL_POSE_LEAD_FIRST_PERSON_SECONDS = 0.05
 
 export interface DealTiming {
   /** Seconds before the first card leaves the hand. */

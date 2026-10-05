@@ -133,10 +133,12 @@ export interface HeroHandsAnchors {
   potX: number
   potHalfW: number
   potBottomY: number
+  /** The pot readout's top edge (NDC); tossed cards stay above it once they are past the label. */
+  potTopY: number
 }
 
 export function createHeroHandsAnchors(): HeroHandsAnchors {
-  return { restRightX: REST_X, restLeftX: -REST_X, stackX: 0.2, stackY: -0.4, betX: 0.05, betY: -0.3, cardsX: 0, cardsY: -0.7, cardsHalfW: 0.15, cardsTopY: -0.5, dealRightX: DEAL_RIGHT_X, dealRightY: DEAL_RIGHT_Y, dealLeftX: DEAL_LEFT_X, dealLeftY: DEAL_LEFT_Y, potX: 0, potHalfW: 0, potBottomY: 1 }
+  return { restRightX: REST_X, restLeftX: -REST_X, stackX: 0.2, stackY: -0.4, betX: 0.05, betY: -0.3, cardsX: 0, cardsY: -0.7, cardsHalfW: 0.15, cardsTopY: -0.5, dealRightX: DEAL_RIGHT_X, dealRightY: DEAL_RIGHT_Y, dealLeftX: DEAL_LEFT_X, dealLeftY: DEAL_LEFT_Y, potX: 0, potHalfW: 0, potBottomY: 1, potTopY: 1 }
 }
 
 /** Half the width of the column a hand must keep out of to stay clear of the hole-card tray (NDC). */
@@ -278,7 +280,10 @@ export function evaluateHeroHands(input: HeroHandsInput, out: HeroHandsPose): He
   const acting = e >= 0 && e < length && length > 0
   const flicking = input.flickSeconds >= 0 && input.flickSeconds < CHIP_FLICK_GESTURE_SECONDS
 
-  if (input.deal && input.deal.weight > 0.001) {
+  // An action the hero takes while dealing (first to act, fold, bet) takes the hands over: the
+  // gesture is never swallowed by the deal, which picks up again once the hands are free.
+  const actionGesture = acting && (input.cue === 'check' || input.cue === 'fold' || input.cue === 'call' || input.cue === 'bet' || input.cue === 'raise' || input.cue === 'all_in')
+  if (input.deal && input.deal.weight > 0.001 && !actionGesture) {
     poseDeal(input.deal, out, anchors)
   } else if (flicking) {
     poseFlick(input.flickSeconds, out.right, anchors)
@@ -397,6 +402,48 @@ function poseCheck(e: number, input: HeroHandsInput, hand: HandPose) {
   }
 }
 
+/** Half the on-screen size of a tossed card plus its fan (NDC, widest case, at the carry depth). */
+const TOSS_CARD_HALF_W = 0.09
+const TOSS_CARD_HALF_H = 0.14
+/** The toss lane sits this far beyond the label's reach; the keep-clear easing is narrower, so the lane itself is free. */
+const TOSS_LANE_MARGIN = 0.07
+const TOSS_EASE = 0.03
+
+/**
+ * The lane the fold toss rises in (NDC x): just outside the hole-card tray, and never
+ * nearer the pot label than a card's half width plus a margin, so the flying cards
+ * pass beside the label instead of over it.
+ */
+export function getFoldLaneX(anchors: HeroHandsAnchors): number {
+  const beside = anchors.cardsX + cardColumn(anchors)
+  if (anchors.potHalfW <= 0) return beside
+  const clear = anchors.potX + anchors.potHalfW + TOSS_CARD_HALF_W + TOSS_LANE_MARGIN
+  return Math.min(0.62, Math.max(beside, clear))
+}
+
+/**
+ * Keeps a tossed card out of the pot label's rectangle (the label is a DOM pill over
+ * the felt). Carried, a card stays under the label until it has slid out past the
+ * label's right edge, then rises beside it; in flight it stays above it. Returns the
+ * card's y (NDC). `scale` is the card's on-screen shrink relative to the carry size.
+ */
+export function keepCardOffLabel(x: number, y: number, shrink: number, flying: boolean, anchors: HeroHandsAnchors): number {
+  if (anchors.potHalfW <= 0) return y
+  const halfW = TOSS_CARD_HALF_W * shrink
+  const halfH = TOSS_CARD_HALF_H * shrink
+  const left = anchors.potX - anchors.potHalfW - halfW
+  const right = anchors.potX + anchors.potHalfW + halfW
+  // 1 while the card overlaps the label's columns, easing off either side.
+  const column = smooth((x - left) / TOSS_EASE) * (1 - smooth((x - right) / TOSS_EASE))
+  if (column <= 0) return y
+  if (flying) {
+    const floor = anchors.potTopY + halfH + 0.035
+    return y < floor ? lerp(y, floor, column) : y
+  }
+  const ceiling = anchors.potBottomY - halfH - 0.05
+  return y > ceiling ? lerp(y, ceiling, column) : y
+}
+
 function poseFold(e: number, input: HeroHandsInput, out: HeroHandsPose) {
   const style = input.profile.foldStyle
   const tempo = style === 'snap' ? 1.25 : style === 'toss' ? 1.05 : 0.9
@@ -410,16 +457,19 @@ function poseFold(e: number, input: HeroHandsInput, out: HeroHandsPose) {
   // and flicked in toward the middle: the hand never crosses behind the card tray.
   const gatherX = anchors.cardsX + anchors.cardsHalfW * 0.75
   const gatherY = anchors.cardsTopY - 0.08
-  const tossX = anchors.cardsX + cardColumn(anchors)
+  const tossX = getFoldLaneX(anchors)
   const tossY = clearPotLabel(Math.min(MAX_REACH_Y - 0.06, anchors.cardsTopY + 0.08), tossX, anchors)
   const reach = smooth(t / 0.22)
   // A small draw back (anticipation) before the toss, then the flick.
   const cock = smooth((t - 0.2) / 0.14) * (1 - smooth((t - 0.36) / 0.1))
   const sweep = smooth((t - 0.34) / 0.24)
+  // The hand slides out to the lane first and only then climbs: the cards never rise
+  // through the band the pot label occupies above the tray.
+  const sweepX = smooth((t - 0.31) / 0.17)
   const back = smooth((t - 0.76) / 0.34)
   blendTo(hand, gatherX, gatherY, reach)
   hand.y -= 0.035 * cock
-  hand.x = lerp(hand.x, tossX, sweep)
+  hand.x = lerp(hand.x, tossX, sweepX)
   hand.y = lerp(hand.y, tossY, sweep)
   const arc = style === 'toss' ? 0.06 : style === 'snap' ? 0.02 : 0.035
   hand.y += Math.sin(sweep * Math.PI) * arc
@@ -459,7 +509,23 @@ function poseFold(e: number, input: HeroHandsInput, out: HeroHandsPose) {
     cards.roll = -0.15 - 1.4 * flightT * (style === 'toss' ? 1.5 : 1)
     cards.yaw = 0.7 * flightT
     cards.spread = smooth(t / 0.4) * 0.5 + flightT * 0.5
+    const shrink = (cards.scale * (HAND_DEPTH + 0.11)) / cards.depth
+    cards.y = keepCardOffLabel(cards.x, cards.y, shrink, flightT > 0, anchors)
   }
+}
+
+/** Wager size (the action's intensity, 0..1) at which a push starts to need a second hand, and how fast it fades in. */
+const PAIR_FROM_INTENSITY = 0.6
+const PAIR_SPAN = 0.14
+const restScratch = createHandPose()
+
+/**
+ * How much of a second hand a wager needs: none for a small bet or call (one hand slides
+ * the chips), both hands for a big raise, and always both for an all-in shove.
+ */
+export function getWagerPairWeight(cue: ThreeActionCue, wagerIntensity: number): number {
+  if (cue === 'all_in') return 1
+  return smooth((wagerIntensity - PAIR_FROM_INTENSITY) / PAIR_SPAN)
 }
 
 function poseWager(e: number, input: HeroHandsInput, out: HeroHandsPose) {
@@ -468,48 +534,62 @@ function poseWager(e: number, input: HeroHandsInput, out: HeroHandsPose) {
   const departAt = WAGER_DEPART_SECONDS
   const arriveAt = departAt + travel
   const reach = smooth(e / 0.22)
+  const reachSecond = smooth(e / 0.3)
   const push = easeInOut((e - departAt - PUSH_LAG_SECONDS) / travel)
   const back = smooth((e - arriveAt - 0.12) / 0.38)
   const release = smooth((e - arriveAt - PUSH_LAG_SECONDS + 0.06) / 0.12)
   const grab = smooth((e - 0.1) / 0.12)
-  const lift = profile.wagerStyle === 'flick' ? 0.1 : profile.wagerStyle === 'shove' ? 0.02 : 0.045
   const allIn = cue === 'all_in'
+  const pair = getWagerPairWeight(cue, profile.wagerIntensity)
+  // A shove drives flat and hard whatever the chips' style; a small bet is a lazy slide.
+  const lift = allIn ? 0.03 : profile.wagerStyle === 'flick' ? 0.1 : profile.wagerStyle === 'shove' ? 0.02 : 0.045
   const bigger = cue === 'raise' || allIn ? 1.1 : 1
+  // How far the hand follows the pile: a small bet is nudged along, a big one is driven the whole way.
+  const follow = allIn ? 1 : 0.8 + 0.2 * clamp01(profile.wagerIntensity)
 
   const stackY = Math.min(MAX_REACH_Y, anchors.stackY - WRIST_BELOW)
   // The push always carries the chips forward a little (never back toward the player,
   // even when the spot projects lower than the stack); the chips fly the rest.
   const betY = Math.min(MAX_REACH_Y, Math.max(anchors.betY, anchors.stackY + 0.05) - WRIST_BELOW)
-  const sides = allIn ? 2 : 1
-  for (let index = 0; index < sides; index += 1) {
+  for (let index = 0; index < 2; index += 1) {
     const sign: 1 | -1 = index === 0 ? 1 : -1
+    // The second hand fades in with the size of the wager (an all-in shoves with both).
+    const weight = index === 0 ? 1 : pair
+    if (weight <= 0.001) continue
     const hand = sign === 1 ? out.right : out.left
-    // An all-in shoves with both hands, cupped either side of the pile.
-    const spread = allIn ? 0.1 * sign : 0.0
+    if (weight < 1) copyHand(restScratch, hand)
+    // The second hand has the whole width of the hole-card tray to cross: a touch slower, so it does not whip over.
+    const rch = index === 0 ? reach : reachSecond
+    // Two hands cup either side of the pile.
+    const spread = 0.1 * sign * pair
     // The betting spot sits between the hole-card tray and the pot readout on screen:
     // the hands drive the chips toward it from the stack's side of that column and let
     // them slide the rest of the way, so a hand never vanishes under either overlay
-    // (both hands of an all-in stay on that side too, the far one just inside it).
+    // (both hands of a pair stay on that side too, the far one just inside it).
     const column = Math.max(cardColumn(anchors), anchors.potHalfW > 0 ? Math.abs(anchors.potX - anchors.cardsX) + anchors.potHalfW + HAND_SCREEN_HALF_W + 0.05 : 0)
     const stackSide = anchors.stackX >= anchors.cardsX ? 1 : -1
-    const edge = anchors.cardsX + stackSide * (column - (allIn && sign !== stackSide ? 0.04 : 0))
-    const rawStackX = anchors.stackX + spread + (allIn ? 0 : 0.02)
-    const rawBetX = anchors.betX + spread + (allIn && sign === stackSide ? 0.16 * stackSide : 0)
+    const edge = anchors.cardsX + stackSide * (column - (sign !== stackSide ? 0.04 * pair : 0))
+    const rawStackX = anchors.stackX + spread + 0.02 * (1 - pair)
+    const rawBetX = anchors.betX + spread + (sign === stackSide ? 0.16 * stackSide * pair : 0)
     const stackX = stackSide === 1 ? Math.max(rawStackX, edge) : Math.min(rawStackX, edge)
     const betX = stackSide === 1 ? Math.max(rawBetX, edge) : Math.min(rawBetX, edge)
     const restX = sign === 1 ? anchors.restRightX : anchors.restLeftX
-    let x = lerp(restX, stackX, reach)
-    let y = lerp(REST_Y, stackY, reach)
-    x = lerp(x, betX, push)
-    y = lerp(y, betY, push)
+    let x = lerp(restX, stackX, rch)
+    let y = lerp(REST_Y, stackY, rch)
+    x = lerp(x, betX, push * follow)
+    y = lerp(y, betY, push * follow)
     y += Math.sin(push * Math.PI) * lift * bigger
     x = lerp(x, restX, back)
     y = lerp(y, REST_Y, back)
-    // Passing the hole-card tray: ride just above its top edge instead of under it.
-    const overCards = 1 - smooth((Math.abs(x - anchors.cardsX) - cardColumn(anchors)) / CARDS_CLEAR_FADE)
-    y = lerp(y, Math.max(y, anchors.cardsTopY), overCards)
     // The push stops a finger short of the pot readout; the chips slide on.
     y = clearPotLabel(y, x, anchors)
+    // Passing the hole-card tray (the second hand coming over to the pile, or heading home):
+    // ride just above its top edge instead of under it. The opaque cards hide a hand much
+    // worse than the small pot pill does, so this one has the last word.
+    // (A hand resting beside the cards is not "passing": the constraint fades out near home so
+    // the settle at the end of the gesture never pops the hand down.)
+    const overCards = (1 - smooth((Math.abs(x - anchors.cardsX) - cardColumn(anchors)) / CARDS_CLEAR_FADE)) * smooth(Math.abs(x - restX) / 0.045)
+    y = lerp(y, Math.max(y, anchors.cardsTopY), overCards)
     // Settle: the hand pats down a touch as it lands back on the rail.
     const land = Math.sin(clamp01((e - arriveAt - 0.32) / 0.3) * Math.PI) * back
     hand.x = x
@@ -517,20 +597,51 @@ function poseWager(e: number, input: HeroHandsInput, out: HeroHandsPose) {
     // The wrist dips as the fingers close on the chips, drives flat through the push and
     // flicks up as they let go.
     const flick = Math.sin(release * Math.PI) * (1 - back)
-    hand.pitch = REST_PITCH + 0.08 * reach - 0.08 * grab * (1 - push) + 0.18 * push * (1 - back) + 0.16 * flick
-    hand.yaw = 0.14 + 0.1 * reach * (1 - back)
+    hand.pitch = REST_PITCH + 0.08 * rch - 0.08 * grab * (1 - push) + 0.18 * push * (1 - back) + 0.16 * flick
+    hand.yaw = 0.14 + 0.1 * rch * (1 - back)
     hand.roll = 0.05 - 0.14 * push * (1 - back)
     hand.fist = grab * 0.55 * (1 - release)
     hand.open = release * (1 - back) * 0.65
     hand.depth = HAND_DEPTH - 0.04 * push * (1 - back)
+    if (weight < 1) {
+      mixHand(hand, restScratch, weight)
+      // A half-faded second hand can land anywhere on its way over: it too rides above the tray.
+      const half = (1 - smooth((Math.abs(hand.x - anchors.cardsX) - cardColumn(anchors)) / CARDS_CLEAR_FADE)) * smooth(Math.abs(hand.x - restX) / 0.045)
+      hand.y = lerp(hand.y, Math.max(hand.y, anchors.cardsTopY), half)
+    }
   }
-  if (!allIn) {
-    // The free hand braces on the rail through the push (a little weight onto it).
-    const brace = Math.sin(clamp01(e / (arriveAt + 0.3)) * Math.PI)
+  // The free hand braces on the rail through the push (a little weight onto it), until it is needed for the pile.
+  const brace = Math.sin(clamp01(e / (arriveAt + 0.3)) * Math.PI) * (1 - pair)
+  if (brace > 0) {
     out.left.y -= 0.008 * brace
     out.left.x += 0.012 * brace
     out.left.fist += 0.14 * brace
   }
+}
+
+function copyHand(to: HandPose, from: HandPose) {
+  to.x = from.x
+  to.y = from.y
+  to.depth = from.depth
+  to.pitch = from.pitch
+  to.yaw = from.yaw
+  to.roll = from.roll
+  to.fist = from.fist
+  to.open = from.open
+  to.pinch = from.pinch
+  to.flutter = from.flutter
+}
+
+/** Pulls `hand` back toward `rest` (the pose before the gesture wrote it): weight 1 keeps the gesture. */
+function mixHand(hand: HandPose, rest: HandPose, weight: number) {
+  hand.x = lerp(rest.x, hand.x, weight)
+  hand.y = lerp(rest.y, hand.y, weight)
+  hand.depth = lerp(rest.depth, hand.depth, weight)
+  hand.pitch = lerp(rest.pitch, hand.pitch, weight)
+  hand.yaw = lerp(rest.yaw, hand.yaw, weight)
+  hand.roll = lerp(rest.roll, hand.roll, weight)
+  hand.fist = lerp(rest.fist, hand.fist, weight)
+  hand.open = lerp(rest.open, hand.open, weight)
 }
 
 function poseWin(w: number, out: HeroHandsPose) {

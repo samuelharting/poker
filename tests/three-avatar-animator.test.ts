@@ -8,6 +8,8 @@ import {
   LIVE_PEEK_MIN_HOLD_SECONDS,
   getFlipOffHand,
   slapClap,
+  winnerPointFocus,
+  winnerPointsLeft,
   updateAvatarAnimator,
   type AvatarAnimatorInput,
 } from '@/components/three/avatarAnimator'
@@ -362,5 +364,64 @@ describe('flick-off, pass-out and reactions', () => {
     const shove = cueInput('all_in', 700)
     expect(shove.handR[2]).toBeLessThan(anchors.stack[2])
     expect(shove.handL[2]).toBeLessThan(anchors.stack[2])
+  })
+})
+
+describe('avatar animator: the winner points at the pot', () => {
+  // Win 1.0 s (rake) + 2.5 s (celebration) + 0.7 s into the flair: arm out, mid-jab.
+  const POINT_TIME = 4.2
+  const withBoard = (x: number) => ({ ...anchors, board: [x, 0.5, -5] as [number, number, number] })
+  const pointPose = (boardX: number, id: string, reducedMotion = false) => {
+    const state = createAvatarAnimatorState(id)
+    const a = withBoard(boardX)
+    computeAvatarTargetPose(state, input({ reducedMotion, winner: true, time: 0, anchors: a }))
+    state.winFlair = 2
+    return computeAvatarTargetPose(state, input({ reducedMotion, winner: true, time: POINT_TIME, anchors: a }))
+  }
+
+  it('uses the arm on the pot side, never across the chest', () => {
+    for (const [boardX, left] of [[-0.3, true], [0.3, false], [-0.16, true], [0.2, false]] as const) {
+      const pose = pointPose(boardX, 'p-side')
+      const hand = left ? pose.handL : pose.handR
+      const shoulder = left ? anchors.shoulderL : anchors.shoulderR
+      const rest = left ? pose.handR : pose.handL
+      const frame = left ? pose.frameL : pose.frameR
+      // Out in front of the shoulder and still on its own side of the midline.
+      expect(shoulder[2] - hand[2]).toBeGreaterThan(0.55)
+      expect(Math.sign(hand[0])).toBe(Math.sign(shoulder[0]))
+      expect(Math.abs(hand[0])).toBeGreaterThan(0.1)
+      // A deliberate pointing hand frame; the other hand is back on its own side.
+      expect(frame[0]).toBeGreaterThan(0.9)
+      expect(Math.sign(rest[0])).toBe(Math.sign(left ? anchors.shoulderR[0] : anchors.shoulderL[0]))
+      // The fingers aim along the line to the pot: yaw toward the midline when the pot is inboard.
+      expect(Number.isFinite(frame[1]!)).toBe(true)
+    }
+  })
+
+  it('picks a hand by seed when the pot is dead ahead, deterministically', () => {
+    const ahead = withBoard(0)
+    expect(winnerPointsLeft(ahead, 0.2)).toBe(false)
+    expect(winnerPointsLeft(ahead, 0.8)).toBe(true)
+    expect(winnerPointsLeft(withBoard(-0.4), 0.2)).toBe(true)
+    expect(winnerPointsLeft(withBoard(0.4), 0.8)).toBe(false)
+    const a = pointPose(-0.3, 'same')
+    const b = pointPose(-0.3, 'same')
+    expect(Array.from(a.handL)).toEqual(Array.from(b.handL))
+  })
+
+  it('adds no motion under reduced motion', () => {
+    const pose = pointPose(-0.3, 'p-reduced', true)
+    // The celebration's own pose holds (arms up beside the shoulders); no arm is thrown out at the pot.
+    expect(anchors.shoulderL[2] - pose.handL[2]).toBeLessThan(0.4)
+    expect(anchors.shoulderR[2] - pose.handR[2]).toBeLessThan(0.4)
+    expect(winnerPointFocus(0, 2, POINT_TIME, true)).toBe(0)
+  })
+
+  it('puts the eyes on the pot only during the point beat', () => {
+    expect(winnerPointFocus(0, 2, 0.5, false)).toBe(0)
+    expect(winnerPointFocus(0, 2, POINT_TIME, false)).toBeGreaterThan(0.9)
+    expect(winnerPointFocus(0, 1, POINT_TIME, false)).toBe(0)
+    expect(winnerPointFocus(0, 2, 9, false)).toBe(0)
+    expect(winnerPointFocus(Number.NEGATIVE_INFINITY, 2, POINT_TIME, false)).toBe(0)
   })
 })

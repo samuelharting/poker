@@ -151,6 +151,8 @@ export interface AvatarFaceRig {
     prevWinner: boolean
     /** The director last saw this seat in a table conversation (to retarget the eyes when it starts). */
     prevChatting?: boolean
+    /** The director last saw this winner pointing at the pot (to put the eyes on it when the point starts). */
+    prevPointing?: boolean
     lastBrowAlpha: number
     mouthShape: MouthShape
     browParams: BrowParams

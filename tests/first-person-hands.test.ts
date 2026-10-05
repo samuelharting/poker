@@ -9,8 +9,11 @@ import {
   createHeroHandsPose,
   evaluateHeroHands,
   followHandPose,
+  getFoldLaneX,
   getHeroGestureSeconds,
+  getWagerPairWeight,
   getWagerTravelSeconds,
+  keepCardOffLabel,
   HAND_DEPTH,
   MAX_REACH_Y,
   MIN_HAND_DEPTH,
@@ -19,6 +22,7 @@ import {
   type HeroHandsInput,
   type HeroHandsPose,
 } from '@/components/three/firstPersonHandPose'
+import { getDealRightX } from '@/components/three/firstPersonHands'
 import {
   buildHandGeometry,
   createCelMaterial,
@@ -528,5 +532,176 @@ describe('first-person hands: mesh', () => {
     expect(plainShader.fragmentShader).toContain('vec3(0.07, 0.04, 0.03)')
     plain.dispose()
     material.dispose()
+  })
+})
+
+/** Layouts as the room measures them (NDC): the pot readout sits above the hole-card tray, the tray near the bottom. */
+const LAYOUTS = {
+  p720: { potX: -0.05, potHalfW: 0.1, potBottomY: -0.4, potTopY: -0.28, cardsX: 0.04, cardsHalfW: 0.13, cardsTopY: -0.53, cardsY: -0.69 },
+  p900: { potX: -0.05, potHalfW: 0.095, potBottomY: -0.36, potTopY: -0.27, cardsX: 0.02, cardsHalfW: 0.115, cardsTopY: -0.5, cardsY: -0.66 },
+  wide: { potX: 0.1, potHalfW: 0.12, potBottomY: -0.45, potTopY: -0.3, cardsX: 0.0, cardsHalfW: 0.14, cardsTopY: -0.55, cardsY: -0.72 },
+}
+
+describe('first-person hands: the fold toss clears the pot label', () => {
+  it('the toss lane sits beyond the label by more than a card width, and is never under the tray', () => {
+    for (const layout of Object.values(LAYOUTS)) {
+      const anchors = { ...createHeroHandsAnchors(), ...layout }
+      const lane = getFoldLaneX(anchors)
+      expect(lane).toBeGreaterThanOrEqual(anchors.potX + anchors.potHalfW + 0.1)
+      expect(lane).toBeGreaterThan(anchors.cardsX + anchors.cardsHalfW)
+    }
+    // No label measured: the lane is just beside the tray as before.
+    const none = createHeroHandsAnchors()
+    expect(getFoldLaneX(none)).toBeCloseTo(none.cardsX + none.cardsHalfW + 0.075 - 0.025, 5)
+  })
+
+  it('a carried card stays under the label until it has slid out past it; a flying one stays above', () => {
+    const anchors = { ...createHeroHandsAnchors(), ...LAYOUTS.p720 }
+    // Under the label's columns: held below its bottom edge (card top below the label).
+    expect(keepCardOffLabel(0.0, -0.2, 1, false, anchors)).toBeLessThan(anchors.potBottomY - 0.14)
+    // Beside it nothing is touched.
+    expect(keepCardOffLabel(0.5, -0.2, 1, false, anchors)).toBe(-0.2)
+    // In flight, over the label's columns, held above its top edge.
+    expect(keepCardOffLabel(0.0, -0.4, 0.6, true, anchors)).toBeGreaterThan(anchors.potTopY + 0.14 * 0.6)
+    expect(keepCardOffLabel(0.0, 0.2, 0.6, true, anchors)).toBe(0.2)
+    // No label measured: untouched.
+    expect(keepCardOffLabel(0.0, -0.2, 1, false, createHeroHandsAnchors())).toBe(-0.2)
+  })
+
+  it('no frame of any fold style puts the two cards over the label, at any measured layout', () => {
+    for (const [name, layout] of Object.entries(LAYOUTS)) {
+      const anchors = { ...createHeroHandsAnchors(), ...layout }
+      for (const variant of [0, 1, 2] as const) {
+        const profile = getPokerActionMotionProfile('fold', { variant })
+        for (let t = 0; t <= getHeroGestureSeconds('fold', profile); t += 0.01) {
+          const { cards } = pose('fold', t, { profile, anchors })
+          if (!cards.visible) continue
+          // On-screen half size of a card (and its fan), shrinking as it flies off.
+          const shrink = (cards.scale * (HAND_DEPTH + 0.11)) / cards.depth
+          const halfW = 0.075 * shrink
+          const halfH = 0.12 * shrink
+          const overlapX = Math.abs(cards.x - anchors.potX) < anchors.potHalfW + halfW
+          const overlapY = cards.y - halfH < anchors.potTopY && cards.y + halfH > anchors.potBottomY
+          expect(overlapX && overlapY, `${name} style ${variant} t=${t.toFixed(2)} card (${cards.x.toFixed(2)}, ${cards.y.toFixed(2)})`).toBe(false)
+        }
+      }
+    }
+  })
+})
+
+describe('first-person hands: wager size', () => {
+  const anchors = { ...createHeroHandsAnchors(), ...LAYOUTS.p720, stackX: 0.3, stackY: -0.47, betX: 0.0, betY: -0.2, restRightX: 0.25, restLeftX: -0.2 }
+  const run = (cue: ThreeActionCue, intensity: number, variant: 0 | 1 | 2 = 0) => {
+    const profile = getPokerActionMotionProfile(cue, { variant, wagerIntensity: intensity })
+    const frames: HeroHandsPose[] = []
+    for (let t = 0; t <= getHeroGestureSeconds(cue, profile) + 0.1; t += 0.02) frames.push(pose(cue, t, { anchors, profile }))
+    return frames
+  }
+  const travel = (frames: HeroHandsPose[], side: 'left' | 'right') => Math.max(...frames.map(f => Math.hypot(f[side].x - frames[0]![side].x, f[side].y - frames[0]![side].y)))
+
+  it('a small bet is one hand sliding the chips, a big raise needs both, an all-in always shoves with both', () => {
+    expect(getWagerPairWeight('call', 0.25)).toBe(0)
+    expect(getWagerPairWeight('bet', 0.45)).toBe(0)
+    expect(getWagerPairWeight('raise', 0.9)).toBe(1)
+    expect(getWagerPairWeight('raise', 0.7)).toBeGreaterThan(0.2)
+    expect(getWagerPairWeight('raise', 0.7)).toBeLessThan(0.9)
+    expect(getWagerPairWeight('all_in', 0)).toBe(1)
+    const small = run('bet', 0.3)
+    const big = run('raise', 1)
+    const shove = run('all_in', 1)
+    expect(travel(small, 'left')).toBeLessThan(0.05)
+    expect(travel(big, 'left')).toBeGreaterThan(0.35)
+    expect(travel(shove, 'left')).toBeGreaterThan(0.35)
+    // The pair is symmetric about the pile: both fists close on it.
+    const grabAt = Math.round((WAGER_DEPART_SECONDS + 0.02) / 0.02)
+    expect(big[grabAt]!.left.fist).toBeGreaterThan(0.4)
+    expect(small[grabAt]!.left.fist).toBeLessThan(0.3)
+  })
+
+  it('the second hand fades in with the size: no sudden jump between neighbouring sizes', () => {
+    let last = 0
+    for (let intensity = 0.5; intensity <= 0.9; intensity += 0.05) {
+      const left = travel(run('raise', intensity), 'left')
+      expect(left).toBeGreaterThanOrEqual(last - 0.02)
+      expect(left - last).toBeLessThan(0.3)
+      last = left
+    }
+  })
+
+  it('a shove drives flat: it lifts less than a flicked big raise', () => {
+    const lift = (frames: HeroHandsPose[]) => Math.max(...frames.map(f => f.right.y)) - Math.max(...frames.slice(0, 10).map(f => f.right.y))
+    const shove = run('all_in', 1, 1)
+    const flick = run('raise', 1, 1)
+    expect(getPokerActionMotionProfile('all_in', { variant: 1 }).wagerStyle).toBe('flick')
+    expect(lift(shove)).toBeLessThan(lift(flick))
+  })
+
+  it('the second hand crosses above the hole-card tray, never behind it, and comes home the same way', () => {
+    for (const [cue, intensity] of [['raise', 0.66], ['raise', 0.72], ['raise', 0.8], ['raise', 1], ['all_in', 1]] as const) {
+      for (const frame of run(cue, intensity)) {
+        const hand = frame.left
+        if (Math.abs(hand.x - anchors.cardsX) < anchors.cardsHalfW - 0.02 && Math.abs(hand.x - anchors.restLeftX) > 0.08) {
+          expect(hand.y, `${cue} ${intensity}`).toBeGreaterThan(anchors.cardsTopY - 0.02)
+        }
+      }
+    }
+  })
+
+  it('every size settles onto the rail with no pop at the end of the gesture', () => {
+    for (const [cue, intensity] of [['call', 0.3], ['bet', 0.5], ['raise', 1], ['all_in', 1]] as const) {
+      const profile = getPokerActionMotionProfile(cue, { variant: 0, wagerIntensity: intensity })
+      const length = getHeroGestureSeconds(cue, profile)
+      for (const side of ['right', 'left'] as const) {
+        const before = pose(cue, length - 0.02, { anchors, profile })[side]
+        const after = pose(cue, length + 0.02, { anchors, profile })[side]
+        // 0.04 s apart: a pop would be a big step; the settle is a slow slide.
+        expect(Math.abs(after.y - before.y), `${cue} ${side}`).toBeLessThan(0.05)
+        expect(Math.abs(after.x - before.x), `${cue} ${side}`).toBeLessThan(0.05)
+      }
+    }
+  })
+})
+
+describe('first-person hands: dealing keeps clear of the action tray', () => {
+  const anchors = { stackX: 0.3, potX: -0.05, potHalfW: 0.1 }
+
+  it('without a tray the wrist works beyond the hero chip stack', () => {
+    expect(getDealRightX(0.2, anchors, null)).toBeCloseTo(0.56, 5)
+    expect(getDealRightX(0.2, { ...anchors, stackX: 0 }, null)).toBeCloseTo(0.22, 5)
+  })
+
+  it('with the tray or the pre-action chips up, the wrist stays left of them, over the stack', () => {
+    // A tray whose left edge is at NDC 0.31 (about 840px of 1280): the hand's right edge stays short of it.
+    const x = getDealRightX(0.2, anchors, 0.31)
+    expect(x + 0.075).toBeLessThan(0.31)
+    expect(x).toBeGreaterThan(0.1)
+  })
+
+  it('and right of the pot readout when there is room for a hand between the two', () => {
+    const x = getDealRightX(0.2, anchors, 0.31)
+    expect(x - 0.075).toBeGreaterThanOrEqual(anchors.potX + anchors.potHalfW - 1e-6)
+  })
+
+  it('a tray close to the cards wins over the pot readout (no ghost hand behind the glass)', () => {
+    const x = getDealRightX(0.2, { ...anchors, potX: 0.05 }, 0.2)
+    expect(x).toBeLessThanOrEqual(0.2 - 0.1 + 1e-6)
+  })
+})
+
+describe('first-person hands: acting while dealing', () => {
+  const deal = { weight: 1, rightX: 0, rightY: -1, leftX: 0, leftY: -1, pinch: 0, cock: 0, snap: 0, holdLeft: 1 }
+
+  it('a fold taken mid-deal is played (cards tossed), not swallowed by the deal; the deal resumes after', () => {
+    const during = pose('fold', 0.4, { deal })
+    expect(during.cards.visible).toBe(true)
+    const wager = pose('raise', 0.5, { deal })
+    expect(wager.right.fist).toBeGreaterThan(0.3)
+    // Once the gesture is over the dealing hands are back.
+    const profile = getPokerActionMotionProfile('fold', { variant: 0 })
+    const after = pose('fold', getHeroGestureSeconds('fold', profile) + 0.1, { deal })
+    expect(after.right.x).toBeGreaterThan(0.25)
+    expect(after.cards.visible).toBe(false)
+    // A ready cue is still just dealing.
+    expect(pose('ready', 99, { deal }).right.x).toBeGreaterThan(0.25)
   })
 })

@@ -761,6 +761,27 @@ function isFreeToChat(state: AvatarAnimatorState, input: AvatarAnimatorInput) {
 }
 
 /**
+ * Which hand points at the pot in the winner's point beat: the one on the pot's
+ * side of the body, so the arm never crosses the chest. A pot dead ahead (the
+ * far seat) falls back to a per-player habit, deterministic by seed.
+ */
+export function winnerPointsLeft(anchors: AvatarAnchors, seed: number): boolean {
+  const sideways = anchors.board[0] - (anchors.shoulderR[0] + anchors.shoulderL[0]) * 0.5
+  return Math.abs(sideways) < 0.08 ? seed >= 0.5 : sideways < 0
+}
+
+/**
+ * 0..1 how much the winner is deliberately pointing at the pot right now (the
+ * face director uses it to put the eyes on the pot). Zero outside the point
+ * beat and in reduced motion (the beat does not play).
+ */
+export function winnerPointFocus(winnerSince: number, winFlair: number, time: number, reducedMotion: boolean): number {
+  if (winFlair !== 2 || reducedMotion || !Number.isFinite(winnerSince)) return 0
+  const fe = time - winnerSince - WINNER_RAKE_SECONDS - 2.5
+  return smoothStep((fe + 0.1) / 0.3) * (1 - smoothStep((fe - 1.7) / 0.4))
+}
+
+/**
  * Builds the unsmoothed target pose. Pass `out` to reuse a pooled pose object
  * (the render loop does); without it a fresh pose is returned.
  */
@@ -812,6 +833,9 @@ export function computeAvatarTargetPose(
   const restLx = pose.handL[0]
   const restLy = pose.handL[1]
   const restLz = pose.handL[2]
+  const restRx = pose.handR[0]
+  const restRy = pose.handR[1]
+  const restRz = pose.handR[2]
   // Relaxed hands: fingers loosely curled, never flat mittens.
   pose.fingerCurlR = rest.curlR
   pose.fingerCurlL = rest.curlL
@@ -1945,14 +1969,25 @@ export function computeAvatarTargetPose(
     const flair = flairKind === 0 ? 0 : smoothStep((elapsed - 2.5) / 0.45) * motion
     if (flair > 0.001) {
       const fe = elapsed - 2.5
+      // The pointing beat uses whichever hand is on the pot's side (see winnerPointsLeft).
+      const pointLeft = flairKind === 2 && winnerPointsLeft(anchors, seed)
       if (flairKind !== 1) {
         // One-handed beats: the other hand drops back to the rail from the celebration.
-        pose.handL[0] += (restLx - pose.handL[0]) * flair
-        pose.handL[1] += (restLy - pose.handL[1]) * flair
-        pose.handL[2] += (restLz - pose.handL[2]) * flair
-        handShape(pose, 'L', 'relaxed', flair)
-        pose.frameL[0] *= 1 - flair
-        pose.fingerCurlL = pose.fingerCurlL * (1 - flair) + rest.curlL * flair
+        if (pointLeft) {
+          pose.handR[0] += (restRx - pose.handR[0]) * flair
+          pose.handR[1] += (restRy - pose.handR[1]) * flair
+          pose.handR[2] += (restRz - pose.handR[2]) * flair
+          handShape(pose, 'R', 'relaxed', flair)
+          pose.frameR[0] *= 1 - flair
+          pose.fingerCurlR = pose.fingerCurlR * (1 - flair) + rest.curlR * flair
+        } else {
+          pose.handL[0] += (restLx - pose.handL[0]) * flair
+          pose.handL[1] += (restLy - pose.handL[1]) * flair
+          pose.handL[2] += (restLz - pose.handL[2]) * flair
+          handShape(pose, 'L', 'relaxed', flair)
+          pose.frameL[0] *= 1 - flair
+          pose.fingerCurlL = pose.fingerCurlL * (1 - flair) + rest.curlL * flair
+        }
       }
       if (flairKind === 1) {
         // Lean back and laugh: head thrown back, shoulders bouncing, a hand slapping the rail.
@@ -1975,21 +2010,35 @@ export function computeAvatarTargetPose(
         handFrame(pose, 'L', flair, 0.9, 0.2, 0.4)
         pose.bodyPosition[1] += 0.02 * bounce * flair
       } else if (flairKind === 2) {
-        // Point at the pot coming their way ("that's mine"), a double jab, chin up.
-        const jab = (pulse(fe, 0.45, 0.08, 0.2) + pulse(fe, 0.85, 0.08, 0.2)) * motion
-        // Arm out toward the pot (most of its length, a little below the
-        // shoulder), the index finger along the same line.
-        const bx = anchors.board[0] - anchors.shoulderR[0]
-        const bz = anchors.board[2] - anchors.shoulderR[2]
-        const flat = Math.hypot(bx, bz) || 1
-        const reach = 0.74 + 0.06 * jab
-        blendTo(pose.handR, offset(anchors.shoulderR, (bx / flat) * reach, -0.08 + 0.02 * jab, (bz / flat) * reach), flair)
-        pose.fingerCurlR = pose.fingerCurlR * (1 - flair) + 0.8 * flair
-        handShape(pose, 'R', 'point', flair)
-        // Yaw toward the midline is -x for the right hand (fingers along -z).
-        handFrame(pose, 'R', flair, Math.atan2(-bx, -bz), -0.1, 1.15)
-        add(bones.Head, -0.1 + 0.04 * jab, 0, 0.06, flair)
-        add(bones.Chest, 0.06 * jab, 0.06, 0, flair)
+        // Point at the pot coming their way ("that's mine"): the arm on the pot's
+        // side (never across the chest) cocks back, thrusts out along the line
+        // from the shoulder to the pot, stabs it twice, and holds; the head
+        // comes down off the celebration's chin-up to look at the pot.
+        const side: Side = pointLeft ? 'L' : 'R'
+        const outward = pointLeft ? -1 : 1
+        const hand = pointLeft ? pose.handL : pose.handR
+        const sh = pointLeft ? anchors.shoulderL : anchors.shoulderR
+        const jab = (pulse(fe, 0.62, 0.07, 0.18) + pulse(fe, 0.98, 0.07, 0.18)) * motion
+        const thrust = smoothStep((fe - 0.18) / 0.26)
+        const bx = anchors.board[0] - sh[0]
+        const by = anchors.board[1] - sh[1]
+        const bz = anchors.board[2] - sh[2]
+        const toPot = Math.hypot(bx, by, bz) || 1
+        const reach = 0.72 + 0.07 * jab
+        // Cocked: the fist drawn back beside the shoulder, elbow bent, a little
+        // outboard of the shoulder line and well clear of the chest and chin.
+        const gx = (outward * 0.1) * (1 - thrust) + (bx / toPot) * reach * thrust
+        const gy = -0.06 * (1 - thrust) + (by / toPot) * reach * thrust + 0.02 * jab
+        const gz = -0.2 * (1 - thrust) + (bz / toPot) * reach * thrust
+        blendTo(hand, offset(sh, gx, gy, gz), flair)
+        if (pointLeft) pose.fingerCurlL = pose.fingerCurlL * (1 - flair) + 0.8 * flair
+        else pose.fingerCurlR = pose.fingerCurlR * (1 - flair) + 0.8 * flair
+        handShape(pose, side, 'point', flair)
+        // Yaw toward the midline is -x for the right hand, +x for the left.
+        const lineX = anchors.board[0] - (sh[0] + gx)
+        handFrame(pose, side, flair, Math.atan2(-outward * lineX, -bz), Math.atan2(by, Math.hypot(bx, bz)) + 0.35 * (1 - thrust), 1.15)
+        add(bones.Head, 0.14 - 0.03 * jab, 0, 0, flair)
+        add(bones.Chest, 0.06 * jab - 0.04 * (1 - thrust), 0, 0, flair)
       } else {
         // The pull-down: a fist raised high, then yanked down to the chest, "yes!",
         // held there with a couple of little shakes.

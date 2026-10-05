@@ -3,8 +3,12 @@ import { createCardMesh, disposeCardMesh, type CardMesh } from './cardMeshes'
 import {
   createHeroHandsAnchors,
   createHeroHandsPose,
+  DEAL_LEFT_X,
+  DEAL_RIGHT_X,
   evaluateHeroHands,
+  REST_X,
   followHandPose,
+  getHeroGestureSeconds,
   createHandVelocity,
   type HandVelocity,
   MIN_HAND_DEPTH,
@@ -37,6 +41,10 @@ import type { ThreeActionCue } from './tableViewModel'
  */
 
 const CARD_WIDTH = 0.082
+/** A dealing wrist keeps this far (NDC) left of the action tray: half a drawn hand, the cocked swing and a margin. */
+const HAND_CLEAR_OF_TRAY = 0.1
+/** Half a drawn hand's width on screen (NDC). */
+const HAND_HALF_WIDTH = 0.075
 /** Everything the rig draws must stay clear of the lens plane. */
 const MIN_FORWARD = MIN_HAND_DEPTH
 
@@ -62,6 +70,8 @@ export interface FirstPersonHands {
   anchors: HeroHandsAnchors
   /** Scratch for the dealer gesture. */
   deal: HeroDealInput
+  /** Where the resting and dealing wrists want to be (NDC x); the anchors ease toward it so a tray opening or closing slides the hands, never snaps them. */
+  layoutTarget: { dealRightX: number; dealLeftX: number; restRightX: number; restLeftX: number }
   /** The hands were hidden last frame (they ease back in). */
   wasHidden: boolean
   winnerSince: number
@@ -153,6 +163,7 @@ export function createFirstPersonHands(camera: THREE.Camera): FirstPersonHands {
     },
     anchors: createHeroHandsAnchors(),
     deal: { weight: 0, rightX: 0, rightY: 0, leftX: 0, leftY: 0, pinch: 0, cock: 0, snap: 0, holdLeft: 0 },
+    layoutTarget: { dealRightX: DEAL_RIGHT_X, dealLeftX: DEAL_LEFT_X, restRightX: REST_X, restLeftX: -REST_X },
     wasHidden: true,
     winnerSince: -1,
     lastTime: 0,
@@ -269,6 +280,47 @@ export interface HeroHandsFrame {
   host: HTMLElement | null
 }
 
+/**
+ * Where the dealing right wrist wants to be (NDC x). `clearRight` is just outside the pot readout
+ * and the hole cards; the hero's chip stack pushes it out beyond that (deal from past the pile,
+ * not through it), unless the action tray or the pre-action chips are up (`trayLeft`, NDC): a
+ * hand behind them is a ghost (the DOM draws over the canvas), so it stays left of them, over
+ * the stack, and right of the pot readout when there is room for a hand between the two.
+ */
+export function getDealRightX(clearRight: number, anchors: Pick<HeroHandsAnchors, 'stackX' | 'potX' | 'potHalfW'>, trayLeft: number | null): number {
+  let dealRight = clamp(clearRight, 0.22, 0.52)
+  if (anchors.stackX > 0.1) dealRight = clamp(Math.max(dealRight, anchors.stackX + 0.26), 0.22, 0.58)
+  if (trayLeft !== null) {
+    const potClear = anchors.potHalfW > 0 ? anchors.potX + anchors.potHalfW + HAND_HALF_WIDTH + 0.012 : 0.12
+    dealRight = clamp(dealRight, Math.max(0.12, potClear), 0.58)
+    dealRight = Math.max(0.1, Math.min(dealRight, trayLeft - HAND_CLEAR_OF_TRAY))
+  }
+  return dealRight
+}
+
+/** The pot readout's box into the anchors the gestures steer around (see clearPotLabel). */
+function readPotLabel(anchors: HeroHandsAnchors, box: DOMRect, hostRect: DOMRect, width: number, height: number) {
+  if (!(box.width > 8 && box.bottom > hostRect.top && box.top < hostRect.bottom && box.right > hostRect.left && box.left < hostRect.right)) return
+  anchors.potX = ((box.left + box.right) / 2 - hostRect.left) / width * 2 - 1
+  anchors.potHalfW = box.width / width
+  anchors.potBottomY = 1 - ((box.bottom - hostRect.top) / height) * 2
+  anchors.potTopY = 1 - ((box.top - hostRect.top) / height) * 2
+}
+
+/**
+ * The pot readout rides on the pot chips (positioned by the 3D loop every frame) and slides
+ * several pixels a frame while bets are swept in, so the gestures that steer around it (the
+ * fold toss, the wager push, the deal) read it every frame while they run instead of waiting
+ * for the slow layout pass.
+ */
+function trackPotLabel(hands: FirstPersonHands, frame: HeroHandsFrame) {
+  const host = frame.host
+  if (!host) return
+  const scene = host.closest('.table-scene') ?? host
+  const box = (scene.querySelector('.pot-display') as HTMLElement | null)?.getBoundingClientRect()
+  if (box) readPotLabel(hands.anchors, box, host.getBoundingClientRect(), frame.width, frame.height)
+}
+
 /** Re-measures the hole cards and the action tray (a few times a second) so the hands rest between them. */
 function measureLayout(hands: FirstPersonHands, frame: HeroHandsFrame) {
   const host = frame.host
@@ -305,17 +357,17 @@ function measureLayout(hands: FirstPersonHands, frame: HeroHandsFrame) {
       if (box && box.width > 8 && box.right > hostRect.left && box.left < hostRect.right) {
         avoidLeft = Math.min(avoidLeft, box.left - hostRect.left)
         avoidRight = Math.max(avoidRight, box.right - hostRect.left)
-        if (selector === '.pot-display' && box.bottom > hostRect.top && box.top < hostRect.bottom) {
-          // Reaching hands stop short of the pot readout (see clearPotLabel).
-          anchors.potX = ((box.left + box.right) / 2 - hostRect.left) / width * 2 - 1
-          anchors.potHalfW = box.width / width
-          anchors.potBottomY = 1 - ((box.bottom - hostRect.top) / height) * 2
-        }
+        if (selector === '.pot-display') readPotLabel(anchors, box, hostRect, width, height)
       }
     }
-    const trayEl = host.querySelector('.betting-tray') as HTMLElement | null
-    const trayBox = trayEl?.getBoundingClientRect()
-    if (trayBox && trayBox.width > 20) trayLeft = trayBox.left - hostRect.left
+    // The action tray (your turn) and the pre-action chips both dock at the bottom right:
+    // whichever is showing is where the hands must not go.
+    for (const selector of ['.betting-tray', '.pre-action-bar']) {
+      const trayBox = (scene.querySelector(selector) as HTMLElement | null)?.getBoundingClientRect()
+      if (trayBox && trayBox.width > 20 && trayBox.height > 20 && trayBox.left - hostRect.left < width) {
+        trayLeft = Math.min(trayLeft, trayBox.left - hostRect.left)
+      }
+    }
   }
   const toNdcX = (px: number) => (px / width) * 2 - 1
   const toNdcY = (px: number) => 1 - (px / height) * 2
@@ -327,14 +379,16 @@ function measureLayout(hands: FirstPersonHands, frame: HeroHandsFrame) {
   const dealClear = 58
   const clearLeftPx = Math.min(cardsLeft, avoidLeft) - dealClear
   const clearRightPx = Math.max(cardsRight, avoidRight) + dealClear
-  anchors.dealRightX = clamp(toNdcX(clearRightPx), 0.22, 0.52)
-  anchors.dealLeftX = clamp(toNdcX(clearLeftPx), -0.52, -0.22)
-  // The hero's own chip stack sits right of the cards: deal from beyond it, not through it.
-  if (anchors.stackX > 0.1) anchors.dealRightX = clamp(Math.max(anchors.dealRightX, anchors.stackX + 0.26), 0.22, 0.58)
+  const dealRight = getDealRightX(toNdcX(clearRightPx), anchors, trayLeft < width ? toNdcX(trayLeft) : null)
+  const dealLeft = clamp(toNdcX(clearLeftPx), -0.52, -0.22)
+  hands.layoutTarget.dealRightX = dealRight
+  hands.layoutTarget.dealLeftX = dealLeft
   const clearance = 62
-  // Left hand just left of the cards; right hand just right of them, but never under the tray.
-  anchors.restLeftX = clamp(toNdcX(cardsLeft - clearance), -0.6, -0.12)
-  anchors.restRightX = clamp(toNdcX(Math.min(cardsRight + clearance, trayLeft - 70)), 0.12, 0.6)
+  // Left hand just left of the cards; right hand just right of them, tucked toward the tray when it
+  // is close but never under the cards (a hand half under the card row is a ghost, one half under the
+  // tray's glass is still seen).
+  hands.layoutTarget.restLeftX = clamp(toNdcX(cardsLeft - clearance), -0.6, -0.12)
+  hands.layoutTarget.restRightX = clamp(toNdcX(clamp(trayLeft - 70, cardsRight + 40, cardsRight + clearance)), 0.12, 0.6)
 }
 
 function projectToNdc(point: THREE.Vector3, camera: THREE.Camera, out: { x: number; y: number }) {
@@ -392,6 +446,13 @@ export function updateHeroHands(scene: HeroHandsSceneLike, frame: HeroHandsFrame
 
   const { camera } = scene
   const anchors = hands.anchors
+  // Ease the resting and dealing anchors toward the measured targets (a tray appearing moves them in one step).
+  const dealEase = hands.wasHidden || frame.reducedMotion ? 1 : 1 - Math.exp(-dt * 7)
+  const target = hands.layoutTarget
+  anchors.dealRightX += (target.dealRightX - anchors.dealRightX) * dealEase
+  anchors.dealLeftX += (target.dealLeftX - anchors.dealLeftX) * dealEase
+  anchors.restRightX += (target.restRightX - anchors.restRightX) * dealEase
+  anchors.restLeftX += (target.restLeftX - anchors.restLeftX) * dealEase
   const wager = scene.wagers.get(frame.hero.id)
   if (wager) {
     projectToNdc(wager.start, camera, ndc)
@@ -434,7 +495,16 @@ export function updateHeroHands(scene: HeroHandsSceneLike, frame: HeroHandsFrame
   // Dealing by hand: the timeline's wrist targets (hero seat space) projected onto the screen.
   input.deal = null
   const dealPose = heroSeat.dealPose
-  if (!forced && !frame.reducedMotion && scene.dealer?.seatId === heroSeat.playerId && dealPose && dealPose.weight > 0) {
+  // (An action taken mid-deal owns the hands: see evaluateHeroHands. The cards then leave from the seat, not the fingers.)
+  const profile = getPokerActionMotionProfile(input.cue, {
+    actionKey: heroSeat.actionKey,
+    playerId: heroSeat.playerId,
+    wagerIntensity: heroSeat.wagerIntensity,
+  })
+  const gestureLength = getHeroGestureSeconds(input.cue, profile)
+  const actingNow = input.elapsedMs >= 0 && input.elapsedMs / 1000 < gestureLength
+  hands.deal.weight = 0
+  if (!forced && !frame.reducedMotion && !actingNow && scene.dealer?.seatId === heroSeat.playerId && dealPose && dealPose.weight > 0) {
     const deal = hands.deal
     heroSeat.root.updateWorldMatrix(true, false)
     scratchPoint.set(dealPose.handR[0], dealPose.handR[1], dealPose.handR[2])
@@ -452,15 +522,11 @@ export function updateHeroHands(scene: HeroHandsSceneLike, frame: HeroHandsFrame
     deal.holdLeft = dealPose.holdL
     input.deal = deal
   }
-  const profile = getPokerActionMotionProfile(input.cue, {
-    actionKey: heroSeat.actionKey,
-    playerId: heroSeat.playerId,
-    wagerIntensity: heroSeat.wagerIntensity,
-  })
   input.profile = profile
   input.time = frame.time
   input.drunkLevel = heroSeat.drunkLevel
   input.reducedMotion = frame.reducedMotion
+  if (!frame.reducedMotion && (input.deal || (input.cue !== 'ready' && input.elapsedMs < 3000))) trackPotLabel(hands, frame)
   evaluateHeroHands(input, hands.target)
 
   // Drunk hands wander a little.
@@ -470,10 +536,10 @@ export function updateHeroHands(scene: HeroHandsSceneLike, frame: HeroHandsFrame
     wobbleHand(hands.target.left, frame.time, wobble)
   }
   // The drink and the shot each bring their own hand: step the matching one aside.
-  const drinking = scene.firstPersonDrink.root.visible
-  const shooting = scene.pranks.firstPerson.root.visible
+  // (Both are held in the left hand, over the rail left of the hole cards; the right hand stays.)
+  const drinking = scene.firstPersonDrink.root.visible || scene.pranks.firstPerson.root.visible
   hands.target.left.show = drinking ? 0 : 1
-  hands.target.right.show = shooting ? 0 : 1
+  hands.target.right.show = 1
 
   // First frame after being hidden: start from the target so the hands do not swoop in from stale values.
   const snap = frame.reducedMotion || hands.wasHidden

@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { PrankEvent } from '@/lib/pranks'
 import { popIconMarkup, type PopIconKind } from './popIcons'
+import { createGripHand, disposeGripHand, setGripInk, setGripPose, type GripHand } from './firstPersonGripHand'
 import { FELT_TOP_Y } from './tableArt'
 import {
   CHIP_BONK_REACT_SECONDS,
@@ -255,6 +256,8 @@ function removeShotGlass(glass: ShotGlass) {
 interface FirstPersonShot {
   root: THREE.Group
   liquid: THREE.Mesh | null
+  /** The hand that holds the glass: the resting hands' mesh in a grip (two draw calls). */
+  grip: GripHand | null
   colorKey: string
   materials: THREE.Material[]
   geometries: THREE.BufferGeometry[]
@@ -266,11 +269,29 @@ function createFirstPersonShot(camera: THREE.Camera): FirstPersonShot {
   root.visible = false
   root.renderOrder = 11
   camera.add(root)
-  return { root, liquid: null, colorKey: '', materials: [], geometries: [] }
+  return { root, liquid: null, grip: null, colorKey: '', materials: [], geometries: [] }
+}
+
+/** The first-person shot glass (metres, rim at the origin, hanging down) and the hand that holds it. */
+const FP_SHOT = { top: 0.038, bottom: 0.03, height: 0.1 }
+/** Hand space -> camera space for the shot hand (the shot is held in the left hand, mirrored). */
+const FP_SHOT_HAND_SCALE = 0.78
+const FP_SHOT_GRIP = {
+  spec: {
+    radius: (FP_SHOT.top + FP_SHOT.bottom) / 2 / FP_SHOT_HAND_SCALE,
+    axis: [-((FP_SHOT.top + FP_SHOT.bottom) / 2 / FP_SHOT_HAND_SCALE + 0.021), -0.07] as const,
+    thumb: { yaw: [0.8, -0.25, 0] as [number, number, number], curl: [0.6, 0.45, 0.3] as [number, number, number] },
+    wristBend: 0.5,
+  },
+  scale: FP_SHOT_HAND_SCALE,
+  yaw: 0.45,
+  height: FP_SHOT.height * 0.5,
 }
 
 function buildFirstPersonShot(fp: FirstPersonShot, skinColor: string, sleeveColor: string) {
   fp.root.clear()
+  disposeGripHand(fp.grip)
+  fp.grip = null
   fp.materials.forEach(material => material.dispose())
   fp.geometries.forEach(geometry => geometry.dispose())
   fp.materials = []
@@ -288,38 +309,41 @@ function buildFirstPersonShot(fp: FirstPersonShot, skinColor: string, sleeveColo
     fp.materials.push(material)
     return material
   }
-  const glass = lit('#f6fbff', 0.2, { transparent: true, opacity: 0.35, depthWrite: false, roughness: 0.1 })
-  const liquid = lit('#d8861c', 0.7)
-  const skin = lit(skinColor, 0.3)
-  const sleeve = lit(sleeveColor, 0.2)
-  // Glass rim sits at the origin so tipping pivots at the lips. The fist
-  // grips the bottom half so the whiskey shows above the knuckles.
-  add(new THREE.CylinderGeometry(0.058, 0.046, 0.11, 18, 1, true), glass, [0, -0.055, 0])
-  add(new THREE.CylinderGeometry(0.046, 0.046, 0.024, 18), glass, [0, -0.1, 0])
-  fp.liquid = add(new THREE.CylinderGeometry(0.052, 0.044, 0.07, 18), liquid, [0, -0.06, 0])
-  const fingerHeights = [-0.1, -0.085, -0.07]
-  fingerHeights.forEach((height, index) => {
-    const finger = add(new THREE.TorusGeometry(0.056, 0.011, 6, 12, 1.7), skin, [0, height, 0])
-    finger.rotation.x = Math.PI / 2
-    finger.rotation.z = 0.5 - index * 0.05
-  })
-  const palm = add(new THREE.SphereGeometry(1, 12, 10), skin, [0.062, -0.085, -0.004])
-  palm.scale.set(0.03, 0.04, 0.044)
-  const thumb = add(new THREE.CapsuleGeometry(0.011, 0.03, 4, 8), skin, [0.04, -0.05, 0.035])
-  thumb.rotation.set(0.3, 0, -0.9)
-  // Just a short cuff tucked under the fist: a forearm (or a long dark
-  // sleeve) would sweep across the middle of the view as the glass rises.
-  const cuff = add(new THREE.CylinderGeometry(0.032, 0.036, 0.06, 12), sleeve, [0.088, -0.128, 0.022])
-  cuff.rotation.set(0.2, 0, 0.7)
+  const glass = lit('#e8f4fb', 0.06, { transparent: true, opacity: 0.26, depthWrite: false, roughness: 0.1, side: THREE.DoubleSide })
+  const liquid = lit('#d8861c', 0.85)
+  // Glass rim sits at the origin so tipping pivots at the lips; the whiskey shows between the fingers.
+  const { top, bottom, height } = FP_SHOT
+  add(new THREE.CylinderGeometry(top, bottom, height, 20, 1, true), glass, [0, -height / 2, 0])
+  add(new THREE.CylinderGeometry(bottom, bottom, 0.02, 20), glass, [0, -height + 0.01, 0])
+  fp.liquid = add(new THREE.CylinderGeometry(top - 0.004, bottom - 0.003, height * 0.62, 20), liquid, [0, -height * 0.5 - 0.005, 0])
+  // The resting hands' own hand, wrapped around the glass (built as a right hand; the root mirrors it).
+  const grip = createGripHand({ ...FP_SHOT_GRIP, skin: skinColor, sleeve: sleeveColor })
+  const hand = new THREE.Group()
+  hand.position.y = -height
+  hand.add(grip.group)
+  fp.root.add(hand)
+  fp.grip = grip
   fp.root.traverse(object => { object.castShadow = false; object.receiveShadow = false })
 }
 
-const FP_OFF = new THREE.Vector3(0.24, -0.62, -0.62)
-const FP_HOLD = new THREE.Vector3(0.1, -0.16, -0.6)
-const FP_MOUTH = new THREE.Vector3(0.02, -0.2, -0.36)
-// Raised toward the middle but kept right of centre and below the board line.
-const FP_CHEERS = new THREE.Vector3(0.14, -0.04, -0.75)
-const FP_SLAM = new THREE.Vector3(0.12, -0.7, -0.55)
+// Screen anchors for the glass rim: (x, y in -1..1 of the view, camera-space depth), turned into
+// camera space every frame from the lens so the framing holds at any aspect. Like the beer and the
+// water, the shot is held in the LEFT hand over the empty near rail left of the hole cards and above
+// the Beer / Water / Shot buttons (clear of the cards, the pot and the action tray), and comes in and
+// goes out through the bottom left.
+const FP_OFF = new THREE.Vector3(-0.46, -1.45, -0.62)
+const FP_HOLD = new THREE.Vector3(-0.36, -0.5, -0.62)
+const FP_MOUTH = new THREE.Vector3(-0.33, -0.5, -0.52)
+// Raised toward the middle but kept left of centre and below the board line.
+const FP_CHEERS = new THREE.Vector3(-0.16, 0.04, -0.75)
+const FP_SLAM = new THREE.Vector3(-0.4, -1.2, -0.55)
+const shotAt = { off: new THREE.Vector3(), hold: new THREE.Vector3(), mouth: new THREE.Vector3(), cheers: new THREE.Vector3(), slam: new THREE.Vector3() }
+
+function shotAnchor(anchor: THREE.Vector3, camera: THREE.PerspectiveCamera, out: THREE.Vector3) {
+  const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
+  const depth = -anchor.z
+  return out.set(anchor.x * depth * tanHalf * camera.aspect, anchor.y * depth * tanHalf, anchor.z)
+}
 
 const smooth = (value: number) => {
   const t = Math.min(1, Math.max(0, value))
@@ -328,7 +352,7 @@ const smooth = (value: number) => {
 const easeOutCubic = (value: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, value)), 3)
 
 /** Poses the hero's first-person shot; returns how far the head tips back (0..1). */
-function updateFirstPersonShot(runtime: PrankRuntime, time: number, colors: { skin: string; sleeve: string }): number {
+function updateFirstPersonShot(runtime: PrankRuntime, time: number, colors: { skin: string; sleeve: string }, renderHeight: number, tanHalf: number): number {
   const fp = runtime.firstPerson
   const shot = runtime.heroShot
   if (!shot) {
@@ -346,34 +370,48 @@ function updateFirstPersonShot(runtime: PrankRuntime, time: number, colors: { sk
   const key = `${colors.skin}|${colors.sleeve}`
   if (fp.colorKey !== key) buildFirstPersonShot(fp, colors.skin, colors.sleeve)
   fp.root.visible = true
+  shotAnchor(FP_OFF, runtime.camera, shotAt.off)
+  shotAnchor(FP_HOLD, runtime.camera, shotAt.hold)
+  shotAnchor(FP_MOUTH, runtime.camera, shotAt.mouth)
+  shotAnchor(FP_CHEERS, runtime.camera, shotAt.cheers)
+  shotAnchor(FP_SLAM, runtime.camera, shotAt.slam)
   const position = fp.root.position
   let tip = 0
   let tilt = 0
   if (local < SHOT_MOUTH_AT - 0.25) {
-    position.lerpVectors(FP_OFF, FP_HOLD, easeOutCubic((local - SHOT_ARRIVE_AT + 0.05) / 0.3))
+    position.lerpVectors(shotAt.off, shotAt.hold, easeOutCubic((local - SHOT_ARRIVE_AT + 0.05) / 0.3))
   } else if (local < SHOT_MOUTH_AT) {
     const t = smooth((local - (SHOT_MOUTH_AT - 0.25)) / 0.25)
-    position.lerpVectors(FP_HOLD, FP_MOUTH, t)
+    position.lerpVectors(shotAt.hold, shotAt.mouth, t)
     tip = t * 1.2
     tilt = t * 0.5
   } else if (local < SHOT_DOWN_AT) {
     const t = smooth((local - SHOT_MOUTH_AT) / (SHOT_DOWN_AT - SHOT_MOUTH_AT))
-    position.copy(FP_MOUTH)
+    position.copy(shotAt.mouth)
     position.y += 0.05 * t
     tip = 1.2 + 0.7 * t
     tilt = 0.5 + 0.5 * t
   } else {
     // Slam: the empty glass comes down hard and out of view.
     const t = smooth((local - SHOT_DOWN_AT) / (SHOT_SLAM_AT - SHOT_DOWN_AT + 0.1))
-    position.lerpVectors(FP_MOUTH, FP_SLAM, t)
+    position.lerpVectors(shotAt.mouth, shotAt.slam, t)
     tip = 1.9 * (1 - t) + 0.15 * t
     tilt = 1 - t
   }
   if (raise > 0) {
-    position.lerp(FP_CHEERS, raise)
+    position.lerp(shotAt.cheers, raise)
     tip *= 1 - raise
   }
-  fp.root.rotation.set(tip, 0, 0.15 * (1 - Math.min(1, tip)))
+  // Mirrored: a left hand, like the beer and the water (three flips the winding for a negative scale).
+  fp.root.scale.set(-1, 1, 1)
+  fp.root.rotation.set(tip, 0, -0.15 * (1 - Math.min(1, tip)))
+  if (fp.grip) {
+    // Fingers settle on the glass as it arrives, squeeze as it is thrown back, let go in the slam.
+    const arriving = local < SHOT_MOUTH_AT - 0.25 ? 1 - easeOutCubic((local - SHOT_ARRIVE_AT + 0.05) / 0.3) : 0
+    const slam = local > SHOT_DOWN_AT ? smooth((local - SHOT_DOWN_AT) / (SHOT_SLAM_AT - SHOT_DOWN_AT + 0.1)) : 0
+    setGripPose(fp.grip, { loose: 0.5 * arriving + 0.35 * slam, tight: 0.55 * tilt })
+    setGripInk(fp.grip, fp.grip.scale, renderHeight, -position.z, tanHalf)
+  }
   if (fp.liquid) fp.liquid.visible = local < SHOT_DOWN_AT - 0.1
   return tilt
 }
@@ -917,7 +955,9 @@ export function updatePranks(runtime: PrankRuntime, frame: PrankFrame): PrankCam
   for (const shot of Array.from(runtime.shots.values())) updateShot(runtime, shot, frame)
   for (const flick of Array.from(runtime.flicks.values())) updateFlick(runtime, flick, frame)
   updatePops(runtime, frame)
-  const headTilt = updateFirstPersonShot(runtime, frame.time, frame.heroColors)
+  const renderHeight = frame.height * (typeof window === 'undefined' ? 1 : Math.min(window.devicePixelRatio || 1, 1.35))
+  const tanHalf = Math.tan(THREE.MathUtils.degToRad(runtime.camera.fov / 2))
+  const headTilt = updateFirstPersonShot(runtime, frame.time, frame.heroColors, renderHeight, tanHalf)
   if (frame.reducedMotion) return headTilt > 0 ? { ...NO_KICK, headTilt } : NO_KICK
   const glareEase = getGlareAmount(runtime.glare, frame.time, Boolean(frame.heroActing))
   const glareYaw = runtime.glare.yaw * glareEase
@@ -951,6 +991,8 @@ export function disposePrankRuntime(runtime: PrankRuntime) {
   runtime.glassMaterials.forEach(material => material.dispose())
   runtime.glassGeometries.forEach(geometry => geometry.dispose())
   const fp = runtime.firstPerson
+  disposeGripHand(fp.grip)
+  fp.grip = null
   fp.materials.forEach(material => material.dispose())
   fp.geometries.forEach(geometry => geometry.dispose())
   fp.root.removeFromParent()

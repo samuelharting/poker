@@ -48,6 +48,8 @@ import { createAvatarFace, disposeAvatarFace, updateAvatarFace, type AvatarFaceR
 import { buildFaceInput, setFaceViewer, triggerFaceEmote } from './avatarFaceDirector'
 import {
   createDealerPose,
+  DEAL_POSE_LEAD_FIRST_PERSON_SECONDS,
+  DEAL_POSE_LEAD_SECONDS,
   getDealFlightSeconds,
   getDealerPose,
   getHoleCardDelay,
@@ -2765,7 +2767,7 @@ function animateSeat(
   let dealing: DealerPose | null = null
   if (dealer && dealer.seatId === seat.playerId && !reducedMotion) {
     const dealPose = seat.dealPose ?? (seat.dealPose = createDealerPose())
-    getDealerPose(time - dealer.schedule.startedAt, dealer.schedule, seat.anchors, dealPose)
+    getDealerPose(time - dealer.schedule.startedAt, dealer.schedule, seat.anchors, dealPose, seat.isHero ? DEAL_POSE_LEAD_FIRST_PERSON_SECONDS : DEAL_POSE_LEAD_SECONDS)
     if (dealPose.weight > 0) dealing = dealPose
   }
   const pose = updateAvatarAnimator(seat.animator, {
@@ -3697,6 +3699,7 @@ function updateHeroDrink(runtime: SceneRuntime, view: ThreeTableViewModel, time:
     drunkLevel: heroSeat?.drunkLevel ?? 0,
     time,
     reducedMotion,
+    renderHeight: runtime.renderer.domElement.height,
   })
 }
 

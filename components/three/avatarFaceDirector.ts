@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { AvatarFaceRig, FaceInput } from './avatarFace'
 import { GAZE, type GazeTargets } from './avatarFaceGaze'
+import { winnerPointFocus } from './avatarAnimator'
 import { emoteToEmotion } from './avatarFaceEmotion'
 import { BOARD_Z, FELT_TOP_Y } from './tableArt'
 import { TABLE_POT_POSITION } from './tableWagerLayout'
@@ -41,6 +42,8 @@ export interface FaceDirectorSeat {
   chat?: TableChat | null
   /** 0..1 yawn through the middle of the stretch idle (from the animator). */
   yawn?: number
+  /** The winner's animator state (the point-at-the-pot beat puts the eyes on the pot). */
+  animator?: { winnerSince: number; winFlair: number }
 }
 
 /** Seconds of a drink (matches drinkProps DRINK_DURATION); the "aah" follows the swallow near the end. */
@@ -177,6 +180,7 @@ function buildFaceInputInner(face: AvatarFaceRig, seat: FaceDirectorSeat, env: F
   }
   st.prevLoser = seat.loser
   st.prevWinner = seat.winner
+  if (!seat.winner) st.prevPointing = false
   ctx.tilt = st.lossStreak >= 2 ? Math.min(1, (st.lossStreak - 1) * 0.4) : 0
   ctx.acting = seat.acting
   ctx.folded = seat.folded
@@ -335,6 +339,17 @@ function buildFaceInputInner(face: AvatarFaceRig, seat: FaceDirectorSeat, env: F
     w[GAZE.pot] = fresh ? 0.04 : 0.3
     w[GAZE.other] = fresh ? 0.45 : 0.3
     w[GAZE.acting] = 0.05
+    // Pointing at the pot: the eyes follow the finger.
+    const aim = seat.animator ? winnerPointFocus(seat.animator.winnerSince, seat.animator.winFlair, env.time, env.reducedMotion) : 0
+    if (aim > 0.01) {
+      const rest = 1 - 0.9 * aim
+      w[GAZE.viewer] *= rest
+      w[GAZE.other] *= rest
+      w[GAZE.acting] *= rest
+      w[GAZE.pot] = Math.max(w[GAZE.pot]!, 0.2) + 3 * aim
+      if (!st.prevPointing) face.gazeState.fixUntil = Math.min(face.gazeState.fixUntil, face.emotion.time + 0.1)
+    }
+    st.prevPointing = aim > 0.3
   } else if (seat.loser) {
     w[GAZE.cards] = 0.3
     w[GAZE.away] = 0.5
