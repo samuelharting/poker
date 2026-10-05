@@ -5,6 +5,8 @@ import {
   createHeroHandsPose,
   evaluateHeroHands,
   followHandPose,
+  createHandVelocity,
+  type HandVelocity,
   MIN_HAND_DEPTH,
   type HandPose,
   type HeroHandsAnchors,
@@ -40,6 +42,8 @@ export interface FirstPersonHands {
   cards: CardMesh[]
   /** Smoothed pose actually drawn. */
   shown: HeroHandsPose
+  /** Spring velocities that carry each drawn hand to its target (no sudden starts). */
+  velocity: { right: HandVelocity; left: HandVelocity }
   /** Target pose for this frame (scratch). */
   target: HeroHandsPose
   input: HeroHandsInput
@@ -107,6 +111,7 @@ export function createFirstPersonHands(camera: THREE.Camera): FirstPersonHands {
     colorKey: '',
     cards,
     shown: createHeroHandsPose(),
+    velocity: { right: createHandVelocity(), left: createHandVelocity() },
     target: createHeroHandsPose(),
     input: {
       cue: 'ready',
@@ -152,6 +157,7 @@ function applyHand(mesh: THREE.Mesh, pose: HandPose, side: 1 | -1, tanHalf: numb
     influences[HAND_MORPH.fist] = pose.fist
     influences[HAND_MORPH.open] = pose.open
     influences[HAND_MORPH.pinch] = pose.pinch
+    influences[HAND_MORPH.flutter] = pose.flutter
   }
 }
 
@@ -313,7 +319,8 @@ export function updateHeroHands(scene: HeroHandsSceneLike, frame: HeroHandsFrame
   const key = `${frame.hero.avatarProfile.skinColor}|${frame.hero.avatarProfile.sleeveColor}`
   if (hands.colorKey !== key) {
     hands.colorKey = key
-    colors.skin.set(frame.hero.avatarProfile.skinColor)
+    // The same small lift the avatars' skin gets, so the hands match the body that is hidden.
+    colors.skin.set(frame.hero.avatarProfile.skinColor).offsetHSL(0, 0.04, 0.02)
     colors.sleeve.set(frame.hero.avatarProfile.sleeveColor)
   }
 
@@ -411,8 +418,8 @@ export function updateHeroHands(scene: HeroHandsSceneLike, frame: HeroHandsFrame
   const snap = frame.reducedMotion || hands.wasHidden
   hands.wasHidden = false
   const shown = hands.shown
-  followHandPose(shown.right, hands.target.right, dt, snap)
-  followHandPose(shown.left, hands.target.left, dt, snap)
+  followHandPose(shown.right, hands.target.right, dt, snap, hands.velocity.right)
+  followHandPose(shown.left, hands.target.left, dt, snap, hands.velocity.left)
   const cardsTarget = hands.target.cards
   Object.assign(shown.cards, cardsTarget)
 

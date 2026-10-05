@@ -90,6 +90,7 @@ const forceFrame = async (spec, label) => {
   await page.evaluate(force => { document.querySelector('.desktop-3d-stage').__pokerRuntime.firstPersonHands.debugForce = force }, force)
   await sleep(450)
   await page.screenshot({ path: path.join(outDir, label + '.png') })
+  await page.evaluate(() => { document.querySelector('.desktop-3d-stage').__pokerRuntime.firstPersonHands.debugForce = null })
   if (process.env.DUMP) console.log(label, JSON.stringify(await page.evaluate(() => { const r = document.querySelector('.desktop-3d-stage').__pokerRuntime; const h = r.firstPersonHands; const hero = [...r.seats.values()].find(x => x.isHero); const w = hero && r.wagers.get(hero.playerId); const p = hero?.stack.group.getWorldPosition(new h.root.position.constructor()); return { a: h.anchors, shown: h.shown.right, stack: p && [p.x, p.y, p.z], start: w && w.start.toArray(), target: w && w.target.toArray() } }), (k, v) => typeof v === 'number' ? +v.toFixed(2) : v))
 }
 
@@ -202,7 +203,7 @@ for (const action of wanted) {
       const meta = await sharp(buf).metadata()
       const k = meta.width / width
       tiles.push(await sharp(buf).extract({ left: Math.round(cropBox[0] * k), top: Math.round(cropBox[1] * k), width: Math.round(cropBox[2] * k), height: Math.round(cropBox[3] * k) }).resize({ width: 480 }).png().toBuffer())
-      if (i === 0 || i === pick.length - 1) await sharp(buf).toFile(path.join(outDir, action + '-full-' + i + '.png'))
+      if ((process.env.SAVE_IDX ?? '0,' + (pick.length - 1)).split(',').map(Number).includes(i)) await sharp(buf).toFile(path.join(outDir, action + '-full-' + i + '.png'))
     }
     if (tiles.length) {
       const th = (await sharp(tiles[0]).metadata()).height
@@ -218,7 +219,7 @@ for (const action of wanted) {
   }
 }
 await page.evaluate(() => { document.querySelector('.desktop-3d-stage').__pokerRuntime.firstPersonHands.debugForce = null })
-console.log('stats', await page.evaluate(() => { const r = document.querySelector('.desktop-3d-stage')?.__pokerRuntime; return { calls: r.renderer.info.render.calls, tris: r.renderer.info.render.triangles } }))
+console.log('stats', await page.evaluate(() => { const r = document.querySelector('.desktop-3d-stage')?.__pokerRuntime; const c = r.firstPersonHands.colors; return { calls: r.renderer.info.render.calls, tris: r.renderer.info.render.triangles, skin: '#' + c.skin.getHexString(), sleeve: '#' + c.sleeve.getHexString() } }))
 const videoPath = video ? await page.video().path() : null
 await context.close()
 await browser.close()

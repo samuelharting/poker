@@ -13,7 +13,7 @@ export function TableThemePicker() {
   const [theme, setTheme] = useTableTheme()
 
   return (
-    <div className="settings-rule-row peek-style-row table-theme-row">
+    <div className="settings-rule-row peek-style-row table-theme-row settings-desktop-only">
       <div className="peek-style-head">
         <div>
           <div className="settings-rule-name">Table theme</div>

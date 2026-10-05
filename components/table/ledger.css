@@ -116,7 +116,7 @@
 
 .ledger-table th,
 .ledger-table td {
-  padding: 8px 6px;
+  padding: 4px 6px;
   border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.08));
   text-align: right;
   white-space: nowrap;
@@ -180,7 +180,9 @@
 }
 
 .ledger-name {
-  display: block;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
   overflow: hidden;
   color: var(--c-text-1, #f4efe4);
   text-overflow: ellipsis;
@@ -188,10 +190,11 @@
 }
 
 .ledger-name-meta {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 2px;
+  margin: 0 0 0 6px;
+  vertical-align: middle;
 }
 
 .ledger-name-meta:empty {
@@ -681,12 +684,12 @@
 .ledger-rank span {
   display: inline-grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: color-mix(in srgb, var(--c-ink-600, #2a3336) 80%, transparent);
   color: var(--c-text-2, #b9b3a4);
-  font: 800 12px / 1 var(--font-display, system-ui);
+  font: 800 11px / 1 var(--font-display, system-ui);
 }
 
 .ledger-table tr[data-medal='1'] .ledger-rank span {

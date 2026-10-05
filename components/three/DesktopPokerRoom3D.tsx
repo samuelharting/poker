@@ -467,6 +467,12 @@ const SUIT_SYMBOLS: Record<ThreeCardView['suit'], string> = {
   spades: '♠',
 }
 
+/**
+ * The showdown cinematic camera (showdownCamera.ts) is switched off: the camera no
+ * longer moves when someone wins. Flip this to bring the gentle winner zoom back.
+ */
+const SHOWDOWN_CAMERA_ENABLED = false as boolean
+
 const AVATAR_RETRY_BASE_MS = 3_000
 const AVATAR_RETRY_MAX_MS = 30_000
 
@@ -4112,13 +4118,8 @@ function createSceneRuntime(
       targetLook.x = THREE.MathUtils.clamp(targetLook.x, -0.95, 0.95)
       targetCamera.x += actingPosition[0] * 0.04
     }
-    if (winnerSeat) {
-      winnerSeat.root.getWorldPosition(winnerFocus)
-      targetLook.lerp(winnerFocus.setY(1.1), 0.22)
-      targetCamera.x += winnerFocus.x * 0.04
-      targetCamera.z -= 0.35
-      targetCamera.y += 0.05
-    }
+    // No camera move when someone wins: the winner is shown by the halo, sparkles,
+    // confetti and the lit winning cards, and the view stays where it is.
     if (allInImpact.strength > 0) {
       const impactSeat = allInImpact.visualSeat === null
         ? null
@@ -4136,7 +4137,7 @@ function createSceneRuntime(
     // shot's own easing (not this chase) shapes the move.
     let showdownZoom = 1
     let showdownWeight = 0
-    if (!runtime.debugCamera && runtime.showdown.sample(time, reducedMotion, showdownShot)) {
+    if (SHOWDOWN_CAMERA_ENABLED && !runtime.debugCamera && runtime.showdown.sample(time, reducedMotion, showdownShot)) {
       showdownWeight = showdownShot.weight
       showdownZoom = blendShowdownShot(showdownShot, targetCamera, targetLook)
     }
@@ -4818,22 +4819,6 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
                 >
                 <span className="cinematic-seat-topline">
                   <strong>{player.nickname}</strong>
-                  {!player.isHero && player.hasCards && !player.isOutOfHand && (
-                    // "Looking at their cards" tell. Always mounted so CSS can linger it
-                    // for a beat after a quick tap; hidden (and out of flow) otherwise.
-                    <em
-                      className="cinematic-peek-eye"
-                      data-on={player.isPeeking ? 'true' : 'false'}
-                      role="img"
-                      aria-label={player.isPeeking ? 'Looking at their cards' : undefined}
-                      aria-hidden={player.isPeeking ? undefined : 'true'}
-                    >
-                      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
-                        <path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12Z" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
-                        <circle cx="12" cy="12" r="3.4" fill="currentColor" />
-                      </svg>
-                    </em>
-                  )}
                   <StickyNoteChip note={player.stickyNote} />
                   {player.shotsWaiting > 0 && (
                     // A shot is lined up for them, poured once they're out of the hand.

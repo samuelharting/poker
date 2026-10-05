@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import {
   createHandPose,
+  createHandVelocity,
   createHeroHandsAnchors,
   createHeroHandsPose,
   evaluateHeroHands,
@@ -16,7 +17,7 @@ import {
   type HeroHandsInput,
   type HeroHandsPose,
 } from '@/components/three/firstPersonHandPose'
-import { buildHandGeometry, createHandMaterial, HAND_MORPH, HAND_SCALE } from '@/components/three/firstPersonHandMesh'
+import { buildHandGeometry, createHandMaterial, getHandShapeTips, HAND_MORPH, HAND_SCALE } from '@/components/three/firstPersonHandMesh'
 import { getPokerActionMotionProfile } from '@/components/three/pokerActionPose'
 import type { ThreeActionCue } from '@/components/three/tableViewModel'
 
@@ -62,7 +63,7 @@ describe('first-person hands: resting', () => {
     const a = pose('ready', 99, { time: 0 })
     const b = pose('ready', 99, { time: 2.2 })
     expect(Math.abs(a.right.y - b.right.y)).toBeLessThan(0.02)
-    expect(Math.abs(a.left.x - b.left.x)).toBeLessThan(1e-6)
+    expect(Math.abs(a.left.x - b.left.x)).toBeLessThan(0.01)
   })
 
   it('keeps resting under reduced motion whatever the cue', () => {
@@ -78,8 +79,10 @@ describe('first-person hands: resting', () => {
   it('rests where the room measured the cards and tray', () => {
     const anchors = { ...createHeroHandsAnchors(), restRightX: 0.31, restLeftX: -0.4 }
     const rest = pose('ready', 99, { anchors })
-    expect(rest.right.x).toBeCloseTo(0.31, 5)
-    expect(rest.left.x).toBeCloseTo(-0.4, 5)
+    // (the idle sway moves it by a few thousandths)
+    expect(rest.right.x).toBeCloseTo(0.31, 1)
+    expect(rest.left.x).toBeCloseTo(-0.4, 1)
+    expect(Math.abs(rest.right.x - 0.31)).toBeLessThan(0.01)
   })
 })
 
@@ -264,6 +267,45 @@ describe('first-person hands: invariants', () => {
     }
   })
 
+  it('the spring carries a hand to its target with no sudden start and no overshoot', () => {
+    const current = createHandPose()
+    const target = createHandPose()
+    const velocity = createHandVelocity()
+    target.x = 0.5
+    let firstStep = 0
+    let peakStep = 0
+    let previous = current.x
+    let peak = 0
+    for (let i = 0; i < 90; i += 1) {
+      followHandPose(current, target, 1 / 60, false, velocity)
+      const step = current.x - previous
+      if (i === 0) firstStep = step
+      peakStep = Math.max(peakStep, step)
+      previous = current.x
+      peak = Math.max(peak, current.x)
+    }
+    // It starts gently (the first frame moves far less than the fastest one) and never overshoots.
+    expect(firstStep).toBeLessThan(peakStep * 0.5)
+    expect(peak).toBeLessThanOrEqual(0.5 + 1e-3)
+    expect(current.x).toBeCloseTo(0.5, 2)
+    // A huge frame (tab switch) cannot blow the spring up.
+    followHandPose(current, createHandPose(), 5, false, velocity)
+    expect(Number.isFinite(current.x)).toBe(true)
+  })
+
+  it('idle fingers drift on their own slow clocks, right and left out of step', () => {
+    let differs = 0
+    let range = 0
+    for (let t = 0; t < 40; t += 0.5) {
+      const p = pose('ready', 99, { time: t })
+      if (Math.abs(p.right.flutter - p.left.flutter) > 0.05) differs += 1
+      range = Math.max(range, Math.abs(p.right.flutter))
+      expect(Math.abs(p.right.flutter)).toBeLessThanOrEqual(0.6)
+    }
+    expect(differs).toBeGreaterThan(10)
+    expect(range).toBeGreaterThan(0.15)
+  })
+
   it('followHandPose eases toward the target and snaps when asked', () => {
     const current = createHandPose()
     const target = createHandPose()
@@ -287,13 +329,25 @@ describe('first-person hands: mesh', () => {
 
   it('is one merged mesh with fist, open and pinch morph targets', () => {
     const position = geometry.getAttribute('position')
-    expect(geometry.morphAttributes.position).toHaveLength(3)
-    expect(geometry.morphAttributes.normal).toHaveLength(3)
+    expect(geometry.morphAttributes.position).toHaveLength(4)
+    expect(geometry.morphAttributes.normal).toHaveLength(4)
     for (const target of geometry.morphAttributes.position!) expect(target.count).toBe(position.count)
     expect(geometry.morphTargetsRelative).toBe(true)
-    expect(HAND_MORPH).toEqual({ fist: 0, open: 1, pinch: 2 })
+    expect(HAND_MORPH).toEqual({ fist: 0, open: 1, pinch: 2, flutter: 3 })
     expect((geometry.index?.count ?? 0) / 3).toBeLessThan(4000)
     expect(geometry.getAttribute('color').count).toBe(position.count)
+    // Baked shading (palm underside, finger roots, the sleeve sinking into shadow).
+    expect(geometry.getAttribute('shade').count).toBe(position.count)
+  })
+
+  it('the pinch shape brings thumb and index fingertips together; the thumb rests beside the hand', () => {
+    const pinch = getHandShapeTips('pinch')
+    expect(pinch.index.distanceTo(pinch.thumb)).toBeLessThan(0.02)
+    const relaxed = getHandShapeTips('relaxed')
+    expect(relaxed.index.distanceTo(relaxed.thumb)).toBeGreaterThan(0.03)
+    expect(relaxed.thumb.z).toBeGreaterThan(relaxed.index.z)
+    expect(Math.abs(relaxed.thumb.x)).toBeLessThan(0.08)
+    expect(getHandShapeTips('open').index.z).toBeLessThan(-0.15)
   })
 
   it('a fist is shorter than an open hand (the fingers curl in)', () => {
@@ -344,12 +398,16 @@ describe('first-person hands: mesh', () => {
     expect(material.fog).toBe(false)
     const shader = {
       uniforms: {} as Record<string, { value: unknown }>,
-      fragmentShader: '#include <common>\n#include <color_fragment>\n#include <emissivemap_fragment>',
+      vertexShader: '#include <common>\n#include <begin_vertex>',
+      fragmentShader: '#include <common>\n#include <color_fragment>\n#include <opaque_fragment>',
     }
     material.onBeforeCompile(shader as never, undefined as never)
     expect(shader.uniforms.uSkin!.value).toBe(colors.skin)
     expect(shader.fragmentShader).toContain('uniform vec3 uSleeve;')
     expect(shader.fragmentShader).toContain('vColor.r * uSkin')
+    // The avatars' ink colour (#120a07) and a constant pixel-width edge.
+    expect(shader.fragmentShader).toContain('vec3(0.07, 0.04, 0.03)')
+    expect(shader.fragmentShader).toContain('fwidth')
     material.dispose()
   })
 })

@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { createCelMaterial } from './firstPersonHandMesh'
 import { createDrinkProp, disposeDrinkProp, DRINK_DURATION, type DrinkKind, type DrinkProp } from './drinkProps'
 
 /**
@@ -87,14 +88,6 @@ export function createFirstPersonDrink(camera: THREE.Camera): FirstPersonDrink {
   }
 }
 
-function toonRamp() {
-  const texture = new THREE.DataTexture(new Uint8Array([95, 175, 255]), 3, 1, THREE.RedFormat)
-  texture.minFilter = THREE.NearestFilter
-  texture.magFilter = THREE.NearestFilter
-  texture.needsUpdate = true
-  return texture
-}
-
 function clearModel(drink: FirstPersonDrink) {
   disposeDrinkProp(drink.prop)
   drink.prop = null
@@ -137,13 +130,10 @@ function buildModel(drink: FirstPersonDrink, kind: DrinkKind, skinColor: string,
     drink.liquidBase = { y: drink.liquid.position.y - params.height / 2, height: params.height }
   }
 
-  const ramp = toonRamp()
-  // The hand sits in the chair's shadow; a little self-light keeps it readable.
-  const lit = (color: string, glow: number) =>
-    new THREE.MeshToonMaterial({ color, gradientMap: ramp, emissive: color, emissiveIntensity: glow })
-  const skin = lit(skinColor, 0.32)
-  const sleeve = lit(sleeveColor, 0.22)
-  const cuff = lit('#f4efe6', 0.25)
+  // The same cel look (tones, warm shadow, ink outline) as the resting hands, in the profile's colours.
+  const skin = createCelMaterial(new THREE.Color(skinColor).offsetHSL(0, 0.04, 0.02))
+  const sleeve = createCelMaterial(sleeveColor)
+  const cuff = createCelMaterial('#f4efe6')
   drink.materials.push(skin, sleeve, cuff)
 
   const hand = new THREE.Group()

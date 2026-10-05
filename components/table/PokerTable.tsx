@@ -1399,7 +1399,8 @@ export function PokerTable({
 }: PokerTableProps) {
   // Narrow screens and touch-first devices (phones, tablets, iPad landscape)
   // use the simple 2D table; wide mouse-driven screens get the 3D room.
-  const isMobileViewport = useMediaQuery(TWO_D_LAYOUT_QUERY)
+  // The Chill room is that same simple 2D table, even on a wide screen.
+  const isMobileViewport = useMediaQuery(TWO_D_LAYOUT_QUERY) || sceneMode === 'chill'
   const drinkContext = useDrinks()
   const isDesktopWidth = useMediaQuery('(min-width: 1024px)')
   const shouldRenderDesktopThree = isDesktopWidth && !isMobileViewport
@@ -4770,10 +4771,10 @@ export function SettingsModal({
                   </button>
                 </div>
               </div>
-              <div className="settings-rule-row">
+              <div className="settings-rule-row settings-desktop-only">
                 <div>
                   <div className="settings-rule-name">Room</div>
-                  <div className="settings-rule-copy">Chill hides the decor and ambient effects for a calmer table.</div>
+                  <div className="settings-rule-copy">Chill is the simple flat 2D table, the same one phones get.</div>
                 </div>
                 <div className="settings-toggle-row">
                   <button
@@ -4908,7 +4909,7 @@ export function SettingsModal({
 
                 <div className="settings-section">
                   <div className="settings-section-title">Rules</div>
-                  <div className="settings-rule-row">
+                  <div className="settings-rule-row settings-desktop-only">
                     <div>
                       <div className="settings-rule-name">Fun mode</div>
                       <div className="settings-rule-copy">Beer, water and Lady Luck for players on the desktop 3D table. Phones and tablets always keep it simple. Turning it off sobers everyone up right away.</div>

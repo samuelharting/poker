@@ -156,7 +156,8 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     currentProfile
   )
   // Drinks are a 3D-table feature: the 2D layout (phones, tablets) never shows them.
-  const isTwoDLayout = useIsTwoDLayout()
+  // The Chill room is the same simple 2D table, even on a wide screen.
+  const isTwoDLayout = useIsTwoDLayout() || sceneMode === 'chill'
   // Drunk players occasionally misread a freshly dealt card on their own screen only.
   const hallucinatedTableState = useDrunkHallucination(tableState, yourId)
   const displayTableState = isTwoDLayout ? tableState : hallucinatedTableState

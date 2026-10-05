@@ -28,6 +28,8 @@ export interface HandPose {
   fist: number
   open: number
   pinch: number
+  /** Idle finger drift (-1..1): index and middle lift while ring and little finger tuck. */
+  flutter: number
   /** 0 = slid away below the frame, 1 = in view. */
   show: number
 }
@@ -52,7 +54,7 @@ export interface HeroHandsPose {
 }
 
 export function createHandPose(): HandPose {
-  return { x: 0, y: -0.8, depth: HAND_DEPTH, pitch: REST_PITCH, yaw: 0, roll: 0, fist: 0, open: 0, pinch: 0, show: 1 }
+  return { x: 0, y: -0.8, depth: HAND_DEPTH, pitch: REST_PITCH, yaw: 0, roll: 0, fist: 0, open: 0, pinch: 0, flutter: 0, show: 1 }
 }
 
 export function createHeroHandsPose(): HeroHandsPose {
@@ -190,11 +192,13 @@ function setRest(hand: HandPose, side: 1 | -1, anchors: HeroHandsAnchors) {
   hand.y = REST_Y
   hand.depth = HAND_DEPTH
   hand.pitch = REST_PITCH
-  hand.yaw = 0.14
-  hand.roll = 0.05
+  // The hands are not mirror images: the left lies a touch flatter and more turned in.
+  hand.yaw = side === 1 ? 0.14 : 0.19
+  hand.roll = side === 1 ? 0.05 : 0.08
   hand.fist = 0
   hand.open = 0
   hand.pinch = 0
+  hand.flutter = 0
   hand.show = 1
 }
 
@@ -243,13 +247,26 @@ export function evaluateHeroHands(input: HeroHandsInput, out: HeroHandsPose): He
   return out
 }
 
-/** A very small breath and a slow finger drift while the hands rest. */
+/**
+ * Idle: a slow breath that lifts and settles the wrists, a hair of sway, and
+ * fingers that drift on their own slow clocks (right and left never in step).
+ */
 function poseIdle(input: HeroHandsInput, out: HeroHandsPose) {
   const t = input.time
-  out.right.y += Math.sin(t * 1.1) * 0.006
-  out.left.y += Math.sin(t * 1.1 + 1.7) * 0.006
-  out.right.fist = 0.04 + 0.04 * Math.sin(t * 0.7)
-  out.left.fist = 0.04 + 0.04 * Math.sin(t * 0.6 + 2)
+  const breath = Math.sin(t * 1.15)
+  const breathLeft = Math.sin(t * 1.15 + 0.9)
+  out.right.y += breath * 0.0055
+  out.left.y += breathLeft * 0.0055
+  out.right.x += Math.sin(t * 0.37 + 1.1) * 0.003
+  out.left.x += Math.sin(t * 0.31 + 2.4) * 0.003
+  out.right.pitch += breath * 0.012
+  out.left.pitch += breathLeft * 0.012
+  out.right.roll += Math.sin(t * 0.43) * 0.012
+  out.left.roll += Math.sin(t * 0.39 + 1.7) * 0.012
+  out.right.fist = 0.04 + 0.035 * Math.sin(t * 0.7)
+  out.left.fist = 0.04 + 0.035 * Math.sin(t * 0.6 + 2)
+  out.right.flutter = 0.55 * Math.sin(t * 0.52 + 0.4) * Math.sin(t * 0.21)
+  out.left.flutter = 0.55 * Math.sin(t * 0.47 + 2.1) * Math.sin(t * 0.19 + 1)
 }
 
 function posePeek(out: HeroHandsPose, anchors: HeroHandsAnchors) {
@@ -439,16 +456,69 @@ function poseFlick(f: number, hand: HandPose, anchors: HeroHandsAnchors) {
   hand.fist = 0
 }
 
-/** Smoothing for pose channels (per second); gestures are already smooth in time. */
+/** Smoothing for pose channels (per second) when no spring state is given. */
 export const HAND_FOLLOW_RATE = 16
 
-const CHANNELS = ['x', 'y', 'depth', 'pitch', 'yaw', 'roll', 'fist', 'open', 'pinch', 'show'] as const
+const CHANNELS = ['x', 'y', 'depth', 'pitch', 'yaw', 'roll', 'fist', 'open', 'pinch', 'flutter', 'show'] as const
 
-/** Exponentially eases `current` toward `target` (the hand's own lag, so state changes never snap). */
-export function followHandPose(current: HandPose, target: HandPose, dt: number, snap: boolean) {
-  const k = snap ? 1 : 1 - Math.exp(-Math.max(0, dt) * HAND_FOLLOW_RATE)
+/**
+ * Settling time (s) per channel of the critically damped spring that carries a
+ * drawn pose to its target: position and angles ease in and out (no sudden
+ * start), finger shapes close a little quicker, and the hand slides in and out
+ * of frame slowest.
+ */
+const SMOOTH_TIME: Record<(typeof CHANNELS)[number], number> = {
+  x: 0.075,
+  y: 0.075,
+  depth: 0.09,
+  pitch: 0.09,
+  yaw: 0.09,
+  roll: 0.09,
+  fist: 0.06,
+  open: 0.05,
+  pinch: 0.06,
+  flutter: 0.2,
+  show: 0.16,
+}
+
+/** Per-channel velocities for followHandPose's spring (one per hand). */
+export type HandVelocity = Record<(typeof CHANNELS)[number], number>
+
+export function createHandVelocity(): HandVelocity {
+  return { x: 0, y: 0, depth: 0, pitch: 0, yaw: 0, roll: 0, fist: 0, open: 0, pinch: 0, flutter: 0, show: 0 }
+}
+
+/**
+ * Carries the drawn pose to the target. With velocities it is a critically
+ * damped spring (smooth start and stop, never overshoots); without, a plain
+ * exponential ease. `snap` jumps straight to the target.
+ */
+export function followHandPose(current: HandPose, target: HandPose, dt: number, snap: boolean, velocity?: HandVelocity) {
+  if (snap) {
+    for (let index = 0; index < CHANNELS.length; index += 1) {
+      const channel = CHANNELS[index]!
+      current[channel] = target[channel]
+      if (velocity) velocity[channel] = 0
+    }
+    return
+  }
+  const step = Math.max(0, dt)
+  if (!velocity) {
+    const k = 1 - Math.exp(-step * HAND_FOLLOW_RATE)
+    for (let index = 0; index < CHANNELS.length; index += 1) {
+      const channel = CHANNELS[index]!
+      current[channel] += (target[channel] - current[channel]) * k
+    }
+    return
+  }
   for (let index = 0; index < CHANNELS.length; index += 1) {
     const channel = CHANNELS[index]!
-    current[channel] += (target[channel] - current[channel]) * k
+    const omega = 2 / SMOOTH_TIME[channel]
+    const x = omega * step
+    const damp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x)
+    const change = current[channel] - target[channel]
+    const temp = (velocity[channel] + omega * change) * step
+    velocity[channel] = (velocity[channel] - omega * temp) * damp
+    current[channel] = target[channel] + (change + temp) * damp
   }
 }

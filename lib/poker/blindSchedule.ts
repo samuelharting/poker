@@ -14,13 +14,14 @@ export interface BlindSchedule {
   raiseSteps: number
 }
 
+/** Listed from slowest to fastest blind growth (the settings pills follow this order). */
 export const BLIND_SCHEDULES: readonly BlindSchedule[] = [
   { id: 'off', label: 'Off', description: 'Blinds stay where you set them.', levelMinutes: [], raiseSteps: 0 },
   { id: 'steady', label: 'Steady', description: 'Blinds go up one step (about 1.4x) every 30 minutes.', levelMinutes: [30], raiseSteps: 1 },
-  { id: 'turbo', label: 'Turbo', description: 'Blinds go up one step (about 1.4x) every 15 minutes.', levelMinutes: [15], raiseSteps: 1 },
-  { id: 'hyper', label: 'Hyper', description: 'Blinds go up one step (about 1.4x) every 5 minutes.', levelMinutes: [5], raiseSteps: 1 },
-  { id: 'one_hour', label: '1-hour game', description: 'Blinds about double after 30 min, then 10, then every 5: the game wraps up in about an hour.', levelMinutes: [30, 10, 5], raiseSteps: 2 },
   { id: 'two_hour', label: '2-hour game', description: 'Blinds about double after 60 min, then 30, 15, 10, then every 5.', levelMinutes: [60, 30, 15, 10, 5], raiseSteps: 2 },
+  { id: 'turbo', label: 'Turbo', description: 'Blinds go up one step (about 1.4x) every 15 minutes.', levelMinutes: [15], raiseSteps: 1 },
+  { id: 'one_hour', label: '1-hour game', description: 'Blinds about double after 30 min, then 10, then every 5: the game wraps up in about an hour.', levelMinutes: [30, 10, 5], raiseSteps: 2 },
+  { id: 'hyper', label: 'Hyper', description: 'Blinds go up one step (about 1.4x) every 5 minutes.', levelMinutes: [5], raiseSteps: 1 },
 ]
 
 export function isBlindScheduleId(value: unknown): value is BlindScheduleId {
