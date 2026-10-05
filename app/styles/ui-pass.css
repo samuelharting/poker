@@ -1713,3 +1713,68 @@
     gap: 1px;
   }
 }
+
+/* ==========================================================================
+   Table menu fixes (wide screens): Outfit and Players get explicit layouts so
+   nothing overlaps.
+   ========================================================================== */
+@media (min-width: 1024px) {
+  /* Outfit: preview on the left, the option groups in two columns on the right. */
+  .settings-modal-body.avatar-settings-body {
+    display: grid;
+    columns: auto;
+    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    align-content: start;
+  }
+
+  .settings-modal-body.avatar-settings-body > .settings-section {
+    margin: 0;
+  }
+
+  .avatar-settings-intro {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .avatar-settings-intro .avatar-look-card {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    text-align: center;
+  }
+
+  .avatar-customizer-section {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 18px;
+    align-items: start;
+  }
+
+  .avatar-customizer-section > .settings-footer {
+    grid-column: 1 / -1;
+  }
+
+  /* Players: wider cards, and the chip box never shrinks under the buttons. */
+  .settings-player-list {
+    grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+  }
+
+  .settings-modal .settings-player-chip-input {
+    flex: 0 0 auto;
+  }
+
+  .settings-modal .settings-player-chip-input > span {
+    flex: none;
+  }
+
+  .settings-modal .settings-player-chip-input input {
+    flex: none;
+    width: 84px;
+    min-width: 84px;
+  }
+
+  .settings-modal .settings-player-actions .btn-subtle {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+}
