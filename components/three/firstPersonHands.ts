@@ -278,6 +278,7 @@ function measureLayout(hands: FirstPersonHands, frame: HeroHandsFrame) {
   let cardsLeft = width * 0.5 - 105
   let cardsRight = width * 0.5 + 105
   let cardsMidY = height - 130
+  let cardsTopPx: number | null = null
   let trayLeft = width
   // Overlays the dealing hands must stay clear of: the pot readout and the hero's own bet label.
   let avoidLeft = Number.POSITIVE_INFINITY
@@ -295,13 +296,21 @@ function measureLayout(hands: FirstPersonHands, frame: HeroHandsFrame) {
       cardsLeft = cardsBox.left - hostRect.left
       cardsRight = cardsBox.right - hostRect.left
       cardsMidY = (cardsBox.top + cardsBox.bottom) / 2 - hostRect.top
+      cardsTopPx = cardsBox.top - hostRect.top
     }
     const scene = host.closest('.table-scene') ?? host
+    anchors.potHalfW = 0
     for (const selector of ['.pot-display', '.hero-table-bet']) {
       const box = (scene.querySelector(selector) as HTMLElement | null)?.getBoundingClientRect()
       if (box && box.width > 8 && box.right > hostRect.left && box.left < hostRect.right) {
         avoidLeft = Math.min(avoidLeft, box.left - hostRect.left)
         avoidRight = Math.max(avoidRight, box.right - hostRect.left)
+        if (selector === '.pot-display' && box.bottom > hostRect.top && box.top < hostRect.bottom) {
+          // Reaching hands stop short of the pot readout (see clearPotLabel).
+          anchors.potX = ((box.left + box.right) / 2 - hostRect.left) / width * 2 - 1
+          anchors.potHalfW = box.width / width
+          anchors.potBottomY = 1 - ((box.bottom - hostRect.top) / height) * 2
+        }
       }
     }
     const trayEl = host.querySelector('.betting-tray') as HTMLElement | null
@@ -312,6 +321,8 @@ function measureLayout(hands: FirstPersonHands, frame: HeroHandsFrame) {
   const toNdcY = (px: number) => 1 - (px / height) * 2
   anchors.cardsX = clamp(toNdcX((cardsLeft + cardsRight) / 2), -0.4, 0.4)
   anchors.cardsY = clamp(toNdcY(cardsMidY), -0.92, -0.45)
+  anchors.cardsHalfW = clamp((cardsRight - cardsLeft) / width, 0.08, 0.3)
+  anchors.cardsTopY = clamp(cardsTopPx === null ? anchors.cardsY + 0.2 : toNdcY(cardsTopPx), anchors.cardsY + 0.05, -0.2)
   // Dealing: wrists just outside the pot readout / bet label and the hole cards, a hand's width clear.
   const dealClear = 58
   const clearLeftPx = Math.min(cardsLeft, avoidLeft) - dealClear

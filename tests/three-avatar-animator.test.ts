@@ -7,6 +7,7 @@ import {
   FLIP_OFF_SECONDS,
   LIVE_PEEK_MIN_HOLD_SECONDS,
   getFlipOffHand,
+  slapClap,
   updateAvatarAnimator,
   type AvatarAnimatorInput,
 } from '@/components/three/avatarAnimator'
@@ -52,6 +53,31 @@ function input(overrides: Partial<AvatarAnimatorInput> = {}): AvatarAnimatorInpu
     ...overrides,
   }
 }
+
+describe('avatar animator: hand-offs', () => {
+  it('the fold cue hands over to the folded-arms rest without a jump', () => {
+    const state = createAvatarAnimatorState('p-fold')
+    // Folded from the moment the cue starts (the server marks it with the action).
+    computeAvatarTargetPose(state, input({ time: 9, folded: true, cue: 'fold', cueActive: true, cueElapsedMs: 0, actionKey: 'f1' }))
+    const last = computeAvatarTargetPose(state, input({ time: 9.97, folded: true, cue: 'fold', cueActive: true, cueElapsedMs: 975, actionKey: 'f1' }))
+    const end = { r: [...last.handR], l: [...last.handL], chest: last.bones.Chest[0] }
+    const after = computeAvatarTargetPose(state, input({ time: 9.99, folded: true, cue: 'fold', cueActive: false, cueElapsedMs: 990, actionKey: 'f1' }))
+    for (let axis = 0; axis < 3; axis += 1) {
+      expect(Math.abs(after.handR[axis]! - end.r[axis]!)).toBeLessThan(0.03)
+      expect(Math.abs(after.handL[axis]! - end.l[axis]!)).toBeLessThan(0.03)
+    }
+    expect(Math.abs(after.bones.Chest[0] - end.chest)).toBeLessThan(0.05)
+  })
+
+  it('a slow clap swings open slowly and closes fast', () => {
+    expect(slapClap(0.05)).toBe(0)
+    expect(slapClap(0.72)).toBeCloseTo(1, 5)
+    // Opening (0.12 -> 0.72) takes twice as long as closing (0.72 -> 1).
+    expect(slapClap(0.42)).toBeGreaterThan(0.4)
+    expect(slapClap(0.95)).toBeLessThan(0.4)
+    expect(slapClap(1.05)).toBe(slapClap(0.05))
+  })
+})
 
 describe('avatar animator', () => {
   it('rests both hands on the rail when idle', () => {

@@ -53,9 +53,9 @@ const finger = (
   radius,
   curl: { relaxed, fist: [1.5, 1.8, 1.1], open: [-0.06, 0.02, 0], pinch, flutter },
   spread: {
-    relaxed: 0.012 * spreadSign,
+    relaxed: 0.04 * spreadSign,
     fist: -0.03 * spreadSign,
-    open: 0.14 * spreadSign,
+    open: 0.17 * spreadSign,
     pinch: 0.02 * spreadSign,
     flutter: 0.02 * spreadSign,
   },
@@ -67,10 +67,10 @@ const finger = (
  * the relaxed shape: index and middle lift while ring and little finger tuck.
  */
 const FINGERS: FingerSpec[] = [
-  finger(-0.0315, [0.037, 0.023, 0.018], 0.0111, [0.26, 0.46, 0.26], [0.62, 0.95, 0.5], [-0.12, -0.18, -0.08], -1),
-  finger(-0.0105, [0.041, 0.026, 0.019], 0.0113, [0.36, 0.56, 0.3], [0.7, 0.8, 0.45], [-0.06, -0.1, -0.05], -0.35),
-  finger(0.0105, [0.038, 0.024, 0.018], 0.0107, [0.5, 0.64, 0.33], [0.8, 0.85, 0.45], [0.12, 0.1, 0.05], 0.35),
-  finger(0.0305, [0.029, 0.018, 0.016], 0.0094, [0.66, 0.72, 0.36], [0.95, 0.9, 0.4], [0.2, 0.18, 0.1], 1),
+  finger(-0.0315, [0.037, 0.023, 0.018], 0.0111, [0.18, 0.34, 0.2], [0.62, 0.95, 0.5], [-0.12, -0.18, -0.08], -1),
+  finger(-0.0105, [0.041, 0.026, 0.019], 0.0113, [0.24, 0.42, 0.24], [0.7, 0.8, 0.45], [-0.06, -0.1, -0.05], -0.35),
+  finger(0.0105, [0.038, 0.024, 0.018], 0.0107, [0.32, 0.5, 0.26], [0.8, 0.85, 0.45], [0.12, 0.1, 0.05], 0.35),
+  finger(0.0305, [0.029, 0.018, 0.016], 0.0094, [0.42, 0.56, 0.28], [0.95, 0.9, 0.4], [0.2, 0.18, 0.1], 1),
 ]
 
 interface ThumbSpec {
@@ -86,7 +86,7 @@ const THUMB: Record<Shape, ThumbSpec> = {
   relaxed: { yaw: [0.3, -0.16, -0.04], curl: [0.14, 0.22, 0.36] },
   // Wraps over the first two fingers.
   fist: { yaw: [0.2, -0.62, -0.42], curl: [0.28, 0.72, 0.9] },
-  open: { yaw: [0.92, -0.08, 0], curl: [0, 0, 0.02] },
+  open: { yaw: [0.72, -0.06, 0], curl: [0.06, 0.04, 0.06] },
   // The tip meets the index fingertip.
   pinch: { yaw: [0.24, -0.18, -0.02], curl: [0.38, 0.3, 0.3] },
   flutter: { yaw: [0.58, -0.3, -0.1], curl: [0.14, 0.24, 0.36] },
@@ -102,13 +102,19 @@ const tmpB = new THREE.Matrix4()
 
 type Shade = number | ((x: number, y: number, z: number) => number)
 
-function part(geometry: THREE.BufferGeometry, matrix: THREE.Matrix4, mask: readonly [number, number, number], shade: Shade = 1) {
+/**
+ * `ink` scales the silhouette hull on this piece (see createHandHullMaterial):
+ * pieces that sit in a crease (the knuckle ridge, the thumb pads) push it out
+ * less, so it never pokes through the skin there as stray black notches.
+ */
+function part(geometry: THREE.BufferGeometry, matrix: THREE.Matrix4, mask: readonly [number, number, number], shade: Shade = 1, ink = 1) {
   const piece = geometry.clone()
   piece.applyMatrix4(matrix)
   const position = piece.getAttribute('position')
   const count = position.count
   const colors = new Float32Array(count * 3)
   const shades = new Float32Array(count)
+  const inks = new Float32Array(count).fill(ink)
   for (let index = 0; index < count; index += 1) {
     colors[index * 3] = mask[0]
     colors[index * 3 + 1] = mask[1]
@@ -117,21 +123,103 @@ function part(geometry: THREE.BufferGeometry, matrix: THREE.Matrix4, mask: reado
   }
   piece.setAttribute('color', new THREE.BufferAttribute(colors, 3))
   piece.setAttribute('shade', new THREE.BufferAttribute(shades, 1))
+  piece.setAttribute('ink', new THREE.BufferAttribute(inks, 1))
   piece.deleteAttribute('uv')
   return piece
 }
 
-/** A bone from the origin to z = -length (a tapered tube along -Z). */
-function boneGeometry(length: number, radiusStart: number, radiusEnd: number) {
-  const geometry = new THREE.CylinderGeometry(radiusEnd, radiusStart, length, 9, 1, true)
-  // Cylinder axis is Y: lay it along -Z, base (wide end) at the origin.
-  geometry.rotateX(-Math.PI / 2)
-  geometry.translate(0, 0, -length / 2)
+function jointGeometry(radius: number) {
+  return new THREE.SphereGeometry(radius, 9, 7)
+}
+
+/** One cross-section of a swept tube: its frame (the section lies in the frame's XY plane, the tube runs along -Z). */
+interface Ring {
+  m: THREE.Matrix4
+  /** Half-width (x) and half-height (y): fingers are a little wider than they are thick. */
+  rx: number
+  ry: number
+  /** Baked shade on the back (+y) and the pad side (-y) of the section. */
+  top: number
+  under: number
+  /** How much darker the flanks are (0 = none). */
+  side?: number
+  /** Silhouette hull scale at this section (0 where it is buried in a crease; default 1). */
+  ink?: number
+}
+
+const TUBE_SIDES = 10
+const ringPoint = new THREE.Vector3()
+
+/**
+ * A smooth tube through `rings`, closed with a rounded cap after the last one
+ * (`cap` long along the last ring's -Z). One continuous surface per digit, so
+ * the joints bend like skin instead of reading as a string of beads, and the
+ * shared normals give the ink hull a clean silhouette. Same topology for every
+ * shape (the morph targets need it).
+ */
+function tubeGeometry(rings: Ring[], cap: number, mask: readonly [number, number, number]) {
+  const sides = TUBE_SIDES
+  const count = rings.length * sides + 1
+  const positions = new Float32Array(count * 3)
+  const colors = new Float32Array(count * 3)
+  const shades = new Float32Array(count)
+  const inks = new Float32Array(count)
+  let vertex = 0
+  const write = (point: THREE.Vector3, shade: number, ink: number) => {
+    positions[vertex * 3] = point.x
+    positions[vertex * 3 + 1] = point.y
+    positions[vertex * 3 + 2] = point.z
+    colors[vertex * 3] = mask[0]
+    colors[vertex * 3 + 1] = mask[1]
+    colors[vertex * 3 + 2] = mask[2]
+    shades[vertex] = shade
+    inks[vertex] = ink
+    vertex += 1
+  }
+  for (const ring of rings) {
+    for (let side = 0; side < sides; side += 1) {
+      const angle = (side / sides) * Math.PI * 2
+      const up = Math.sin(angle)
+      const across = Math.cos(angle)
+      ringPoint.set(across * ring.rx, up * ring.ry, 0).applyMatrix4(ring.m)
+      // The flanks of a digit sit a shade darker, so neighbouring fingers read as
+      // separate (a painted valley between them) instead of one paddle.
+      const flank = 1 - (ring.side ?? 0) * smoothstep(0.62, 0.98, Math.abs(across))
+      write(ringPoint, (ring.under + (ring.top - ring.under) * smoothstep(-0.55, 0.45, up)) * flank, ring.ink ?? 1)
+    }
+  }
+  const last = rings[rings.length - 1]!
+  ringPoint.set(0, 0, -cap).applyMatrix4(last.m)
+  write(ringPoint, last.top, last.ink ?? 1)
+  const indices: number[] = []
+  for (let ring = 0; ring < rings.length - 1; ring += 1) {
+    for (let side = 0; side < sides; side += 1) {
+      const a = ring * sides + side
+      const d = ring * sides + ((side + 1) % sides)
+      const b = a + sides
+      const c = d + sides
+      indices.push(a, b, c, a, c, d)
+    }
+  }
+  const pole = count - 1
+  const lastStart = (rings.length - 1) * sides
+  for (let side = 0; side < sides; side += 1) indices.push(lastStart + side, pole, lastStart + ((side + 1) % sides))
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+  geometry.setAttribute('shade', new THREE.BufferAttribute(shades, 1))
+  geometry.setAttribute('ink', new THREE.BufferAttribute(inks, 1))
+  geometry.setIndex(indices)
+  geometry.computeVertexNormals()
   return geometry
 }
 
-function jointGeometry(radius: number) {
-  return new THREE.SphereGeometry(radius, 9, 7)
+/** The rounded tip after the last ring: a few shrinking sections so the cap is a dome, not a cone. */
+function pushTipRings(rings: Ring[], end: THREE.Matrix4, rx: number, ry: number, top: number, under: number) {
+  for (const angle of [0.55, 1.0, 1.32]) {
+    const m = end.clone().multiply(tmpB.makeTranslation(0, 0, -Math.sin(angle) * rx * 0.95))
+    rings.push({ m, rx: rx * Math.cos(angle), ry: ry * Math.cos(angle), top, under, side: 0.1 })
+  }
 }
 
 const smoothstep = (edge0: number, edge1: number, value: number) => {
@@ -146,9 +234,15 @@ function palmGeometry() {
   const position = palm.getAttribute('position')
   for (let index = 0; index < position.count; index += 1) {
     const z = position.getZ(index)
-    // 0 at the wrist end, 1 across the knuckles.
-    const t = Math.min(1, Math.max(0, (-z) / 0.1))
-    const width = 0.68 + 0.36 * smoothstep(0.05, 0.85, t)
+    // -1 across the knuckles, +1 at the wrist end.
+    const zn = z / 0.0505
+    // Narrow at the wrist; toward the knuckles the section squares off (an ellipsoid
+    // would taper to a point there and leave the outer finger roots poking out of
+    // its sides, with gaps that show the dark inside of the hull).
+    const front = Math.max(0, -zn)
+    const square = 1 / Math.max(0.5, Math.sqrt(Math.max(0, 1 - front * front)))
+    const width = (0.7 + 0.3 * smoothstep(1, -0.2, zn)) * (1 + 0.8 * (square - 1))
+    position.setY(index, position.getY(index) * (1 + 0.45 * (square - 1)))
     const x = position.getX(index) * width
     // A shallow arch over the metacarpals.
     const arch = 0.0035 * (1 - Math.min(1, Math.abs(x) / 0.045) ** 2)
@@ -180,74 +274,109 @@ function buildShape(shape: Shape): Built {
   pieces.push(part(palmGeometry(), new THREE.Matrix4().makeTranslation(0, -0.002, -0.046), SKIN, underside))
   const thenar = new THREE.SphereGeometry(1, 9, 7)
   thenar.scale(0.0205, 0.0135, 0.031)
-  pieces.push(part(thenar, new THREE.Matrix4().makeTranslation(-0.028, -0.008, -0.036), SKIN, 0.86))
+  pieces.push(part(thenar, new THREE.Matrix4().makeTranslation(-0.028, -0.008, -0.036), SKIN, 0.86, 0.6))
   const hypothenar = new THREE.SphereGeometry(1, 8, 6)
   hypothenar.scale(0.0135, 0.0105, 0.028)
-  pieces.push(part(hypothenar, new THREE.Matrix4().makeTranslation(0.031, -0.007, -0.04), SKIN, 0.86))
+  pieces.push(part(hypothenar, new THREE.Matrix4().makeTranslation(0.031, -0.007, -0.04), SKIN, 0.86, 0.6))
+  // One smooth ridge across the knuckles fills the web between the finger roots (separate
+  // knuckle balls left dark notches there that read as dirt, not as fingers).
+  const knuckles = new THREE.SphereGeometry(1, 14, 7)
+  knuckles.scale(0.0435, 0.0128, 0.0145)
+  pieces.push(part(knuckles, new THREE.Matrix4().makeTranslation(-0.001, 0.0005, PALM_END + 0.003).multiply(tmpB.makeRotationY(-0.06)), SKIN, (_x, y) => (y < -0.004 ? 0.86 : 0.98), 0.35))
 
-  // Fingers: three tapered bones with a ball at each joint, a visible knuckle on the back of the hand.
+  // Fingers: one smooth tube each, swept through the three joints (each joint's
+  // section turned half-way between the bones it joins, so the bend is a curve),
+  // slightly flattened sections and a
+  // domed tip. Each finger tapers from the knuckle to the tip.
   FINGERS.forEach((spec, fingerIndex) => {
     const chain = new THREE.Matrix4().makeTranslation(spec.x, 0, PALM_END)
     chain.multiply(tmpB.makeRotationY(spec.spread[shape]))
-    const knuckle = jointGeometry(spec.radius * 1.2)
-    pieces.push(part(knuckle, new THREE.Matrix4().makeTranslation(spec.x, 0.0035, PALM_END + 0.004), SKIN, 0.98))
-    knuckle.dispose()
+    const r = spec.radius
+    // Width / thickness of the section along the finger: knuckle, mid-phalanges, the two finger joints, the tip.
+    const radiusAt = (u: number) => r * (1 - 0.2 * u + 0.035 * Math.max(0, 1 - Math.abs(u - 0.47) / 0.08) + 0.03 * Math.max(0, 1 - Math.abs(u - 0.78) / 0.07))
+    const total = spec.lengths[0]! + spec.lengths[1]! + spec.lengths[2]!
+    const rings: Ring[] = []
+    // Buried root inside the palm, so the finger grows out of it without a seam.
+    rings.push({ m: chain.clone().multiply(tmpB.makeTranslation(0, -0.002, 0.022)), rx: r * 1.12, ry: r * 0.86, top: 0.97, under: 0.84, ink: 0 })
+    let along = 0
     for (let joint = 0; joint < 3; joint += 1) {
-      chain.multiply(tmpB.makeRotationX(-curlOf(spec, joint)))
-      const r0 = spec.radius * (1 - joint * 0.07)
-      const r1 = spec.radius * (1 - (joint + 1) * 0.07 - (joint === 2 ? 0.14 : 0))
-      const rootShade = joint === 0 ? 0.9 : joint === 1 ? 0.96 : 1
-      const joinBall = jointGeometry(r0 * 1.0)
-      pieces.push(part(joinBall, chain, SKIN, rootShade))
-      joinBall.dispose()
-      const bone = boneGeometry(spec.lengths[joint]!, r0, r1)
-      pieces.push(part(bone, chain, SKIN, rootShade))
-      bone.dispose()
-      chain.multiply(tmpB.makeTranslation(0, 0, -spec.lengths[joint]!))
+      const curl = curlOf(spec, joint)
+      const length = spec.lengths[joint]!
+      const u0 = along / total
+      const root = joint === 0 ? 0.93 : 1
+      // The joint section, turned half-way into the bend.
+      const half = chain.clone().multiply(tmpB.makeRotationX(-curl / 2))
+      rings.push({ m: half, rx: radiusAt(u0) * 1.1, ry: radiusAt(u0) * 0.9, top: root, under: 0.86, side: joint === 0 ? 0.12 : 0.26, ink: joint === 0 ? 0.35 : 1 })
+      chain.multiply(tmpB.makeRotationX(-curl))
+      for (const f of [0.34, 0.68]) {
+        const u = (along + length * f) / total
+        rings.push({ m: chain.clone().multiply(tmpB.makeTranslation(0, 0, -length * f)), rx: radiusAt(u) * 1.08, ry: radiusAt(u) * 0.86, top: 1, under: 0.88, side: 0.26, ink: joint === 0 && f < 0.5 ? 0.8 : 1 })
+      }
+      chain.multiply(tmpB.makeTranslation(0, 0, -length))
+      along += length
     }
-    const tip = jointGeometry(spec.radius * 0.62)
-    pieces.push(part(tip, chain, SKIN))
-    tip.dispose()
-    if (fingerIndex === 0) fingertip.setFromMatrixPosition(chain)
+    const tipRx = radiusAt(1) * 1.06
+    const tipRy = radiusAt(1) * 0.84
+    rings.push({ m: chain.clone(), rx: tipRx, ry: tipRy, top: 1, under: 0.9, side: 0.2 })
+    pushTipRings(rings, chain, tipRx, tipRy, 1, 0.92)
+    const tube = tubeGeometry(rings, tipRx * 0.95 * (1 - Math.sin(1.32)) + 0.0005, SKIN)
+    pieces.push(tube)
+    if (fingerIndex === 0) fingertip.setFromMatrixPosition(chain.clone().multiply(tmpB.makeTranslation(0, 0, -tipRx * 0.5)))
   })
 
-  // Thumb: metacarpal along the edge of the palm, then two phalanges that rest beside the index finger.
+  // Thumb: the same kind of tube, from inside the thenar pad (metacarpal along
+  // the edge of the palm) through two phalanges that rest beside the index finger.
   const thumb = THUMB[shape]
   const chain = new THREE.Matrix4().makeTranslation(THUMB_BASE.x, THUMB_BASE.y, THUMB_BASE.z)
+  const thumbRings: Ring[] = []
+  thumbRings.push({ m: chain.clone().multiply(tmpB.makeRotationY(thumb.yaw[0]!)).multiply(tmpB.makeTranslation(0, 0, 0.012)), rx: THUMB_RADII[0] * 1.05, ry: THUMB_RADII[0] * 0.92, top: 0.92, under: 0.84, ink: 0 })
   for (let joint = 0; joint < 3; joint += 1) {
+    const r0 = THUMB_RADII[joint]!
+    const half = chain.clone().multiply(tmpB.makeRotationY(thumb.yaw[joint]! / 2)).multiply(tmpB.makeRotationX(-thumb.curl[joint]! / 2))
+    if (joint > 0) thumbRings.push({ m: half, rx: r0 * 1.06, ry: r0 * 0.92, top: 0.98, under: 0.88 })
     chain.multiply(tmpB.makeRotationY(thumb.yaw[joint]!))
     chain.multiply(tmpB.makeRotationX(-thumb.curl[joint]!))
-    const r0 = THUMB_RADII[joint]!
-    const r1 = joint === 2 ? r0 * 0.82 : THUMB_RADII[joint + 1]!
-    const joinBall = jointGeometry(r0 * 1.05)
-    pieces.push(part(joinBall, chain, SKIN, joint === 0 ? 0.9 : 0.98))
-    joinBall.dispose()
-    const bone = boneGeometry(THUMB_LENGTHS[joint]!, r0, r1)
-    pieces.push(part(bone, chain, SKIN, joint === 0 ? 0.9 : 0.98))
-    bone.dispose()
-    chain.multiply(tmpB.makeTranslation(0, 0, -THUMB_LENGTHS[joint]!))
+    const length = THUMB_LENGTHS[joint]!
+    const r1 = joint === 2 ? r0 * 0.84 : THUMB_RADII[joint + 1]!
+    for (const f of [0.3, 0.68]) {
+      const rr = r0 + (r1 - r0) * f
+      // The metacarpal is mostly pad: wide and low.
+      const flat = joint === 0 ? 0.86 : 0.9
+      thumbRings.push({ m: chain.clone().multiply(tmpB.makeTranslation(0, 0, -length * f)), rx: rr * 1.06, ry: rr * flat, top: joint === 0 ? 0.92 : 0.99, under: 0.86, ink: joint === 0 ? (f < 0.5 ? 0.45 : 0.75) : 1 })
+    }
+    chain.multiply(tmpB.makeTranslation(0, 0, -length))
   }
-  const thumbCap = jointGeometry(THUMB_RADII[2] * 0.82)
-  pieces.push(part(thumbCap, chain, SKIN))
-  thumbCap.dispose()
-  thumbTip.setFromMatrixPosition(chain)
+  const thumbTipR = THUMB_RADII[2] * 0.84
+  thumbRings.push({ m: chain.clone(), rx: thumbTipR * 1.04, ry: thumbTipR * 0.88, top: 1, under: 0.9 })
+  pushTipRings(thumbRings, chain, thumbTipR * 1.04, thumbTipR * 0.88, 1, 0.92)
+  pieces.push(tubeGeometry(thumbRings, thumbTipR * 1.04 * 0.95 * (1 - Math.sin(1.32)) + 0.0005, SKIN))
+  thumbTip.setFromMatrixPosition(chain.clone().multiply(tmpB.makeTranslation(0, 0, -thumbTipR * 0.5)))
 
   // Wrist, a shirt cuff and a jacket sleeve run back toward the lens (+Z) and out of the bottom of the view.
   // After the turn a cylinder's top is the +Z (lens) end: the sleeve widens toward the camera.
-  const alongZ = (length: number, radiusNear: number, radiusFar: number, start: number, radial: number) => {
+  // Every section is an oval (wider than it is deep), like a real wrist and forearm.
+  const alongZ = (length: number, radiusNear: number, radiusFar: number, start: number, radial: number, depth: number) => {
     const geometry = new THREE.CylinderGeometry(radiusFar, radiusNear, length, radial, 1, false)
     geometry.rotateX(Math.PI / 2)
-    geometry.translate(0, 0, start + length / 2)
+    geometry.scale(1, depth, 1)
+    geometry.translate(0, -0.002, start + length / 2)
     return geometry
   }
-  const wrist = alongZ(0.07, 0.026, 0.029, 0, 12)
-  pieces.push(part(wrist, identity, SKIN, 0.95))
-  wrist.dispose()
-  const cuff = alongZ(0.036, 0.0315, 0.0325, 0.05, 14)
+  // The wrist: a smooth oval tube from inside the heel of the hand to inside the cuff,
+  // a little narrower than the palm and filling out toward the forearm (rings run from the
+  // cuff toward the hand, the direction tubeGeometry sweeps in).
+  const wristRing = (z: number, rx: number, ry: number, ink = 1): Ring => ({ m: new THREE.Matrix4().makeTranslation(0, -0.002, z), rx, ry, top: 0.95, under: 0.86, ink })
+  pieces.push(tubeGeometry([
+    wristRing(0.07, 0.0328, 0.0228),
+    wristRing(0.035, 0.0312, 0.0212),
+    wristRing(0.006, 0.0298, 0.0196, 0.8),
+    wristRing(-0.022, 0.028, 0.0165, 0),
+  ], 0, SKIN))
+  const cuff = alongZ(0.036, 0.0352, 0.0362, 0.05, 16, 0.76)
   pieces.push(part(cuff, identity, CUFF, 0.98))
   cuff.dispose()
   // The sleeve darkens with distance so it sinks into the shadow at the bottom of the view.
-  const sleeve = alongZ(0.62, 0.0405, 0.058, 0.082, 16)
+  const sleeve = alongZ(0.62, 0.0445, 0.064, 0.082, 18, 0.8)
   pieces.push(part(sleeve, identity, SLEEVE, (_x, _y, z) => 0.96 - 0.62 * smoothstep(0.09, 0.62, z)))
   sleeve.dispose()
 
@@ -379,6 +508,9 @@ export function createCelMaterial(color: THREE.ColorRepresentation): THREE.MeshT
   return material
 }
 
+/** Depth push of the hull (metres): see createHandHullMaterial. */
+export const HULL_DEPTH_BACK = 0.0035
+
 /** The avatars' ink colour (#120a07). */
 export const HAND_INK_COLOR = '#120a07'
 
@@ -386,6 +518,8 @@ export interface HandHullMaterial {
   material: THREE.MeshBasicMaterial
   /** How far the hull is pushed out along the normals (hand-space units). */
   width: { value: number }
+  /** How far the hull's depth is pushed back from the lens (metres), so contacts between digits stay un-inked. */
+  back: { value: number }
 }
 
 /**
@@ -396,17 +530,26 @@ export interface HandHullMaterial {
  */
 export function createHandHullMaterial(): HandHullMaterial {
   const width = { value: 0.002 }
+  const back = { value: HULL_DEPTH_BACK }
   const material = new THREE.MeshBasicMaterial({ color: HAND_INK_COLOR, side: THREE.BackSide, fog: false })
   material.onBeforeCompile = shader => {
     shader.uniforms.uHullWidth = width
+    shader.uniforms.uHullBack = back
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float uHullWidth;')
+      .replace('#include <common>', '#include <common>\nuniform float uHullWidth;\nuniform float uHullBack;\nattribute float ink;')
       .replace('#include <begin_vertex>', '#include <beginnormal_vertex>\n#include <morphnormal_vertex>\n#include <begin_vertex>')
-      .replace('#include <morphtarget_vertex>', '#include <morphtarget_vertex>\n  transformed += normalize(objectNormal) * uHullWidth;')
+      .replace('#include <morphtarget_vertex>', '#include <morphtarget_vertex>\n  transformed += normalize(objectNormal) * uHullWidth * ink;')
+      // Depth only, a few millimetres back: where the hull of one digit cuts into a
+      // neighbour it is touching (thumb against the index, curled fingers in a fist) the
+      // skin wins, so only real outlines stay inked, never stray notches.
+      .replace(
+        '#include <project_vertex>',
+        '#include <project_vertex>\n  vec4 hullBack = projectionMatrix * vec4(mvPosition.xy, mvPosition.z - uHullBack, 1.0);\n  gl_Position.z = hullBack.z / hullBack.w * gl_Position.w;'
+      )
   }
   material.name = 'first-person-hand-ink'
-  material.customProgramCacheKey = () => 'first-person-hand-hull-v1'
-  return { material, width }
+  material.customProgramCacheKey = () => 'first-person-hand-hull-v3'
+  return { material, width, back }
 }
 
 /**

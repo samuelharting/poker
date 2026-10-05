@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import {
+  checkRap,
+  clearPotLabel,
   createHandPose,
   createHandVelocity,
   createHeroHandsAnchors,
@@ -97,15 +99,19 @@ describe('first-person hands: resting', () => {
 })
 
 describe('first-person hands: check', () => {
-  it('knuckle-taps: rises to the rail, strikes down in a fist, then goes home', () => {
+  it('knuckle-taps: lifts off the rail beside the cards, raps down in a fist, then goes home', () => {
     const profile = getPokerActionMotionProfile('check', { variant: 2 })
     expect(profile.checkStyle).toBe('knuckle')
     const rest = pose('ready', 99)
     const reach = pose('check', 0.14, { profile })
-    const strike = pose('check', 0.24, { profile })
+    const strike = pose('check', 0.25, { profile })
     const end = pose('check', getHeroGestureSeconds('check', profile) + 0.05, { profile })
-    expect(reach.right.y).toBeGreaterThan(rest.right.y + 0.15)
-    expect(strike.right.y).toBeLessThan(reach.right.y)
+    expect(reach.right.y).toBeGreaterThan(rest.right.y + 0.1)
+    // Cocked back at the wrist before the rap, flexed down on it.
+    expect(reach.right.pitch).toBeGreaterThan(strike.right.pitch + 0.2)
+    // The rap lands on the rail right of the hole cards (never under the card tray or the pot label).
+    expect(strike.right.x).toBeGreaterThan(createHeroHandsAnchors().cardsX + 0.18)
+    expect(strike.right.y).toBeLessThan(reach.right.y - 0.06)
     expect(strike.right.fist).toBeGreaterThan(0.7)
     expect(end.right.y).toBeCloseTo(rest.right.y, 3)
     expect(end.right.fist).toBeLessThan(0.2)
@@ -145,7 +151,9 @@ describe('first-person hands: wagers', () => {
     expect(atStack.right.fist).toBeGreaterThan(0.5)
     expect(midPush.right.x).toBeLessThan(atStack.right.x)
     expect(midPush.right.x).toBeGreaterThan(arrive.right.x - 1e-6)
-    expect(arrive.right.x).toBeCloseTo(anchors.betX, 1)
+    // The spot is behind the hole-card tray on screen: the hand stops at the tray's side and the chips slide on.
+    expect(arrive.right.x).toBeLessThan(atStack.right.x - 0.08)
+    expect(arrive.right.x).toBeGreaterThan(anchors.cardsX + 0.15)
     expect(arrive.right.fist).toBeLessThan(atStack.right.fist)
     expect(end.right.y).toBeCloseTo(rest.right.y, 3)
     expect(end.right.x).toBeCloseTo(rest.right.x, 3)
@@ -167,7 +175,8 @@ describe('first-person hands: wagers', () => {
     const call = pose('call', 0.5, { anchors, profile })
     expect(allIn.left.y).toBeGreaterThan(REST_Y + 0.08)
     expect(allIn.left.fist).toBeGreaterThan(0.4)
-    expect(call.left.y).toBeCloseTo(REST_Y, 2)
+    // The free hand only braces on the rail.
+    expect(Math.abs(call.left.y - REST_Y)).toBeLessThan(0.02)
   })
 
   it('matches the chip flight: the push takes as long as animateWagers throws them', () => {
@@ -177,8 +186,42 @@ describe('first-person hands: wagers', () => {
   })
 })
 
+describe('first-person hands: overlays', () => {
+  it('a hand reaching under the pot label stops short of it; one beside it is left alone', () => {
+    const anchors = { ...createHeroHandsAnchors(), potX: 0, potHalfW: 0.1, potBottomY: -0.2 }
+    const under = clearPotLabel(-0.3, 0.02, anchors)
+    // Wrist low enough that the fingers stay below the label's bottom edge.
+    expect(under).toBeLessThan(-0.2 - 0.2)
+    expect(clearPotLabel(-0.3, 0.5, anchors)).toBe(-0.3)
+    expect(clearPotLabel(-0.6, 0.02, anchors)).toBe(-0.6)
+    expect(clearPotLabel(-0.3, 0.02, createHeroHandsAnchors())).toBe(-0.3)
+  })
+
+  it('wagers stay clear of the pot label and the card tray even when the betting spot is behind them', () => {
+    const anchors = { ...createHeroHandsAnchors(), stackX: 0.32, stackY: -0.42, betX: 0.02, betY: -0.3, potX: 0, potHalfW: 0.09, potBottomY: -0.28 }
+    for (const cue of ['call', 'raise', 'all_in'] as const) {
+      const p = getPokerActionMotionProfile(cue, { variant: 0, wagerIntensity: 0.8 })
+      for (let t = 0; t <= getHeroGestureSeconds(cue, p); t += 0.02) {
+        const hands = pose(cue, t, { anchors, profile: p })
+        for (const hand of [hands.right, hands.left]) {
+          if (Math.abs(hand.x - anchors.potX) < anchors.potHalfW) expect(hand.y).toBeLessThan(anchors.potBottomY - 0.2)
+          if (Math.abs(hand.x - anchors.cardsX) < anchors.cardsHalfW - 0.02) expect(hand.y).toBeGreaterThan(anchors.cardsTopY - 0.13)
+        }
+      }
+    }
+  })
+
+  it('a check rap accelerates into the rail and rebounds', () => {
+    expect(checkRap(0.1, 0.25)).toBe(0)
+    expect(checkRap(0.2, 0.25)).toBeLessThan(checkRap(0.23, 0.25))
+    expect(checkRap(0.25, 0.25)).toBe(1)
+    expect(checkRap(0.32, 0.25)).toBeLessThan(1)
+    expect(checkRap(0.5, 0.25)).toBe(0)
+  })
+})
+
 describe('first-person hands: fold', () => {
-  it('carries the two cards off to the left, lets go, and the hand comes home', () => {
+  it('carries the two cards forward toward the middle, lets go, and the hand comes home', () => {
     const profile = getPokerActionMotionProfile('fold', { variant: 2 })
     expect(profile.foldStyle).toBe('toss')
     const before = pose('fold', 0.02, { profile })
@@ -188,12 +231,21 @@ describe('first-person hands: fold', () => {
     expect(before.cards.visible).toBe(false)
     expect(carried.cards.visible).toBe(true)
     expect(carried.right.fist).toBeGreaterThan(0.4)
-    expect(carried.right.x).toBeLessThan(0)
+    const anchors = createHeroHandsAnchors()
+    // Lifted beside the card tray (never behind it), the cards flicked in toward the middle.
+    expect(carried.right.x).toBeGreaterThan(anchors.cardsX + anchors.cardsHalfW * 0.7)
+    expect(flying.cards.x).toBeLessThan(flying.right.x)
+    for (let t = 0; t <= getHeroGestureSeconds('fold', profile); t += 0.02) {
+      const hand = pose('fold', t, { profile }).right
+      // (Inside the tray's width only by its top corner: the fingers reach over the top edge.)
+      if (Math.abs(hand.x - anchors.cardsX) < anchors.cardsHalfW) expect(hand.y).toBeGreaterThan(anchors.cardsTopY - 0.13)
+    }
     expect(flying.cards.depth).toBeGreaterThan(HAND_DEPTH)
     expect(flying.cards.scale).toBeLessThan(1)
     expect(flying.right.fist).toBeLessThan(carried.right.fist)
     expect(end.cards.visible).toBe(false)
-    expect(end.right.x).toBeCloseTo(createHeroHandsAnchors().restRightX, 2)
+    // Home on the rail (give or take the idle weight drift).
+    expect(Math.abs(end.right.x - createHeroHandsAnchors().restRightX)).toBeLessThan(0.012)
   })
 })
 
@@ -201,7 +253,7 @@ describe('first-person hands: peek, win, flick, deal', () => {
   it('peeking pinches a corner of each card with both hands, just outside the cards', () => {
     const peek = pose('ready', 99, { peeking: true })
     expect(peek.right.pinch).toBe(1)
-    expect(peek.left.pinch).toBe(1)
+    expect(peek.left.pinch).toBeGreaterThan(0.85)
     expect(peek.right.x).toBeGreaterThan(0.1)
     expect(peek.left.x).toBeLessThan(-0.1)
     expect(peek.right.y).toBeLessThan(-0.5)

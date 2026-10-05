@@ -515,6 +515,19 @@ function smoothStep(value: number) {
   return clamped * clamped * (3 - 2 * clamped)
 }
 
+/**
+ * How far apart clapping hands are (0 = together, 1 = wide) over a beat: they
+ * touch, swing open slowly, then come together fast (accelerating into the
+ * clap), so each clap lands with a hit instead of a sine-wave wobble.
+ */
+export function slapClap(phase: number) {
+  const p = positiveModulo(phase, 1)
+  if (p < 0.12) return 0
+  if (p < 0.72) return smoothStep((p - 0.12) / 0.6)
+  const q = (p - 0.72) / 0.28
+  return 1 - q * q
+}
+
 /** Rises over `attack`, holds, then falls over `release` within `duration`. */
 function envelope(elapsed: number, duration: number, attack: number, release: number) {
   if (elapsed < 0 || elapsed > duration) return 0
@@ -1186,6 +1199,8 @@ export function computeAvatarTargetPose(
     pose.cardLift = Math.max(pose.cardLift, lift)
   }
 
+  // How far the fold cue has handed over to the folded-arms rest (section 8 draws it).
+  let foldHandoff = 0
   // 7. The action itself, choreographed against real table spots: reach to
   // the chip stack, push chips to the bet line, knuckle-tap the felt, flick the
   // cards to the muck, or shove the whole stack in with both hands.
@@ -1356,15 +1371,16 @@ export function computeAvatarTargetPose(
         handShape(pose, 'R', 'card', reach * (1 - flick) * (1 - back))
         handShape(pose, 'R', 'flickSnap', flick * (1 - back) * 0.9)
         handFrame(pose, 'R', reach * (1 - back), 0.1, -0.08 + 0.32 * cock - 0.42 * flick, 0.15)
-        // Lean back into the folded-arms rest the fold state holds afterwards.
-        blendTo(pose.handR, FOLD_HAND_R(anchors), back * 0.8)
-        blendTo(pose.handL, FOLD_HAND_L(anchors), back * 0.8)
-        handShape(pose, 'R', 'loose', back * 0.5)
-        handShape(pose, 'L', 'loose', back * 0.5)
-        add(bones.Chest, 0.08 * reach * (1 - back) + 0.04 * cock - 0.14 * back, -0.06 * back, 0)
+        // Lean back into the folded-arms rest: section 8 draws it (the same pose the
+        // fold state holds afterwards), so the end of the cue hands over without a pop.
+        foldHandoff = back
+        if (!input.folded) {
+          // (Not marked folded yet: settle back toward the rail instead.)
+          handShape(pose, 'R', 'loose', back * 0.5)
+        }
+        add(bones.Chest, 0.08 * reach * (1 - back) + 0.04 * cock, 0, 0)
         const disgust = clamp01((input.tableHeat - 0.2) / 0.4) * envelope(t - 0.5, 0.5, 0.08, 0.15) * motion
-        add(bones.Head, 0.05 - 0.08 * back, -0.2 * back + 0.2 * Math.sin((t - 0.5) * 38) * disgust, 0.05 * back)
-        pose.bodyPosition[2] += 0.07 * back
+        add(bones.Head, 0.05 * (1 - back), 0.2 * Math.sin((t - 0.5) * 38) * disgust, 0)
         break
       }
       default:
@@ -1612,8 +1628,8 @@ export function computeAvatarTargetPose(
   }
 
   // 8. Folded: sit back and fold the arms, eyes drifting off the action.
-  if (input.folded && !input.cueActive && !input.winner) {
-    const settle = smoothStep((time - state.foldedSince) / 0.9)
+  if (input.folded && (!input.cueActive || input.cue === 'fold') && !input.winner) {
+    const settle = smoothStep((time - state.foldedSince) / 0.9) * (input.cueActive ? foldHandoff : 1)
     add(bones.Chest, -0.16, 0, 0, settle)
     add(bones.Torso, -0.06, 0.08, 0, settle)
     add(bones.Head, 0.1, -0.12, 0.04, settle)
@@ -1893,11 +1909,16 @@ export function computeAvatarTargetPose(
         break
       }
       case 'slow_clap': {
-        const clap = (0.5 + 0.5 * Math.sin(time * 5.4 + seed)) * motion
-        // Hands meet out in front of the chest (never crossing).
-        blendTo(pose.handR, offset(anchors.chest, 0.045 + 0.11 * clap, 0.1, -0.42), rise)
-        blendTo(pose.handL, offset(anchors.chest, -0.045 - 0.11 * clap, 0.1, -0.42), rise)
-        add(bones.Head, 0.05 * clap, 0, 0, rise)
+        // A deliberate, sarcastic clap: the hands swing open slowly and come together
+        // fast, a beat each (slapClap), out in front of the chest and below the chin so
+        // the face stays clear. Wide enough apart between beats that the clap reads.
+        const clap = slapClap(time * 0.68 + seed) * motion
+        const meet = 1 - clap
+        blendTo(pose.handR, offset(anchors.chest, 0.05 + 0.15 * clap, -0.04 + 0.03 * clap, -0.4), rise)
+        blendTo(pose.handL, offset(anchors.chest, -0.05 - 0.15 * clap, -0.04 + 0.03 * clap, -0.4), rise)
+        // The head dips on each clap.
+        add(bones.Head, 0.06 * meet * meet * meet, 0, 0, rise)
+        add(bones.Chest, 0.02 * meet, 0, 0, rise)
         pose.fingerCurlR = 0.12
         pose.fingerCurlL = 0.12
         handShape(pose, 'R', 'clap', rise)
