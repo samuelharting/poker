@@ -301,8 +301,13 @@ export interface HandColors {
 /** Outline thickness in render pixels (the avatars' ink line at this size). */
 const INK_PIXELS = 1.05
 
-/** The cel look (three tones, warm shadow, soft rim, pixel-wide ink), after the colour is known. */
-const CEL_FRAGMENT = `#include <opaque_fragment>
+/**
+ * The cel look (three tones, warm shadow, soft rim), after the colour is known.
+ * `ink` adds a pixel-wide outline from the surface normal (flat one-piece meshes
+ * only: on the multi-segment hand it also inks every joint, so the hands get a
+ * hull outline instead).
+ */
+const celFragment = (ink: boolean) => `#include <opaque_fragment>
   {
     vec3 handN = normalize(vNormal);
     vec3 handV = normalize(vViewPosition);
@@ -318,12 +323,12 @@ const CEL_FRAGMENT = `#include <opaque_fragment>
     // A soft rim lifts the sleeve and fingers off the dark rail.
     float handFacing = clamp(abs(dot(handN, handV)), 0.0, 1.0);
     handColor += handAlbedo * pow(1.0 - handFacing, 3.0) * 0.1;
-    // Constant-width ink outline: handFacing^2 falls off linearly in screen space toward a silhouette.
+${ink ? `    // Constant-width ink outline: handFacing^2 falls off linearly in screen space toward a silhouette.
     float handQ = handFacing * handFacing;
     float handEdgePx = handQ / max(fwidth(handQ), 1e-4);
     float handInk = 1.0 - smoothstep(uInkPixels - 0.9, uInkPixels + 0.6, handEdgePx);
     handColor = mix(handColor, vec3(0.07, 0.04, 0.03), handInk);
-    gl_FragColor = vec4(handColor, diffuseColor.a);
+` : ''}    gl_FragColor = vec4(handColor, diffuseColor.a);
   }`
 
 /**
@@ -352,9 +357,9 @@ export function createHandMaterial(colors: HandColors): THREE.MeshToonMaterial {
         '#include <common>\nuniform vec3 uSkin;\nuniform vec3 uSleeve;\nuniform vec3 uCuff;\nuniform float uInkPixels;\nvarying float vShade;'
       )
       .replace('#include <color_fragment>', 'diffuseColor.rgb = vColor.r * uSkin + vColor.g * uSleeve + vColor.b * uCuff;')
-      .replace('#include <opaque_fragment>', CEL_FRAGMENT)
+      .replace('#include <opaque_fragment>', celFragment(false))
   }
-  material.customProgramCacheKey = () => 'first-person-hand-v2'
+  material.customProgramCacheKey = () => 'first-person-hand-v3'
   return material
 }
 
@@ -368,8 +373,47 @@ export function createCelMaterial(color: THREE.ColorRepresentation): THREE.MeshT
     shader.uniforms.uInkPixels = { value: INK_PIXELS }
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\nuniform float uInkPixels;\nconst float vShade = 1.0;')
-      .replace('#include <opaque_fragment>', CEL_FRAGMENT)
+      .replace('#include <opaque_fragment>', celFragment(true))
   }
   material.customProgramCacheKey = () => 'first-person-cel-v1'
   return material
+}
+
+/** The avatars' ink colour (#120a07). */
+export const HAND_INK_COLOR = '#120a07'
+
+export interface HandHullMaterial {
+  material: THREE.MeshBasicMaterial
+  /** How far the hull is pushed out along the normals (hand-space units). */
+  width: { value: number }
+}
+
+/**
+ * The hand's silhouette ink: the same geometry again, pushed out along its
+ * (morphed) normals and drawn back-faces only, like the avatars' inverted-hull
+ * outline. Only the outer silhouette shows, so there are no ink lines at the
+ * joints between finger segments. One extra draw call per hand.
+ */
+export function createHandHullMaterial(): HandHullMaterial {
+  const width = { value: 0.002 }
+  const material = new THREE.MeshBasicMaterial({ color: HAND_INK_COLOR, side: THREE.BackSide, fog: false })
+  material.onBeforeCompile = shader => {
+    shader.uniforms.uHullWidth = width
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uHullWidth;')
+      .replace('#include <begin_vertex>', '#include <beginnormal_vertex>\n#include <morphnormal_vertex>\n#include <begin_vertex>')
+      .replace('#include <morphtarget_vertex>', '#include <morphtarget_vertex>\n  transformed += normalize(objectNormal) * uHullWidth;')
+  }
+  material.name = 'first-person-hand-ink'
+  material.customProgramCacheKey = () => 'first-person-hand-hull-v1'
+  return { material, width }
+}
+
+/**
+ * Hull push-out (hand-space units) that draws an ink line `pixels` wide on
+ * screen for a hand drawn `depth` metres from the lens.
+ */
+export function getHullWidth(pixels: number, renderHeightPx: number, depth: number, tanHalfFov: number): number {
+  const pixelsPerMetre = renderHeightPx / (2 * Math.max(0.05, depth) * tanHalfFov)
+  return pixels / (pixelsPerMetre * HAND_SCALE)
 }

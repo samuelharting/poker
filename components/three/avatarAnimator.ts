@@ -489,11 +489,11 @@ const FOLD_HAND_L = (anchors: AvatarAnchors): Vec3 => offset(anchors.chest, 0.21
  * raises the elbows (pose.elbowUp) so the forearms frame the head instead of
  * crossing the face.
  */
-function behindHead(anchors: AvatarAnchors, side: 1 | -1): Vec3 {
-  // Wrists at the back corners of the skull (below any hat brim), not on
-  // top of the head; the renderer carries the target along with the live
-  // head as the player leans back.
-  return offset(anchors.chin, 0.15 * side, 0.15, 0.4)
+function behindHead(anchors: AvatarAnchors, side: 1 | -1, hat = false): Vec3 {
+  // Wrists on the back of the skull, close to the midline so the fingers meet there (below any
+  // hat brim: a hat lowers them), not on top of the head and not floating behind it; the
+  // renderer carries the target along with the live head as the player leans back.
+  return offset(anchors.chin, 0.1 * side, hat ? 0.1 : 0.19, 0.52)
 }
 
 /**
@@ -1410,8 +1410,11 @@ export function computeAvatarTargetPose(
         // ...with a wide yawn through the middle of it (the face rig reads state.yawn).
         state.yawn = yawnAmount(elapsed) * Math.min(1, w * 2)
         const reachUp = smoothStep((elapsed - 0.35) / 0.6) * w
-        blendTo(pose.handR, offset(anchors.shoulderR, 0.06, 0.66 + 0.06 * reachUp, 0.08), w)
-        blendTo(pose.handL, offset(anchors.shoulderL, -0.06, 0.66 + 0.06 * reachUp, 0.08), w)
+        // (Reaching a little higher and wider in a hat, so the hands clear its crown and brim.)
+        const hatLift = input.headwear === 'hat' ? 0.15 : 0
+        const hatSpread = input.headwear === 'hat' ? 0.1 : 0
+        blendTo(pose.handR, offset(anchors.shoulderR, 0.06 + hatSpread, 0.66 + hatLift + 0.06 * reachUp, 0.08), w)
+        blendTo(pose.handL, offset(anchors.shoulderL, -0.06 - hatSpread, 0.66 + hatLift + 0.06 * reachUp, 0.08), w)
         aroundHead(pose.handR, w, 1)
         aroundHead(pose.handL, w, -1)
         pose.elbowUp = Math.max(pose.elbowUp, w)
@@ -1427,9 +1430,10 @@ export function computeAvatarTargetPose(
         handFrame(pose, 'L', w, -0.1, 1.3, 1.9)
         break
       }
-      case 1: // lean back, hands laced behind the head, elbows up and out
-        blendTo(pose.handR, behindHead(anchors, 1), w)
-        blendTo(pose.handL, behindHead(anchors, -1), w)
+      case 1: { // lean back, hands laced behind the head, elbows up and out
+        const hat = input.headwear === 'hat'
+        blendTo(pose.handR, behindHead(anchors, 1, hat), w)
+        blendTo(pose.handL, behindHead(anchors, -1, hat), w)
         aroundHead(pose.handR, w, 1)
         aroundHead(pose.handL, w, -1)
         pose.elbowUp = Math.max(pose.elbowUp, w)
@@ -1438,10 +1442,15 @@ export function computeAvatarTargetPose(
         pose.fingerCurlL = pose.fingerCurlL * (1 - w) + 0.5 * w
         handShape(pose, 'R', 'grab', w * 0.85)
         handShape(pose, 'L', 'grab', w * 0.85)
+        // Palms on the back of the head, fingers pointing up and in toward the other hand (tipped
+        // inward under a hat's brim instead of up into it).
+        handFrame(pose, 'R', w, 0.5, hat ? 0.85 : 1.3, 0.1)
+        handFrame(pose, 'L', w, 0.5, hat ? 0.85 : 1.3, 0.1)
         add(bones.Chest, -0.22, 0, 0, w)
         add(bones.Head, -0.08, 0.05, 0, w)
         pose.bodyPosition[2] += 0.1 * w
         break
+      }
       case 2: { // interlace and crack the knuckles
         const pushOut = Math.sin(clamp01((elapsed - 0.8) / 1.2) * Math.PI)
         // Fists pressed together knuckle to knuckle (never one hand through

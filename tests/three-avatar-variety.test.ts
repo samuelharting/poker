@@ -8,6 +8,7 @@ import {
   OUTFIT_MAIN_KEY,
   OUTFIT_PALETTES,
   PUNK_DYE_SETS,
+  clothTrim,
   colorDistance,
   hairHighlights,
   hashString,
@@ -17,7 +18,8 @@ import {
   pickOutfitPalette,
 } from '@/components/three/avatarWardrobe'
 import { createRiggedJewelry, measureForearm } from '@/components/three/avatarJewelry'
-import { createRiggedAvatarAccessories } from '@/components/three/avatarCustomization'
+import { createRiggedAvatarAccessories, hairCapEdge } from '@/components/three/avatarCustomization'
+import { AVATAR_TRIM_BODY_LEVEL } from '@/components/three/avatarStyle'
 import { AVATAR_MODEL_KEYS, normalizePlayerAvatarCustomization } from '@/lib/profile'
 
 const HEX = /^#[0-9a-f]{6}$/i
@@ -204,5 +206,73 @@ describe('rigged jewellery', () => {
     const old = normalizePlayerAvatarCustomization({ modelKey: 'punk', hat: 'cowboy', glasses: 'aviator', jacket: 'western' })
     expect(old.modelKey).toBe('punk')
     expect(old.jacketColor).toBe('burgundy')
+  })
+})
+
+describe('cloth trim', () => {
+  it('is a deterministic per-garment choice that most players get', () => {
+    let on = 0
+    for (let seed = 0; seed < 400; seed += 1) {
+      const hash = hashString(`trim-${seed}`)
+      expect(clothTrim(hash, 'Suit')).toBe(clothTrim(hash, 'Suit'))
+      if (clothTrim(hash, 'Suit')) on += 1
+    }
+    expect(on).toBeGreaterThan(240)
+    expect(on).toBeLessThan(360)
+    // Two garments of one player decide independently.
+    const differing = Array.from({ length: 200 }, (_, seed) => hashString(`both-${seed}`)).filter(hash => clothTrim(hash, 'Suit') !== clothTrim(hash, 'White'))
+    expect(differing.length).toBeGreaterThan(10)
+  })
+
+  it('keeps the body level a real step below full so the trim band reads', () => {
+    expect(AVATAR_TRIM_BODY_LEVEL).toBeGreaterThan(0.5)
+    expect(AVATAR_TRIM_BODY_LEVEL).toBeLessThan(0.9)
+  })
+})
+
+describe('worker hairstyle under a visor or crown', () => {
+  it('has a hairline lower at the back and sides than at the forehead, with a sideburn in front of each ear', () => {
+    const front = hairCapEdge(0)
+    const temple = hairCapEdge(1.15)
+    const sideburn = hairCapEdge(1.42)
+    const nape = hairCapEdge(Math.PI)
+    expect(front).toBeLessThan(temple)
+    expect(sideburn).toBeGreaterThan(temple)
+    expect(nape).toBeGreaterThan(temple)
+    expect(hairCapEdge(-1.42)).toBeCloseTo(sideburn, 6)
+    // The forehead hairline stays above the brow: well short of the equator.
+    expect(front).toBeLessThan(Math.PI / 2 - 0.3)
+  })
+
+  it('builds one merged, vertex-coloured mesh inside the head and brim bounds', () => {
+    const { root, bones } = createTestRig()
+    for (const hat of ['visor', 'crown'] as const) {
+      const set = createRiggedAvatarAccessories(root, new Map(Object.entries(bones)), {
+        modelKey: 'worker', hat, glasses: 'none', jacket: 'none', jacketColor: 'burgundy',
+      })
+      const caps: THREE.Mesh[] = []
+      set.groups[0]!.traverse(object => {
+        if (object.name === 'avatar-hair-cap') caps.push(object as THREE.Mesh)
+      })
+      expect(caps).toHaveLength(1)
+      const geometry = caps[0]!.geometry
+      expect(geometry.getAttribute('color')).toBeTruthy()
+      expect(geometry.getAttribute('position').count).toBeGreaterThan(300)
+      geometry.computeBoundingBox()
+      const box = geometry.boundingBox!
+      const size = box.getSize(new THREE.Vector3())
+      // Head-bone units: a 0.0043-per-unit calibration; the default fit's skull is ~0.28 wide per side.
+      expect(size.x / 0.0043).toBeGreaterThan(0.4)
+      expect(size.x / 0.0043).toBeLessThan(0.7)
+      expect(Number.isFinite(size.y) && size.y > 0).toBe(true)
+      for (const value of geometry.getAttribute('position').array) expect(Number.isFinite(value)).toBe(true)
+    }
+    // Other models and other hats get no cap.
+    const none = createRiggedAvatarAccessories(root, new Map(Object.entries(bones)), {
+      modelKey: 'worker', hat: 'fedora', glasses: 'none', jacket: 'none', jacketColor: 'burgundy',
+    })
+    let found = false
+    none.groups[0]!.traverse(object => { if (object.name === 'avatar-hair-cap') found = true })
+    expect(found).toBe(false)
   })
 })

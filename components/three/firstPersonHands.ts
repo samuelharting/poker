@@ -14,7 +14,16 @@ import {
   type HeroHandsInput,
   type HeroHandsPose,
 } from './firstPersonHandPose'
-import { buildHandGeometry, createHandMaterial, HAND_MORPH, HAND_SCALE, type HandColors } from './firstPersonHandMesh'
+import {
+  buildHandGeometry,
+  createHandHullMaterial,
+  createHandMaterial,
+  getHullWidth,
+  HAND_MORPH,
+  HAND_SCALE,
+  type HandColors,
+  type HandHullMaterial,
+} from './firstPersonHandMesh'
 import { getActionPlaybackSnapshot, type ThreeActionPlaybackState } from './actionPlayback'
 import { getPokerActionMotionProfile } from './pokerActionPose'
 import type { ThreeActionCue } from './tableViewModel'
@@ -37,6 +46,9 @@ export interface FirstPersonHands {
   left: THREE.Mesh
   geometry: THREE.BufferGeometry
   material: THREE.MeshToonMaterial
+  /** Silhouette ink: a back-face hull of each hand (a child mesh, one extra draw per hand). */
+  hull: HandHullMaterial
+  hulls: THREE.Mesh[]
   colors: HandColors
   colorKey: string
   cards: CardMesh[]
@@ -72,6 +84,8 @@ export function createFirstPersonHands(camera: THREE.Camera): FirstPersonHands {
   }
   const geometry = buildHandGeometry()
   const material = createHandMaterial(colors)
+  const hull = createHandHullMaterial()
+  const hulls: THREE.Mesh[] = []
   const makeHand = (mirror: boolean) => {
     const mesh = new THREE.Mesh(geometry, material)
     mesh.name = mirror ? 'first-person-hand-left' : 'first-person-hand-right'
@@ -81,6 +95,15 @@ export function createFirstPersonHands(camera: THREE.Camera): FirstPersonHands {
     mesh.renderOrder = 9
     mesh.matrixAutoUpdate = true
     mesh.rotation.order = 'YXZ'
+    // The ink hull rides on the hand (same geometry, same morphs, pushed out along the normals).
+    const ink = new THREE.Mesh(geometry, hull.material)
+    ink.name = 'first-person-hand-ink'
+    ink.frustumCulled = false
+    ink.castShadow = false
+    ink.receiveShadow = false
+    ink.renderOrder = 8
+    mesh.add(ink)
+    hulls.push(ink)
     root.add(mesh)
     return mesh
   }
@@ -107,6 +130,8 @@ export function createFirstPersonHands(camera: THREE.Camera): FirstPersonHands {
     left,
     geometry,
     material,
+    hull,
+    hulls,
     colors,
     colorKey: '',
     cards,
@@ -139,6 +164,9 @@ export function createFirstPersonHands(camera: THREE.Camera): FirstPersonHands {
   return hands
 }
 
+/** Resting hands sit this far from the lens; the ink width is sized for it. */
+const HAND_DEPTH_FOR_INK = 0.72
+
 const scratchPoint = new THREE.Vector3()
 const clamp = (value: number, min: number, max: number) => (value < min ? min : value > max ? max : value)
 
@@ -159,6 +187,9 @@ function applyHand(mesh: THREE.Mesh, pose: HandPose, side: 1 | -1, tanHalf: numb
     influences[HAND_MORPH.pinch] = pose.pinch
     influences[HAND_MORPH.flutter] = pose.flutter
   }
+  const ink = mesh.children[0] as THREE.Mesh | undefined
+  const inkInfluences = ink?.morphTargetInfluences
+  if (inkInfluences && influences) for (let index = 0; index < influences.length; index += 1) inkInfluences[index] = influences[index]!
 }
 
 function applyCards(hands: FirstPersonHands, tanHalf: number, aspect: number) {
@@ -248,6 +279,9 @@ function measureLayout(hands: FirstPersonHands, frame: HeroHandsFrame) {
   let cardsRight = width * 0.5 + 105
   let cardsMidY = height - 130
   let trayLeft = width
+  // Overlays the dealing hands must stay clear of: the pot readout and the hero's own bet label.
+  let avoidLeft = Number.POSITIVE_INFINITY
+  let avoidRight = Number.NEGATIVE_INFINITY
   if (host) {
     const hostRect = host.getBoundingClientRect()
     const cardsEl = host.querySelector('.own-card-row') as HTMLElement | null
@@ -262,6 +296,14 @@ function measureLayout(hands: FirstPersonHands, frame: HeroHandsFrame) {
       cardsRight = cardsBox.right - hostRect.left
       cardsMidY = (cardsBox.top + cardsBox.bottom) / 2 - hostRect.top
     }
+    const scene = host.closest('.table-scene') ?? host
+    for (const selector of ['.pot-display', '.hero-table-bet']) {
+      const box = (scene.querySelector(selector) as HTMLElement | null)?.getBoundingClientRect()
+      if (box && box.width > 8 && box.right > hostRect.left && box.left < hostRect.right) {
+        avoidLeft = Math.min(avoidLeft, box.left - hostRect.left)
+        avoidRight = Math.max(avoidRight, box.right - hostRect.left)
+      }
+    }
     const trayEl = host.querySelector('.betting-tray') as HTMLElement | null
     const trayBox = trayEl?.getBoundingClientRect()
     if (trayBox && trayBox.width > 20) trayLeft = trayBox.left - hostRect.left
@@ -270,6 +312,14 @@ function measureLayout(hands: FirstPersonHands, frame: HeroHandsFrame) {
   const toNdcY = (px: number) => 1 - (px / height) * 2
   anchors.cardsX = clamp(toNdcX((cardsLeft + cardsRight) / 2), -0.4, 0.4)
   anchors.cardsY = clamp(toNdcY(cardsMidY), -0.92, -0.45)
+  // Dealing: wrists just outside the pot readout / bet label and the hole cards, a hand's width clear.
+  const dealClear = 58
+  const clearLeftPx = Math.min(cardsLeft, avoidLeft) - dealClear
+  const clearRightPx = Math.max(cardsRight, avoidRight) + dealClear
+  anchors.dealRightX = clamp(toNdcX(clearRightPx), 0.22, 0.52)
+  anchors.dealLeftX = clamp(toNdcX(clearLeftPx), -0.52, -0.22)
+  // The hero's own chip stack sits right of the cards: deal from beyond it, not through it.
+  if (anchors.stackX > 0.1) anchors.dealRightX = clamp(Math.max(anchors.dealRightX, anchors.stackX + 0.26), 0.22, 0.58)
   const clearance = 62
   // Left hand just left of the cards; right hand just right of them, but never under the tray.
   anchors.restLeftX = clamp(toNdcX(cardsLeft - clearance), -0.6, -0.12)
@@ -426,6 +476,9 @@ export function updateHeroHands(scene: HeroHandsSceneLike, frame: HeroHandsFrame
   const lens = camera
   const tanHalf = Math.tan(THREE.MathUtils.degToRad(lens.fov / 2))
   const aspect = lens.aspect
+  // Keep the silhouette ink about a pixel and a half wide whatever the window size.
+  const renderPx = frame.height * (typeof window === 'undefined' ? 1 : Math.min(window.devicePixelRatio || 1, 1.35))
+  hands.hull.width.value = getHullWidth(1.5, renderPx, HAND_DEPTH_FOR_INK, tanHalf)
   applyHand(hands.right, shown.right, 1, tanHalf, aspect, true)
   applyHand(hands.left, shown.left, -1, tanHalf, aspect, true)
   applyCards(hands, tanHalf, aspect)
@@ -462,5 +515,6 @@ export function disposeFirstPersonHands(hands: FirstPersonHands | null) {
   const map = hands.material.gradientMap
   map?.dispose()
   hands.material.dispose()
+  hands.hull.material.dispose()
   hands.root.removeFromParent()
 }

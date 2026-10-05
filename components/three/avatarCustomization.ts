@@ -7,7 +7,7 @@ import type {
   PlayerAvatarJacketStyle,
   PlayerAvatarModelKey,
 } from '@/lib/profile'
-import { applyAvatarToonLook, createAvatarToonMaterial } from './avatarStyle'
+import { AVATAR_TRIM_BODY_LEVEL, applyAvatarToonLook, createAvatarToonMaterial } from './avatarStyle'
 import { createRiggedJewelry } from './avatarJewelry'
 import { hashString } from './avatarWardrobe'
 
@@ -158,9 +158,9 @@ export function createRiggedAvatarAccessories(
     materials
   )
   // The worker's skull is open-topped under his hard hat: with a visor or crown on instead,
-  // fill it with short hair in his own colour so the hat does not float over a flat scalp.
+  // give him a short hairstyle in his own colour so the hat does not float over a flat scalp.
   if (selection.modelKey === 'worker' && (selection.hat === 'visor' || selection.hat === 'crown')) {
-    const cap = createScalpCap(avatarRoot, headCalibration, fit, materials)
+    const cap = createHairCap(avatarRoot, headCalibration, fit, materials)
     if (cap) headGroup.add(cap)
   }
   if (headBone) {
@@ -391,8 +391,29 @@ function createHeadAccessories(
   return group
 }
 
-/** A shallow dome of short hair over the skull, coloured like the model's own facial hair. */
-function createScalpCap(
+/**
+ * Where the hair ends (polar angle from the crown, radians) around the head: a forehead hairline
+ * that recedes at the temples, a narrow sideburn in front of each ear, and a low nape. `azimuth` is
+ * 0 at the face and PI at the back.
+ */
+export function hairCapEdge(azimuth: number): number {
+  const a = Math.abs(THREE.MathUtils.euclideanModulo(azimuth + Math.PI, Math.PI * 2) - Math.PI)
+  const smooth = (edge0: number, edge1: number, x: number) => {
+    const t = THREE.MathUtils.clamp((x - edge0) / (edge1 - edge0), 0, 1)
+    return t * t * (3 - 2 * t)
+  }
+  let degrees = 64 + 24 * smooth(0, 1.15, a)
+  degrees += 6 * smooth(1.15, 1.7, a) + 10 * smooth(1.7, Math.PI, a)
+  degrees += 17 * Math.exp(-(((a - 1.42) / 0.15) ** 2))
+  return THREE.MathUtils.degToRad(degrees)
+}
+
+/**
+ * A short hairstyle for models whose own hair is hidden under a hard hat (the worker): a closed
+ * cap that follows the measured skull with a forehead hairline, temples and sideburns, a little
+ * volume on top and soft strand shading in vertex colours. One mesh, one material.
+ */
+function createHairCap(
   avatarRoot: THREE.Object3D,
   calibration: HeadAccessoryCalibration,
   fit: HeadFit,
@@ -406,16 +427,54 @@ function createScalpCap(
     if (material?.color && /moustache|^hair$/i.test(material.name)) color = material.color.clone()
   })
   const s = calibration.scale
-  const material = createAvatarToonMaterial(color ?? '#2a211c')
+  const rows = 12
+  const cols = 40
+  const centerY = fit.eyeY + 0.02
+  const radiusY = fit.top + 0.045 - centerY
+  const radiusX = fit.halfWidth * 1.03 + 0.008
+  const radiusZ = Math.max(fit.depth, fit.halfWidth * 0.9) * 1.0 + 0.008
+  const positions: number[] = []
+  const colors: number[] = []
+  const indices: number[] = []
+  for (let row = 0; row <= rows; row += 1) {
+    for (let col = 0; col <= cols; col += 1) {
+      const azimuth = (col / cols) * Math.PI * 2
+      const theta = (row / rows) * hairCapEdge(azimuth)
+      // Narrower below the equator: the sideburns follow the cheek, not the skull's widest point.
+      const taper = 1 - 0.16 * THREE.MathUtils.clamp((theta - Math.PI / 2) / 0.4, 0, 1)
+      // Soft strand relief, strongest on the crown, fading toward the hairline.
+      const strand = 1 + 0.02 * Math.sin(azimuth * 11 + theta * 2.5) * (1 - row / rows * 0.6)
+      const sinTheta = Math.sin(theta) * taper * strand
+      positions.push(
+        radiusX * sinTheta * Math.sin(azimuth) * s,
+        (centerY + radiusY * Math.cos(theta)) * s,
+        (fit.centerZ + radiusZ * sinTheta * Math.cos(azimuth)) * s
+      )
+      const band = Math.floor((azimuth / (Math.PI * 2)) * 20) * 5 + Math.floor((row / rows) * 3)
+      const streak = ((Math.sin(band * 12.9898) * 43758.5453) % 1 + 1) % 1
+      // Slightly darker at the hairline and in the sideburns, lighter streaks on top.
+      const value = 0.86 + 0.14 * (1 - row / rows) + (streak < 0.3 ? 0.08 : 0)
+      colors.push(value, value, value)
+    }
+  }
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const a = row * (cols + 1) + col
+      const b = a + cols + 1
+      indices.push(a, a + 1, b, a + 1, b + 1, b)
+    }
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+  geometry.setIndex(indices)
+  geometry.computeVertexNormals()
+  const material = createAvatarToonMaterial(color ?? '#2a211c') as THREE.MeshToonMaterial
+  material.vertexColors = true
+  material.side = THREE.DoubleSide
   materials.push(material)
-  const radius = fit.halfWidth * 0.86
-  const cap = mesh(
-    new THREE.SphereGeometry(radius * s, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2),
-    material,
-    [0, (fit.top - 0.12) * s, fit.centerZ * s]
-  )
+  const cap = mesh(geometry, material)
   cap.name = 'avatar-hair-cap'
-  cap.scale.set(1, 0.42, THREE.MathUtils.clamp(fit.depth / fit.halfWidth, 0.8, 1.25))
   cap.castShadow = false
   return cap
 }
@@ -950,6 +1009,8 @@ function applyRiggedJacketMaterial(
     if ((material as THREE.MeshToonMaterial).isMeshToonMaterial) {
       const toon = material as THREE.MeshToonMaterial
       toon.color.set(selectedColor)
+      // Trimmed garments carry the body level in their vertex colours (see bakeTrimColors).
+      if (toon.vertexColors) toon.color.multiplyScalar(1 / AVATAR_TRIM_BODY_LEVEL)
       if (style === 'leather') toon.color.offsetHSL(0, -0.05, 0.02)
       applyAvatarToonLook(toon)
       return

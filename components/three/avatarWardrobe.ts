@@ -206,6 +206,15 @@ export function hairHighlights(seed: number) {
   return mixSeed(seed, 9) % 100 < 65
 }
 
+/**
+ * Whether this player's garment `materialName` carries collar/cuff trim (about three in four). Each
+ * garment decides on its own, so a suit can be piped while the shirt under it is plain, and the same
+ * seed always dresses the same.
+ */
+export function clothTrim(seed: number, materialName: string) {
+  return mixSeed(seed ^ hashString(materialName), 11) % 100 < 75
+}
+
 export type JewelryMetal = 'gold' | 'silver'
 export type WristPieceKind = 'watch' | 'bracelet' | 'beads' | 'cuff'
 

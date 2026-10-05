@@ -73,8 +73,19 @@ export const REST_PITCH = 0.5
 /** Resting hands: low on the screen, either side of the hole cards. */
 export const REST_Y = -0.8
 export const REST_X = 0.27
-/** The wrist sits this far (NDC) below whatever the fingertips are working on. */
-const WRIST_BELOW = 0.17
+/**
+ * Pushing chips: the wrist sits this far (NDC) below the pile, so the fingertips
+ * stop at the pile's near edge and the hand pushes from behind instead of
+ * covering the chips it is moving.
+ */
+const WRIST_BELOW = 0.27
+/** Half-width (NDC) of the hole-card tray plus a hand's half width, and where its influence fades out. */
+const CARDS_CLEAR_NEAR = 0.2
+const CARDS_CLEAR_FAR = 0.3
+/** The tray's top edge sits this far above its centre (NDC); the wrist rides at or above it. */
+const CARDS_TOP_ABOVE_CENTER = 0.2
+/** The hand trails the chips by this long (s): the pile leads, the hand follows. */
+const PUSH_LAG_SECONDS = 0.05
 /** The hands never travel above this line: the board and the pot stay clear. */
 export const MAX_REACH_Y = -0.27
 /**
@@ -84,10 +95,10 @@ export const MAX_REACH_Y = -0.27
  * screen for the hero (clamped to -1), so only its cock/snap shape is used; the
  * card leaves the drawn fingertips (see getHeroDealTipWorld).
  */
-export const DEAL_RIGHT_X = 0.1
-export const DEAL_RIGHT_Y = -0.34
-export const DEAL_LEFT_X = -0.1
-export const DEAL_LEFT_Y = -0.4
+export const DEAL_RIGHT_X = 0.34
+export const DEAL_RIGHT_Y = -0.44
+export const DEAL_LEFT_X = -0.34
+export const DEAL_LEFT_Y = -0.48
 /** Where a knuckle tap lands (on the rail, just above the hole cards). */
 const TAP_X = 0.12
 const TAP_Y = -0.5
@@ -108,10 +119,19 @@ export interface HeroHandsAnchors {
   /** The hole cards' spot at the bottom of the view (NDC). */
   cardsX: number
   cardsY: number
+  /**
+   * Where the dealing hands work (wrists, NDC). The room moves these out to the
+   * sides of the pot readout and the hole-card tray, so the hands are seen
+   * flanking the table's middle instead of sitting under those overlays.
+   */
+  dealRightX: number
+  dealRightY: number
+  dealLeftX: number
+  dealLeftY: number
 }
 
 export function createHeroHandsAnchors(): HeroHandsAnchors {
-  return { restRightX: REST_X, restLeftX: -REST_X, stackX: 0.2, stackY: -0.4, betX: 0.05, betY: -0.3, cardsX: 0, cardsY: -0.7 }
+  return { restRightX: REST_X, restLeftX: -REST_X, stackX: 0.2, stackY: -0.4, betX: 0.05, betY: -0.3, cardsX: 0, cardsY: -0.7, dealRightX: DEAL_RIGHT_X, dealRightY: DEAL_RIGHT_Y, dealLeftX: DEAL_LEFT_X, dealLeftY: DEAL_LEFT_Y }
 }
 
 /** The dealer gesture (dealerDeal.getDealerPose) mapped onto the screen by the rig. */
@@ -228,7 +248,7 @@ export function evaluateHeroHands(input: HeroHandsInput, out: HeroHandsPose): He
   const flicking = input.flickSeconds >= 0 && input.flickSeconds < CHIP_FLICK_GESTURE_SECONDS
 
   if (input.deal && input.deal.weight > 0.001) {
-    poseDeal(input.deal, out)
+    poseDeal(input.deal, out, anchors)
   } else if (flicking) {
     poseFlick(input.flickSeconds, out.right, anchors)
   } else if (acting && input.cue === 'check') {
@@ -362,9 +382,9 @@ function poseWager(e: number, input: HeroHandsInput, out: HeroHandsPose) {
   const departAt = WAGER_DEPART_SECONDS
   const arriveAt = departAt + travel
   const reach = smooth(e / 0.22)
-  const push = easeInOut((e - departAt) / travel)
-  const back = smooth((e - arriveAt - 0.08) / 0.38)
-  const release = smooth((e - arriveAt + 0.06) / 0.12)
+  const push = easeInOut((e - departAt - PUSH_LAG_SECONDS) / travel)
+  const back = smooth((e - arriveAt - 0.12) / 0.38)
+  const release = smooth((e - arriveAt - PUSH_LAG_SECONDS + 0.06) / 0.12)
   const grab = smooth((e - 0.1) / 0.12)
   const lift = profile.wagerStyle === 'flick' ? 0.1 : profile.wagerStyle === 'shove' ? 0.02 : 0.045
   const allIn = cue === 'all_in'
@@ -388,12 +408,15 @@ function poseWager(e: number, input: HeroHandsInput, out: HeroHandsPose) {
     y += Math.sin(push * Math.PI) * lift * bigger
     x = lerp(x, restX, back)
     y = lerp(y, REST_Y, back)
+    // Passing the hole-card tray: ride just above its top edge instead of under it.
+    const overCards = 1 - smooth((Math.abs(x - anchors.cardsX) - CARDS_CLEAR_NEAR) / (CARDS_CLEAR_FAR - CARDS_CLEAR_NEAR))
+    y = lerp(y, Math.max(y, anchors.cardsY + CARDS_TOP_ABOVE_CENTER), overCards)
     hand.x = x
     hand.y = y
     hand.pitch = REST_PITCH + 0.2 * push * (1 - back) + 0.08 * reach
     hand.yaw = 0.14 + 0.1 * reach * (1 - back)
     hand.roll = 0.05 - 0.14 * push * (1 - back)
-    hand.fist = grab * 0.7 * (1 - release)
+    hand.fist = grab * 0.55 * (1 - release)
     hand.open = release * (1 - back) * 0.65
     hand.depth = HAND_DEPTH - 0.04 * push * (1 - back)
   }
@@ -425,19 +448,19 @@ function poseWin(w: number, out: HeroHandsPose) {
 }
 
 /** Dealing: the right hand cocks and snaps cards off the deck, the left steadies it. */
-function poseDeal(deal: HeroDealInput, out: HeroHandsPose) {
+function poseDeal(deal: HeroDealInput, out: HeroHandsPose, anchors: HeroHandsAnchors) {
   const w = clamp01(deal.weight)
   const right = out.right
   const left = out.left
-  right.x = lerp(right.x, DEAL_RIGHT_X - 0.03 * deal.cock + 0.02 * deal.snap, w)
-  right.y = lerp(right.y, DEAL_RIGHT_Y - 0.05 * deal.cock + 0.07 * deal.snap, w)
+  right.x = lerp(right.x, anchors.dealRightX - 0.03 * deal.cock + 0.02 * deal.snap, w)
+  right.y = lerp(right.y, anchors.dealRightY - 0.05 * deal.cock + 0.07 * deal.snap, w)
   right.pitch = REST_PITCH + w * (0.12 - 0.28 * deal.cock + 0.35 * deal.snap)
   right.yaw = 0.14 + w * 0.1
   right.pinch = deal.pinch * w
   right.fist = 0.4 * deal.cock * w
   right.open = 0.9 * deal.snap * w
-  left.x = lerp(left.x, DEAL_LEFT_X, w)
-  left.y = lerp(left.y, DEAL_LEFT_Y, w)
+  left.x = lerp(left.x, anchors.dealLeftX, w)
+  left.y = lerp(left.y, anchors.dealLeftY, w)
   left.pitch = REST_PITCH + 0.08 * w
   left.fist = 0.5 * deal.holdLeft * w
 }

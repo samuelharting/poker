@@ -825,8 +825,22 @@ function orientHand(
   }
   const raise = clamp(st.raiseW, 0, 1)
   if (raise > 0.01) {
-    gestureF.set(0, 0.4, 0.92).transformDirection(root.matrixWorld)
-    gestureS.set(0, -0.6, 0.8).transformDirection(root.matrixWorld)
+    // A hand low on the back of the skull (laced behind the head, lounging) cups it with the fingers
+    // up and in across the back toward the other hand, palm to the skull. A hand held high over the
+    // head (the stretch) keeps fingers up and back.
+    const cupped = smoothstep(0.14, 0.3, hand[2] - anchors.chin[2]) * (1 - smoothstep(0.3, 0.42, hand[1] - anchors.chin[1]))
+    gestureF.set(-out * 0.72 * cupped, 0.4 + 0.08 * cupped, 0.92 - 0.45 * cupped).normalize()
+    if (cupped > 0.001) {
+      // palm normal: toward the front, made square to the fingers; side = out * (N x F)
+      laceN.set(0, 0, -1)
+      laceN.addScaledVector(gestureF, -laceN.dot(gestureF)).normalize()
+      gestureS.crossVectors(laceN, gestureF).multiplyScalar(out)
+      gestureS.lerp(laceOld.set(0, -0.6, 0.8), 1 - cupped).normalize()
+    } else {
+      gestureS.set(0, -0.6, 0.8)
+    }
+    gestureF.transformDirection(root.matrixWorld)
+    gestureS.transformDirection(root.matrixWorld)
     blendFrames(frameF, frameS, gestureF, gestureS, raise, st, 3)
   }
 
@@ -877,6 +891,8 @@ function orientHand(
 const WRIST_FLEX_MAX = 1.2
 const WRIST_EXTEND_MAX = 0.85
 const WRIST_DEVIATE_MAX = 0.8
+const laceN = new THREE.Vector3()
+const laceOld = new THREE.Vector3()
 const wristN = new THREE.Vector3()
 const wristSide = new THREE.Vector3()
 

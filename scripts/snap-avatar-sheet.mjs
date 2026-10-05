@@ -6,6 +6,7 @@
 // Env: SHEETS=hats,glasses,combo,jackets,colors,wrist,chain,custom (default hats), MODELS=a,b (subset),
 //      DIST (camera distance, default 2.4), SHOT=face|top|side|wrist|upper, SHEET_PREFIX, SEATS (default 6),
 //      CROP (square px of the screenshot centre, default 600), JOBS_JSON (for SHEETS=custom: [{label, patch}]),
+//      FORCE_IDLE=<big idle kind> FORCE_ELAPSED=<s> (hold every seat in that idle, e.g. 1 = hands behind head),
 //      SNAP_WIDTH/SNAP_HEIGHT (default 1280x720)
 import { chromium } from '@playwright/test'
 import { mkdir, readFile } from 'node:fs/promises'
@@ -67,6 +68,7 @@ const browser = await chromium.launch({ args: ['--enable-gpu', '--ignore-gpu-blo
 try {
   const page = await browser.newPage({ viewport: { width, height } })
   page.on('pageerror', error => console.log('pageerror:', error.message))
+  page.on('console', message => { if (message.type() === 'error' || message.type() === 'warning') console.log('console', message.type(), message.text().slice(0, 300)) })
   await page.goto(appUrl, { waitUntil: 'load', timeout: 120000 })
   await page.getByLabel('Your nickname').fill('Lab')
   await page.getByRole('button', { name: /Take a seat|Sit down as/ }).click()
@@ -94,6 +96,9 @@ try {
   })
   const client = await readFile(new URL('./avatar-lab-client.js', import.meta.url), 'utf8')
   await page.evaluate(`(async () => { ${client} })()`)
+  if (process.env.FORCE_IDLE) await page.evaluate(`lab.force(${Number(process.env.FORCE_IDLE)}, ${Number(process.env.FORCE_ELAPSED ?? 2)})`)
+  if (process.env.PROBE_JS) { await new Promise(r => setTimeout(r, 2500)); console.log('PROBE', JSON.stringify(await page.evaluate(process.env.PROBE_JS))) }
+  if (process.env.NO_TRIM) await page.evaluate('globalThis.__noTrim = true')
   const seatCount = Math.min(seatLimit, await page.evaluate('lab.ids().length'))
   console.log('seats', seatCount)
 

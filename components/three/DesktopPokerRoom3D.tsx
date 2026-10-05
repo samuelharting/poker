@@ -112,12 +112,6 @@ import {
   type CompanionRuntime,
 } from './companion3D'
 import { DESKTOP_CAMERA_FRAMING } from './cameraFraming'
-import {
-  ShowdownDirector,
-  blendShowdownShot,
-  createShowdownShot,
-  createShowdownSnapshot,
-} from './showdownCamera'
 import { PERSONAL_STACK_MAX_CHIPS, PersonalChipStack, StackSparkles } from './personalChipStack'
 import {
   createPrankRuntime,
@@ -432,8 +426,6 @@ interface SceneRuntime {
   effects: { cone: LightCone; confetti: Confetti; shockwave: Shockwave; winnerKey: string; allInKey: string }
   /** Scene time when community cards last landed. */
   boardRevealAt: number
-  /** Showdown cinematic camera (see showdownCamera.ts); fed from the view, sampled each frame. */
-  showdown: ShowdownDirector
   /** The dealer avatar's deal in progress (hole cards or a street), if one is physically dealing. */
   dealer: DealerRuntime | null
   anyWinner: boolean
@@ -466,12 +458,6 @@ const SUIT_SYMBOLS: Record<ThreeCardView['suit'], string> = {
   hearts: '♥',
   spades: '♠',
 }
-
-/**
- * The showdown cinematic camera (showdownCamera.ts) is switched off: the camera no
- * longer moves when someone wins. Flip this to bring the gentle winner zoom back.
- */
-const SHOWDOWN_CAMERA_ENABLED = false as boolean
 
 const AVATAR_RETRY_BASE_MS = 3_000
 const AVATAR_RETRY_MAX_MS = 30_000
@@ -3801,11 +3787,6 @@ function createSceneRuntime(
   const baseCameraPosition = camera.position.clone()
   const baseCameraLookAt = cameraLookAt.clone()
   camera.lookAt(cameraLookAt)
-  // Showdown cinematic: the lens the window asks for (resize), and the live shot (see showdownCamera.ts).
-  let showdownBaseFov: number = DESKTOP_CAMERA_FRAMING.fov
-  /** Lens change this cinematic currently applies (added to camera.fov like FunFx's breathing lens). */
-  let showdownFovDelta = 0
-  const showdownShot = createShowdownShot()
 
   const environment = applyEnvironmentLighting(renderer, scene)
   const lights = createStageLights(scene)
@@ -3890,7 +3871,6 @@ function createSceneRuntime(
     pranks,
     effects,
     boardRevealAt: Number.NEGATIVE_INFINITY,
-    showdown: new ShowdownDirector(),
     dealer: null as DealerRuntime | null,
     anyWinner: false,
     chipInstancer: createChipInstancer(scene),
@@ -3963,8 +3943,6 @@ function createSceneRuntime(
         : camera.aspect > 2.15
           ? 50
           : DESKTOP_CAMERA_FRAMING.fov
-    showdownBaseFov = camera.fov
-    showdownFovDelta = 0
     camera.updateProjectionMatrix()
   }
   const resizeObserver = new ResizeObserver(resize)
@@ -3979,11 +3957,6 @@ function createSceneRuntime(
   }
   host.addEventListener('pointerover', handlePointerOver)
   host.addEventListener('pointerleave', handlePointerLeave)
-  // Any click or key press skips the showdown cinematic (a quick ease back). Passive and
-  // observing only: it never blocks or consumes the event, so the action buttons stay live.
-  const skipShowdownShot = () => runtime.showdown.cancel((performance.now() - runtime.startTime) / 1000)
-  window.addEventListener('pointerdown', skipShowdownShot, { capture: true, passive: true })
-  window.addEventListener('keydown', skipShowdownShot, { capture: true, passive: true })
   runtime.resizeObserver = resizeObserver
   resize()
 
@@ -4131,29 +4104,11 @@ function createSceneRuntime(
       targetLook.x += (impactSeat?.[0] ?? 0) * allInImpact.strength * 0.035
       targetLook.z += (impactSeat?.[2] ?? 0) * allInImpact.strength * 0.025
     }
-    // Showdown cinematic (showdownCamera.ts): a dolly/orbit through the revealed hands, a held
-    // board beat and a winner hero shot, mixed over the normal target. Reduced motion and the
-    // debug camera never get it. While a shot has weight the camera follows it closely so the
-    // shot's own easing (not this chase) shapes the move.
-    let showdownZoom = 1
-    let showdownWeight = 0
-    if (SHOWDOWN_CAMERA_ENABLED && !runtime.debugCamera && runtime.showdown.sample(time, reducedMotion, showdownShot)) {
-      showdownWeight = showdownShot.weight
-      showdownZoom = blendShowdownShot(showdownShot, targetCamera, targetLook)
-    }
-    const smoothing = reducedMotion ? 1 : Math.max(showdownWeight, 1 - Math.exp(
+    const smoothing = reducedMotion ? 1 : Math.max(0, 1 - Math.exp(
       -delta * (allInImpact.strength > 0 ? 3.8 : winnerSeat ? 1.1 : 1.35)
     ))
     camera.position.lerp(targetCamera, smoothing)
     cameraLookAt.lerp(targetLook, smoothing)
-    if (!runtime.debugCamera) {
-      const wantedFovDelta = showdownBaseFov * (showdownZoom - 1)
-      if (Math.abs(wantedFovDelta - showdownFovDelta) > 0.002) {
-        camera.fov += wantedFovDelta - showdownFovDelta
-        showdownFovDelta = wantedFovDelta
-        camera.updateProjectionMatrix()
-      }
-    }
     if (runtime.debugCamera) {
       camera.position.set(...runtime.debugCamera.position)
       cameraLookAt.set(...runtime.debugCamera.lookAt)
@@ -4353,8 +4308,6 @@ function createSceneRuntime(
     resizeObserver.disconnect()
     host.removeEventListener('pointerover', handlePointerOver)
     host.removeEventListener('pointerleave', handlePointerLeave)
-    window.removeEventListener('pointerdown', skipShowdownShot, { capture: true })
-    window.removeEventListener('keydown', skipShowdownShot, { capture: true })
     hoveredOverlayElement = null
     motionPreference.removeEventListener('change', handleMotionPreference)
     document.removeEventListener('visibilitychange', handleVisibilityChange)
@@ -4648,10 +4601,6 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
       }
     }
     const liveRuntime = runtimeRef.current
-    // The showdown cinematic follows what the table view shows (cards turning, winner flags).
-    syncSafely('showdown camera', () => {
-      liveRuntime.showdown.sync(createShowdownSnapshot(view), (performance.now() - liveRuntime.startTime) / 1000)
-    })
     syncSafely('player', () => syncPlayers(liveRuntime, view))
     syncSafely('wager', () => syncWagers(liveRuntime, view))
     syncSafely('pot', () => syncPot(liveRuntime, view))

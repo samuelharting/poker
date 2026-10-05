@@ -17,7 +17,17 @@ import {
   type HeroHandsInput,
   type HeroHandsPose,
 } from '@/components/three/firstPersonHandPose'
-import { buildHandGeometry, createHandMaterial, getHandShapeTips, HAND_MORPH, HAND_SCALE } from '@/components/three/firstPersonHandMesh'
+import {
+  buildHandGeometry,
+  createCelMaterial,
+  createHandHullMaterial,
+  createHandMaterial,
+  getHandShapeTips,
+  getHullWidth,
+  HAND_INK_COLOR,
+  HAND_MORPH,
+  HAND_SCALE,
+} from '@/components/three/firstPersonHandMesh'
 import { getPokerActionMotionProfile } from '@/components/three/pokerActionPose'
 import type { ThreeActionCue } from '@/components/three/tableViewModel'
 
@@ -155,7 +165,7 @@ describe('first-person hands: wagers', () => {
   it('only an all-in uses both hands', () => {
     const allIn = pose('all_in', 0.5, { anchors, profile })
     const call = pose('call', 0.5, { anchors, profile })
-    expect(allIn.left.y).toBeGreaterThan(REST_Y + 0.2)
+    expect(allIn.left.y).toBeGreaterThan(REST_Y + 0.08)
     expect(allIn.left.fist).toBeGreaterThan(0.4)
     expect(call.left.y).toBeCloseTo(REST_Y, 2)
   })
@@ -221,13 +231,37 @@ describe('first-person hands: peek, win, flick, deal', () => {
     const full = pose('ready', 99, { deal })
     const none = pose('ready', 99, { deal: { ...deal, weight: 0 } })
     const half = pose('ready', 99, { deal: { ...deal, weight: 0.5 } })
-    expect(full.right.x).toBeCloseTo(0.1, 1)
-    expect(full.right.y).toBeGreaterThan(MAX_REACH_Y - 0.2)
+    const anchors = createHeroHandsAnchors()
+    expect(full.right.x).toBeCloseTo(anchors.dealRightX, 1)
+    expect(full.left.x).toBeCloseTo(anchors.dealLeftX, 1)
+    expect(full.right.y).toBeGreaterThan(MAX_REACH_Y - 0.25)
     expect(full.right.pinch).toBe(1)
     expect(full.left.fist).toBeGreaterThan(0.4)
     expect(none.right.y).toBeCloseTo(REST_Y, 1)
     expect(half.right.x).toBeGreaterThan(Math.min(none.right.x, full.right.x))
     expect(half.right.x).toBeLessThan(Math.max(none.right.x, full.right.x))
+  })
+})
+
+describe('first-person hands: dealing placement', () => {
+  const deal = { weight: 1, rightX: 0, rightY: -1, leftX: 0, leftY: -1, pinch: 0, cock: 0, snap: 0, holdLeft: 1 }
+
+  it('works to the sides of the pot readout and the hole cards, not under them', () => {
+    const anchors = createHeroHandsAnchors()
+    // Pot readout and hero cards roughly span -0.15..0.17 around the middle at the bottom of the view.
+    expect(anchors.dealRightX).toBeGreaterThan(0.25)
+    expect(anchors.dealLeftX).toBeLessThan(-0.25)
+    const out = pose('ready', 99, { deal, anchors })
+    expect(out.right.x).toBeGreaterThan(0.25)
+    expect(out.left.x).toBeLessThan(-0.25)
+  })
+
+  it('follows the measured clear spots when the layout moves', () => {
+    const anchors = { ...createHeroHandsAnchors(), dealRightX: 0.5, dealLeftX: -0.45, dealRightY: -0.4 }
+    const out = pose('ready', 99, { deal, anchors })
+    expect(out.right.x).toBeCloseTo(0.5, 1)
+    expect(out.left.x).toBeCloseTo(-0.45, 1)
+    expect(out.right.y).toBeGreaterThan(-0.5)
   })
 })
 
@@ -391,6 +425,33 @@ describe('first-person hands: mesh', () => {
     expect(nearest).toBeGreaterThan(0.1)
   })
 
+  it('the silhouette ink is a back-face hull pushed out along the morphed normals', () => {
+    const hull = createHandHullMaterial()
+    expect(hull.material.side).toBe(THREE.BackSide)
+    expect(hull.material.color.getHexString()).toBe(HAND_INK_COLOR.slice(1))
+    const shader = {
+      uniforms: {} as Record<string, { value: unknown }>,
+      vertexShader: '#include <common>\n#include <begin_vertex>\n#include <morphtarget_vertex>',
+    }
+    hull.material.onBeforeCompile(shader as never, undefined as never)
+    expect(shader.uniforms.uHullWidth).toBe(hull.width)
+    expect(shader.vertexShader).toContain('morphnormal_vertex')
+    expect(shader.vertexShader).toContain('normalize(objectNormal) * uHullWidth')
+    hull.material.dispose()
+  })
+
+  it('the hull width keeps the ink about the same on screen at any window size and depth', () => {
+    const tan = Math.tan(THREE.MathUtils.degToRad(30))
+    const small = getHullWidth(1.5, 720, 0.72, tan)
+    const big = getHullWidth(1.5, 1080, 0.72, tan)
+    expect(big).toBeLessThan(small)
+    expect(small / big).toBeCloseTo(1.5, 5)
+    expect(getHullWidth(1.5, 720, 1.44, tan)).toBeCloseTo(small * 2, 5)
+    // About 1.5 px at 720p is a couple of millimetres on the hand.
+    expect(small).toBeGreaterThan(0.001)
+    expect(small).toBeLessThan(0.004)
+  })
+
   it('shares one material between both hands and recolours through uniforms', () => {
     const colors = { skin: new THREE.Color('#d9a27c'), sleeve: new THREE.Color('#2b2f3a'), cuff: new THREE.Color('#f4efe6') }
     const material = createHandMaterial(colors)
@@ -405,9 +466,15 @@ describe('first-person hands: mesh', () => {
     expect(shader.uniforms.uSkin!.value).toBe(colors.skin)
     expect(shader.fragmentShader).toContain('uniform vec3 uSleeve;')
     expect(shader.fragmentShader).toContain('vColor.r * uSkin')
-    // The avatars' ink colour (#120a07) and a constant pixel-width edge.
-    expect(shader.fragmentShader).toContain('vec3(0.07, 0.04, 0.03)')
-    expect(shader.fragmentShader).toContain('fwidth')
+    // The multi-segment hand has no normal-based ink (it would draw lines at every joint)...
+    expect(shader.fragmentShader).not.toContain('fwidth')
+    // ...the plain one-piece cel material (the drink hand) does, in the avatars' ink colour.
+    const plain = createCelMaterial('#d9a27c')
+    const plainShader = { uniforms: {} as Record<string, { value: unknown }>, fragmentShader: '#include <common>\n#include <opaque_fragment>' }
+    plain.onBeforeCompile(plainShader as never, undefined as never)
+    expect(plainShader.fragmentShader).toContain('fwidth')
+    expect(plainShader.fragmentShader).toContain('vec3(0.07, 0.04, 0.03)')
+    plain.dispose()
     material.dispose()
   })
 })

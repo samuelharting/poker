@@ -143,6 +143,17 @@ for (const action of wanted) {
     console.log('fps', JSON.stringify(results))
     console.log('hand meshes visible', await page.evaluate(() => { const r = document.querySelector('.desktop-3d-stage').__pokerRuntime; let n = 0; r.firstPersonHands.root.traverseVisible(o => { if (o.isMesh) n += 1 }); return n }))
   }
+  else if (action === 'layout') {
+    await ensureHand()
+    await sleep(1500)
+    console.log('layout', JSON.stringify(await page.evaluate(() => {
+      const W = innerWidth, H = innerHeight
+      const rect = el => { if (!el) return null; const b = el.getBoundingClientRect(); return { l: +(b.left / W * 2 - 1).toFixed(2), r: +(b.right / W * 2 - 1).toFixed(2), t: +(1 - b.top / H * 2).toFixed(2), b: +(1 - b.bottom / H * 2).toFixed(2), px: [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)] } }
+      const pot = [...document.querySelectorAll('*')].filter(el => el.children.length < 4 && /^s*POTs*$[d,]+s*$/i.test(el.textContent || '')).sort((a, b) => a.textContent.length - b.textContent.length)[0]
+      const potBox = pot && [...document.querySelectorAll('*')].filter(el => el.contains(pot) && el.getBoundingClientRect().width < 260).pop()
+      return { W, H, potClass: potBox && potBox.className, pot: rect(potBox), cards: rect(document.querySelector('.own-card-row')), tray: rect(document.querySelector('.betting-tray')), plate: rect([...document.querySelectorAll('[class*=hero]')].find(e => /$/.test(e.textContent || '') && e.getBoundingClientRect().width < 260)) }
+    })))
+  }
   else if (action === 'rest') { await burst(page, 'rest', 1) }
   else if (action.startsWith('force:')) { await forceFrame(action.slice(6), 'force-' + action.slice(6).replace(/[^a-z0-9=@.,-]/gi, '_')) }
   else if (action === 'peek') {

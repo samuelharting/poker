@@ -101,8 +101,8 @@ describe('hero dealing hands', () => {
 
   it('works above the hole-card tray even when the gesture point projects off the bottom of the screen', () => {
     const out = evaluateHeroHands(input(1), createHeroHandsPose())
-    expect(out.right.y).toBeGreaterThan(-0.5)
-    expect(out.left.y).toBeGreaterThan(-0.55)
+    expect(out.right.y).toBeGreaterThan(-0.55)
+    expect(out.left.y).toBeGreaterThan(-0.6)
     expect(out.right.y).toBeCloseTo(DEAL_RIGHT_Y, 0)
     expect(out.left.y).toBeCloseTo(DEAL_LEFT_Y, 0)
     expect(out.right.x).toBeGreaterThan(out.left.x + 0.1)

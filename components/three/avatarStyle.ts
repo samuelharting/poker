@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { hairHighlights, hashString, pickHairColor, pickOutfitPalette } from './avatarWardrobe'
+import { clothTrim, hairHighlights, hashString, pickHairColor, pickOutfitPalette } from './avatarWardrobe'
 
 /**
  * Stylized look for the rigged avatars: cel-shaded toon materials with a
@@ -529,6 +529,46 @@ function applyLook(model: THREE.Object3D, materials: Iterable<THREE.MeshToonMate
     } else if (palette[name]) material.color.set(palette[name]!)
     else if (/^black$/i.test(name)) material.color.set('#22222a')
     else if (/^grey$/i.test(name)) material.color.set('#3a3a44')
+  }
+}
+
+/**
+ * Collar, cuff and front-edge trim without touching the shader: every open cloth border (the
+ * `fabricEdge` data baked for the fabric pass) is a lighter band in vertex colours, the rest of the
+ * garment sits at TRIM_BODY_LEVEL and its material colour is lifted by the inverse, so the body keeps
+ * its palette colour while collars, cuffs and lapel edges read about a third lighter.
+ */
+export const AVATAR_TRIM_BODY_LEVEL = 0.72
+const TRIM_KINDS = new Set<AvatarFabricKind>(['wool', 'cotton', 'jersey', 'satin', 'fleece', 'knit', 'leather', 'suede', 'canvas'])
+
+function bakeTrimColors(geometry: THREE.BufferGeometry) {
+  if (geometry.userData.trimBaked) return
+  geometry.userData.trimBaked = true
+  const edge = geometry.getAttribute('fabricEdge')
+  const count = geometry.getAttribute('position').count
+  const colors = new Float32Array(count * 3)
+  for (let index = 0; index < count; index += 1) {
+    const e = edge ? edge.getX(index) : 0
+    // fabricEdge.x is 1 on the border and fades to 0 over 6 cm: keep the outer ~3 cm.
+    const t = THREE.MathUtils.smoothstep(e, 0.42, 0.72)
+    const value = AVATAR_TRIM_BODY_LEVEL + (1 - AVATAR_TRIM_BODY_LEVEL) * t
+    colors[index * 3] = value
+    colors[index * 3 + 1] = value
+    colors[index * 3 + 2] = value
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+}
+
+/** Turns trim on for this player's garments (see clothTrim): off for pale cloth, where lighter does not show. */
+function applyClothTrim(materials: Iterable<THREE.MeshToonMaterial>, seed: number) {
+  for (const material of materials) {
+    const kind = material.userData[FABRIC_KIND_KEY] as AvatarFabricKind | undefined
+    if (!kind || !TRIM_KINDS.has(kind) || !clothTrim(seed, material.name)) continue
+    const luma = material.color.r * 0.2126 + material.color.g * 0.7152 + material.color.b * 0.0722
+    if (luma > 0.42) continue
+    material.vertexColors = true
+    material.color.multiplyScalar(1 / AVATAR_TRIM_BODY_LEVEL)
+    material.needsUpdate = true
   }
 }
 
@@ -1140,6 +1180,8 @@ export function stylizeAvatar(
     const frame = computeFabricFrame(skinnedMeshes)
     const cover = clothMeshes.some(mesh => !mesh.geometry.userData.fabricBaked) ? buildClothPointIndex(clothMeshes, frame) : null
     for (const mesh of clothMeshes) bakeFabricAttributes(mesh, frame, cover)
+    for (const mesh of clothMeshes) bakeTrimColors(mesh.geometry)
+    applyClothTrim(converted.values(), hashString(look.seed ?? ''))
     for (const material of converted.values()) {
       const kind = material.userData[FABRIC_KIND_KEY] as AvatarFabricKind | undefined
       if (kind && kind !== 'none') setAvatarFabric(material, kind, frame)

@@ -779,14 +779,20 @@ describe('PokerRoom house rules', () => {
       .filter((message): message is TypedMessage<'drink_event'> => message.type === 'drink_event')
       .map(message => message.event)
       .filter(event => event.kind === 'house_beer')
-    if (busted) {
+    if (busted && busted.drinks?.passedOut) {
+      // The deal can also trip a house-rule shot (7-2, bad beat...) that knocks the busted
+      // player out first; a blacked-out player is not poured a beer, so there is none to check.
+      expect(houseBeers.filter(event => event.playerId === busted.id)).toEqual([])
+    } else if (busted) {
       // The dealer's-round beer can also land on the button; only check the bust.
       expect(houseBeers.filter(event => event.playerId === busted.id)).toEqual([expect.objectContaining({ playerId: busted.id, amount: 2 })])
       expect(busted.drinks?.beers).toBe(2)
       expect(drinkEventKinds(sam.connection)).toContain('house_water')
     } else {
-      // Chopped pot: nobody lost anything (only a dealer's-round beer, at most).
-      expect(houseBeers.every(event => event.amount === 1)).toBe(true)
+      // Chopped pot: nobody lost their stack. The button can still collect a dealer's-round beer
+      // plus a winner or bad-beat beer (two in all), but never more than that.
+      expect(final.players.every(player => player.stack > 0)).toBe(true)
+      expect(houseBeers.every(event => (event.amount ?? 1) >= 1 && (event.amount ?? 1) <= 2)).toBe(true)
     }
   })
 
