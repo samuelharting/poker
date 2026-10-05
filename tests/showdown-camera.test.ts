@@ -218,38 +218,56 @@ describe('constrainShowdownCamera', () => {
   })
 })
 
-describe('ShowdownDirector showdown', () => {
-  it('stays off until a hand we watched ends, then runs the whole story and eases to zero', () => {
-    const director = new ShowdownDirector()
-    const timeline = showdownTimeline({ seats: [0, 2, 4, 6], winners: [4] })
-    const frames = run(director, timeline)
+describe('ShowdownDirector showdown (gentle winner zoom)', () => {
+  /** Seconds the winner flags arrive after the showdown starts, in showdownTimeline's default. */
+  const WINNERS_AT = 1 + 1.7
+
+  it('waits for the winner, then does one brief gentle zoom and eases to zero', () => {
+    const frames = run(new ShowdownDirector(), showdownTimeline({ seats: [0, 2, 4, 6], winners: [4] }))
     assertWithinLimits(frames)
 
-    // Nothing before the hand ends.
-    expect(frames.filter(frame => frame.t < 1).every(frame => !frame.active)).toBe(true)
-    // Starts from zero weight (no jump) and is completely off at the end.
+    // Nothing at all until the winner is known: no overview, no tour, no board beat.
+    expect(frames.filter(frame => frame.t < WINNERS_AT - 0.05).every(frame => !frame.active || frame.shot.weight === 0)).toBe(true)
     const first = frames.find(frame => frame.active)!
+    expect(first.t).toBeGreaterThanOrEqual(WINNERS_AT - 0.05)
     expect(first.shot.weight).toBeLessThan(0.01)
+
+    // A gentle peak, never the full move.
+    const peak = Math.max(...frames.map(frame => frame.shot.weight))
+    expect(peak).toBeGreaterThan(TUNING.winnerOnly.peakWeight * 0.95)
+    expect(peak).toBeLessThanOrEqual(TUNING.winnerOnly.peakWeight + 1e-9)
+
+    // Completely off at the end, and the whole thing is short (about three seconds).
     const end = lastActive(frames)
-    expect(end).toBeGreaterThan(0)
-    expect(end).toBeLessThan(frames.length - 5)
     expect(frames[end]!.shot.weight).toBeLessThan(0.01)
     expect(frames[frames.length - 1]!.active).toBe(false)
+    const seconds = (end - frames.findIndex(frame => frame.active)) * FRAME
+    expect(seconds).toBeLessThan(TUNING.winnerOnly.enterSeconds + TUNING.winnerOnly.holdSeconds + TUNING.release.maxSeconds + 0.1)
+    expect(seconds).toBeGreaterThan(1.2)
+    expect(seconds).toBeLessThan(2.4)
+
     // The last 0.4s of the ease-out are monotone and gentle.
     for (let index = end - 24; index < end; index += 1) {
       const delta = frames[index]!.shot.weight - frames[index + 1]!.shot.weight
       expect(delta).toBeGreaterThanOrEqual(-1e-9)
-      expect(delta).toBeLessThan(0.05)
+      expect(delta).toBeLessThan(0.03)
     }
-    // Reaches full weight for the middle of the story, and fits the showdown window.
-    expect(Math.max(...frames.map(frame => frame.shot.weight))).toBeGreaterThan(0.99)
-    const seconds = (end - frames.findIndex(frame => frame.active)) * FRAME
-    expect(seconds).toBeLessThan(TUNING.maxShotSeconds + TUNING.release.maxSeconds + 0.1)
-    expect(seconds).toBeGreaterThan(3)
   })
 
-  it('fits inside the real showdown window (about 4.2s from the first frame) without lengthening it', () => {
-    // Reveal times and highlight follow lib/poker/showdown.ts: first flip at 0.9s, one card per step.
+  it('plans a single winner scene, whatever the table size and reveal order', () => {
+    for (const seats of [[0, 4], [0, 6, 2, 4], [0, 1, 2, 3, 4, 5, 6, 7]]) {
+      const director = new ShowdownDirector()
+      const winner = seats[seats.length - 1]!
+      run(director, showdownTimeline({ seats, winners: [winner], reveals: Object.fromEntries(seats.map(seat => [seat, 0.9])), winnersAt: 1.3 }), 3.6)
+      const plan = director.describe()
+      expect(plan.mode).toBe('showdown')
+      expect(plan.stops).toEqual([])
+      expect(plan.scenes.map(scene => scene.kind)).toEqual(['winner'])
+      expect(plan.winnersMask).toBe(1 << winner)
+    }
+  })
+
+  it('stays inside the real showdown window (about 4.2s from the first frame) without lengthening it', () => {
     const cases = [
       { seats: [0, 4], winners: [4], reveals: { 4: 0.9 }, winnersAt: 1.58 },
       { seats: [0, 2, 4, 6], winners: [4], reveals: { 2: 0.9, 4: 1.17, 6: 1.44 }, winnersAt: 1.86 },
@@ -257,115 +275,71 @@ describe('ShowdownDirector showdown', () => {
     ]
     for (const options of cases) {
       const frames = run(new ShowdownDirector(), showdownTimeline({ ...options, start: 1 }), 10)
-      const first = frames.findIndex(frame => frame.active)
-      const seconds = (lastActive(frames) - first) * FRAME
-      expect(seconds).toBeLessThan(4.35)
+      const showdownStart = 1
+      const end = lastActive(frames)
+      expect(frames[end]!.t - showdownStart).toBeLessThan(4.35)
     }
   })
 
-  it('moves the camera smoothly at every frame', () => {
+  it('moves the camera gently and smoothly at every frame', () => {
     for (const timeline of [
       showdownTimeline({ seats: [0, 4], winners: [4] }),
-      showdownTimeline({ seats: [0, 1, 2, 3, 4, 5, 6, 7], winners: [7], reveals: Object.fromEntries([0, 1, 2, 3, 4, 5, 6, 7].map((seat, index) => [seat, 0.9 + index * 0.13])) }),
+      showdownTimeline({ seats: [0, 1, 2, 3, 4, 5, 6, 7], winners: [7] }),
       showdownTimeline({ seats: [0, 2, 6], winners: [2, 6] }),
       showdownTimeline({ seats: [0, 3], heroWins: true }),
     ]) {
       const frames = run(new ShowdownDirector(), timeline)
       assertWithinLimits(frames)
       const active = frames.slice(0, lastActive(frames) + 1).filter(frame => frame.active)
-      // Even the quick moves between stops stay bounded per frame (15 units/s at most).
-      expect(maxStep(active, frame => frame.position)).toBeLessThan(0.3)
-      expect(maxStep(active, frame => frame.look)).toBeLessThan(0.4)
+      // Far below the old tour's per-frame limits: no whip pans, no jolts.
+      expect(maxStep(active, frame => frame.position)).toBeLessThan(0.04)
+      expect(maxStep(active, frame => frame.look)).toBeLessThan(0.05)
       let largestZoom = 0
       for (let index = 1; index < active.length; index += 1) largestZoom = Math.max(largestZoom, Math.abs(active[index]!.zoom - active[index - 1]!.zoom))
-      expect(largestZoom).toBeLessThan(0.05)
+      expect(largestZoom).toBeLessThan(0.01)
+      // And it never travels far from the normal camera (a nudge, not a new shot).
+      const farthest = Math.max(...active.map(frame => Math.hypot(
+        frame.position.x - BASE_POSITION.x, frame.position.y - BASE_POSITION.y, frame.position.z - BASE_POSITION.z
+      )))
+      expect(farthest).toBeLessThan(1)
+      // The lens only tightens a little.
+      expect(Math.min(...active.map(frame => frame.zoom))).toBeGreaterThan(0.78)
     }
   })
 
-  it('visits showing players in the order their cards turn over', () => {
-    const director = new ShowdownDirector()
-    // Seat 6 flips first, then 2, then 4: the tour must follow, not seat order.
-    run(director, showdownTimeline({ seats: [0, 6, 2, 4], winners: [2], reveals: { 6: 0.9, 2: 1.14, 4: 1.4 } }), 3)
-    const plan = director.describe()
-    expect(plan.mode).toBe('showdown')
-    expect(plan.stops).toEqual([6, 2, 4])
-    expect(plan.scenes.map(scene => scene.kind)).toEqual(['overview', 'stop', 'stop', 'stop', 'board', 'winner'])
-    // Then the board beat, then the winner: strictly later and ordered.
-    const starts = plan.scenes.map(scene => scene.start)
-    expect([...starts].sort((a, b) => a - b)).toEqual(starts)
-  })
-
-  it('holds the board after the winning cards light up, then frames the winner', () => {
-    const director = new ShowdownDirector()
-    run(director, showdownTimeline({ seats: [0, 4], winners: [4], winnersAt: 1.6 }), 3)
-    const plan = director.describe()
-    const board = plan.scenes.find(scene => scene.kind === 'board')!
-    const winner = plan.scenes.find(scene => scene.kind === 'winner')!
-    expect(winner.start - board.start).toBeGreaterThanOrEqual(TUNING.boardMinSeconds - 1e-9)
-    // Held at least `boardAfterHighlightSeconds` once the winners are known (1.6s in).
-    expect(winner.start).toBeGreaterThanOrEqual(1.6 + TUNING.boardAfterHighlightSeconds - 1e-9)
-    expect(plan.winnersMask).toBe(1 << 4)
-  })
-
-  it('frames an opponent winner low and from the hero side of the table', () => {
-    const director = new ShowdownDirector()
-    const frames = run(director, showdownTimeline({ seats: [0, 4], winners: [4] }))
-    const hold = frames.reduce((best, frame) => (frame.shot.weight > best.shot.weight ? frame : best))
-    // The peak of the shot is the winner hold: a low lens and the camera below the normal eye line.
-    const peakFrames = frames.filter(frame => frame.shot.weight > 0.999)
-    const winnerHold = peakFrames[peakFrames.length - 5]!
-    expect(hold.shot.weight).toBeGreaterThan(0.999)
-    expect(winnerHold.position.y).toBeLessThan(BASE_POSITION.y - 0.3)
-    expect(winnerHold.zoom).toBeLessThan(0.7)
-    // Looking at the winner (far side), camera on the near half.
-    expect(winnerHold.look.z).toBeLessThan(-2.5)
-    expect(winnerHold.position.z).toBeGreaterThan(winnerHold.look.z + 3)
+  it('zooms toward an opponent winner on the far side of the table', () => {
+    const frames = run(new ShowdownDirector(), showdownTimeline({ seats: [0, 4], winners: [4] }))
     assertWithinLimits(frames)
+    const hold = frames.reduce((best, frame) => (frame.shot.weight > best.shot.weight ? frame : best))
+    // Tighter than normal and looking further toward the winner than the normal view does.
+    expect(hold.zoom).toBeLessThan(1)
+    expect(hold.look.z).toBeLessThan(BASE_LOOK.z)
   })
 
-  it('pulls to an over-the-shoulder shot when the hero wins, never into the hero head', () => {
-    const director = new ShowdownDirector()
-    const frames = run(director, showdownTimeline({ seats: [0, 3], heroWins: true }))
+  it('stays well clear of the hero head when the hero wins', () => {
+    const frames = run(new ShowdownDirector(), showdownTimeline({ seats: [0, 3], heroWins: true }))
     assertWithinLimits(frames)
     const [heroX, , heroZ] = TABLE_SEAT_POSITIONS[0]
     const heroHead = { x: heroX, y: 1.6, z: heroZ - 0.3 }
-    let held: Frame | null = null
     let minAway = Infinity
     for (const frame of frames) {
       if (!frame.active) continue
-      const away = Math.hypot(frame.position.x - heroHead.x, frame.position.y - heroHead.y, frame.position.z - heroHead.z)
-      // Always clear of the hero's head (a seated head with a hat is well inside this ball).
-      minAway = Math.min(minAway, away)
-      held = frame
+      minAway = Math.min(minAway, Math.hypot(frame.position.x - heroHead.x, frame.position.y - heroHead.y, frame.position.z - heroHead.z))
     }
-    expect(held).not.toBeNull()
     expect(minAway).toBeGreaterThan(0.8)
-    // At the hold the camera is above and behind the hero, looking down at their cards and chips.
-    const hold = frames.filter(frame => frame.shot.weight > 0.999).pop()!
-    expect(hold.position.z).toBeGreaterThan(5.5)
-    expect(hold.position.y).toBeGreaterThan(2.2)
-    expect(hold.look.z).toBeGreaterThan(2)
-    expect(hold.look.y).toBeLessThan(1)
   })
 
-  it('frames both winners of a split pot, wide, whichever seats they hold', () => {
+  it('frames a split pot more widely than a single winner, whichever seats they hold', () => {
     const wide = run(new ShowdownDirector(), showdownTimeline({ seats: [0, 1, 7], winners: [1, 7] }))
     assertWithinLimits(wide)
-    const hold = wide.filter(frame => frame.shot.weight > 0.999).pop()!
-    // Winners flank the table: a hero-side camera, a wide lens, aimed between them.
-    expect(hold.zoom).toBeGreaterThan(0.85)
-    expect(Math.abs(hold.look.x)).toBeLessThan(0.5)
+    const hold = wide.reduce((best, frame) => (frame.shot.weight > best.shot.weight ? frame : best))
+    expect(Math.abs(hold.look.x)).toBeLessThan(0.8)
     const single = run(new ShowdownDirector(), showdownTimeline({ seats: [0, 1, 7], winners: [1] }))
-    const singleHold = single.filter(frame => frame.shot.weight > 0.999).pop()!
+    const singleHold = single.reduce((best, frame) => (frame.shot.weight > best.shot.weight ? frame : best))
     expect(hold.zoom).toBeGreaterThan(singleHold.zoom)
-
-    const near = run(new ShowdownDirector(), showdownTimeline({ seats: [0, 3, 5], winners: [3, 5] }))
-    assertWithinLimits(near)
-    const nearHold = near.filter(frame => frame.shot.weight > 0.999).pop()!
-    expect(nearHold.zoom).toBeLessThan(hold.zoom)
   })
 
-  it('tours hands that never flip (already tabled) by seat order', () => {
+  it('does the same for hands that were already face up (tabled) when the showdown began', () => {
     const live = (seat: number) => player(`p${seat}`, seat, { revealed: 2 })
     const timeline: Timeline = [
       { at: 0.5, snap: snapshot('in_hand', [player('hero', 0, { isHero: true, revealed: 2 }), live(5), live(2)]) },
@@ -375,7 +349,8 @@ describe('ShowdownDirector showdown', () => {
     const director = new ShowdownDirector()
     const frames = run(director, timeline)
     assertWithinLimits(frames)
-    expect(director.describe().stops).toEqual([2, 5])
+    expect(director.describe().scenes.map(scene => scene.kind)).toEqual(['winner'])
+    expect(frames.some(frame => frame.active)).toBe(true)
   })
 
   it('never starts from a showdown that was already underway when the page loaded', () => {
@@ -389,11 +364,11 @@ describe('ShowdownDirector showdown', () => {
   it('skips on cancel with a quick ease back, never a jump, and does not restart', () => {
     const director = new ShowdownDirector()
     const timeline = showdownTimeline({ seats: [0, 2, 4], winners: [2] })
-    const cancelAt = 3.0
+    const cancelAt = 3.5
     const frames = run(director, timeline, 8, { cancelAt })
     assertWithinLimits(frames)
     const before = frames.filter(frame => frame.t < cancelAt)
-    expect(before.some(frame => frame.shot.weight > 0.9)).toBe(true)
+    expect(before.some(frame => frame.shot.weight > TUNING.winnerOnly.peakWeight * 0.6)).toBe(true)
     const end = lastActive(frames)
     expect(frames[end]!.t - cancelAt).toBeLessThanOrEqual(TUNING.cancelSeconds + 0.1)
     // The weight only goes down after the cancel, smoothly.
@@ -401,10 +376,9 @@ describe('ShowdownDirector showdown', () => {
     for (let index = 1; index < after.length; index += 1) {
       const delta = after[index - 1]!.shot.weight - after[index]!.shot.weight
       expect(delta).toBeGreaterThanOrEqual(-1e-9)
-      expect(delta).toBeLessThan(0.08)
+      expect(delta).toBeLessThan(0.05)
     }
-    // A skip is quick (under 0.4s) but still a continuous glide (at most ~30 units/s).
-    expect(maxStep(frames.slice(0, end + 1).filter(frame => frame.active), frame => frame.position)).toBeLessThan(0.55)
+    expect(maxStep(frames.slice(0, end + 1).filter(frame => frame.active), frame => frame.position)).toBeLessThan(0.05)
     // The same hand keeps reporting its winner: no second cinematic.
     expect(frames.slice(end + 1).some(frame => frame.active)).toBe(false)
   })
@@ -412,11 +386,11 @@ describe('ShowdownDirector showdown', () => {
   it('cancels when the next hand starts', () => {
     const director = new ShowdownDirector()
     const timeline = showdownTimeline({ seats: [0, 2], winners: [2] })
-    timeline.push({ at: 3.2, snap: snapshot('in_hand', [player('hero', 0, { isHero: true }), player('p2', 2)], { handKey: 8, communityCount: 0 }) })
+    timeline.push({ at: 3.6, snap: snapshot('in_hand', [player('hero', 0, { isHero: true }), player('p2', 2)], { handKey: 8, communityCount: 0 }) })
     const frames = run(director, timeline, 8)
     assertWithinLimits(frames)
     const end = lastActive(frames)
-    expect(frames[end]!.t - 3.2).toBeLessThanOrEqual(TUNING.cancelSeconds + 0.1)
+    expect(frames[end]!.t - 3.6).toBeLessThanOrEqual(TUNING.cancelSeconds + 0.1)
     expect(frames.slice(end + 1).some(frame => frame.active)).toBe(false)
   })
 
@@ -427,11 +401,11 @@ describe('ShowdownDirector showdown', () => {
     expect(frames.every(frame => frame.zoom === 1)).toBe(true)
   })
 
-  it('stops itself even if the winners never arrive', () => {
+  it('gives up quietly, with no shot at all, if the winners never arrive', () => {
     const director = new ShowdownDirector()
     const frames = run(director, showdownTimeline({ seats: [0, 2], winners: [], winnersAt: 99 }), 14)
     assertWithinLimits(frames)
-    expect(lastActive(frames) * FRAME).toBeLessThan(TUNING.maxShotSeconds + TUNING.release.maxSeconds + 1.5)
+    expect(frames.every(frame => !frame.active || frame.shot.weight === 0)).toBe(true)
     expect(frames[frames.length - 1]!.active).toBe(false)
   })
 })
@@ -463,7 +437,7 @@ describe('ShowdownDirector fold-outs and runouts', () => {
     }
   })
 
-  it('leans toward the board for each street of an all-in runout, mildly, and relaxes', () => {
+  it('no longer leans toward the board during an all-in runout', () => {
     const director = new ShowdownDirector()
     const allIn = [player('hero', 0, { isHero: true, allIn: true }), player('p4', 4, { allIn: true })]
     const timeline: Timeline = [
@@ -474,16 +448,8 @@ describe('ShowdownDirector fold-outs and runouts', () => {
     ]
     const frames = run(director, timeline, 11)
     assertWithinLimits(frames)
-    // Three pulses, each below full weight and back to zero between streets.
-    let pulses = 0
-    let wasActive = false
-    for (const frame of frames) {
-      if (frame.active && !wasActive) pulses += 1
-      wasActive = frame.active
-      expect(frame.shot.weight).toBeLessThan(0.7)
-    }
-    expect(pulses).toBe(3)
-    expect(maxStep(frames.filter(frame => frame.active), frame => frame.position)).toBeLessThan(0.2)
+    // The camera stays out of the runout entirely.
+    expect(frames.some(frame => frame.active)).toBe(false)
   })
 
   it('does not lean on an ordinary street when someone can still bet', () => {

@@ -1,6 +1,12 @@
 /**
  * Showdown cinematic camera (pure, allocation-free per frame, no three.js).
  *
+ * NOTE: the cinematic was deliberately toned down (it felt far too intense). A
+ * showdown now does ONE thing: once the winner is known, a gentle, brief zoom
+ * toward them, then an eased return. The old overview / reveal tour / board
+ * beat / all-in lean machinery below is kept but unused (see `winnerOnly` and
+ * the zeroed `runout.peak`).
+ *
  * The 3D room keeps its seated first-person camera. While a showdown plays out
  * this module produces a *shot* (camera position, look-at point, lens zoom and
  * a 0..1 blend weight) that the render loop mixes over the normal camera
@@ -37,9 +43,9 @@ export const SHOWDOWN_CAMERA_TUNING = {
   /** Blend weight ramp in for the main shot. */
   enterSeconds: 0.55,
   /** Height the camera rises by while entering or leaving a shot, so it clears the hero's chair. */
-  liftHump: 0.9,
+  liftHump: 0.3,
   /** Ease-out back to the normal camera: longer the farther the last shot is from it. */
-  release: { baseSeconds: 0.6, perUnit: 0.05, minSeconds: 0.65, maxSeconds: 0.9 },
+  release: { baseSeconds: 0.8, perUnit: 0.05, minSeconds: 0.8, maxSeconds: 1.0 },
   /** Ease-out used when the viewer skips or the next hand starts. */
   cancelSeconds: 0.38,
   /** The server intro (runout settles, nothing flips yet) lasts about 0.9s. */
@@ -64,7 +70,20 @@ export const SHOWDOWN_CAMERA_TUNING = {
   /** The whole shot never runs longer than this before easing out. */
   maxShotSeconds: 3.4,
   /** A fold-out win: a quick winner beat only. */
-  foldout: { enterSeconds: 0.6, holdSeconds: 0.8, peakWeight: 0.6 },
+  foldout: { enterSeconds: 0.7, holdSeconds: 0.6, peakWeight: 0.35 },
+  /**
+   * A showdown: skip the tour entirely and, once the winner is known, ease a
+   * fraction of the way toward the winner shot (peakWeight 0..1 of the full
+   * move), hold briefly, and return.
+   */
+  winnerOnly: { enterSeconds: 0.85, holdSeconds: 0.7, peakWeight: 0.7 },
+  /**
+   * The showdown shot is mostly a zoom: the camera moves only `dolly` of the way
+   * toward the winner shot's position, the look point moves `lookShare` of the
+   * way toward the winner, and the lens never tightens past `minZoom` (before
+   * the blend weight is applied on top).
+   */
+  gentle: { dolly: 0.14, lookShare: 0.45, minZoom: 0.72 },
   /**
    * Hole cards and face of a showing opponent, shot with a long lens from the
    * near side of the table (so the board never looms in the foreground): the
@@ -82,7 +101,7 @@ export const SHOWDOWN_CAMERA_TUNING = {
   /** Split pots: one wide frame around every winner. */
   split: { baseDistance: 3.8, perSpread: 0.55, maxDistance: 9.5, height: 2.6, perSpreadHeight: 0.08, maxHeight: 3.4, sideDegrees: 20, minZoom: 0.62, maxZoom: 1, lookY: 1.4 },
   /** Mild lean toward the board for each street of an all-in runout. */
-  runout: { position: [0, 2.5, 5.0], zoom: 0.88, delaySeconds: 0.25, attackSeconds: 0.55, holdSeconds: 0.35, decaySeconds: 0.95, peak: [0.5, 0.58, 0.68] as readonly number[] },
+  runout: { position: [0, 2.5, 5.0], zoom: 0.88, delaySeconds: 0.25, attackSeconds: 0.55, holdSeconds: 0.35, decaySeconds: 0.95, peak: [0, 0, 0] as readonly number[] },
   /** Where the camera may be, whatever the shot asks for. */
   bounds: {
     halfWidth: 8.2,
@@ -449,6 +468,20 @@ function winnerPose(mask: number, heroSeat: number, u: number, out: ShowdownShot
   out.zoom = lerp(S.minZoom, S.maxZoom, clamp(spreadWidth / 9, 0, 1))
 }
 
+/** A showdown's winner shot, toned down to a zoom with only a small camera move (see T.gentle). */
+function gentleWinnerPose(mask: number, heroSeat: number, u: number, out: ShowdownShot) {
+  winnerPose(mask, heroSeat, u, out)
+  const G = T.gentle
+  const home = DESKTOP_CAMERA_FRAMING
+  out.px = home.position[0] + (out.px - home.position[0]) * G.dolly
+  out.py = home.position[1] + (out.py - home.position[1]) * G.dolly
+  out.pz = home.position[2] + (out.pz - home.position[2]) * G.dolly
+  out.lx = home.lookAt[0] + (out.lx - home.lookAt[0]) * G.lookShare
+  out.ly = home.lookAt[1] + (out.ly - home.lookAt[1]) * G.lookShare
+  out.lz = home.lookAt[2] + (out.lz - home.lookAt[2]) * G.lookShare
+  out.zoom = clamp(out.zoom, G.minZoom, 1)
+}
+
 function copyPose(from: ShowdownShot, to: ShowdownShot) {
   to.px = from.px
   to.py = from.py
@@ -483,6 +516,7 @@ export interface ShowdownDirectorDebug {
 export class ShowdownDirector {
   private mode = MODE_NONE
   private startAt = 0
+  private beganAt = 0
   private cancelAt = -1
   private cancelWeight = 0
   private doneKey = ''
@@ -637,6 +671,7 @@ export class ShowdownDirector {
   private begin(snapshot: ShowdownSnapshot, key: string, now: number, mode: number) {
     this.mode = mode
     this.startAt = now
+    this.beganAt = now
     this.cancelAt = -1
     this.cancelWeight = 0
     this.doneKey = key
@@ -690,7 +725,11 @@ export class ShowdownDirector {
       }
     }
     if (mask !== this.winnersMask) {
-      if (this.winnersMask === 0 && mask !== 0) this.winnersAt = now
+      if (this.winnersMask === 0 && mask !== 0) {
+        this.winnersAt = now
+        // The zoom starts when the winner is known, not when the showdown began.
+        if (this.mode === MODE_SHOWDOWN) this.startAt = now
+      }
       this.winnersMask = mask
       this.planDirty = true
     }
@@ -715,9 +754,12 @@ export class ShowdownDirector {
     const count = snapshot.communityCount
     if (runout && count > this.prevCommunity && count >= 3 && this.mode === MODE_NONE) {
       const peaks = T.runout.peak
-      this.pulseStart = now + T.runout.delaySeconds
-      this.pulsePeak = peaks[Math.min(peaks.length - 1, Math.max(0, count - 3))]!
-      this.pulseCancelAt = -1
+      const peak = peaks[Math.min(peaks.length - 1, Math.max(0, count - 3))]!
+      if (peak > 0) {
+        this.pulseStart = now + T.runout.delaySeconds
+        this.pulsePeak = peak
+        this.pulseCancelAt = -1
+      }
     }
     this.prevCommunity = count
   }
@@ -744,6 +786,15 @@ export class ShowdownDirector {
       this.closeScenes()
       return
     }
+    // Showdown: just the winner, gently.
+    this.enterSeconds = T.winnerOnly.enterSeconds
+    this.peakWeight = T.winnerOnly.peakWeight
+    this.addScene(KIND_WINNER, -1, 0)
+    this.planEnd = T.winnerOnly.holdSeconds
+    this.setRelease()
+    this.closeScenes()
+    if (this.sceneCount > 0) return
+
     this.enterSeconds = T.enterSeconds
     this.peakWeight = 1
     this.addScene(KIND_OVERVIEW, -1, 0)
@@ -808,6 +859,7 @@ export class ShowdownDirector {
   /** Blend envelope of the main shot ignoring any cancel. */
   private mainEnvelope(now: number): number {
     if (this.mode === MODE_NONE) return 0
+    if (this.mode === MODE_SHOWDOWN && this.winnersAt < 0) return 0
     const t = now - this.startAt
     let weight = this.peakWeight * smoother(t / this.enterSeconds)
     if (t > this.planEnd) weight *= 1 - smoother((t - this.planEnd) / this.releaseSeconds)
@@ -824,6 +876,14 @@ export class ShowdownDirector {
         return 0
       }
       return this.cancelWeight * (1 - smoother(progress))
+    }
+    if (this.mode === MODE_SHOWDOWN && this.winnersAt < 0) {
+      // Waiting for the winner to be known; give up quietly if it never is.
+      if (now - this.beganAt > T.waitForWinnersSeconds) {
+        this.mode = MODE_NONE
+        this.hasLast = false
+      }
+      return 0
     }
     if (now - this.startAt > this.planEnd + this.releaseSeconds) {
       this.mode = MODE_NONE
@@ -890,7 +950,10 @@ export class ShowdownDirector {
     const target = this.target
     if (kind === KIND_STOP) stopPose(seat, u, target)
     else if (kind === KIND_BOARD) boardPose(u, T.board.zoom, target)
-    else if (kind === KIND_WINNER) winnerPose(this.winnersMask, this.heroSeat, u, target)
+    else if (kind === KIND_WINNER) {
+      if (this.mode === MODE_SHOWDOWN) gentleWinnerPose(this.winnersMask, this.heroSeat, u, target)
+      else winnerPose(this.winnersMask, this.heroSeat, u, target)
+    }
     else boardPose(clamp(u * 0.5, 0, 1), T.board.overviewZoom, target)
 
     const retarget = index !== this.curIndex || kind !== this.curKind || seat !== this.curSeat ||

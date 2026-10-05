@@ -1306,3 +1306,19 @@
     display: none;
   }
 }
+/* Your hand's name (desktop 3D): bigger, lifted well clear of the peeled card
+   edges, and always drawn above the cards so a flipping card never hides it. */
+@media (min-width: 1024px) {
+  .table-scene[data-desktop-three='true'] .own-hand-area.has-strength .own-hand-strength {
+    bottom: calc(100% + 40px);
+    z-index: 8;
+    padding: 9px 24px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  }
+
+  .table-scene[data-desktop-three='true'] .own-hand-area.has-strength .own-hand-strength-value {
+    font-size: 23px;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+  }
+}
