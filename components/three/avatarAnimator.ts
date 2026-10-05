@@ -1121,8 +1121,8 @@ export function computeAvatarTargetPose(
           (anchors.railR[1] + anchors.railL[1]) / 2 + 0.03,
           (anchors.railR[2] + anchors.railL[2]) / 2 - 0.12,
         ]
-        blendTo(pose.handR, offset(mid, 0.1, 0.02 * tap, 0), think)
-        blendTo(pose.handL, offset(mid, -0.1, 0, 0), think)
+        blendTo(pose.handR, offset(mid, 0.125, 0.02 * tap, 0), think)
+        blendTo(pose.handL, offset(mid, -0.125, 0, 0), think)
         pose.fingerCurlR += 0.5 * think
         pose.fingerCurlL += 0.5 * think
         handShape(pose, 'R', 'fist', think * 0.85)

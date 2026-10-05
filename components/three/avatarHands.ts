@@ -73,32 +73,32 @@ function shape(thumb: FingerDof, index: FingerDof, middle: FingerDof, ring: Fing
 
 const SHAPE_TABLE: Record<HandShapeId, Float32Array> = {
   // A resting hand: gently curled, curl growing from index to pinky, thumb alongside.
-  relaxed: shape(F(20, 8, -10, 14, 16), F(0, 18, 28, 12, 4), F(0, 23, 36, 15, 1), F(2, 28, 42, 18, 3), F(4, 34, 46, 20, 7)),
+  relaxed: shape(F(20, 8, -24, 14, 16), F(0, 18, 28, 12, 4), F(0, 23, 36, 15, 1), F(2, 28, 42, 18, 3), F(4, 34, 46, 20, 7)),
   flat: shape(F(6, 0, -18, 4, 4), F(0, -2, 0, 0, 0), F(0, -2, 0, 0, 0), F(0, -2, 0, 0, 0), F(0, -2, 0, 0, 1)),
   open: shape(F(0, 0, 10, 0, -4), F(0, -6, -2, 0, 7), F(0, -6, -2, 0, 2), F(0, -6, -2, 0, 5), F(0, -6, -2, 0, 10)),
-  fist: shape(F(48, 26, -22, 30, 36), F(0, 84, 105, 60, 0), F(0, 86, 108, 62, 0), F(4, 88, 106, 60, 0), F(8, 86, 100, 55, 0)),
-  loose: shape(F(30, 14, -12, 20, 24), F(0, 55, 70, 35, 2), F(0, 62, 80, 40, 0), F(3, 68, 85, 42, 0), F(6, 72, 88, 44, 2)),
+  fist: shape(F(15, 10, -50, 55, 55), F(0, 84, 105, 60, 0), F(0, 86, 108, 62, 0), F(4, 88, 106, 60, 0), F(8, 86, 100, 55, 0)),
+  loose: shape(F(30, 10, -40, 40, 40), F(0, 55, 70, 35, 2), F(0, 62, 80, 40, 0), F(3, 68, 85, 42, 0), F(6, 72, 88, 44, 2)),
   // Chip pinch: thumb tip meets index tip, the rest curled out of the way.
   pinch: shape(F(22, 28, -28, 10, 1), F(0, 51, 25, 19, 0), F(0, 55, 65, 30, 0), F(2, 62, 72, 35, 0), F(4, 68, 78, 38, 0)),
   // Claw round a stack of chips.
-  grab: shape(F(30, 10, -6, 20, 20), F(0, 38, 44, 20, 3), F(0, 42, 50, 24, 1), F(2, 46, 54, 26, 3), F(4, 50, 58, 28, 5)),
+  grab: shape(F(30, 10, -22, 20, 20), F(0, 38, 44, 20, 3), F(0, 42, 50, 24, 1), F(2, 46, 54, 26, 3), F(4, 50, 58, 28, 5)),
   // Holding a card edge: thumb under, fingers curved over the top.
-  card: shape(F(26, 14, -8, 18, 18), F(0, 30, 28, 12, 3), F(0, 36, 38, 16, 0), F(2, 46, 52, 24, 2), F(4, 52, 56, 26, 4)),
-  peek: shape(F(30, 16, -6, 20, 18), F(0, 20, 24, 10, 4), F(0, 26, 34, 14, 1), F(2, 38, 46, 20, 3), F(4, 46, 52, 24, 5)),
+  card: shape(F(26, 14, -22, 18, 18), F(0, 30, 28, 12, 3), F(0, 36, 38, 16, 0), F(2, 46, 52, 24, 2), F(4, 52, 56, 26, 4)),
+  peek: shape(F(30, 16, -20, 20, 18), F(0, 20, 24, 10, 4), F(0, 26, 34, 14, 1), F(2, 38, 46, 20, 3), F(4, 46, 52, 24, 5)),
   // Two-finger tap on the felt: index and middle out, the rest tucked.
-  tap: shape(F(30, 16, -14, 24, 26), F(0, 24, 20, 8, 2), F(0, 26, 24, 10, 0), F(2, 84, 98, 55, 0), F(4, 84, 95, 52, 0)),
+  tap: shape(F(30, 16, -26, 24, 26), F(0, 24, 20, 8, 2), F(0, 26, 24, 10, 0), F(2, 84, 98, 55, 0), F(4, 84, 95, 52, 0)),
   point: shape(F(15, 10, 4, 10, 6), F(0, 2, 0, 0, 4), F(0, 86, 106, 60, 0), F(4, 88, 106, 60, 0), F(8, 86, 100, 55, 0)),
   flickCock: shape(F(38, 20, -8, 22, 20), F(0, 72, 108, 30, 0), F(0, 62, 80, 40, 0), F(3, 68, 85, 42, 0), F(6, 72, 88, 44, 2)),
   flickSnap: shape(F(30, 20, 0, 14, 8), F(0, -4, 0, 0, 2), F(0, 62, 80, 40, 0), F(3, 68, 85, 42, 0), F(6, 72, 88, 44, 2)),
   // Round a glass.
-  cup: shape(F(34, 12, -4, 22, 20), F(0, 50, 52, 26, 4), F(0, 54, 60, 30, 1), F(2, 58, 66, 32, 3), F(4, 62, 70, 34, 5)),
+  cup: shape(F(44, 12, -26, 22, 20), F(0, 50, 52, 26, 4), F(0, 54, 60, 30, 1), F(2, 58, 66, 32, 3), F(4, 62, 70, 34, 5)),
   // Flick-off: middle finger up, the rest folded, thumb over them.
-  middle: shape(F(40, 22, -20, 28, 32), F(0, 84, 105, 60, 0), F(0, -4, 0, 0, 0), F(4, 88, 106, 60, 0), F(8, 86, 100, 55, 0)),
+  middle: shape(F(15, 10, -50, 55, 55), F(0, 84, 105, 60, 0), F(0, -4, 0, 0, 0), F(4, 88, 106, 60, 0), F(8, 86, 100, 55, 0)),
   // Fingertips resting on the temple or head.
-  rub: shape(F(10, 6, -6, 8, 8), F(0, 14, 16, 6, 8), F(0, 16, 20, 8, 3), F(0, 22, 26, 10, 6), F(0, 28, 30, 12, 10)),
+  rub: shape(F(10, 6, -18, 8, 8), F(0, 14, 16, 6, 8), F(0, 16, 20, 8, 3), F(0, 22, 26, 10, 6), F(0, 28, 30, 12, 10)),
   clap: shape(F(4, 0, -14, 4, 4), F(0, 8, 8, 4, 0), F(0, 8, 8, 4, 0), F(0, 10, 10, 5, 0), F(0, 12, 12, 6, 1)),
   // Fingers draped over a chip stack: relaxed but a little more spread.
-  chipRest: shape(F(22, 10, -6, 16, 18), F(0, 30, 38, 18, 4), F(0, 34, 46, 22, 1), F(2, 40, 52, 26, 3), F(4, 46, 56, 28, 6)),
+  chipRest: shape(F(22, 10, -20, 16, 18), F(0, 30, 38, 18, 4), F(0, 34, 46, 22, 1), F(2, 40, 52, 26, 3), F(4, 46, 56, 28, 6)),
 }
 
 /** Legacy 0..1 curl: 0 = the relaxed hand, ~0.55 = a loose fist, 1 = a tight fist. */
@@ -306,6 +306,9 @@ function updateOneHand(
     for (let index = 0; index < JOINTS; index += 1) goal[index] = vector[index]!
   } else if (debug) {
     goal.set(SHAPE_TABLE[debug])
+    // Dev: window.__handDebugPatch = { 3: 0.5 } overrides single joints (radians) on the debug shape.
+    const patch = process.env.NODE_ENV === 'production' ? undefined : (globalThis as { __handDebugPatch?: Record<string, number> }).__handDebugPatch
+    if (patch) for (const key of Object.keys(patch)) goal[Number(key)] = patch[key]!
   } else {
     for (let shapeIndex = 0; shapeIndex < HAND_SHAPE_COUNT; shapeIndex += 1) {
       const w = weights[shapeIndex]!

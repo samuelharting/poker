@@ -213,12 +213,13 @@ describe('first-person hands: peek, win, flick, deal', () => {
     expect(done.right.y).toBeCloseTo(REST_Y, 1)
   })
 
-  it('dealing by hand follows the projected wrist targets, easing in with the gesture weight', () => {
+  it('dealing by hand works a visible spot above the tray (cock and snap shape it), easing in with the gesture weight', () => {
     const deal = { weight: 1, rightX: 0.1, rightY: -0.55, leftX: -0.2, leftY: -0.6, pinch: 1, cock: 0.2, snap: 0.5, holdLeft: 1 }
     const full = pose('ready', 99, { deal })
     const none = pose('ready', 99, { deal: { ...deal, weight: 0 } })
     const half = pose('ready', 99, { deal: { ...deal, weight: 0.5 } })
-    expect(full.right.x).toBeCloseTo(0.1, 5)
+    expect(full.right.x).toBeCloseTo(0.1, 1)
+    expect(full.right.y).toBeGreaterThan(MAX_REACH_Y - 0.2)
     expect(full.right.pinch).toBe(1)
     expect(full.left.fist).toBeGreaterThan(0.4)
     expect(none.right.y).toBeCloseTo(REST_Y, 1)

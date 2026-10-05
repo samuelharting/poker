@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { hairHighlights, hashString, pickHairColor, pickOutfitPalette } from './avatarWardrobe'
 
 /**
  * Stylized look for the rigged avatars: cel-shaded toon materials with a
@@ -486,58 +487,7 @@ export interface AvatarLook {
   seed?: string
 }
 
-type Palette = Record<string, string>
-
-// Jewel-toned wardrobe that sits well against the teal lounge and green felt.
-// Keys are the GLB material names; each model gets a few variants per player.
-const OUTFIT_PALETTES: Record<string, Palette[]> = {
-  Suit: [
-    { Suit: '#27324d', White: '#efe8d8', Tie: '#a3263c' },
-    { Suit: '#3a2a45', White: '#f1ead9', Tie: '#d8a23a' },
-    { Suit: '#1f3b3a', White: '#ece6d6', Tie: '#c2573a' },
-    { Suit: '#2c2c33', White: '#f2ecde', Tie: '#2f8f83' },
-  ],
-  Casual2: [
-    { LightBrown: '#d2a03f', LightBlue: '#35507a', White: '#ece6da', Red_Dark: '#8f2433' },
-    { LightBrown: '#c8604e', LightBlue: '#2f3f5e', White: '#ece6da', Red_Dark: '#1f5c55' },
-    { LightBrown: '#7fa36a', LightBlue: '#3b4f78', White: '#ece6da', Red_Dark: '#7a2a3a' },
-    { LightBrown: '#e0d3b4', LightBlue: '#2c4a6e', White: '#ece6da', Red_Dark: '#b8403a' },
-  ],
-  Casual: [
-    { Purple: '#5d3a8a', LightBlue: '#34496e', White: '#ece6da' },
-    { Purple: '#1f7f7a', LightBlue: '#2e3f5c', White: '#ece6da' },
-    { Purple: '#a83246', LightBlue: '#33476a', White: '#ece6da' },
-    { Purple: '#3f64a8', LightBlue: '#2c3a52', White: '#ece6da' },
-  ],
-  Worker: [
-    { Worker_Vest: '#e0692c', Worker_Yellow: '#e8b640', LightBrown: '#7c95a6', Brown: '#46506a', Brown2: '#2c2f3a' },
-    { Worker_Vest: '#d9a32e', Worker_Yellow: '#e8c35a', LightBrown: '#b0544a', Brown: '#3b4a5e', Brown2: '#2c2f3a' },
-    { Worker_Vest: '#2f8f7a', Worker_Yellow: '#e2ae3a', LightBrown: '#d8cdb3', Brown: '#40465a', Brown2: '#2c2f3a' },
-  ],
-  Punk: [
-    { Black: '#26242c', White: '#ebe4d6', LightBlue: '#2f3e58' },
-    { Black: '#3a1f2c', White: '#e8e0cf', LightBlue: '#27324a' },
-    { Black: '#1f2c34', White: '#f0e8d8', LightBlue: '#353148' },
-  ],
-  Adventurer: [
-    { Green: '#3f6d55', LightGreen: '#c4a46a', Brown: '#6e4a2c', Brown2: '#3a3140', Gold: '#e0b04a' },
-    { Green: '#7a3b33', LightGreen: '#d6c29a', Brown: '#5c3e28', Brown2: '#2e3244', Gold: '#e0b04a' },
-    { Green: '#34577a', LightGreen: '#c9b07a', Brown: '#6a4630', Brown2: '#33303c', Gold: '#e0b04a' },
-  ],
-}
-
-// Natural hair plus a couple of playful dyes; punks get the loud ones.
-const HAIR_COLORS = ['#1c1613', '#3a2419', '#5e3520', '#8a3a1e', '#b8612a', '#d9ae5e', '#e6dcc0', '#8d8a86', '#2d2a33']
-const PUNK_HAIR_COLORS = ['#d8345f', '#1fb3a6', '#c8283c', '#8150d8', '#f0a030']
-
-function hashString(value: string) {
-  let hash = 2166136261
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-  return hash >>> 0
-}
+// Outfit palettes, hair colours and dye sets live in avatarWardrobe (pure data, unit tested).
 
 function detectOutfitFamily(model: THREE.Object3D) {
   let family: string | null = null
@@ -553,10 +503,10 @@ function detectOutfitFamily(model: THREE.Object3D) {
 function applyLook(model: THREE.Object3D, materials: Iterable<THREE.MeshToonMaterial>, look: AvatarLook) {
   const seed = hashString(look.seed ?? '')
   const family = detectOutfitFamily(model)
-  const variants = family ? OUTFIT_PALETTES[family] : undefined
-  const palette: Palette = variants ? variants[seed % variants.length]! : {}
-  const hairChoices = family === 'Punk' ? PUNK_HAIR_COLORS : HAIR_COLORS
-  const hair = new THREE.Color(hairChoices[(seed >>> 8) % hairChoices.length]!)
+  const palette = pickOutfitPalette(family, seed, look.skinColor)
+  const hairPick = pickHairColor(family, seed, look.skinColor)
+  const hair = new THREE.Color(hairPick.main)
+  const accent = hairPick.accent ? new THREE.Color(hairPick.accent) : null
   const skin = look.skinColor ? new THREE.Color(look.skinColor) : null
   if (skin) skin.offsetHSL(0, 0.06, -0.035)
 
@@ -566,11 +516,76 @@ function applyLook(model: THREE.Object3D, materials: Iterable<THREE.MeshToonMate
     else if (skin && /^skin_darker$/i.test(name)) material.color.copy(skin).multiplyScalar(0.84)
     else if (/^(hair|moustache)$/i.test(name) || (family === 'Punk' && /^red(_dark)?$/i.test(name))) {
       material.color.copy(hair)
-      if (/^red_dark$/i.test(name)) material.color.multiplyScalar(0.72)
+      // The punk's sideburns and goatee take the dye set's accent (default: a deeper shade of the crest).
+      if (/^red_dark$/i.test(name)) {
+        if (accent) material.color.copy(accent)
+        else material.color.multiplyScalar(0.72)
+      }
+      // Highlights and root shade are baked as vertex colours (see bakeHairShading); lift the base to match.
+      if (/^(hair|red)$/i.test(name) && hairHighlights(seed)) {
+        material.vertexColors = true
+        material.color.multiplyScalar(HAIR_SHADING_LIFT)
+      }
     } else if (palette[name]) material.color.set(palette[name]!)
     else if (/^black$/i.test(name)) material.color.set('#22222a')
     else if (/^grey$/i.test(name)) material.color.set('#3a3a44')
   }
+}
+
+/** Mean of the baked hair shading (see bakeHairShading), so a shaded head averages the chosen colour. */
+const HAIR_SHADING_LIFT = 1.08
+
+/**
+ * Bakes a root-to-tip gradient and soft lighter streaks into a hair mesh's vertex
+ * colours (once per shared template geometry; per-player hair dye is the material
+ * colour, and players without highlights leave `vertexColors` off). Roots at the
+ * crown run darker, tips and some strands lighter, so flat dye reads as hair.
+ */
+function bakeHairShading(mesh: THREE.SkinnedMesh) {
+  const geometry = mesh.geometry
+  if (geometry.userData.hairShaded) return
+  geometry.userData.hairShaded = true
+  const position = geometry.getAttribute('position')
+  const bones = mesh.skeleton.bones
+  const head = bones.find(bone => /^head$/i.test(bone.name))
+  const hips = bones.find(bone => /^hips$/i.test(bone.name))
+  const up = new THREE.Vector3(0, 1, 0)
+  if (head && hips) {
+    const world = (bone: THREE.Bone) => new THREE.Vector3().setFromMatrixPosition(mesh.skeleton.boneInverses[bones.indexOf(bone)]!.clone().invert())
+    up.copy(world(head)).sub(world(hips)).normalize()
+  }
+  const point = new THREE.Vector3()
+  const heights = new Float32Array(position.count)
+  let low = Infinity
+  let high = -Infinity
+  let cx = 0
+  let cz = 0
+  for (let index = 0; index < position.count; index += 1) {
+    point.fromBufferAttribute(position, index).applyMatrix4(mesh.bindMatrix)
+    heights[index] = point.dot(up)
+    low = Math.min(low, heights[index]!)
+    high = Math.max(high, heights[index]!)
+    cx += point.x
+    cz += point.z
+  }
+  cx /= position.count
+  cz /= position.count
+  const colors = new Float32Array(position.count * 3)
+  const span = Math.max(high - low, 1e-9)
+  for (let index = 0; index < position.count; index += 1) {
+    point.fromBufferAttribute(position, index).applyMatrix4(mesh.bindMatrix)
+    const t = (heights[index]! - low) / span
+    // Strand id from the angle around the head and the height band: soft blocks of lighter hair.
+    const angle = Math.atan2(point.z - cz, point.x - cx)
+    const strand = Math.floor((angle / (Math.PI * 2) + 0.5) * 14) * 7 + Math.floor(t * 4)
+    const streak = ((Math.sin(strand * 12.9898) * 43758.5453) % 1 + 1) % 1 < 0.28 ? 1 : 0
+    const gradient = 0.82 + 0.3 * (1 - t) ** 0.9
+    const value = gradient + streak * 0.17
+    colors[index * 3] = value
+    colors[index * 3 + 1] = value * (1 - streak * 0.03)
+    colors[index * 3 + 2] = value * (1 - streak * 0.06)
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
 }
 
 const SMOOTH_CREASE_COS = Math.cos(THREE.MathUtils.degToRad(62))
@@ -1117,6 +1132,10 @@ export function stylizeAvatar(
     }
   })
   applyLook(model, converted.values(), look)
+  for (const mesh of skinnedMeshes) {
+    const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material
+    if (material && (material as THREE.MeshToonMaterial).vertexColors && /^(hair|red)$/i.test(material.name)) bakeHairShading(mesh)
+  }
   if (clothMeshes.length > 0) {
     const frame = computeFabricFrame(skinnedMeshes)
     const cover = clothMeshes.some(mesh => !mesh.geometry.userData.fabricBaked) ? buildClothPointIndex(clothMeshes, frame) : null

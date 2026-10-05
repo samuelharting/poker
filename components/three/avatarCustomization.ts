@@ -8,13 +8,18 @@ import type {
   PlayerAvatarModelKey,
 } from '@/lib/profile'
 import { applyAvatarToonLook, createAvatarToonMaterial } from './avatarStyle'
+import { createRiggedJewelry } from './avatarJewelry'
+import { hashString } from './avatarWardrobe'
 
 type CosmeticSelection = Pick<
   PlayerAvatarCustomization,
   'hat' | 'glasses' | 'jacket' | 'jacketColor'
 >
 
-type RiggedCosmeticSelection = CosmeticSelection & Pick<PlayerAvatarCustomization, 'modelKey'>
+type RiggedCosmeticSelection = CosmeticSelection & Pick<PlayerAvatarCustomization, 'modelKey'> & {
+  /** Stable per-player seed (player id): decides the seeded jewellery. Omitted: none is worn. */
+  seed?: string
+}
 
 export const AVATAR_JACKET_COLOR_HEX: Record<PlayerAvatarJacketColor, string> = {
   burgundy: '#8c2442',
@@ -59,6 +64,11 @@ export interface HeadFit {
   faceHalfWidth: number
   /** Height where the skull is still wide enough to seat a small crown. */
   crownSeatY?: number
+  /**
+   * The ellipse that encloses the skull, hair and fringe between `y - half` and `y + half`
+   * (a hat band must clear the hair at its own height, not just the average head).
+   */
+  ellipseAt?: (y: number, half: number) => { halfX: number; halfZ: number; centerZ: number } | null
 }
 
 const FALLBACK_HEAD: HeadAccessoryCalibration = { scale: 1, front: -1 }
@@ -147,6 +157,12 @@ export function createRiggedAvatarAccessories(
     fit,
     materials
   )
+  // The worker's skull is open-topped under his hard hat: with a visor or crown on instead,
+  // fill it with short hair in his own colour so the hat does not float over a flat scalp.
+  if (selection.modelKey === 'worker' && (selection.hat === 'visor' || selection.hat === 'crown')) {
+    const cap = createScalpCap(avatarRoot, headCalibration, fit, materials)
+    if (cap) headGroup.add(cap)
+  }
   if (headBone) {
     headBone.add(headGroup)
   } else {
@@ -176,7 +192,14 @@ export function createRiggedAvatarAccessories(
   materials.push(...jacketOverride.materials)
   if (jacketOverride.restore) restores.push(jacketOverride.restore)
 
-  return { groups: [headGroup, jacketGroup], materials, restores }
+  const groups = [headGroup, jacketGroup]
+  if (selection.seed !== undefined) {
+    const jewelry = createRiggedJewelry(avatarRoot, bones, selection.modelKey, hashString(selection.seed))
+    groups.push(...jewelry.groups)
+    materials.push(...jewelry.materials)
+  }
+
+  return { groups, materials, restores }
 }
 
 export function disposeAvatarAccessorySet(set: AvatarAccessorySet | null): void {
@@ -304,7 +327,32 @@ export function measureHeadFit(
       break
     }
   }
+  const ellipseAt = (y: number, half: number) => {
+    let hx = 0
+    let zMin = Infinity
+    let zMax = -Infinity
+    let count = 0
+    for (const p of upper) {
+      if (Math.abs(p.y - y) > half) continue
+      count += 1
+      hx = Math.max(hx, Math.abs(p.x))
+      zMin = Math.min(zMin, p.z)
+      zMax = Math.max(zMax, p.z)
+    }
+    if (count < 6) return null
+    const halfZ = Math.max(1e-4, (zMax - zMin) / 2)
+    const centerZ = (zMax + zMin) / 2
+    // Boxy hair has corners outside the ellipse through its extremes: grow it to enclose every point.
+    let k = 1
+    for (const p of upper) {
+      if (Math.abs(p.y - y) > half) continue
+      k = Math.max(k, Math.hypot(p.x / Math.max(hx, 1e-4), (p.z - centerZ) / halfZ))
+    }
+    k = Math.min(k, 1.22)
+    return { halfX: hx * k, halfZ: halfZ * k, centerZ }
+  }
   return {
+    ellipseAt,
     crownSeatY,
     halfWidth,
     top,
@@ -341,6 +389,35 @@ function createHeadAccessories(
   }
   group.add(glassesGroup, hatGroup)
   return group
+}
+
+/** A shallow dome of short hair over the skull, coloured like the model's own facial hair. */
+function createScalpCap(
+  avatarRoot: THREE.Object3D,
+  calibration: HeadAccessoryCalibration,
+  fit: HeadFit,
+  materials: THREE.Material[]
+): THREE.Mesh | null {
+  let color: THREE.Color | null = null
+  avatarRoot.traverse(object => {
+    const mesh = object as THREE.Mesh
+    if (color || !mesh.isMesh || Array.isArray(mesh.material)) return
+    const material = mesh.material as THREE.MeshToonMaterial
+    if (material?.color && /moustache|^hair$/i.test(material.name)) color = material.color.clone()
+  })
+  const s = calibration.scale
+  const material = createAvatarToonMaterial(color ?? '#2a211c')
+  materials.push(material)
+  const radius = fit.halfWidth * 0.86
+  const cap = mesh(
+    new THREE.SphereGeometry(radius * s, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2),
+    material,
+    [0, (fit.top - 0.12) * s, fit.centerZ * s]
+  )
+  cap.name = 'avatar-hair-cap'
+  cap.scale.set(1, 0.42, THREE.MathUtils.clamp(fit.depth / fit.halfWidth, 0.8, 1.25))
+  cap.castShadow = false
+  return cap
 }
 
 function createGlasses(
@@ -453,6 +530,19 @@ function createBrimGeometry(inner: number, outer: number, curl: number, thicknes
   return new THREE.LatheGeometry(profile, 40)
 }
 
+/** The head ellipse a hat band at `y` must enclose (never smaller than the average skull). */
+function hatEllipse(fit: HeadFit, y: number, half: number, margin: number) {
+  const measured = fit.ellipseAt?.(y, half)
+  const halfX = Math.max(fit.halfWidth, (measured?.halfX ?? 0) * margin)
+  const halfZ = Math.max(fit.depth, (measured?.halfZ ?? 0) * margin)
+  return {
+    halfX,
+    halfZ,
+    centerZ: measured ? measured.centerZ : fit.centerZ,
+    depthScale: THREE.MathUtils.clamp(halfZ / halfX, 0.7, 1.4),
+  }
+}
+
 function createHat(
   style: PlayerAvatarHatStyle,
   calibration: HeadAccessoryCalibration,
@@ -485,9 +575,18 @@ function createHat(
   materials.push(primary, trim)
 
   // Everything is placed relative to the measured skull, centred front/back.
-  const width = fit.halfWidth
-  const depthScale = THREE.MathUtils.clamp(fit.depth / width, 0.8, 1.25)
-  group.position.set(0, 0, fit.centerZ * s)
+  // The band must clear the hair and fringe at its own height (a fringe pokes forward of the
+  // average skull), so size and centre it from the head's measured extent there.
+  const ellipse = style === 'fedora' || style === 'cowboy'
+    ? hatEllipse(fit, fit.top - (style === 'cowboy' ? 0.1 : 0.09), 0.14, 1.03)
+    : style === 'visor'
+      ? hatEllipse(fit, fit.eyeY + 0.175, 0.08, 1.04)
+      : style === 'beanie'
+        ? hatEllipse(fit, fit.eyeY + 0.2, 0.12, 1.0)
+        : hatEllipse(fit, fit.top - 0.07, 0.05, 1.0)
+  const width = ellipse.halfX
+  const depthScale = ellipse.depthScale
+  group.position.set(0, 0, ellipse.centerZ * s)
   const oval = (object: THREE.Object3D) => {
     object.scale.z *= depthScale
     return object
@@ -495,7 +594,7 @@ function createHat(
 
   if (style === 'beanie') {
     // Knit cap hugging the skull down to the brow, a folded cuff and a pom-pom.
-    const radius = width * 1.2
+    const radius = width * 1.1
     const cuffY = fit.eyeY + 0.13
     const domeHeight = Math.max(0.2, fit.top + 0.06 - cuffY)
     const dome = oval(mesh(
@@ -525,10 +624,10 @@ function createHat(
 
   if (style === 'visor') {
     // A sweatband around the forehead with a bill out front.
-    const bandY = fit.eyeY + 0.17
-    const radius = width * 1.04
+    const bandY = fit.eyeY + 0.175
+    const radius = width
     group.add(oval(mesh(
-      new THREE.CylinderGeometry(radius * s, radius * s, 0.07 * s, 32, 1, true),
+      new THREE.CylinderGeometry(radius * s, radius * s, 0.085 * s, 32, 1, true),
       trim,
       [0, bandY * s, 0]
     )))
@@ -537,8 +636,8 @@ function createHat(
       primary,
       [0, (bandY - 0.03) * s, 0]
     )
-    bill.scale.z = (fit.depth * 1.6) / radius
-    bill.rotation.x = 0.16
+    bill.scale.z = (ellipse.halfZ * 1.4) / radius
+    bill.rotation.x = 0.04
     group.add(bill)
     return group
   }
@@ -591,9 +690,9 @@ function createHat(
   cap.scale.x = 0.92
   group.add(cap)
   const crease = mesh(
-    new THREE.BoxGeometry(0.02 * s, 0.03 * s, crownRadius * 1.3 * depthScale * s),
+    new THREE.BoxGeometry(0.02 * s, 0.024 * s, crownRadius * 0.8 * depthScale * s),
     trim,
-    [0, (bandY + crownHeight + 0.03) * s, 0]
+    [0, (bandY + crownHeight + 0.018) * s, 0]
   )
   crease.visible = !cowboy
   group.add(crease)

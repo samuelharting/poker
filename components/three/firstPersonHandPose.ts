@@ -75,6 +75,17 @@ export const REST_X = 0.27
 const WRIST_BELOW = 0.17
 /** The hands never travel above this line: the board and the pot stay clear. */
 export const MAX_REACH_Y = -0.27
+/**
+ * Where the dealing hands work (wrist, NDC): well above the hole-card tray and the
+ * pot label (DOM overlays at the bottom of the view), so the deal is visible rather
+ * than a ghost behind them. The gesture's own table point projects below the
+ * screen for the hero (clamped to -1), so only its cock/snap shape is used; the
+ * card leaves the drawn fingertips (see getHeroDealTipWorld).
+ */
+export const DEAL_RIGHT_X = 0.1
+export const DEAL_RIGHT_Y = -0.34
+export const DEAL_LEFT_X = -0.1
+export const DEAL_LEFT_Y = -0.4
 /** Where a knuckle tap lands (on the rail, just above the hole cards). */
 const TAP_X = 0.12
 const TAP_Y = -0.5
@@ -372,19 +383,27 @@ function poseWager(e: number, input: HeroHandsInput, out: HeroHandsPose) {
 }
 
 function poseWin(w: number, out: HeroHandsPose) {
-  // Both fists up and pumping, then they come back down.
+  // Both fists up and pumping, then they come back down. The hands are not mirror
+  // images: the right is the lead (higher, tighter, quicker), the left follows a
+  // beat behind and a little looser, each punching up and easing back down with
+  // its own sway and wrist roll instead of bobbing in lockstep.
   const raise = smooth(w / 0.4) * (1 - smooth((w - WIN_HOLD_SECONDS) / 0.55))
   for (const sign of [1, -1] as const) {
     const hand = sign === 1 ? out.right : out.left
-    const phase = sign === 1 ? 0 : 0.35
-    const bob = (Math.sin(w * 8 + phase * Math.PI) * 0.5 + 0.5) * 0.07
-    hand.x = lerp(hand.x, 0.47 * sign, raise)
-    hand.y = lerp(hand.y, -0.16 + bob, raise)
-    hand.pitch = lerp(hand.pitch, 0.95, raise)
-    hand.yaw = lerp(hand.yaw, 0.1, raise)
-    hand.roll = lerp(hand.roll, 0.35, raise)
-    hand.fist = raise * 0.95
-    hand.depth = HAND_DEPTH + 0.06 * raise
+    const lead = sign === 1
+    const cycle = w * (lead ? 2.3 : 2.0) - (lead ? 0 : 0.28)
+    const phase = cycle - Math.floor(cycle)
+    // A quick punch up, a slower pull down.
+    const punch = phase < 0.28 ? smooth(phase / 0.28) : 1 - smooth((phase - 0.28) / 0.72)
+    const sway = Math.sin(w * (lead ? 3.1 : 2.6) + (lead ? 0 : 1.3))
+    hand.x = lerp(hand.x, 0.47 * sign + 0.035 * sway * sign, raise)
+    hand.y = lerp(hand.y, (lead ? -0.12 : -0.2) + 0.1 * punch, raise)
+    hand.pitch = lerp(hand.pitch, 0.85 + 0.2 * punch, raise)
+    hand.yaw = lerp(hand.yaw, 0.1 + 0.08 * sway, raise)
+    hand.roll = lerp(hand.roll, 0.3 + 0.16 * sway - 0.1 * punch, raise)
+    hand.fist = raise * (lead ? 0.95 : 0.8) * (0.9 + 0.1 * punch)
+    hand.open = raise * (lead ? 0 : 0.12) * (1 - punch)
+    hand.depth = HAND_DEPTH + (0.06 - 0.05 * punch) * raise
   }
 }
 
@@ -393,15 +412,15 @@ function poseDeal(deal: HeroDealInput, out: HeroHandsPose) {
   const w = clamp01(deal.weight)
   const right = out.right
   const left = out.left
-  right.x = lerp(right.x, deal.rightX, w)
-  right.y = lerp(right.y, Math.min(MAX_REACH_Y, deal.rightY), w)
+  right.x = lerp(right.x, DEAL_RIGHT_X - 0.03 * deal.cock + 0.02 * deal.snap, w)
+  right.y = lerp(right.y, DEAL_RIGHT_Y - 0.05 * deal.cock + 0.07 * deal.snap, w)
   right.pitch = REST_PITCH + w * (0.12 - 0.28 * deal.cock + 0.35 * deal.snap)
   right.yaw = 0.14 + w * 0.1
   right.pinch = deal.pinch * w
   right.fist = 0.4 * deal.cock * w
   right.open = 0.9 * deal.snap * w
-  left.x = lerp(left.x, deal.leftX, w)
-  left.y = lerp(left.y, Math.min(MAX_REACH_Y, deal.leftY), w)
+  left.x = lerp(left.x, DEAL_LEFT_X, w)
+  left.y = lerp(left.y, DEAL_LEFT_Y, w)
   left.pitch = REST_PITCH + 0.08 * w
   left.fist = 0.5 * deal.holdLeft * w
 }

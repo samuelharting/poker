@@ -127,12 +127,24 @@ export function createBoardDeal(dealer: DealerSeatLike, plan: ReturnType<typeof 
 }
 
 /**
+ * The hero's own hands are drawn on the camera, so while they deal the card has to
+ * leave those drawn fingertips (set by the room; see getHeroDealTipWorld).
+ */
+let heroTipProvider: ((out: THREE.Vector3) => boolean) | null = null
+export function setHeroDealTipProvider(provider: ((out: THREE.Vector3) => boolean) | null, onlyIf?: (out: THREE.Vector3) => boolean) {
+  // (A disposing scene only clears its own provider, never a newer scene's.)
+  if (onlyIf && heroTipProvider !== onlyIf) return
+  heroTipProvider = provider
+}
+
+/**
  * Where card `cardIndex` of the dealer's schedule leaves the hand, in world
  * space. Reads the live fingertips when the rig is loaded (and they are where
  * the gesture says they should be), else the timeline's own release point.
  */
 export function getDealerReleaseWorld(deal: DealerRuntime, dealer: DealerSeatLike, cardIndex: number, out: THREE.Vector3): boolean {
   if (cardIndex < 0 || cardIndex >= deal.schedule.cards.length) return false
+  if (dealer.isHero && heroTipProvider && heroTipProvider(out)) return true
   dealer.root.updateWorldMatrix(true, false)
   getDealCardRelease(deal.schedule, cardIndex, dealer.anchors, expectedLocal)
   expected.set(expectedLocal[0], expectedLocal[1], expectedLocal[2])

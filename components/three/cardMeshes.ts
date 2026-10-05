@@ -490,6 +490,8 @@ interface BoardSlot {
   /** Scene time the card started being swept off the felt (-inf while dealt). */
   leavingAt: number
   highlighted: boolean
+  /** Face albedo scalar (1 = normal; non-winning board cards dim at showdown). */
+  dim: number
   highlightMaterial: THREE.MeshBasicMaterial
   highlightMesh: THREE.Mesh
   /** The small lip the propped card is seated in. */
@@ -624,6 +626,7 @@ export function createBoardRuntime(scene: THREE.Scene): BoardRuntime {
       dealtAt: Number.NEGATIVE_INFINITY,
       leavingAt: Number.NEGATIVE_INFINITY,
       highlighted: false,
+      dim: 1,
       highlightMaterial,
       highlightMesh,
       stand,
@@ -676,6 +679,8 @@ export function syncBoardRuntime(
       slot.dealtAt = base + (dealOffsets ? dealOffsets[Math.min(dealtThisSync, dealOffsets.length - 1)] ?? 0 : dealtThisSync * 0.16)
       slot.launched = false
       slot.fromHand = false
+      slot.dim = 1
+      slot.card.faceMaterial.color.setScalar(1)
       startAt = base
       dealtThisSync += 1
       setCardFace(slot.card, { rank: card.rank, suit: card.suit })
@@ -691,7 +696,11 @@ export function syncBoardRuntime(
 const scratch = new THREE.Vector3()
 const slotTarget = new THREE.Vector3()
 
+/** Face brightness of board cards outside the winning hand once the winners are lit. */
+const BOARD_LOSER_DIM = 0.55
+
 export function animateBoardRuntime(board: BoardRuntime, time: number, reducedMotion: boolean) {
+  const winnersLit = board.slots.some(slot => slot.highlighted && slot.card.group.visible && slot.leavingAt === Number.NEGATIVE_INFINITY)
   board.slots.forEach((slot, index) => {
     const group = slot.card.group
     if (!group.visible) {
@@ -763,5 +772,13 @@ export function animateBoardRuntime(board: BoardRuntime, time: number, reducedMo
     slot.highlightMesh.visible = rim > 0
     slot.highlightMaterial.opacity = rim
     group.position.y += rim > 0 ? 0.07 : 0
+    // Once the winning five are lit, the board cards that are not part of the
+    // winning hand step back a little (cheap: one albedo scalar, no new draw).
+    const dimTarget = winnersLit && !slot.highlighted && progress >= 1 ? BOARD_LOSER_DIM : 1
+    const dim = reducedMotion || Math.abs(dimTarget - slot.dim) < 0.01 ? dimTarget : slot.dim + (dimTarget - slot.dim) * 0.12
+    if (dim !== slot.dim) {
+      slot.dim = dim
+      slot.card.faceMaterial.color.setScalar(dim)
+    }
   })
 }

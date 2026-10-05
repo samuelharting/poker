@@ -62,6 +62,7 @@ import {
   findDealingSeat,
   findHoleCardIndex,
   getDealerReleaseWorld,
+  setHeroDealTipProvider,
   planDealerBoard,
   type DealerRuntime,
 } from './dealerDealRuntime'
@@ -78,6 +79,7 @@ import {
 import {
   createFirstPersonHands,
   disposeFirstPersonHands,
+  getHeroDealTipWorld,
   updateHeroHands,
   type FirstPersonHands,
 } from './firstPersonHands'
@@ -1354,7 +1356,7 @@ async function requestRiggedAvatar(
     seat.riggedAccessories = createRiggedAvatarAccessories(
       avatar.root,
       avatar.bones,
-      seat.avatarProfile
+      { ...seat.avatarProfile, seed: playerId }
     )
     applyAvatarAccessoryFabrics(seat.riggedAccessories)
     avatar.model.traverse(object => {
@@ -1408,7 +1410,7 @@ function syncSeatAppearance(
   if (!seat.avatar || seat.avatar.modelKey === profile.modelKey) {
     disposeAvatarAccessorySet(seat.riggedAccessories)
     seat.riggedAccessories = seat.avatar
-      ? createRiggedAvatarAccessories(seat.avatar.root, seat.avatar.bones, profile)
+      ? createRiggedAvatarAccessories(seat.avatar.root, seat.avatar.bones, { ...profile, seed: seat.playerId })
       : null
     applyAvatarAccessoryFabrics(seat.riggedAccessories)
   }
@@ -3830,6 +3832,9 @@ function createSceneRuntime(
   scene.add(camera)
   const firstPersonDrink = createFirstPersonDrink(camera)
   const firstPersonHands = createFirstPersonHands(camera)
+  // When the hero deals, cards leave the fingertips drawn on screen.
+  const heroDealTip = (out: THREE.Vector3) => getHeroDealTipWorld(firstPersonHands, camera, out)
+  setHeroDealTipProvider(heroDealTip)
   // One loose chip for flicks: the shared chip look, a touch oversized so it reads.
   const pranks = createPrankRuntime(scene, camera, host, () => {
     const chipMaterials = getSharedChipMaterials()
@@ -4362,6 +4367,7 @@ function createSceneRuntime(
     funFx.dispose()
     if (runtime.companion) disposeCompanion(runtime.companion)
     disposeFirstPersonDrink(runtime.firstPersonDrink)
+    setHeroDealTipProvider(null, heroDealTip)
     disposeFirstPersonHands(runtime.firstPersonHands)
     disposePrankRuntime(runtime.pranks)
     disposeLightCone(runtime.effects.cone)

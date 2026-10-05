@@ -424,6 +424,30 @@ export function updateHeroHands(scene: HeroHandsSceneLike, frame: HeroHandsFrame
   applyCards(hands, tanHalf, aspect)
 }
 
+/** Wrist to fingertip along the drawn hand (metres, at HAND_SCALE). */
+const HAND_REACH = 0.12
+
+/**
+ * Where the drawn right-hand fingertips are in the world while the hero deals by
+ * hand, so a card leaves the fingers the player sees (the hands ride on the
+ * camera, away from the table point the gesture works). False when the hero is
+ * not dealing or the hands are hidden.
+ */
+export function getHeroDealTipWorld(hands: FirstPersonHands, camera: THREE.PerspectiveCamera, out: THREE.Vector3): boolean {
+  if (!hands.root.visible || hands.deal.weight <= 0.001) return false
+  const pose = hands.shown.right
+  const depth = Math.max(MIN_FORWARD, pose.depth)
+  const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
+  out.set(
+    pose.x * depth * tanHalf * camera.aspect,
+    pose.y * depth * tanHalf + HAND_REACH * Math.sin(pose.pitch),
+    -depth - HAND_REACH * Math.cos(pose.pitch)
+  )
+  camera.updateMatrixWorld()
+  camera.localToWorld(out)
+  return Number.isFinite(out.x + out.y + out.z)
+}
+
 export function disposeFirstPersonHands(hands: FirstPersonHands | null) {
   if (!hands) return
   hands.cards.forEach(card => disposeCardMesh(card))
