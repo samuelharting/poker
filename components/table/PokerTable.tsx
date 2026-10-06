@@ -14,6 +14,7 @@ import { PlayerSeat, formatWinnerPaymentLabel, getVisibleSeatCards } from './Pla
 import { CommunityCards } from './CommunityCards'
 import { RunItTwiceBoards, RunItTwicePrompt } from './RunItTwice'
 import { OwnHand, isOwnHandTucked } from './OwnHand'
+import { getHeroHoleCardLandings } from './ownHandDeal'
 import { PotDisplay } from './PotDisplay'
 import { ShowdownCinematic, useShowdownPresentation } from './ShowdownCinematic'
 import { SeatDrinkBadge } from './SeatDrinkBadge'
@@ -1654,6 +1655,22 @@ export function PokerTable({
   ) ? me : null
   const shouldShowOwnHand = visibleOwnPlayer !== null
   const ownHandCards = visibleOwnPlayer?.holeCards ?? []
+  // Desktop 3D: the hero's own seat is hidden in the room, so the bottom tray
+  // stands in for it and holds its cards back until they would have landed in
+  // the deal (see ownHandDeal.ts). Computed once per deal.
+  const heroDealKey = threeTableView && visibleOwnPlayer
+    ? `${state.handNumber}:${ownHandCards.map(card => `${card.rank}${card.suit}`).join('-')}`
+    : ''
+  const heroDealRef = useRef<{ key: string; landsAt: [number, number] | null }>({ key: '', landsAt: null })
+  if (heroDealRef.current.key !== heroDealKey) {
+    const landings = heroDealKey && threeTableView ? getHeroHoleCardLandings(threeTableView.players) : null
+    const dealtAt = Date.now()
+    heroDealRef.current = {
+      key: heroDealKey,
+      landsAt: landings ? [dealtAt + landings[0] * 1000, dealtAt + landings[1] * 1000] : null,
+    }
+  }
+  const heroDealLandsAt = heroDealRef.current.landsAt ?? undefined
   const ownShowCardsMode: ShowCardsMode = canShowRevealedCards ? visibleOwnPlayer?.showCards ?? 'none' : 'none'
   const isOwnHandFolded = isInHand && visibleOwnPlayer?.status === 'folded'
   // Folded cards leave the hand area until the hand is over.
@@ -3171,6 +3188,7 @@ export function PokerTable({
                 showCardsMode={ownShowCardsMode}
                 revealChoiceActive={canAdjustShownCards}
                 concealed={isInHand && !isTabledRunout}
+                dealLandsAt={heroDealLandsAt}
                 onPeekChange={onPeekCards}
                 onSoundCue={onSoundCue}
                 socialMessage={heroSocial.message}
@@ -4712,13 +4730,13 @@ export function SettingsModal({
         )}
 
         {activeTab === 'general' && (
-          <div className="settings-modal-body">
+          <div className="settings-modal-body settings-general-body">
             {(() => {
               const me = state.players.find(player => player.id === yourId) ??
                 state.lobbyPlayers.find(player => player.id === yourId)
               if (!me) return null
               return (
-                <div className="settings-section">
+                <div className="settings-section settings-stats-section">
                   <div className="settings-section-title">Your stats</div>
                   <div className="targeted-player-stats" aria-label="Your stats">
                     {formatPlayerStatsSummary(me.stats).map(stat => (
@@ -4750,7 +4768,10 @@ export function SettingsModal({
               <div className="settings-rule-row">
                 <div>
                   <div className="settings-rule-name">Suit colors</div>
-                  <div className="settings-rule-copy">Four colors make flushes easier to spot.</div>
+                  <div className="settings-rule-copy">
+                    <span className="copy-full">Four colors make flushes easier to spot.</span>
+                    <span className="copy-short">Spot flushes faster.</span>
+                  </div>
                 </div>
                 <div className="settings-toggle-row">
                   <button
@@ -4801,7 +4822,8 @@ export function SettingsModal({
                 <div>
                   <div className="settings-rule-name">Soundscape</div>
                   <div className="settings-rule-copy">
-                    Card, chip, action, and showdown sounds play in both table views.
+                    <span className="copy-full">Card, chip, action, and showdown sounds play in both table views.</span>
+                    <span className="copy-short">Sounds play in both table views.</span>
                   </div>
                 </div>
                 <div className="settings-toggle-row">
@@ -4843,8 +4865,8 @@ export function SettingsModal({
 
             {isHost ? (
               <>
-                <div className="settings-section">
-                  <div className="settings-section-title">Game setup</div>
+                <div className="settings-section settings-setup-section">
+                  <div className="settings-section-title">Game setup &amp; timing</div>
                   <div className="settings-grid settings-grid-modal">
                     <label className="settings-field">
                       <span>Small blind</span>
@@ -4876,12 +4898,6 @@ export function SettingsModal({
                         onChange={event => updateNumericDraft('startingStack', event.target.value)}
                       />
                     </label>
-                  </div>
-                </div>
-
-                <div className="settings-section">
-                  <div className="settings-section-title">Timing</div>
-                  <div className="settings-grid settings-grid-modal">
                     <label className="settings-field">
                       <span>Action timer (seconds)</span>
                       <input
@@ -4907,7 +4923,7 @@ export function SettingsModal({
                   </div>
                 </div>
 
-                <div className="settings-section">
+                <div className="settings-section settings-rules-section">
                   <div className="settings-section-title">Rules</div>
                   <div className="settings-rule-row settings-desktop-only">
                     <div>
@@ -5074,7 +5090,7 @@ export function SettingsModal({
                 </div>
               </>
             ) : (
-              <div className="settings-section">
+              <div className="settings-section settings-host-note">
                 <div className="settings-section-title">Table settings</div>
                 <div className="settings-section-copy">
                   Only the game creator can change blinds, stacks, timing, and table rules.
@@ -5090,8 +5106,10 @@ export function SettingsModal({
               <div>
                 <div className="settings-section-title">Make the seat yours</div>
                 <div className="settings-section-copy">
-                  Build a table look, choose a natural idle tell, and pick how you celebrate a win.
-                  Nothing changes for the room until you save.
+                  <span className="copy-full">
+                    Build a table look, choose a natural idle tell, and pick how you celebrate a win.{' '}
+                  </span>
+                  <span className="copy-key">Nothing changes for the room until you save.</span>
                 </div>
               </div>
               <AvatarLookPreview avatar={avatarDraft} />

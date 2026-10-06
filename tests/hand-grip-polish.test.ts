@@ -115,7 +115,9 @@ describe('hero dealing hands', () => {
     const shown = createHeroHandsPose()
     shown.right.y = -0.3
     shown.right.x = 0.1
-    const hands = { root: { visible: true }, deal: { weight: 1 }, shown } as unknown as FirstPersonHands
+    const target = createHeroHandsPose()
+    target.dealHand = 1
+    const hands = { root: { visible: true }, deal: { weight: 1 }, shown, target, anchors: createHeroHandsAnchors() } as unknown as FirstPersonHands
     const tip = new THREE.Vector3()
     expect(getHeroDealTipWorld(hands, camera, tip)).toBe(true)
     // In front of the camera (it looks down -Z) and a hand's length beyond the wrist plane.
@@ -124,6 +126,34 @@ describe('hero dealing hands', () => {
     expect(tip.y).toBeGreaterThan(wristY)
     ;(hands as unknown as { deal: { weight: number } }).deal.weight = 0
     expect(getHeroDealTipWorld(hands, camera, tip)).toBe(false)
+  })
+
+  it('a fold or a check mid-deal hands the pitching to the left hand; a big raise to the deck spot', () => {
+    const camera = new THREE.PerspectiveCamera(45, 16 / 9, 0.1, 100)
+    camera.position.set(0, 1.5, 3)
+    camera.updateMatrixWorld(true)
+    const shown = createHeroHandsPose()
+    shown.right.x = 0.4
+    shown.right.y = -0.3
+    shown.left.x = -0.3
+    shown.left.y = -0.45
+    const target = createHeroHandsPose()
+    const anchors = createHeroHandsAnchors()
+    const hands = { root: { visible: true }, deal: { weight: 1 }, shown, target, anchors } as unknown as FirstPersonHands
+    const right = new THREE.Vector3()
+    const left = new THREE.Vector3()
+    const deck = new THREE.Vector3()
+    target.dealHand = 1
+    expect(getHeroDealTipWorld(hands, camera, right)).toBe(true)
+    target.dealHand = -1
+    expect(getHeroDealTipWorld(hands, camera, left)).toBe(true)
+    target.dealHand = 0
+    expect(getHeroDealTipWorld(hands, camera, deck)).toBe(true)
+    // The left tip is on the left of the right one; the deck spot is the left hand's stance, ahead of the camera.
+    expect(left.x).toBeLessThan(right.x - 0.1)
+    expect(deck.z).toBeLessThan(camera.position.z)
+    expect(Number.isFinite(deck.x + deck.y + deck.z)).toBe(true)
+    expect(deck.x).toBeLessThan(right.x)
   })
 })
 

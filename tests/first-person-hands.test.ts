@@ -11,6 +11,8 @@ import {
   followHandPose,
   getFoldLaneX,
   getHeroGestureSeconds,
+  getHeroPushStyle,
+  getPilePush,
   getWagerPairWeight,
   getWagerTravelSeconds,
   keepCardOffLabel,
@@ -22,7 +24,7 @@ import {
   type HeroHandsInput,
   type HeroHandsPose,
 } from '@/components/three/firstPersonHandPose'
-import { getDealRightX } from '@/components/three/firstPersonHands'
+import { getDealRightX, getPileOffset } from '@/components/three/firstPersonHands'
 import {
   buildHandGeometry,
   createCelMaterial,
@@ -151,13 +153,14 @@ describe('first-person hands: wagers', () => {
     const midPush = pose('raise', WAGER_DEPART_SECONDS + getWagerTravelSeconds(profile) / 2, { anchors, profile })
     const arrive = pose('raise', WAGER_DEPART_SECONDS + getWagerTravelSeconds(profile), { anchors, profile })
     const end = pose('raise', getHeroGestureSeconds('raise', profile) + 0.1, { anchors, profile })
-    expect(atStack.right.x).toBeCloseTo(anchors.stackX + 0.02, 1)
+    // Behind the pile on its right, the fingers leaning in.
+    expect(atStack.right.x).toBeCloseTo(anchors.stackX + 0.11, 1)
     expect(atStack.right.fist).toBeGreaterThan(0.5)
     expect(midPush.right.x).toBeLessThan(atStack.right.x)
     expect(midPush.right.x).toBeGreaterThan(arrive.right.x - 1e-6)
-    // The spot is behind the hole-card tray on screen: the hand stops at the tray's side and the chips slide on.
-    expect(arrive.right.x).toBeLessThan(atStack.right.x - 0.08)
-    expect(arrive.right.x).toBeGreaterThan(anchors.cardsX + 0.15)
+    // The hand drives the pile to the betting spot (it ends beside it, not stopped at the tray's side).
+    expect(arrive.right.x).toBeLessThan(atStack.right.x - 0.15)
+    expect(Math.abs(arrive.right.x - anchors.betX)).toBeLessThan(0.2)
     expect(arrive.right.fist).toBeLessThan(atStack.right.fist)
     expect(end.right.y).toBeCloseTo(rest.right.y, 3)
     expect(end.right.x).toBeCloseTo(rest.right.x, 3)
@@ -186,7 +189,65 @@ describe('first-person hands: wagers', () => {
   it('matches the chip flight: the push takes as long as animateWagers throws them', () => {
     expect(getWagerTravelSeconds({ wagerStyle: 'slide', wagerIntensity: 0.3 })).toBeCloseTo(0.72)
     expect(getWagerTravelSeconds({ wagerStyle: 'shove', wagerIntensity: 1 })).toBeCloseTo(0.56)
-    expect(getWagerTravelSeconds({ wagerStyle: 'flick', wagerIntensity: 0 })).toBeCloseTo(0.78)
+    // The hero's own chips are pushed, never thrown: a flick takes a slide's time.
+    expect(getWagerTravelSeconds({ wagerStyle: 'flick', wagerIntensity: 0 })).toBeCloseTo(0.72)
+  })
+
+  it('the pile curve is the one animateWagers draws: a smoothstep over the flight, the leading chips 4% ahead', () => {
+    const travel = 0.72
+    expect(getPilePush(WAGER_DEPART_SECONDS - 0.1, travel)).toBe(0)
+    expect(getPilePush(WAGER_DEPART_SECONDS + travel, travel)).toBe(1)
+    const half = getPilePush(WAGER_DEPART_SECONDS + travel * 0.5, travel)
+    expect(half).toBeGreaterThan(0.5)
+    expect(half).toBeLessThan(0.55)
+    let last = 0
+    for (let t = 0; t <= 1.2; t += 0.02) {
+      const value = getPilePush(t, travel)
+      expect(value).toBeGreaterThanOrEqual(last)
+      last = value
+    }
+  })
+
+  it('the hand follows the pile all the way to the betting spot instead of stopping beside the pot readout', () => {
+    // The layout measured at 1280x720: stack right of the cards, the spot under the pot readout.
+    const real = { ...createHeroHandsAnchors(), stackX: 0.27, stackY: -0.49, betX: 0, betY: -0.3, cardsX: 0.04, cardsHalfW: 0.13, cardsTopY: -0.53, potX: 0, potHalfW: 0.108, potBottomY: -0.4, potTopY: -0.28, restRightX: 0.22 }
+    for (const intensity of [0.3, 0.45, 0.6]) {
+      const p = getPokerActionMotionProfile('raise', { variant: 0, wagerIntensity: intensity })
+      const travel = getWagerTravelSeconds(p)
+      const pileAt = (t: number) => {
+        const push = getPilePush(t, travel)
+        return { x: real.stackX + (real.betX - real.stackX) * push, y: real.stackY + (Math.max(real.betY, real.stackY + 0.05) - real.stackY) * push }
+      }
+      const arrive = pose('raise', WAGER_DEPART_SECONDS + travel, { anchors: real, profile: p }).right
+      // Over the felt where the chips land: the wrist is within a hand's width of the spot sideways.
+      expect(Math.abs(arrive.x - real.betX), `intensity ${intensity}`).toBeLessThan(0.2)
+      // All the way along, the hand stays with the pile (never left behind at the stack while the chips slide on).
+      for (let t = WAGER_DEPART_SECONDS + 0.1; t <= WAGER_DEPART_SECONDS + travel; t += 0.02) {
+        const hand = pose('raise', t, { anchors: real, profile: p }).right
+        const pile = pileAt(t)
+        expect(Math.abs(hand.x - pile.x), `intensity ${intensity} t=${t.toFixed(2)}`).toBeLessThan(0.3)
+        expect(Math.abs(hand.y - (pile.y - 0.17)), `intensity ${intensity} t=${t.toFixed(2)}`).toBeLessThan(0.14)
+      }
+    }
+  })
+})
+
+describe('first-person hands: the pile the hand pushes', () => {
+  it('is centred on the chips as laid out around the wager origin, turned by the columns yaw', () => {
+    const bases = [{ x: -0.1, z: 0.2 }, { x: 0.1, z: 0.2 }, { x: 0, z: 0.3 }]
+    const out = new THREE.Vector3()
+    expect(getPileOffset({ start: new THREE.Vector3(), target: new THREE.Vector3(), layoutCount: 0, chipBasePositions: bases }, out).length()).toBe(0)
+    expect(getPileOffset({ start: new THREE.Vector3(), target: new THREE.Vector3() }, out).length()).toBe(0)
+    getPileOffset({ start: new THREE.Vector3(), target: new THREE.Vector3(), layoutCount: 3, chipBasePositions: bases, yaw: 0 }, out)
+    expect(out.x).toBeCloseTo(0)
+    expect(out.z).toBeCloseTo(0.2333, 3)
+    // Turned a quarter way round, the depth offset swings sideways (the same rotation the group gets).
+    getPileOffset({ start: new THREE.Vector3(), target: new THREE.Vector3(), layoutCount: 3, chipBasePositions: bases, yaw: Math.PI / 2 }, out)
+    expect(out.x).toBeCloseTo(0.2333, 3)
+    expect(Math.abs(out.z)).toBeLessThan(1e-9)
+    // Only the chips actually laid out count.
+    getPileOffset({ start: new THREE.Vector3(), target: new THREE.Vector3(), layoutCount: 2, chipBasePositions: bases, yaw: 0 }, out)
+    expect(out.z).toBeCloseTo(0.2)
   })
 })
 
@@ -201,17 +262,25 @@ describe('first-person hands: overlays', () => {
     expect(clearPotLabel(-0.3, 0.02, createHeroHandsAnchors())).toBe(-0.3)
   })
 
-  it('wagers stay clear of the pot label and the card tray even when the betting spot is behind them', () => {
+  it('wagers never sink behind the card tray, and only slip under the pot readout in the last moment of the push', () => {
     const anchors = { ...createHeroHandsAnchors(), stackX: 0.32, stackY: -0.42, betX: 0.02, betY: -0.3, potX: 0, potHalfW: 0.09, potBottomY: -0.28 }
     for (const cue of ['call', 'raise', 'all_in'] as const) {
       const p = getPokerActionMotionProfile(cue, { variant: 0, wagerIntensity: 0.8 })
+      const travel = getWagerTravelSeconds(p)
+      let under = 0
       for (let t = 0; t <= getHeroGestureSeconds(cue, p); t += 0.02) {
         const hands = pose(cue, t, { anchors, profile: p })
         for (const hand of [hands.right, hands.left]) {
-          if (Math.abs(hand.x - anchors.potX) < anchors.potHalfW) expect(hand.y).toBeLessThan(anchors.potBottomY - 0.2)
           if (Math.abs(hand.x - anchors.cardsX) < anchors.cardsHalfW - 0.02) expect(hand.y).toBeGreaterThan(anchors.cardsTopY - 0.13)
         }
+        // The pushing hand is only under the readout once the pile is nearly home.
+        if (Math.abs(hands.right.x - anchors.potX) < anchors.potHalfW && hands.right.y > anchors.potBottomY - 0.2) {
+          under += 1
+          expect(t).toBeGreaterThan(WAGER_DEPART_SECONDS + travel * 0.5)
+        }
       }
+      // ... and briefly (the whole gesture is over a second and a half).
+      expect(under * 0.02, cue).toBeLessThan(0.7)
     }
   })
 
@@ -296,6 +365,82 @@ describe('first-person hands: peek, win, flick, deal', () => {
     expect(none.right.y).toBeCloseTo(REST_Y, 1)
     expect(half.right.x).toBeGreaterThan(Math.min(none.right.x, full.right.x))
     expect(half.right.x).toBeLessThan(Math.max(none.right.x, full.right.x))
+  })
+})
+
+describe('first-person hands: an action taken mid-deal', () => {
+  const deal = { weight: 1, rightX: 0.1, rightY: -1, leftX: -0.2, leftY: -1, pinch: 0.5, cock: 0.2, snap: 0, holdLeft: 1 }
+  const withDeal = (cue: ThreeActionCue, seconds: number, d = deal, extra: Partial<HeroHandsInput> = {}) =>
+    pose(cue, seconds, { deal: d, profile: getPokerActionMotionProfile(cue, { variant: 0, wagerIntensity: 0.3 }), ...extra })
+
+  it('slides out of the deal stance into the fold: the right hand never drops to the rail first', () => {
+    const stance = pose('ready', 99, { deal })
+    const early = withDeal('fold', 0.01)
+    // Starts where the deal had it (not at the rail), and only then goes for the cards.
+    expect(Math.abs(early.right.x - stance.right.x)).toBeLessThan(0.03)
+    expect(Math.abs(early.right.y - stance.right.y)).toBeLessThan(0.03)
+    let lowest = Infinity
+    for (let t = 0; t <= 0.25; t += 0.01) lowest = Math.min(lowest, withDeal('fold', t).right.y)
+    expect(lowest).toBeGreaterThan(Math.min(stance.right.y, REST_Y + 0.1) - 0.05)
+  })
+
+  it('the free left hand stays on the deck and keeps pitching the remaining cards through a fold or a check', () => {
+    const stance = pose('ready', 99, { deal })
+    for (const cue of ['fold', 'check', 'call'] as const) {
+      for (const t of [0.05, 0.3, 0.6]) {
+        const p = withDeal(cue, t)
+        expect(p.dealHand, cue).toBe(-1)
+        expect(Math.abs(p.left.x - stance.left.x), cue).toBeLessThan(0.08)
+        expect(Math.abs(p.left.y - stance.left.y), cue).toBeLessThan(0.12)
+      }
+    }
+    // The snap opens the left hand, the cock closes it, just as the right hand does in the normal deal.
+    const snap = withDeal('fold', 0.5, { ...deal, snap: 1, cock: 0 })
+    const cock = withDeal('fold', 0.5, { ...deal, snap: 0, cock: 1, pinch: 0 })
+    expect(snap.left.open).toBeGreaterThan(0.7)
+    expect(cock.left.fist).toBeGreaterThan(0.3)
+    expect(snap.left.pitch).toBeGreaterThan(cock.left.pitch + 0.3)
+  })
+
+  it('a gesture that needs both hands takes the left too, and the cards leave the deck spot', () => {
+    const big = pose('raise', 0.6, { deal, profile: getPokerActionMotionProfile('raise', { variant: 0, wagerIntensity: 0.9 }) })
+    const allIn = pose('all_in', 0.6, { deal, profile: getPokerActionMotionProfile('all_in', { variant: 0, wagerIntensity: 1 }) })
+    expect(big.dealHand).toBe(0)
+    expect(allIn.dealHand).toBe(0)
+    expect(pose('raise', 0.6, { deal, profile: getPokerActionMotionProfile('raise', { variant: 0, wagerIntensity: 0.3 }) }).dealHand).toBe(-1)
+  })
+
+  it('the deal itself pitches with the right hand, and picks up again after the gesture without a jump', () => {
+    expect(pose('ready', 99, { deal }).dealHand).toBe(1)
+    expect(pose('fold', 99, { deal }).dealHand).toBe(1)
+    expect(pose('ready', 99).dealHand).toBe(0)
+    const profile = getPokerActionMotionProfile('fold', { variant: 0 })
+    const length = getHeroGestureSeconds('fold', profile)
+    const stance = pose('ready', 99, { deal }).right
+    const before = withDeal('fold', length - 0.02).right
+    const after = withDeal('fold', length + 0.02).right
+    // Right at the end of the gesture the hand is home and the deal weight eases back in: no jump.
+    expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeLessThan(0.06)
+    expect(withDeal('fold', length + 0.6).right.y).toBeCloseTo(stance.y, 1)
+    expect(withDeal('fold', length + 0.6).dealHand).toBe(1)
+  })
+
+  it('every pose over a fold, a check and a raise mid-deal is finite and in front of the lens', () => {
+    for (const cue of ['fold', 'check', 'call', 'raise', 'all_in'] as const) {
+      for (let t = 0; t <= 2.2; t += 0.04) {
+        const p = withDeal(cue, t, { ...deal, snap: Math.sin(t * 9) ** 2, cock: Math.cos(t * 7) ** 2 })
+        for (const hand of [p.right, p.left]) {
+          for (const value of Object.values(hand)) expect(Number.isFinite(value)).toBe(true)
+          expect(hand.depth).toBeGreaterThanOrEqual(0.65)
+          expect(Math.abs(hand.x)).toBeLessThan(1.05)
+          expect(hand.y).toBeLessThan(0)
+          for (const shape of [hand.fist, hand.open, hand.pinch]) {
+            expect(shape).toBeGreaterThanOrEqual(0)
+            expect(shape).toBeLessThanOrEqual(1)
+          }
+        }
+      }
+    }
   })
 })
 
@@ -603,8 +748,8 @@ describe('first-person hands: wager size', () => {
     expect(getWagerPairWeight('call', 0.25)).toBe(0)
     expect(getWagerPairWeight('bet', 0.45)).toBe(0)
     expect(getWagerPairWeight('raise', 0.9)).toBe(1)
-    expect(getWagerPairWeight('raise', 0.7)).toBeGreaterThan(0.2)
-    expect(getWagerPairWeight('raise', 0.7)).toBeLessThan(0.9)
+    expect(getWagerPairWeight('raise', 0.7)).toBe(1)
+    expect(getWagerPairWeight('raise', 0.5)).toBe(0)
     expect(getWagerPairWeight('all_in', 0)).toBe(1)
     const small = run('bet', 0.3)
     const big = run('raise', 1)
@@ -618,22 +763,33 @@ describe('first-person hands: wager size', () => {
     expect(small[grabAt]!.left.fist).toBeLessThan(0.3)
   })
 
-  it('the second hand fades in with the size: no sudden jump between neighbouring sizes', () => {
-    let last = 0
-    for (let intensity = 0.5; intensity <= 0.9; intensity += 0.05) {
+  it('the second hand is all or nothing: a half-faded hand would hang over the hole-card tray', () => {
+    for (let intensity = 0.5; intensity <= 0.9; intensity += 0.02) {
       const left = travel(run('raise', intensity), 'left')
-      expect(left).toBeGreaterThanOrEqual(last - 0.02)
-      expect(left - last).toBeLessThan(0.3)
-      last = left
+      expect(left < 0.05 || left > 0.35, `intensity ${intensity.toFixed(2)} moved the left hand ${left.toFixed(2)}`).toBe(true)
     }
   })
 
-  it('a shove drives flat: it lifts less than a flicked big raise', () => {
-    const lift = (frames: HeroHandsPose[]) => Math.max(...frames.map(f => f.right.y)) - Math.max(...frames.slice(0, 10).map(f => f.right.y))
-    const shove = run('all_in', 1, 1)
-    const flick = run('raise', 1, 1)
+  it('the hero pushes chips, never throws them: a flicked bet is flattened to a slide and the hand stays low', () => {
+    // How far the wrist rises above the straight line of the push (the pile's path on screen).
+    const lift = (frames: HeroHandsPose[]) => {
+      const from = Math.round((WAGER_DEPART_SECONDS + 0.1) / 0.02)
+      const to = Math.round((WAGER_DEPART_SECONDS + 0.62) / 0.02)
+      const a = frames[from]!.right
+      const b = frames[to]!.right
+      let worst = 0
+      for (let i = from; i <= to; i += 1) {
+        const k = (i - from) / (to - from)
+        worst = Math.max(worst, frames[i]!.right.y - (a.y + (b.y - a.y) * k))
+      }
+      return worst
+    }
     expect(getPokerActionMotionProfile('all_in', { variant: 1 }).wagerStyle).toBe('flick')
-    expect(lift(shove)).toBeLessThan(lift(flick))
+    expect(getHeroPushStyle('flick')).toBe('slide')
+    expect(getHeroPushStyle('shove')).toBe('shove')
+    expect(getHeroPushStyle('slide')).toBe('slide')
+    expect(lift(run('all_in', 1, 1))).toBeLessThan(0.08)
+    expect(lift(run('raise', 1, 1))).toBeLessThan(0.08)
   })
 
   it('the second hand crosses above the hole-card tray, never behind it, and comes home the same way', () => {

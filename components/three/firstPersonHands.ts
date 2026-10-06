@@ -8,7 +8,8 @@ import {
   evaluateHeroHands,
   REST_X,
   followHandPose,
-  getHeroGestureSeconds,
+  HAND_DEPTH,
+  REST_PITCH,
   createHandVelocity,
   type HandVelocity,
   MIN_HAND_DEPTH,
@@ -23,6 +24,7 @@ import {
   createHandHullMaterial,
   createHandMaterial,
   getHullWidth,
+  handSkinColor,
   HAND_MORPH,
   HAND_SCALE,
   type HandColors,
@@ -77,6 +79,8 @@ export interface FirstPersonHands {
   winnerSince: number
   lastTime: number
   measureAt: number
+  /** The glass is in the left hand: when no hand can pitch the cards they leave a deck spot set on the right instead. */
+  deckAtRight?: boolean
   /** Dev/test: force a gesture on a fixed clock (scripts/snap-fp-hands.mjs). */
   /** Dev/test: hide the rig entirely (perf comparisons). */
   forceHide?: boolean
@@ -253,10 +257,20 @@ export interface HeroHandsSeatLike {
   wagerIntensity: number
 }
 
+/** A wager's flight endpoints and the way its chips are laid out around them (WagerRuntime satisfies this structurally). */
+export interface HeroWagerLike {
+  start: THREE.Vector3
+  target: THREE.Vector3
+  /** The chip columns are turned this much about the vertical (they face along the betting line). */
+  yaw?: number
+  layoutCount?: number
+  chipBasePositions?: ReadonlyArray<{ x: number; z: number }>
+}
+
 export interface HeroHandsSceneLike {
   camera: THREE.PerspectiveCamera
   seats: ReadonlyMap<string, HeroHandsSeatLike>
-  wagers: ReadonlyMap<string, { start: THREE.Vector3; target: THREE.Vector3 }>
+  wagers: ReadonlyMap<string, HeroWagerLike>
   firstPersonDrink: { root: { visible: boolean } }
   pranks: {
     firstPerson: { root: { visible: boolean } }
@@ -399,6 +413,27 @@ function projectToNdc(point: THREE.Vector3, camera: THREE.Camera, out: { x: numb
 }
 
 const ndc = { x: 0, y: 0 }
+const scratchPile = new THREE.Vector3()
+const pileOffset = new THREE.Vector3()
+
+/** Where the middle of a wager's chips sits relative to its origin (world, metres), the columns' yaw applied. */
+export function getPileOffset(wager: HeroWagerLike, out: THREE.Vector3): THREE.Vector3 {
+  const bases = wager.chipBasePositions
+  const count = Math.min(wager.layoutCount ?? 0, bases?.length ?? 0)
+  if (!bases || count <= 0) return out.set(0, 0, 0)
+  let cx = 0
+  let cz = 0
+  for (let index = 0; index < count; index += 1) {
+    cx += bases[index]!.x
+    cz += bases[index]!.z
+  }
+  cx /= count
+  cz /= count
+  const yaw = wager.yaw ?? 0
+  const cos = Math.cos(yaw)
+  const sin = Math.sin(yaw)
+  return out.set(cx * cos + cz * sin, 0, -cx * sin + cz * cos)
+}
 
 const flickScan = { latest: -1, time: 0 }
 /** Module-level so the per-frame scan allocates no closure. */
@@ -434,8 +469,8 @@ export function updateHeroHands(scene: HeroHandsSceneLike, frame: HeroHandsFrame
   const key = `${frame.hero.avatarProfile.skinColor}|${frame.hero.avatarProfile.sleeveColor}`
   if (hands.colorKey !== key) {
     hands.colorKey = key
-    // The same small lift the avatars' skin gets, so the hands match the body that is hidden.
-    colors.skin.set(frame.hero.avatarProfile.skinColor).offsetHSL(0, 0.04, 0.02)
+    // The same small lift the avatars' skin gets, so the hands match the body that is hidden (very dark tones are lifted to stay readable).
+    handSkinColor(frame.hero.avatarProfile.skinColor, colors.skin)
     colors.sleeve.set(frame.hero.avatarProfile.sleeveColor)
   }
 
@@ -455,10 +490,12 @@ export function updateHeroHands(scene: HeroHandsSceneLike, frame: HeroHandsFrame
   anchors.restLeftX += (target.restLeftX - anchors.restLeftX) * dealEase
   const wager = scene.wagers.get(frame.hero.id)
   if (wager) {
-    projectToNdc(wager.start, camera, ndc)
+    // The pile is a few columns spread around the wager's origin: the hand pushes the pile where it is drawn, not its origin.
+    getPileOffset(wager, pileOffset)
+    projectToNdc(scratchPile.copy(wager.start).add(pileOffset), camera, ndc)
     anchors.stackX = ndc.x
     anchors.stackY = ndc.y
-    projectToNdc(wager.target, camera, ndc)
+    projectToNdc(scratchPile.copy(wager.target).add(pileOffset), camera, ndc)
     anchors.betX = ndc.x
     anchors.betY = ndc.y
   }
@@ -495,16 +532,15 @@ export function updateHeroHands(scene: HeroHandsSceneLike, frame: HeroHandsFrame
   // Dealing by hand: the timeline's wrist targets (hero seat space) projected onto the screen.
   input.deal = null
   const dealPose = heroSeat.dealPose
-  // (An action taken mid-deal owns the hands: see evaluateHeroHands. The cards then leave from the seat, not the fingers.)
+  // (An action taken mid-deal shares the hands: see evaluateHeroHands. The deal keeps its weight, so the cards
+  // still leave drawn fingertips: the free left hand's, or the deck's spot when both hands are busy.)
   const profile = getPokerActionMotionProfile(input.cue, {
     actionKey: heroSeat.actionKey,
     playerId: heroSeat.playerId,
     wagerIntensity: heroSeat.wagerIntensity,
   })
-  const gestureLength = getHeroGestureSeconds(input.cue, profile)
-  const actingNow = input.elapsedMs >= 0 && input.elapsedMs / 1000 < gestureLength
   hands.deal.weight = 0
-  if (!forced && !frame.reducedMotion && !actingNow && scene.dealer?.seatId === heroSeat.playerId && dealPose && dealPose.weight > 0) {
+  if (!forced && !frame.reducedMotion && scene.dealer?.seatId === heroSeat.playerId && dealPose && dealPose.weight > 0) {
     const deal = hands.deal
     heroSeat.root.updateWorldMatrix(true, false)
     scratchPoint.set(dealPose.handR[0], dealPose.handR[1], dealPose.handR[2])
@@ -540,6 +576,10 @@ export function updateHeroHands(scene: HeroHandsSceneLike, frame: HeroHandsFrame
   const drinking = scene.firstPersonDrink.root.visible || scene.pranks.firstPerson.root.visible
   hands.target.left.show = drinking ? 0 : 1
   hands.target.right.show = 1
+  // The glass is in the left hand: cards it would have pitched leave the deck's spot instead, set on the
+  // right (beside where the folding hand works), clear of the glass.
+  if (drinking && hands.target.dealHand === -1) hands.target.dealHand = 0
+  hands.deckAtRight = drinking
 
   // First frame after being hidden: start from the target so the hands do not swoop in from stale values.
   const snap = frame.reducedMotion || hands.wasHidden
@@ -572,13 +612,21 @@ const HAND_REACH = 0.12
  */
 export function getHeroDealTipWorld(hands: FirstPersonHands, camera: THREE.PerspectiveCamera, out: THREE.Vector3): boolean {
   if (!hands.root.visible || hands.deal.weight <= 0.001) return false
-  const pose = hands.shown.right
-  const depth = Math.max(MIN_FORWARD, pose.depth)
+  // The right hand, or the left when the right is busy with a fold or a check; neither when both are busy
+  // (a big raise): the cards then leave the deck's spot, where the left hand holds it while dealing.
+  const side = hands.target.dealHand
+  const anchors = hands.anchors
+  const pose = side === -1 ? hands.shown.left : hands.shown.right
+  const deck = side === 0
+  const deckX = hands.deckAtRight ? anchors.dealRightX : anchors.dealLeftX
+  const deckY = hands.deckAtRight ? anchors.dealRightY : anchors.dealLeftY
+  const depth = Math.max(MIN_FORWARD, deck ? HAND_DEPTH : pose.depth)
   const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
+  const pitch = deck ? REST_PITCH : pose.pitch
   out.set(
-    pose.x * depth * tanHalf * camera.aspect,
-    pose.y * depth * tanHalf + HAND_REACH * Math.sin(pose.pitch),
-    -depth - HAND_REACH * Math.cos(pose.pitch)
+    (deck ? deckX : pose.x) * depth * tanHalf * camera.aspect,
+    (deck ? deckY : pose.y) * depth * tanHalf + HAND_REACH * Math.sin(pitch),
+    -depth - HAND_REACH * Math.cos(pitch)
   )
   camera.updateMatrixWorld()
   camera.localToWorld(out)

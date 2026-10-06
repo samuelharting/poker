@@ -44,6 +44,12 @@ interface OwnHandProps {
    * player's saved preference from Settings.
    */
   peekStyle?: PeekStyle
+  /**
+   * Desktop 3D table: epoch ms at which each hole card lands in the 3D deal
+   * (the room hides the hero's own seat, so this tray stands in for it). The
+   * cards stay hidden, and fade up in place, until then. Layout is unaffected.
+   */
+  dealLandsAt?: readonly [number, number]
 }
 
 /**
@@ -125,7 +131,8 @@ function useCardPeek(
   enabled: boolean,
   handKey: string,
   onPeekChange?: (peeking: boolean) => void,
-  onSoundCue?: (cue: PokerSoundCueKind) => void
+  onSoundCue?: (cue: PokerSoundCueKind) => void,
+  revealDelayMs = 0
 ) {
   const [mode, setModeState] = useState<PeekMode>('idle')
   const [peekedOnce, setPeekedOnce] = useState(hasPeekedBefore)
@@ -135,6 +142,8 @@ function useCardPeek(
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const callbacksRef = useRef({ onPeekChange, onSoundCue })
   callbacksRef.current = { onPeekChange, onSoundCue }
+  const revealDelayRef = useRef(revealDelayMs)
+  revealDelayRef.current = revealDelayMs
 
   const clearTimers = useCallback(() => {
     if (holdTimerRef.current) clearTimeout(holdTimerRef.current)
@@ -181,7 +190,8 @@ function useCardPeek(
     }
     if (revealedHandRef.current !== handKey) {
       revealedHandRef.current = handKey
-      revealStartedAtRef.current = Date.now()
+      // The face-up look counts from when the cards land, not from the deal.
+      revealStartedAtRef.current = Date.now() + revealDelayRef.current
       if (modeRef.current === 'idle') setMode('deal')
     }
     // Re-run for the same hand (e.g. React re-mounting effects): keep the
@@ -312,12 +322,51 @@ export function OwnHand({
   socialEmoteFrom,
   showCardsControl = null,
   peekStyle: peekStyleProp,
+  dealLandsAt,
 }: OwnHandProps) {
   const [savedPeekStyle] = usePeekStyle()
   const peekStyle = peekStyleProp ?? savedPeekStyle
   const canPeek = concealed && cards.length > 0 && !tucked
   const handKey = cards.map(card => `${card.rank}${card.suit}`).join('-')
-  const { mode: peekMode, peekedOnce, pointerHandlers } = useCardPeek(canPeek, handKey, onPeekChange, onSoundCue)
+  // How long each card still has to land. Frozen per deal so a re-render after
+  // landing can never put the gate back up.
+  const dealGateRef = useRef<{ key: string; delays: [number, number] | null }>({ key: '', delays: null })
+  const dealGateKey = dealLandsAt ? `${handKey}@${dealLandsAt[0]}:${dealLandsAt[1]}` : ''
+  if (dealGateRef.current.key !== dealGateKey) {
+    const now = Date.now()
+    // Reduced motion: the room shows dealt cards at once, so the tray does too.
+    const reduceMotion = typeof window !== 'undefined' && typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const delays: [number, number] | null = dealLandsAt && !reduceMotion
+      ? [Math.max(0, dealLandsAt[0] - now), Math.max(0, dealLandsAt[1] - now)]
+      : null
+    dealGateRef.current = { key: dealGateKey, delays: delays && delays[1] > 0 ? delays : null }
+  }
+  const dealDelays = dealGateRef.current.delays
+  // Not tied to canPeek: folding mid-deal must not cancel the timers.
+  const gated = Boolean(dealDelays)
+  // Timers (not CSS delays): a CSS delay only starts at the next painted frame,
+  // so a busy frame right after the deal would push the reveal later still.
+  const [landedState, setLandedState] = useState<{ key: string; count: number }>({ key: '', count: 0 })
+  useEffect(() => {
+    if (!dealLandsAt || !gated) return
+    const timers = dealLandsAt.map((landsAt, index) => setTimeout(() => {
+      setLandedState(previous => ({
+        key: dealGateKey,
+        count: Math.max(previous.key === dealGateKey ? previous.count : 0, index + 1),
+      }))
+    }, Math.max(0, landsAt - Date.now())))
+    return () => timers.forEach(clearTimeout)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dealGateKey, gated])
+  const landedCount = !gated ? 2 : landedState.key === dealGateKey ? landedState.count : 0
+  const { mode: peekMode, peekedOnce, pointerHandlers } = useCardPeek(
+    canPeek,
+    handKey,
+    onPeekChange,
+    onSoundCue,
+    dealDelays ? Math.max(dealDelays[0], dealDelays[1]) : 0
+  )
   const peeking = peekMode !== 'idle'
 
   if (cards.length === 0) {
@@ -351,6 +400,7 @@ export function OwnHand({
         canPeek && 'is-concealable'
       )}
       data-tucked={tucked ? 'true' : undefined}
+      data-deal-gate={gated ? (landedCount >= 2 ? 'landed' : 'pending') : undefined}
       aria-label={visibleHandDescription ? `Your hand: ${visibleHandDescription}` : 'Your hand'}
     >
       {(socialMessage || socialEmote) && (
@@ -417,6 +467,7 @@ export function OwnHand({
             className={clsx(
               'own-card-slot',
               index === 0 ? 'own-card-slot-left' : 'own-card-slot-right',
+              gated && index < landedCount && 'is-landed',
               revealChoiceActive && (isShownToTable(index) ? 'is-shown' : 'is-private')
             )}
           >

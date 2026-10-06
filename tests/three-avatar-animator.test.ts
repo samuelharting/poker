@@ -417,9 +417,85 @@ describe('avatar animator: the winner points at the pot', () => {
     expect(winnerPointFocus(0, 2, POINT_TIME, true)).toBe(0)
   })
 
+  // The same win, sampled at any time since it began (rake included).
+  const pointAt = (time: number, boardX = -0.3, id = 'p-time') => {
+    const state = createAvatarAnimatorState(id)
+    const a = withBoard(boardX)
+    computeAvatarTargetPose(state, input({ reducedMotion: false, winner: true, time: 0, anchors: a }))
+    state.winFlair = 2
+    return computeAvatarTargetPose(state, input({ reducedMotion: false, winner: true, time, anchors: a }))
+  }
+
+  it('winds up with the elbow raised and the fist drawn back, then thrusts out level at the pot', () => {
+    for (const boardX of [-0.3, 0.3]) {
+      const left = boardX < 0
+      const sh = left ? anchors.shoulderL : anchors.shoulderR
+      const windUp = pointAt(3.5, boardX)
+      const hand = left ? windUp.handL : windUp.handR
+      // Cocked: close to the shoulder, at or above it, the elbow lifted.
+      expect(sh[2] - hand[2]).toBeLessThan(0.3)
+      expect(hand[1]).toBeGreaterThan(sh[1])
+      expect(windUp.elbowUp).toBeGreaterThan(0.5)
+      // Thrown: a full arm out in front, about shoulder height (never down at the player's own cards).
+      const thrown = pointAt(4.0, boardX)
+      const out = left ? thrown.handL : thrown.handR
+      expect(sh[2] - out[2]).toBeGreaterThan(0.65)
+      expect(out[1] - sh[1]).toBeGreaterThan(-0.03)
+      expect(out[1] - sh[1]).toBeLessThan(0.25)
+      expect(thrown.elbowUp).toBeLessThan(0.1)
+    }
+  })
+
+  it('holds the pointing arm out for a couple of seconds, then hands over to the lounge', () => {
+    for (const time of [4.2, 4.8, 5.4, 5.9]) {
+      const pose = pointAt(time)
+      expect(anchors.shoulderL[2] - pose.handL[2]).toBeGreaterThan(0.6)
+    }
+    const lounge = pointAt(7.4)
+    expect(anchors.shoulderL[2] - lounge.handL[2]).toBeLessThan(0.3)
+  })
+
+  it('leans into the jab and turns the shoulder toward the pot', () => {
+    const wound = pointAt(3.5)
+    const jab = pointAt(4.1)
+    // Chest pitches into the jab; the torso turns opposite ways in the wind-up and the thrust.
+    expect(jab.bones.Chest[0]).toBeGreaterThan(wound.bones.Chest[0])
+    expect(Math.sign(jab.bones.Torso[1])).not.toBe(Math.sign(wound.bones.Torso[1]))
+    // And leans a little forward over the table.
+    expect(jab.bodyPosition[2]).toBeLessThan(wound.bodyPosition[2])
+  })
+
+  it('is deterministic: the same win gives the same pose every time', () => {
+    for (const boardX of [-0.4, 0, 0.4]) {
+      const a = pointAt(4.4, boardX, 'seed-a')
+      const b = pointAt(4.4, boardX, 'seed-a')
+      expect(Array.from(a.handL)).toEqual(Array.from(b.handL))
+      expect(Array.from(a.handR)).toEqual(Array.from(b.handR))
+      expect(Array.from(a.bones.Torso)).toEqual(Array.from(b.bones.Torso))
+    }
+  })
+
+  it('stays well clear of the face and the chest', () => {
+    for (const boardX of [-0.4, -0.1, 0.1, 0.4]) {
+      for (const time of [3.4, 3.6, 3.9, 4.2, 5.0]) {
+        const pose = pointAt(time, boardX)
+        const left = winnerPointsLeft(withBoard(boardX), createAvatarAnimatorState('p-time').seed)
+        const hand = left ? pose.handL : pose.handR
+        const sh = left ? anchors.shoulderL : anchors.shoulderR
+        // On its own side of the midline, outboard of the head, never across the chest.
+        expect(Math.sign(hand[0])).toBe(Math.sign(sh[0]))
+        expect(Math.abs(hand[0])).toBeGreaterThan(0.15)
+      }
+    }
+  })
+
   it('puts the eyes on the pot only during the point beat', () => {
     expect(winnerPointFocus(0, 2, 0.5, false)).toBe(0)
     expect(winnerPointFocus(0, 2, POINT_TIME, false)).toBeGreaterThan(0.9)
+    // Locked on from the wind-up through the hold, released as the lounge starts.
+    expect(winnerPointFocus(0, 2, 3.3, false)).toBeGreaterThan(0.5)
+    expect(winnerPointFocus(0, 2, 5.6, false)).toBeGreaterThan(0.9)
+    expect(winnerPointFocus(0, 2, 6.4, false)).toBeLessThan(0.1)
     expect(winnerPointFocus(0, 1, POINT_TIME, false)).toBe(0)
     expect(winnerPointFocus(0, 2, 9, false)).toBe(0)
     expect(winnerPointFocus(Number.NEGATIVE_INFINITY, 2, POINT_TIME, false)).toBe(0)

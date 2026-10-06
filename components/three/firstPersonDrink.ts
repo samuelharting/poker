@@ -83,8 +83,8 @@ const DRINK_GRIP: Record<DrinkKind, DrinkGrip> = {
 // pot, the hole cards and every HUD panel on the right (action tray,
 // pre-action bar, show/muck), at 1440x900 and 1024x700 alike.
 const OFF_SCREEN = new THREE.Vector3(-0.42, -1.45, -0.62)
-const HOLD = new THREE.Vector3(-0.36, -0.55, -0.66)
-const MOUTH = new THREE.Vector3(-0.35, -0.54, -0.62)
+const HOLD = new THREE.Vector3(-0.36, -0.44, -0.66)
+const MOUTH = new THREE.Vector3(-0.35, -0.44, -0.62)
 /** After the last gulp the glass goes straight down and out, no bob back up. */
 const LOWER_SECONDS = 0.45
 /** A modest tip: the glass bottom stays below the rim on screen instead of swinging up over the table. */

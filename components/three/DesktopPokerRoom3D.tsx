@@ -85,6 +85,7 @@ import {
   updateHeroHands,
   type FirstPersonHands,
 } from './firstPersonHands'
+import { getHeroPushStyle } from './firstPersonHandPose'
 import { CHILL_BLOOM_SCALE, applySceneMode, type SceneMode } from './sceneMode'
 import { applyTableTheme, disposeTableTheme, getThemeBloomScale, setThemeQuality, type ThemeState } from './themeApply'
 import { useTableThemeId } from './useTableTheme'
@@ -372,6 +373,8 @@ interface WagerRuntime {
   yaw: number
   /** Chip count the columns are currently laid out for. */
   layoutCount: number
+  /** The hero's own hands push this flight (first person): a low glide the hand follows, never a throw. */
+  handPushed?: boolean
 }
 
 interface PotRuntime {
@@ -2051,6 +2054,7 @@ function syncWagers(runtime: SceneRuntime, view: ThreeTableViewModel) {
       // raises animate on their action. Give the hand ~0.25s to reach the
       // stack first (a posted blind has no reach, so it goes almost at once).
       blindPost = !isWagerAction(player.actionCue)
+      wager.handPushed = !blindPost && Boolean(ownerSeat?.isHero) && runtime.firstPersonHands.root.visible && !runtime.reducedMotion
       wager.startedAt = now + (blindPost ? 0.05 : 0.25)
       wager.animating = true
       wager.group.position.copy(wager.start)
@@ -2161,18 +2165,23 @@ function animateWagers(runtime: SceneRuntime, time: number, reducedMotion: boole
       continue
     }
 
-    const { wagerStyle, wagerIntensity, variant } = wager.motionProfile
+    const { wagerIntensity, variant } = wager.motionProfile
+    // The hero's own chips are pushed by the hands on screen (see poseWager): a flick becomes a slide, and the
+    // pile stays low so the fingers on its trailing edge never lose it.
+    const wagerStyle = wager.handPushed ? getHeroPushStyle(wager.motionProfile.wagerStyle) : wager.motionProfile.wagerStyle
     const duration = wagerStyle === 'flick'
       ? 0.78 - wagerIntensity * 0.08
       : wagerStyle === 'shove'
         ? 0.62 - wagerIntensity * 0.06
         : 0.72
     const progress = THREE.MathUtils.clamp((time - wager.startedAt) / duration, 0, 1)
-    const arcHeight = wagerStyle === 'flick'
-      ? 0.42 + wagerIntensity * 0.2
-      : wagerStyle === 'shove'
-        ? 0.16 + wagerIntensity * 0.08
-        : 0.1 + wagerIntensity * 0.07
+    const arcHeight = wager.handPushed
+      ? 0.035 + wagerIntensity * 0.025
+      : wagerStyle === 'flick'
+        ? 0.42 + wagerIntensity * 0.2
+        : wagerStyle === 'shove'
+          ? 0.16 + wagerIntensity * 0.08
+          : 0.1 + wagerIntensity * 0.07
     const leaderProgress = THREE.MathUtils.clamp(progress * 1.04, 0, 1)
     const position = interpolateWagerArc(
       [wager.start.x, wager.start.y, wager.start.z],

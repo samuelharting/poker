@@ -6,6 +6,7 @@ import {
   getHullWidth,
   GRIP_MORPH,
   HAND_SCALE,
+  handSkinColor,
   type GripSpec,
   type HandColors,
   type HandHullMaterial,
@@ -50,9 +51,9 @@ const GLASS_FRAME = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,
 const yawAxis = new THREE.Vector3(0, 1, 0)
 const scratchAxis = new THREE.Vector3()
 
-/** The same small lift the resting hands' skin gets (firstPersonHands.ts). */
+/** The same lift (and floor for very dark skin) the resting hands' skin gets (firstPersonHands.ts). */
 export function gripSkinColor(skin: THREE.ColorRepresentation, out = new THREE.Color()) {
-  return out.set(skin).offsetHSL(0, 0.04, 0.02)
+  return handSkinColor(skin, out)
 }
 
 export function createGripHand(options: GripHandOptions): GripHand {

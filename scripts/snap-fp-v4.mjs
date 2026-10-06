@@ -18,6 +18,8 @@ const width = Number(process.env.SNAP_WIDTH ?? 1280)
 const height = Number(process.env.SNAP_HEIGHT ?? 720)
 const bots = Number(process.env.BOTS ?? 2)
 const sheetFrames = Number(process.env.FRAMES ?? 12)
+const slowmo = Number(process.env.SLOWMO ?? 1)
+const pickEls = process.env.ELS ? process.env.ELS.split(',').map(Number) : null
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 async function clickVisible(page, name, force = true) {
@@ -53,6 +55,13 @@ try {
     const Native = window.WebSocket
     window.WebSocket = class extends Native { constructor(url, protocols) { super(String(url).replace(/crew22/i, id), protocols) } }
   }, roomId)
+  // SLOWMO=0.2: a controllable scene clock (window.__tscale) so the gestures can be sampled densely on a slow machine.
+  await page.addInitScript(() => {
+    const base = performance.now.bind(performance)
+    let lastReal = base(), virtual = lastReal
+    window.__tscale = 1
+    performance.now = () => { const real = base(); virtual += (real - lastReal) * window.__tscale; lastReal = real; return virtual }
+  })
   page.on('pageerror', error => console.log('pageerror:', error.message))
   await page.goto(appUrl, { waitUntil: 'load', timeout: 120000 })
   await page.getByLabel('Your nickname').fill('Hand' + Math.floor(Math.random() * 900 + 100))
@@ -131,12 +140,16 @@ try {
           v.set(origin[0], origin[1], origin[2])
           s.root.localToWorld(v)
           v.project(cams)
-          const depth = Math.max(0.45, r.depth)
-          const tipLocal = new (cams.position.constructor)(r.x * depth * tanHalf * cams.aspect, r.y * depth * tanHalf + 0.12 * Math.sin(r.pitch), -depth - 0.12 * Math.cos(r.pitch))
+          // The drawn fingertips of the hand that is pitching (right normally, left when the right is busy folding; 0 = the deck's spot).
+          const side = hands.target.dealHand
+          const hp = side === -1 ? l : r
+          const depth = side === 0 ? 0.72 : Math.max(0.45, hp.depth)
+          const px = side === 0 ? hands.anchors.dealLeftX : hp.x, py = side === 0 ? hands.anchors.dealLeftY : hp.y, pitch = side === 0 ? 0.5 : hp.pitch
+          const tipLocal = new (cams.position.constructor)(px * depth * tanHalf * cams.aspect, py * depth * tanHalf + 0.12 * Math.sin(pitch), -depth - 0.12 * Math.cos(pitch))
           cams.updateMatrixWorld()
           cams.localToWorld(tipLocal)
           tipLocal.project(cams)
-          window.__origins.push({ t: Date.now(), seat: s.playerId.slice(0, 6), index, origin: [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight], tip: [(tipLocal.x + 1) / 2 * innerWidth, (1 - tipLocal.y) / 2 * innerHeight], wrist: [(r.x + 1) / 2 * innerWidth, (1 - r.y) / 2 * innerHeight] })
+          window.__origins.push({ t: Date.now(), seat: s.playerId.slice(0, 6), index, side, origin: [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight], tip: [(tipLocal.x + 1) / 2 * innerWidth, (1 - tipLocal.y) / 2 * innerHeight], wrist: [(px + 1) / 2 * innerWidth, (1 - py) / 2 * innerHeight] })
         })
       }
     }
@@ -145,6 +158,7 @@ try {
   await installTrace()
 
   const startRecording = async () => {
+    await installTrace().catch(() => {})
     const cdp = await context.newCDPSession(page)
     const frames = []
     cdp.on('Page.screencastFrame', async ({ data, sessionId, metadata }) => {
@@ -168,7 +182,19 @@ try {
   async function sheet(name, frames, trace, startAt, pickCount, cropBox) {
     const useful = frames.filter(f => f.at >= startAt - 150)
     const pick = []
-    for (let i = 0; i < pickCount && useful.length; i += 1) pick.push(useful[Math.min(useful.length - 1, Math.round((i * (useful.length - 1)) / Math.max(1, pickCount - 1)))])
+    if (pickEls) {
+      // Frames whose gesture clock is nearest each wanted time (ms since the action began).
+      for (const want of pickEls) {
+        let best = null, bestGap = Infinity
+        for (const f of useful) {
+          const near = trace.reduce((b, s) => (!b || Math.abs(s.t - f.at) < Math.abs(b.t - f.at) ? s : b), null)
+          if (!near || near.cue === 'ready') continue
+          const gap = Math.abs(near.el - want)
+          if (gap < bestGap) { bestGap = gap; best = f }
+        }
+        if (best) pick.push(best)
+      }
+    } else for (let i = 0; i < pickCount && useful.length; i += 1) pick.push(useful[Math.min(useful.length - 1, Math.round((i * (useful.length - 1)) / Math.max(1, pickCount - 1)))])
     const cols = Number(process.env.COLS ?? 3)
     const tiles = []
     for (const f of pick) {
@@ -321,9 +347,21 @@ try {
     await cdp.send('Page.startScreencast', { format: 'jpeg', quality: Number(process.env.JPEG ?? 80), everyNthFrame: Number(process.env.NTH ?? 2) })
     const deadline = Date.now() + Number(process.env.DEAL_WAIT_MS ?? 240000)
     let detected = 0
+    // FOLD_AT_MS: the hero folds this many scene ms after their own deal starts (a real click on Fold).
+    const foldAt = process.env.FOLD_AT_MS !== undefined ? Number(process.env.FOLD_AT_MS) : null
+    let folded = false, foldClickedAt = 0
     while (Date.now() < deadline) {
       await installTrace().catch(() => {})
       await page.evaluate(() => { if (window.__traceInstalled && window.__traceOn === false && !window.__done) window.__traceOn = true; window.__ring = 1800 }).catch(() => {})
+      // NO_DRINK=1: the house rules hand the hero a forced drink right after a fold, and the glass takes the left hand
+      // away; keep the hands free so the left-hand deal can be seen (the drink is only hidden, the game is untouched).
+      if (process.env.NO_DRINK) await page.evaluate(() => {
+        const rt = document.querySelector('.desktop-3d-stage')?.__pokerRuntime
+        if (!rt) return
+        for (const root of [rt.firstPersonDrink.root, rt.pranks.firstPerson.root]) {
+          if (!root.__noDrink) { root.__noDrink = true; Object.defineProperty(root, 'visible', { get: () => false, set: () => {}, configurable: true }) }
+        }
+      }).catch(() => {})
       const st = await page.evaluate(() => {
         const rt = document.querySelector('.desktop-3d-stage')?.__pokerRuntime
         if (!rt) return { hero: false, kind: null, any: true }
@@ -331,7 +369,10 @@ try {
         return { hero: Boolean(rt.dealer && hero && rt.dealer.seatId === hero.playerId), kind: rt.dealer?.kind ?? null, any: Boolean(rt.dealer) }
       })
       if (st.hero && st.kind === wantKind) {
-        if (!detected) { detected = Date.now(); console.log('hero', wantKind, 'deal detected') }
+        if (!detected) { detected = Date.now(); console.log('hero', wantKind, 'deal detected'); if (slowmo !== 1) await page.evaluate(k => { window.__tscale = k }, slowmo) }
+        if (foldAt !== null && !folded && Date.now() - detected >= foldAt / slowmo) {
+          if (await clickVisible(page, /^Fold/)) { folded = true; foldClickedAt = Date.now(); console.log('clicked Fold', foldAt, 'scene ms into the deal') }
+        }
       } else if (detected && !st.any) { await sleep(1200); break }
       else if (!st.any) {
         if (await clickVisible(page, wantKind === 'board' ? /^(Check|Call)/ : /^Fold/)) await sleep(300)
@@ -340,10 +381,27 @@ try {
       await sleep(120)
     }
     await cdp.send('Page.stopScreencast').catch(() => {})
+    await page.evaluate(() => { window.__tscale = 1 })
     const trace = await page.evaluate(() => { window.__traceOn = false; return window.__trace })
     const origins = await page.evaluate(() => window.__origins)
     if (!detected) console.log('hero never dealt')
-    else {
+    else if (foldAt !== null) {
+      // Fold during the hero's own deal: every dealt card against the drawn fingertips, the sheet around the whole deal.
+      const inDeal = trace.filter(s => s.dealer && s.dealer[0] === 1 && s.dealer[1] === wantKind)
+      const first = inDeal[0]?.t ?? detected
+      const lastT = inDeal[inDeal.length - 1]?.t ?? detected
+      console.log('hero deal frames', inDeal.length, 'span ms', lastT - first, 'fold clicked at ms', foldClickedAt ? foldClickedAt - first : null)
+      const pick = Number(process.env.FRAMES ?? 15)
+      // PICK_MS=0,200,...: frames nearest those offsets (ms after the hero's deal starts); otherwise evenly spread.
+      const pickMs = process.env.PICK_MS ? process.env.PICK_MS.split(',').map(Number) : null
+      const inSpan = frames.filter(f => f.at >= first - 300 && f.at <= lastT + 900)
+      const chosen = pickMs ? pickMs.map(ms => inSpan.reduce((b, f) => (!b || Math.abs(f.at - first - ms) < Math.abs(b.at - first - ms) ? f : b), null)).filter(Boolean) : inSpan
+      await sheet(`folddeal-${tag}.png`, chosen, trace, first - 300, pickMs ? chosen.length : pick, crop)
+      const cues = inDeal.filter((_, i) => i % Math.max(1, Math.floor(inDeal.length / 40)) === 0).map(s => [s.t - first, s.cue, s.el, s.deal ? +s.deal[0].toFixed(2) : null, s.deal ? s.deal[1] : null, +s.R[0].toFixed(2), +s.R[1].toFixed(2), +s.R[2].toFixed(2)])
+      console.log('trace [ms, cue, el, dealWeight, released, Rx, Ry, Rshow]', JSON.stringify(cues))
+      console.log('card origins (px) vs drawn pitching-hand fingertip (px) vs wrist', JSON.stringify(origins.filter(o => o.t > first - 100).map(o => ({ idx: o.index, seat: o.seat, side: o.side, ms: o.t - first, origin: o.origin.map(Math.round), tip: o.tip.map(Math.round), wrist: o.wrist.map(Math.round), off: Math.round(Math.hypot(o.origin[0] - o.tip[0], o.origin[1] - o.tip[1])) }))))
+      await writeFile(path.join(outDir, `folddeal-${tag}.json`), JSON.stringify({ foldAt, foldClickedMs: foldClickedAt - first, origins: origins.map(o => ({ ...o, ms: o.t - first })), trace: inDeal.map(s => ({ ms: s.t - first, cue: s.cue, el: s.el, deal: s.deal, R: s.R, L: s.L })) }))
+    } else {
       const dealing = trace.filter(s => s.deal && s.deal[0] > 0.001 && s.dealer && s.dealer[0] === 1)
       const first = dealing[0]?.t ?? detected
       const lastT = dealing[dealing.length - 1]?.t ?? detected
@@ -420,9 +478,11 @@ try {
       }
       const rec = await startRecording()
       const startAt = Date.now()
+      await page.evaluate(k => { window.__tscale = k }, slowmo)
       const clicked = size === 'allin' ? await clickVisible(page, /All-in/i) : await clickVisible(page, /^(Raise to|Bet) \$\d/)
       console.log('clicked', clicked, label)
-      await sleep(2800)
+      await sleep(2800 / slowmo)
+      await page.evaluate(() => { window.__tscale = 1 })
       const { frames, trace } = await rec.stop()
       await sheet(`raise-${size}-${tag}.png`, frames, trace, startAt, sheetFrames, crop)
       // How the gesture was shaped, and whether the hands ever hid.

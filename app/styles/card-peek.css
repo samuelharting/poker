@@ -731,3 +731,50 @@
     transform: none;
   }
 }
+
+/* Desktop 3D deal: the tray stands in for the hero's hidden 3D seat, so each
+   card stays invisible until it has landed in the deal (OwnHand flips
+   data-deal-gate / .is-landed on timers from the room's own deal timing), then
+   fades up in place. Only opacity and a small slide: layout never moves. */
+.own-hand-area[data-deal-gate] .own-card-peek.card-deal-anim {
+  animation: none;
+  opacity: 0;
+}
+
+.own-hand-area[data-deal-gate] .own-card-slot.is-landed .own-card-peek.card-deal-anim {
+  animation: ownCardLand 300ms cubic-bezier(0.2, 0.85, 0.25, 1) both;
+}
+
+.own-hand-area[data-deal-gate='pending'] .own-card-row {
+  pointer-events: none;
+}
+
+.own-hand-area[data-deal-gate='pending'] .own-hand-strength,
+.own-hand-area[data-deal-gate='pending'] .own-hand-peek-hint {
+  visibility: hidden;
+}
+
+.own-hand-area[data-deal-gate='landed'] .own-hand-strength.is-peek-strength {
+  animation: ownCardLandStrength 200ms ease-out both;
+}
+
+.own-hand-area[data-deal-gate='landed'] .own-hand-peek-hint {
+  animation:
+    ownCardLandHint 240ms linear both,
+    peekHintBob 1.8s ease-in-out 240ms infinite;
+}
+
+@keyframes ownCardLand {
+  from { opacity: 0; transform: translateY(18px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes ownCardLandStrength {
+  from { opacity: 0; translate: 0 6px; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+@keyframes ownCardLandHint {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

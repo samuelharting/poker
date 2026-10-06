@@ -199,6 +199,14 @@ interface RoomData {
   membership: MembershipData
   /** Buy-ins, rebuys and host adjustments per player identity (see lib/poker/ledger). */
   ledger: LedgerData
+  /**
+   * Last moment a live human connection (player, spectator or rail viewer) was
+   * known at the table, in ms. Optional so older saves load: a missing value is
+   * treated as "now". Only meaningful while `humansPresent` is false.
+   */
+  lastHumanSeenAt?: number
+  /** False while zero humans are connected (the idle-reset clock runs from lastHumanSeenAt). */
+  humansPresent?: boolean
 }
 
 /**
@@ -333,6 +341,30 @@ function describeChipAdjustment(playerName: string, delta: number): string {
     : `Removed ${amount} from ${playerName}.`
 }
 
+/**
+ * Zero live human connections, continuously, for this long resets a table that
+ * holds no human at all (bots only: every human left or was removed). Nobody is
+ * coming back to it, so it is cleaned up quickly.
+ */
+export const IDLE_RESET_BOTS_ONLY_MS = 2 * 60_000
+/**
+ * Same, for a table that still holds human seats or entries (phones asleep, a
+ * wifi drop, a refresh): everything is kept this long for the people who may
+ * come back. Never applies while anyone is connected.
+ */
+export const IDLE_RESET_HELD_MS = 30 * 60_000
+/**
+ * The idle timer fires this long after the boundary, and the reset only runs
+ * when the idle time is strictly greater than the window: someone who comes
+ * back exactly on the boundary always wins the tie.
+ */
+export const IDLE_RESET_SLACK_MS = 1_000
+/**
+ * Hands of per-hand stat bookkeeping (dedupe keys) kept. Older keys can never be
+ * looked up again (hand numbers only go up) and would otherwise grow forever.
+ */
+export const HAND_COUNTER_RETENTION = 50
+
 /** Durable copy of RoomData (a JSON string), restored by onStart. */
 const ROOM_STORAGE_KEY = 'room-data-v1'
 /** Durable Object values cap at 128 KiB; leave headroom. */
@@ -408,12 +440,40 @@ export default class PokerRoom implements PartyServer {
   private botPeekTimers = new Set<ReturnType<typeof setTimeout>>()
   /** Injectable so tests can make bot peeking deterministic. */
   botPeekRandom: () => number = Math.random
+  /** Fires when the table has been without any live human for the idle window. */
+  private idleResetTimer: ReturnType<typeof setTimeout> | null = null
+  private idleResetDueAt = 0
+  /** The socket whose onClose is running: some runtimes still list it while it closes. */
+  private closingConnId: string | null = null
+  /**
+   * How long a table with nobody connected is kept before it resets: a table
+   * with no human entry at all (bots only), and one still holding humans' seats.
+   * Tests and local dev can lower them (instance fields, or the
+   * POKER_IDLE_RESET_BOTS_ONLY_MS / POKER_IDLE_RESET_HELD_MS env vars on a dev
+   * server); production leaves the defaults.
+   */
+  idleResetBotsOnlyMs = IDLE_RESET_BOTS_ONLY_MS
+  idleResetHeldMs = IDLE_RESET_HELD_MS
 
   constructor(readonly room: Room) {
-    const roomCode = room.id.toUpperCase()
-    this.data = {
+    this.data = this.createFreshData()
+    this.mushrooms = createMushroomTable(this.mushroomRandom)
+    const env = room.env as Record<string, unknown> | undefined
+    const envBotsOnlyMs = Number(env?.POKER_IDLE_RESET_BOTS_ONLY_MS)
+    if (Number.isFinite(envBotsOnlyMs) && envBotsOnlyMs >= 1_000) {
+      this.idleResetBotsOnlyMs = envBotsOnlyMs
+    }
+    const envHeldMs = Number(env?.POKER_IDLE_RESET_HELD_MS)
+    if (Number.isFinite(envHeldMs) && envHeldMs >= 1_000) {
+      this.idleResetHeldMs = envHeldMs
+    }
+  }
+
+  /** A brand-new table: what a never-used room (and a reset room) looks like. */
+  private createFreshData(): RoomData {
+    return {
       gameState: createInitialGameState(
-        roomCode,
+        this.room.id.toUpperCase(),
         DEFAULT_SETTINGS.smallBlind,
         DEFAULT_SETTINGS.bigBlind,
         DEFAULT_SETTINGS.startingStack,
@@ -445,8 +505,9 @@ export default class PokerRoom implements PartyServer {
       handHistory: [],
       membership: createMembershipData(),
       ledger: createLedger(),
+      lastHumanSeenAt: Date.now(),
+      humansPresent: false,
     }
-    this.mushrooms = createMushroomTable(this.mushroomRandom)
   }
 
   /**
@@ -474,6 +535,15 @@ export default class PokerRoom implements PartyServer {
       for (const player of this.data.gameState.players) {
         if (!this.isBotPlayer(player.id)) player.isConnected = false
       }
+      // Every socket is gone, so nobody is here. If the save was written while
+      // humans were connected (or predates this field) the idle clock starts
+      // now; a table that was already empty keeps counting from when it emptied.
+      const savedSeenAt = restored.lastHumanSeenAt
+      const savedWhileEmpty = restored.humansPresent === false
+      this.data.lastHumanSeenAt = savedWhileEmpty && typeof savedSeenAt === 'number' && Number.isFinite(savedSeenAt)
+        ? Math.min(savedSeenAt, Date.now())
+        : Date.now()
+      this.data.humansPresent = false
       this.finalizeState()
       this.syncActionTimer()
     } catch (error) {
@@ -488,6 +558,10 @@ export default class PokerRoom implements PartyServer {
     this.persistTimeout = setTimeout(() => {
       this.persistTimeout = null
       try {
+        // Keep the "last human seen" stamp fresh in every save made while someone is here.
+        if (this.countLiveHumanConnections() > 0) {
+          this.touchHumanPresence()
+        }
         let serialized = JSON.stringify(this.data)
         if (serialized.length > ROOM_STORAGE_MAX_CHARS) {
           // Stay under the storage value limit: history and chat are the expendable parts.
@@ -502,7 +576,275 @@ export default class PokerRoom implements PartyServer {
     }, 300)
   }
 
+  // -------------------------------------------------------------------------
+  // Idle table: pause and reset when nobody (no human) is connected
+  // -------------------------------------------------------------------------
+
+  /**
+   * Live sockets right now. Bots have no socket, so every socket is a real
+   * person (players, spectators and rail viewers alike). Counted from the
+   * actual connection set, never from isConnected flags. When it cannot tell,
+   * it says someone is here: a wrong "yes" only delays a reset.
+   */
+  private countLiveHumanConnections(ignoreConnId?: string): number {
+    try {
+      let count = 0
+      for (const conn of Array.from(this.room.getConnections())) {
+        if (conn.id === ignoreConnId || conn.id === this.closingConnId) continue
+        const readyState = (conn as { readyState?: number }).readyState
+        if (readyState === 2 || readyState === 3) continue
+        count += 1
+      }
+      return count
+    } catch {
+      return 1
+    }
+  }
+
+  private hasLiveHuman(): boolean {
+    return this.countLiveHumanConnections() > 0
+  }
+
+  /** Is there anything on this table worth resetting? An untouched table has no idle clock. */
+  private hasTableState(): boolean {
+    const data = this.data
+    return (
+      (data.gameState?.players?.length ?? 0) > 0 ||
+      (data.gameState?.handNumber ?? 0) > 0 ||
+      Object.keys(data.playerNicknames ?? {}).length > 0 ||
+      Object.keys(data.reconnectTokens ?? {}).length > 0 ||
+      Object.keys(data.spectatorIds ?? {}).length > 0 ||
+      Object.keys(data.spectatorStacks ?? {}).length > 0 ||
+      Object.keys(data.ledger?.accounts ?? {}).length > 0 ||
+      (data.handHistory?.length ?? 0) > 0 ||
+      (data.social?.chatLog?.length ?? 0) > 0 ||
+      Object.keys(this.drinkLedger).length > 0
+    )
+  }
+
+  /** A human is here: stop any idle countdown and stamp the moment. */
+  private touchHumanPresence() {
+    this.cancelIdleReset()
+    this.data.humansPresent = true
+    this.data.lastHumanSeenAt = Date.now()
+  }
+
+  private cancelIdleReset() {
+    if (this.idleResetTimer) {
+      clearTimeout(this.idleResetTimer)
+    }
+    this.idleResetTimer = null
+  }
+
+  private getLastHumanSeenAt(): number {
+    const seenAt = this.data.lastHumanSeenAt
+    const now = Date.now()
+    // Missing (old save) or garbage: treat as now. A future stamp (clock skew) never counts as idle.
+    return typeof seenAt === 'number' && Number.isFinite(seenAt) ? Math.min(seenAt, now) : now
+  }
+
+  /**
+   * Does the table still hold anything for a human: a seat, a rail entry or a
+   * reconnect token? (Bots do not count.) When unsure it says yes, which only
+   * means the longer wait.
+   */
+  private hasHeldHumanEntries(): boolean {
+    try {
+      const data = this.data
+      const isHuman = (id: string) => !this.isBotPlayer(id)
+      return (
+        (data.gameState?.players ?? []).some(player => !player.isBot && isHuman(player.id)) ||
+        [
+          data.playerNicknames,
+          data.reconnectTokens,
+          data.spectatorIds,
+          data.spectatorStacks,
+          data.pendingRemovals,
+          data.pendingSpectators,
+        ].some(record => Object.keys(record ?? {}).some(isHuman))
+      )
+    } catch {
+      return true
+    }
+  }
+
+  /** How long to wait with nobody connected: short for a bots-only table, long while humans' seats are held. */
+  private currentIdleThresholdMs(): number {
+    return this.hasHeldHumanEntries() ? this.idleResetHeldMs : this.idleResetBotsOnlyMs
+  }
+
+  /** Zero humans for strictly longer than the idle window (ties go to whoever is coming back). */
+  private isIdleExpired(): boolean {
+    return this.data.humansPresent === false && Date.now() - this.getLastHumanSeenAt() > this.currentIdleThresholdMs()
+  }
+
+  /** Nobody is connected: start the idle clock (kept if it is already running). */
+  private beginIdleCountdown() {
+    if (this.data.humansPresent !== false) {
+      this.data.lastHumanSeenAt = Date.now()
+    } else if (typeof this.data.lastHumanSeenAt !== 'number' || !Number.isFinite(this.data.lastHumanSeenAt)) {
+      this.data.lastHumanSeenAt = Date.now()
+    }
+    this.data.humansPresent = false
+    this.scheduleIdleReset()
+  }
+
+  private scheduleIdleReset() {
+    if (!this.hasTableState()) return
+    const remainingMs = this.currentIdleThresholdMs() - (Date.now() - this.getLastHumanSeenAt())
+    const dueAt = Date.now() + Math.max(0, remainingMs) + IDLE_RESET_SLACK_MS
+    // Keep a timer that is already due no later than needed; pull it in when the
+    // threshold got shorter (the last human entry was cleared away).
+    if (this.idleResetTimer && this.idleResetDueAt <= dueAt) return
+    this.cancelIdleReset()
+    this.idleResetDueAt = dueAt
+    this.idleResetTimer = setTimeout(() => this.onIdleResetTimer(), dueAt - Date.now())
+  }
+
+  private onIdleResetTimer() {
+    this.idleResetTimer = null
+    try {
+      // Re-check at fire time: anyone connected means no reset, whatever the clock says.
+      if (this.hasLiveHuman()) {
+        this.touchHumanPresence()
+        return
+      }
+      if (!this.isIdleExpired()) {
+        this.scheduleIdleReset()
+        return
+      }
+      this.resetTable()
+    } catch (error) {
+      console.warn('Idle table reset failed.', error)
+    }
+  }
+
+  /**
+   * Keeps the presence bookkeeping honest from the real connection set. Runs on
+   * every state finalize, so a lost close event cannot leave the table thinking
+   * somebody is still here.
+   */
+  private syncPresence() {
+    if (this.hasLiveHuman()) {
+      if (this.data.humansPresent !== true || this.idleResetTimer) {
+        this.touchHumanPresence()
+      } else {
+        this.data.lastHumanSeenAt = Date.now()
+      }
+      return
+    }
+    this.beginIdleCountdown()
+  }
+
+  /**
+   * A socket just arrived. If the table has been empty of humans for longer
+   * than the idle window (the timer may have been lost to an eviction), reset
+   * it first so the newcomer sees a clean table. Anyone else being connected
+   * means no reset.
+   */
+  private noteHumanArrived(conn: Connection) {
+    try {
+      if (
+        this.countLiveHumanConnections(conn.id) === 0 &&
+        this.isIdleExpired() &&
+        this.hasTableState()
+      ) {
+        this.resetTable(conn.id)
+      }
+    } catch (error) {
+      console.warn('Lazy table reset failed.', error)
+    }
+    this.touchHumanPresence()
+    if (this.hasTableState()) this.schedulePersist()
+  }
+
+  /** Runs a cleanup step; a failure in one step never stops the others. */
+  private safely(step: () => void) {
+    try {
+      step()
+    } catch (error) {
+      console.warn('Table reset step failed.', error)
+    }
+  }
+
+  /**
+   * Back to a brand-new, empty table: no seats, bots, ledger, history, drinks,
+   * chat, pranks, mushroom, timers, alarm or saved copy. Never runs while a
+   * human is connected (the arriving socket, which has no state yet, is passed
+   * as `arrivingConnId`). Returns whether it reset.
+   */
+  private resetTable(arrivingConnId?: string): boolean {
+    if (this.countLiveHumanConnections(arrivingConnId) > 0) return false
+
+    this.safely(() => this.clearAutoFold())
+    this.safely(() => this.clearAutoStart())
+    this.safely(() => this.clearBotAction())
+    this.safely(() => this.clearRunItTwiceVoteTimeout())
+    this.safely(() => this.clearAllInRunoutTimeout())
+    this.safely(() => this.cancelDisconnectedHostTransfer())
+    this.safely(() => this.cancelIdleReset())
+    this.safely(() => {
+      if (this.persistTimeout) clearTimeout(this.persistTimeout)
+      this.persistTimeout = null
+      if (this.revealSettleTimeout) clearTimeout(this.revealSettleTimeout)
+      this.revealSettleTimeout = null
+    })
+    this.safely(() => {
+      for (const timer of this.drinkWaterTimers.values()) clearTimeout(timer)
+      for (const timer of this.botDrinkTimers) clearTimeout(timer)
+      for (const timer of this.botShotTimers) clearTimeout(timer)
+      for (const timer of this.botPeekTimers) clearTimeout(timer)
+      for (const peek of this.peekingByPlayer.values()) clearTimeout(peek.timer)
+    })
+    this.safely(() => this.clearBlackoutTimers())
+    this.safely(() => this.clearTripTimer())
+    this.safely(() => this.clearBotSpikeTimer())
+    this.safely(() => {
+      if (this.autoBeerTimer) clearInterval(this.autoBeerTimer)
+    })
+    this.autoBeerTimer = null
+
+    this.drinkWaterTimers.clear()
+    this.botDrinkTimers.clear()
+    this.botShotTimers.clear()
+    this.botPeekTimers.clear()
+    this.peekingByPlayer.clear()
+    this.peekRateByPlayer.clear()
+    this.blackoutTimers.clear()
+    this.drinkLedger = {}
+    this.drinkWearOffHand = 0
+    this.lastChipFlickAt.clear()
+    this.stickyNotes.clear()
+    this.stickyLastByPlayer.clear()
+    this.stickyTargetCounts.clear()
+    this.shotQueue = []
+    this.pendingShotCharges = []
+    this.pendingBlackouts.clear()
+    this.foldStreaks.clear()
+    this.orbitHands = 0
+    this.drinkCapableByPlayer.clear()
+    this.handStartStacks.clear()
+    this.spikedWaterKeys.clear()
+    this.disconnectedHostId = null
+    this.mushrooms = createMushroomTable(this.mushroomRandom)
+    this.data = this.createFreshData()
+
+    // A normal fresh state for anyone who is connected (nobody should be).
+    this.safely(() => this.broadcastState())
+    this.safely(() => {
+      if (this.persistTimeout) clearTimeout(this.persistTimeout)
+      this.persistTimeout = null
+    })
+    this.safely(() => {
+      const storage = this.room.storage as Partial<Room['storage']> | undefined
+      void storage?.deleteAlarm?.()
+      void storage?.delete?.(ROOM_STORAGE_KEY)?.catch?.(() => {})
+    })
+    return true
+  }
+
   onConnect(conn: Connection) {
+    this.noteHumanArrived(conn)
     this.sendMessage(conn, this.buildSnapshotFor(conn.id))
     this.sendMessage(conn, this.buildSocialSnapshotMessage())
   }
@@ -632,6 +974,23 @@ export default class PokerRoom implements PartyServer {
   }
 
   onClose(conn: Connection) {
+    this.closingConnId = conn.id
+    try {
+      this.handleClose(conn)
+    } finally {
+      // Even a viewer who never joined was a human: when the last socket goes,
+      // the idle clock starts, whichever path handleClose took.
+      try {
+        this.syncPresence()
+        if (this.hasTableState()) this.schedulePersist()
+      } catch (error) {
+        console.warn('Could not update table presence.', error)
+      }
+      this.closingConnId = null
+    }
+  }
+
+  private handleClose(conn: Connection) {
     const playerId = this.data.connectionToPlayer[conn.id]
     if (!playerId || this.data.playerToConnection[playerId] !== conn.id) {
       return
@@ -2455,7 +2814,9 @@ export default class PokerRoom implements PartyServer {
 
   /** Runs the random-thirst clock only while fun mode is on and a drink-capable player is seated. */
   private syncAutoBeerTimer() {
+    // Bots drink on their own, but a table nobody is watching stays quiet.
     const wanted = this.isFunModeEnabled() &&
+      this.hasLiveHuman() &&
       this.data.gameState.players.some(player => this.isDrinkCapable(player))
     if (wanted && !this.autoBeerTimer) {
       this.autoBeerTimer = setInterval(() => this.rollAutoBeers(), BUZZ.autoBeerEveryMs)
@@ -2467,7 +2828,7 @@ export default class PokerRoom implements PartyServer {
 
   /** Each drink-capable seated player may down a beer on their own (accidental blackouts welcome). */
   private rollAutoBeers() {
-    if (!this.isFunModeEnabled()) return
+    if (!this.isFunModeEnabled() || !this.hasLiveHuman()) return
     const state = this.data.gameState
     const now = Date.now()
     let drank = false
@@ -3501,6 +3862,7 @@ export default class PokerRoom implements PartyServer {
       }
     }
 
+    this.syncPresence()
     this.syncAutoStart()
   }
 
@@ -4060,6 +4422,45 @@ export default class PokerRoom implements PartyServer {
     }
   }
 
+  /**
+   * Once per new hand: drop bookkeeping that only ever grows on a long-running
+   * table. Stat dedupe keys of old hands (`<hand>:<player>`) can never be looked
+   * up again, stats and cosmetic cooldowns of bots that left are unreachable,
+   * and per-player maps keep nothing for players the room has forgotten.
+   */
+  private pruneBookkeeping(handNumber: number) {
+    const oldestKept = handNumber - HAND_COUNTER_RETENTION
+    if (oldestKept > 0) {
+      for (const counted of [this.data.countedHandPlayers, this.data.countedFolds]) {
+        for (const key of Object.keys(counted)) {
+          const hand = Number(key.slice(0, key.indexOf(':')))
+          if (Number.isFinite(hand) && hand < oldestKept) delete counted[key]
+        }
+      }
+      for (const key of Object.keys(this.data.countedWinHands)) {
+        if (Number(key) < oldestKept) delete this.data.countedWinHands[Number(key)]
+      }
+    }
+
+    for (const key of Object.keys(this.data.statsByUsername)) {
+      if (key.startsWith('bot:') && !this.isKnownPlayer(key.slice(4))) {
+        delete this.data.statsByUsername[key]
+      }
+    }
+    for (const map of [
+      this.lastChipFlickAt,
+      this.stickyLastByPlayer,
+      this.stickyTargetCounts,
+      this.foldStreaks,
+      this.drinkCapableByPlayer,
+      this.peekRateByPlayer,
+    ] as Array<Map<string, unknown>>) {
+      for (const playerId of Array.from(map.keys())) {
+        if (playerId !== HOUSE_ID && !this.isKnownPlayer(playerId)) map.delete(playerId)
+      }
+    }
+  }
+
   private recordHandsPlayedForCurrentHand() {
     const handNumber = this.data.gameState.handNumber
     if (handNumber <= 0) {
@@ -4072,6 +4473,7 @@ export default class PokerRoom implements PartyServer {
       this.getSeatedPlayerIds(),
       Date.now()
     )
+    this.pruneBookkeeping(handNumber)
 
     for (const player of this.data.gameState.players) {
       if (player.holeCards.length !== 2) {
@@ -4610,6 +5012,12 @@ export default class PokerRoom implements PartyServer {
 
   private shouldAutoStartNow(): boolean {
     if (!this.data.autoStartEnabled) {
+      return false
+    }
+
+    // Pause: with nobody connected (a table of bots, or players who all left)
+    // no new hand is dealt. The hand in progress finishes on its own timers.
+    if (!this.hasLiveHuman()) {
       return false
     }
 

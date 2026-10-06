@@ -1857,26 +1857,6 @@
     border-top-right-radius: 0;
   }
 
-  /* Game setup and Timing read as one card: the timing fields continue the grid. */
-  .settings-modal .settings-section:has(> .settings-grid > .settings-field:nth-child(3)):has(+ .settings-section > .settings-grid) {
-    margin-bottom: -5px;
-    padding-bottom: 3px;
-    border-bottom-color: transparent;
-    border-bottom-left-radius: 0;
-    border-bottom-right-radius: 0;
-  }
-
-  .settings-modal .settings-section:has(> .settings-grid > .settings-field:nth-child(3)) + .settings-section:has(> .settings-grid) {
-    padding-top: 0;
-    border-top-color: transparent;
-    border-top-left-radius: 0;
-    border-top-right-radius: 0;
-  }
-
-  .settings-modal .settings-section:has(> .settings-grid > .settings-field:nth-child(3)) + .settings-section:has(> .settings-grid) > .settings-section-title {
-    display: none;
-  }
-
   .settings-section-title {
     font-size: 14px;
     line-height: 1.15;
@@ -2031,10 +2011,21 @@
     font-size: 12px;
   }
 
-  /* Rows that only need their name: drop the obvious explanation. */
-  .settings-modal .settings-audio-section .settings-rule-row:not(.peek-style-row):not(.settings-audio-controls) > div:first-child .settings-rule-copy,
-  .settings-modal .settings-audio-controls .settings-rule-copy {
+  /* Sound and suit-colour notes stay, as one-line captions. */
+  .settings-modal .settings-audio-section .settings-rule-row:not(.peek-style-row) .settings-rule-copy {
+    overflow: hidden;
+    font-size: 10.5px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .settings-modal .copy-full {
     display: none;
+  }
+
+  .settings-modal .copy-short {
+    display: inline;
   }
 
   /* Card peek style: a small preview beside the text, five options in a 3 x 2 grid. */
@@ -2114,8 +2105,10 @@
     gap: 6px;
   }
 
+  /* The intro keeps its one useful sentence, as a caption under the title. */
   .settings-modal .avatar-settings-intro > div > .settings-section-copy {
-    display: none;
+    font-size: 10.5px;
+    line-height: 1.2;
   }
 
   .settings-modal .avatar-look-card {
@@ -2409,9 +2402,14 @@
     gap: 0;
   }
 
-  /* Phones show the six most recent chip events. */
-  .settings-modal .ledger-panel .ledger-events li:nth-child(n + 7) {
-    display: none;
+  /* Phones: the twelve most recent chip events in a compact list that scrolls
+     inside its card (about seven lines show; the page itself gets no taller). */
+  .settings-modal .ledger-panel .ledger-events {
+    max-height: 120px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
   }
 
   .settings-modal .ledger-panel .ledger-events li {
@@ -2533,5 +2531,161 @@
   .settings-modal-body.ledger-panel .ledger-events {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0 16px;
+  }
+}
+
+/* ==========================================================================
+   Table menu v5
+   - Settings (desktop): an explicit three-column grid, so Rules can never fall
+     into a hidden fourth column and the tab fits 1366x768 / 1280x720 without
+     scrolling (stats, table and game setup stack in the short first column).
+   - Phones: the explanatory captions are back, tap targets reach 36px, the
+     five peek pills sit in a tidy 3 + 2 grid, the chip log scrolls.
+   ========================================================================== */
+.copy-short {
+  display: none;
+}
+
+/* Game setup and timing: five fields, three over two (six tracks, 2 + 3 wide). */
+.settings-modal .settings-grid.settings-grid-modal:has(> .settings-field:nth-child(5)) {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.settings-modal .settings-grid.settings-grid-modal:has(> .settings-field:nth-child(5)) > .settings-field {
+  grid-column: span 2;
+}
+
+.settings-modal .settings-grid.settings-grid-modal:has(> .settings-field:nth-child(5)) > .settings-field:nth-child(n + 4) {
+  grid-column: span 3;
+}
+
+@media (min-width: 1024px) {
+  .settings-modal-body.settings-general-body {
+    display: grid;
+    columns: auto;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: auto auto 1fr;
+    gap: 8px 10px;
+    align-items: start;
+    align-content: start;
+  }
+
+  .settings-modal-body.settings-general-body > .settings-section {
+    margin: 0;
+  }
+
+  .settings-general-body > .settings-stats-section {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .settings-general-body > .settings-room-section {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .settings-general-body > .settings-setup-section {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .settings-general-body > .settings-audio-section {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+  }
+
+  .settings-general-body > .settings-rules-section,
+  .settings-general-body > .settings-host-note {
+    grid-column: 3;
+    grid-row: 1 / span 3;
+  }
+
+  .settings-general-body > .settings-footer {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 1023px) {
+  /* Tap targets: at least 36px. */
+  .settings-modal .settings-pill,
+  .settings-modal .avatar-choice {
+    min-height: 36px;
+  }
+
+  .settings-modal .settings-player-chip-input input,
+  .settings-modal .settings-player-actions .btn-subtle,
+  .settings-modal .ledger-panel .ledger-settle-btn,
+  .settings-modal .ledger-panel .ledger-copy {
+    min-height: 36px;
+  }
+
+  .settings-modal .settings-player-actions .btn-subtle-danger {
+    top: 4px;
+    min-height: 36px;
+  }
+
+  .settings-modal .settings-player-row:has(.btn-subtle-danger) .settings-player-main {
+    padding-right: 100px;
+  }
+
+  /* Card peek style: five pills as three over two, full width. */
+  .settings-modal .peek-style-options:has(> .settings-pill:nth-child(5)) {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .settings-modal .peek-style-options:has(> .settings-pill:nth-child(5)) > .settings-pill {
+    grid-column: span 2;
+  }
+
+  .settings-modal .peek-style-options:has(> .settings-pill:nth-child(5)) > .settings-pill:nth-child(n + 4) {
+    grid-column: span 3;
+  }
+}
+
+@media (max-width: 1023px) {
+  /* Suit colours and sound: the caption sits under the name, beside the switch,
+     inside the switch's own 36px row, so it costs no height. */
+  .settings-modal .settings-audio-section .settings-rule-row:not(.peek-style-row) {
+    align-items: center;
+    row-gap: 0;
+    padding-top: 3px;
+  }
+
+  .settings-modal .settings-audio-section .settings-rule-row:not(.peek-style-row) .settings-rule-name {
+    align-self: end;
+  }
+
+  .settings-modal .settings-audio-section .settings-rule-row:not(.peek-style-row) .settings-rule-copy {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: start;
+  }
+
+  .settings-modal .settings-audio-section .settings-rule-row:not(.peek-style-row) .settings-toggle-row {
+    grid-row: 1 / span 2;
+  }
+
+  /* Rule rows a touch tighter now that their pills are taller. */
+  .settings-modal .settings-rule-row:not(.peek-style-row) {
+    padding-top: 3px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .settings-modal .ledger-panel .ledger-payments > .ledger-copy {
+    min-height: 36px;
+  }
+
+  .settings-modal-body.settings-general-body {
+    gap: 4px;
+  }
+}
+
+/* Narrow phones: slimmer switch pills so the one-line captions beside them fit. */
+@media (max-width: 400px) {
+  .settings-modal .settings-audio-section .settings-rule-row:not(.peek-style-row) .settings-pill {
+    padding-inline: 8px;
   }
 }

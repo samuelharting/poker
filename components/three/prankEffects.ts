@@ -309,8 +309,12 @@ function buildFirstPersonShot(fp: FirstPersonShot, skinColor: string, sleeveColo
     fp.materials.push(material)
     return material
   }
-  const glass = lit('#e8f4fb', 0.06, { transparent: true, opacity: 0.26, depthWrite: false, roughness: 0.1, side: THREE.DoubleSide })
-  const liquid = lit('#d8861c', 0.85)
+  // A clear, slightly smoky glass: a white one is lit bright by the table lights and washes the whiskey out to peach,
+  // the colour of the skin tones around it (the rim and the walls still read as glass against the felt and the rail).
+  const glass = lit('#7f98a6', 0, { transparent: true, opacity: 0.22, depthWrite: false, roughness: 0.1, side: THREE.DoubleSide })
+  // Whiskey: a deep amber (not the bright yellow-orange of the skin tones) that still glows a little between the fingers.
+  // (Mostly emissive on a dark base: the table lights would otherwise wash a lit amber out to peach, the colour of the skin around it.)
+  const liquid = lit('#2a1304', 0.8, { emissive: '#c46c0e', roughness: 0.5 })
   // Glass rim sits at the origin so tipping pivots at the lips; the whiskey shows between the fingers.
   const { top, bottom, height } = FP_SHOT
   add(new THREE.CylinderGeometry(top, bottom, height, 20, 1, true), glass, [0, -height / 2, 0])
@@ -332,8 +336,8 @@ function buildFirstPersonShot(fp: FirstPersonShot, skinColor: string, sleeveColo
 // the Beer / Water / Shot buttons (clear of the cards, the pot and the action tray), and comes in and
 // goes out through the bottom left.
 const FP_OFF = new THREE.Vector3(-0.46, -1.45, -0.62)
-const FP_HOLD = new THREE.Vector3(-0.36, -0.5, -0.62)
-const FP_MOUTH = new THREE.Vector3(-0.33, -0.5, -0.52)
+const FP_HOLD = new THREE.Vector3(-0.36, -0.4, -0.62)
+const FP_MOUTH = new THREE.Vector3(-0.33, -0.38, -0.52)
 // Raised toward the middle but kept left of centre and below the board line.
 const FP_CHEERS = new THREE.Vector3(-0.16, 0.04, -0.75)
 const FP_SLAM = new THREE.Vector3(-0.4, -1.2, -0.55)

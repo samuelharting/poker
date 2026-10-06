@@ -612,6 +612,22 @@ export interface HandColors {
   cuff: THREE.Color
 }
 
+/** The darkest skin the first-person hands draw (HSL lightness, sRGB): darker tones are lifted so the hand never merges with the rail. */
+export const HAND_SKIN_MIN_LIGHTNESS = 0.27
+const skinHsl = { h: 0, s: 0, l: 0 }
+
+/**
+ * The hero's skin as the first-person hands (resting, glass-holding) draw it: the same small lift the
+ * avatars' skin gets, so the hands match the body that is hidden, and a floor on lightness so a very dark
+ * skin tone stays readable against the dark wood and the felt.
+ */
+export function handSkinColor(skin: THREE.ColorRepresentation, out = new THREE.Color()): THREE.Color {
+  out.set(skin).offsetHSL(0, 0.04, 0.02)
+  out.getHSL(skinHsl, THREE.SRGBColorSpace)
+  if (skinHsl.l < HAND_SKIN_MIN_LIGHTNESS) out.setHSL(skinHsl.h, skinHsl.s, HAND_SKIN_MIN_LIGHTNESS, THREE.SRGBColorSpace)
+  return out
+}
+
 /** Outline thickness in render pixels (the avatars' ink line at this size). */
 const INK_PIXELS = 1.05
 
@@ -637,6 +653,10 @@ const celFragment = (ink: boolean) => `#include <opaque_fragment>
     // A soft rim lifts the sleeve and fingers off the dark rail.
     float handFacing = clamp(abs(dot(handN, handV)), 0.0, 1.0);
     handColor += handAlbedo * pow(1.0 - handFacing, 3.0) * 0.1;
+    // Dark skin and dark sleeves have no albedo to lift: a warm rim light keeps their silhouette off the dark rail.
+    float handLuma = dot(handAlbedo, vec3(0.299, 0.587, 0.114));
+    float handDark = 1.0 - smoothstep(0.04, 0.22, handLuma);
+    handColor += vec3(0.55, 0.42, 0.36) * pow(1.0 - handFacing, 2.4) * 0.2 * handDark;
 ${ink ? `    // Constant-width ink outline: handFacing^2 falls off linearly in screen space toward a silhouette.
     float handQ = handFacing * handFacing;
     float handEdgePx = handQ / max(fwidth(handQ), 1e-4);
@@ -673,7 +693,7 @@ export function createHandMaterial(colors: HandColors): THREE.MeshToonMaterial {
       .replace('#include <color_fragment>', 'diffuseColor.rgb = vColor.r * uSkin + vColor.g * uSleeve + vColor.b * uCuff;')
       .replace('#include <opaque_fragment>', celFragment(false))
   }
-  material.customProgramCacheKey = () => 'first-person-hand-v3'
+  material.customProgramCacheKey = () => 'first-person-hand-v4'
   return material
 }
 
@@ -689,7 +709,7 @@ export function createCelMaterial(color: THREE.ColorRepresentation): THREE.MeshT
       .replace('#include <common>', '#include <common>\nuniform float uInkPixels;\nconst float vShade = 1.0;')
       .replace('#include <opaque_fragment>', celFragment(true))
   }
-  material.customProgramCacheKey = () => 'first-person-cel-v1'
+  material.customProgramCacheKey = () => 'first-person-cel-v2'
   return material
 }
 

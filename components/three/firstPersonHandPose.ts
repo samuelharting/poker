@@ -51,6 +51,12 @@ export interface HeroHandsPose {
   right: HandPose
   left: HandPose
   cards: CardTossPose
+  /**
+   * Which hand is pitching the dealt cards right now (the room launches them from its fingertips):
+   * 1 = right (the normal deal), -1 = left (the right hand is busy with a fold or a check while the
+   * deal goes on), 0 = neither (both hands are busy: the cards leave the deck's spot).
+   */
+  dealHand: 1 | -1 | 0
 }
 
 export function createHandPose(): HandPose {
@@ -62,6 +68,7 @@ export function createHeroHandsPose(): HeroHandsPose {
     right: createHandPose(),
     left: createHandPose(),
     cards: { visible: false, x: 0, y: 0, depth: HAND_DEPTH, roll: 0, yaw: 0, scale: 1, spread: 0 },
+    dealHand: 0,
   }
 }
 
@@ -78,7 +85,7 @@ export const REST_X = 0.27
  * stop at the pile's near edge and the hand pushes from behind instead of
  * covering the chips it is moving.
  */
-const WRIST_BELOW = 0.27
+const WRIST_BELOW = 0.17
 /** Beyond the hole-card tray's half width (NDC), how far its influence on a passing hand reaches. */
 const CARDS_CLEAR_FADE = 0.1
 /** The hand trails the chips by this long (s): the pile leads, the hand follows. */
@@ -216,11 +223,8 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 
 /** Seconds the chips take to reach the betting spot (matches animateWagers in the room). */
 export function getWagerTravelSeconds(profile: Pick<PokerActionMotionProfile, 'wagerStyle' | 'wagerIntensity'>): number {
-  return profile.wagerStyle === 'flick'
-    ? 0.78 - profile.wagerIntensity * 0.08
-    : profile.wagerStyle === 'shove'
-      ? 0.62 - profile.wagerIntensity * 0.06
-      : 0.72
+  const style = getHeroPushStyle(profile.wagerStyle)
+  return style === 'shove' ? 0.62 - profile.wagerIntensity * 0.06 : 0.72
 }
 
 /** How long each gesture needs, in seconds (the hands are back at rest afterwards). */
@@ -272,6 +276,7 @@ export function evaluateHeroHands(input: HeroHandsInput, out: HeroHandsPose): He
   out.cards.visible = false
   out.cards.scale = 1
   out.cards.spread = 0
+  out.dealHand = 0
 
   if (input.reducedMotion) return out
 
@@ -281,10 +286,16 @@ export function evaluateHeroHands(input: HeroHandsInput, out: HeroHandsPose): He
   const flicking = input.flickSeconds >= 0 && input.flickSeconds < CHIP_FLICK_GESTURE_SECONDS
 
   // An action the hero takes while dealing (first to act, fold, bet) takes the hands over: the
-  // gesture is never swallowed by the deal, which picks up again once the hands are free.
+  // gesture is never swallowed by the deal. The hands slide out of the deal stance into the gesture
+  // (never dropping to the rail first), the free left hand keeps pitching the remaining cards, and
+  // the deal picks up again with the right hand once the gesture is over.
   const actionGesture = acting && (input.cue === 'check' || input.cue === 'fold' || input.cue === 'call' || input.cue === 'bet' || input.cue === 'raise' || input.cue === 'all_in')
-  if (input.deal && input.deal.weight > 0.001 && !actionGesture) {
-    poseDeal(input.deal, out, anchors)
+  const dealing = Boolean(input.deal && input.deal.weight > 0.001)
+  if (dealing && !actionGesture) {
+    // Just after an action the right hand is still near the rail: ease it back out to the stance.
+    const since = length > 0 && e >= length ? e - length : Number.POSITIVE_INFINITY
+    poseDeal(input.deal!, out, anchors, since < DEAL_RESUME_SECONDS ? smooth(since / DEAL_RESUME_SECONDS) : 1)
+    out.dealHand = 1
   } else if (flicking) {
     poseFlick(input.flickSeconds, out.right, anchors)
   } else if (acting && input.cue === 'check') {
@@ -300,7 +311,53 @@ export function evaluateHeroHands(input: HeroHandsInput, out: HeroHandsPose): He
   } else if (!input.reducedMotion) {
     poseIdle(input, out)
   }
+  if (dealing && actionGesture && !flicking) yieldToDeal(e, input, out)
   return out
+}
+
+/** Seconds the hands take to slide from the deal stance into an action taken mid-deal, and back. */
+const DEAL_YIELD_SECONDS = 0.25
+const DEAL_RESUME_SECONDS = 0.35
+const dealScratch = createHeroHandsPose()
+
+/**
+ * An action taken mid-deal (the gesture is already written to `out`, starting from the rail):
+ * the right hand comes out of the deal stance instead of dropping to the rail first, and the left
+ * hand, when the gesture leaves it free (a check, a fold, a small bet), stays on the deck and keeps
+ * pitching the remaining cards. A gesture that needs both hands (a big raise, an all-in) takes
+ * the left too, and the cards leave the deck's spot.
+ */
+function yieldToDeal(e: number, input: HeroHandsInput, out: HeroHandsPose) {
+  const deal = input.deal!
+  const { anchors } = input
+  setRest(dealScratch.right, 1, anchors)
+  setRest(dealScratch.left, -1, anchors)
+  poseDeal(deal, dealScratch, anchors, 1)
+  const into = smooth(e / DEAL_YIELD_SECONDS)
+  mixHand(out.right, dealScratch.right, into)
+  const cue = input.cue
+  const leftFree = cue === 'check' || cue === 'fold' || getWagerPairWeight(cue, input.profile.wagerIntensity) === 0
+  if (leftFree) {
+    poseDealLeft(deal, out.left, anchors)
+    mixHand(out.left, dealScratch.left, into)
+    out.dealHand = -1
+  } else {
+    mixHand(out.left, dealScratch.left, into)
+    out.dealHand = 0
+  }
+}
+
+/** The left hand pitching cards off the deck (the same cock and snap the right hand shows, mirrored). */
+function poseDealLeft(deal: HeroDealInput, left: HandPose, anchors: HeroHandsAnchors) {
+  const w = clamp01(deal.weight)
+  setRest(left, -1, anchors)
+  left.x = lerp(left.x, anchors.dealLeftX + 0.03 * deal.cock - 0.02 * deal.snap, w)
+  left.y = lerp(left.y, anchors.dealLeftY - 0.05 * deal.cock + 0.07 * deal.snap, w)
+  left.pitch = REST_PITCH + w * (0.12 - 0.28 * deal.cock + 0.35 * deal.snap)
+  left.yaw = 0.19 + w * 0.1
+  left.pinch = deal.pinch * w
+  left.fist = 0.4 * deal.cock * w
+  left.open = 0.9 * deal.snap * w
 }
 
 /**
@@ -515,41 +572,59 @@ function poseFold(e: number, input: HeroHandsInput, out: HeroHandsPose) {
 }
 
 /** Wager size (the action's intensity, 0..1) at which a push starts to need a second hand, and how fast it fades in. */
-const PAIR_FROM_INTENSITY = 0.6
-const PAIR_SPAN = 0.14
+const PAIR_FROM_INTENSITY = 0.64
 const restScratch = createHandPose()
 
 /**
  * How much of a second hand a wager needs: none for a small bet or call (one hand slides
- * the chips), both hands for a big raise, and always both for an all-in shove.
+ * the chips), both hands for a big raise, and always both for an all-in shove. The change is
+ * quick on purpose: a half-faded second hand would hang over the hole-card tray on its way.
  */
 export function getWagerPairWeight(cue: ThreeActionCue, wagerIntensity: number): number {
   if (cue === 'all_in') return 1
-  return smooth((wagerIntensity - PAIR_FROM_INTENSITY) / PAIR_SPAN)
+  return wagerIntensity >= PAIR_FROM_INTENSITY ? 1 : 0
 }
+
+/**
+ * Where the pushed pile is along its way from the stack to the betting spot (0..1): the same
+ * curve animateWagers draws (a smoothstep over the flight, the leading chips 4% ahead), so the
+ * hand follows what is actually on screen. `e` is the gesture clock (s).
+ */
+export function getPilePush(e: number, travel: number): number {
+  return smooth(clamp01(((e - WAGER_DEPART_SECONDS) / travel) * 1.04))
+}
+
+/** The hero's own chips are pushed along the felt, never thrown: the room flattens a flicked bet to a slide. */
+export function getHeroPushStyle(style: PokerActionMotionProfile['wagerStyle']): PokerActionMotionProfile['wagerStyle'] {
+  return style === 'flick' ? 'slide' : style
+}
+
+/** A pushing hand sits this far (NDC) right of the pile's middle: the fingers lean in and the thumb side leads. */
+const PUSH_SIDE = 0.11
+/** Beyond this share of the pile's way the hand lets go and the last stretch is the chips' own glide. */
+const PUSH_RELEASE_AT = 0.86
 
 function poseWager(e: number, input: HeroHandsInput, out: HeroHandsPose) {
   const { anchors, profile, cue } = input
+  const pushStyle = getHeroPushStyle(profile.wagerStyle)
   const travel = getWagerTravelSeconds(profile)
   const departAt = WAGER_DEPART_SECONDS
   const arriveAt = departAt + travel
   const reach = smooth(e / 0.22)
-  const reachSecond = smooth(e / 0.3)
-  const push = easeInOut((e - departAt - PUSH_LAG_SECONDS) / travel)
+  const reachSecond = smooth(e / 0.36)
+  // The pile leads and the hand trails it by a hair: fingertips on the pile's trailing edge all the way.
+  const push = getPilePush(e - PUSH_LAG_SECONDS, travel)
   const back = smooth((e - arriveAt - 0.12) / 0.38)
-  const release = smooth((e - arriveAt - PUSH_LAG_SECONDS + 0.06) / 0.12)
+  const release = smooth((push - PUSH_RELEASE_AT) / (1 - PUSH_RELEASE_AT))
   const grab = smooth((e - 0.1) / 0.12)
   const allIn = cue === 'all_in'
   const pair = getWagerPairWeight(cue, profile.wagerIntensity)
-  // A shove drives flat and hard whatever the chips' style; a small bet is a lazy slide.
-  const lift = allIn ? 0.03 : profile.wagerStyle === 'flick' ? 0.1 : profile.wagerStyle === 'shove' ? 0.02 : 0.045
-  const bigger = cue === 'raise' || allIn ? 1.1 : 1
-  // How far the hand follows the pile: a small bet is nudged along, a big one is driven the whole way.
-  const follow = allIn ? 1 : 0.8 + 0.2 * clamp01(profile.wagerIntensity)
+  // A shove drives flat and hard; a small bet is a lazy slide.
+  const lift = allIn ? 0.015 : pushStyle === 'shove' ? 0.01 : 0.025
 
   const stackY = Math.min(MAX_REACH_Y, anchors.stackY - WRIST_BELOW)
   // The push always carries the chips forward a little (never back toward the player,
-  // even when the spot projects lower than the stack); the chips fly the rest.
+  // even when the spot projects lower than the stack).
   const betY = Math.min(MAX_REACH_Y, Math.max(anchors.betY, anchors.stackY + 0.05) - WRIST_BELOW)
   for (let index = 0; index < 2; index += 1) {
     const sign: 1 | -1 = index === 0 ? 1 : -1
@@ -562,30 +637,22 @@ function poseWager(e: number, input: HeroHandsInput, out: HeroHandsPose) {
     const rch = index === 0 ? reach : reachSecond
     // Two hands cup either side of the pile.
     const spread = 0.1 * sign * pair
-    // The betting spot sits between the hole-card tray and the pot readout on screen:
-    // the hands drive the chips toward it from the stack's side of that column and let
-    // them slide the rest of the way, so a hand never vanishes under either overlay
-    // (both hands of a pair stay on that side too, the far one just inside it).
-    const column = Math.max(cardColumn(anchors), anchors.potHalfW > 0 ? Math.abs(anchors.potX - anchors.cardsX) + anchors.potHalfW + HAND_SCREEN_HALF_W + 0.05 : 0)
-    const stackSide = anchors.stackX >= anchors.cardsX ? 1 : -1
-    const edge = anchors.cardsX + stackSide * (column - (sign !== stackSide ? 0.04 * pair : 0))
-    const rawStackX = anchors.stackX + spread + 0.02 * (1 - pair)
-    const rawBetX = anchors.betX + spread + (sign === stackSide ? 0.16 * stackSide * pair : 0)
-    const stackX = stackSide === 1 ? Math.max(rawStackX, edge) : Math.min(rawStackX, edge)
-    const betX = stackSide === 1 ? Math.max(rawBetX, edge) : Math.min(rawBetX, edge)
+    const side = PUSH_SIDE * (1 - 0.5 * pair)
+    const stackX = anchors.stackX + spread + side
+    const betX = anchors.betX + spread + side
     const restX = sign === 1 ? anchors.restRightX : anchors.restLeftX
     let x = lerp(restX, stackX, rch)
     let y = lerp(REST_Y, stackY, rch)
-    x = lerp(x, betX, push * follow)
-    y = lerp(y, betY, push * follow)
-    y += Math.sin(push * Math.PI) * lift * bigger
+    // The wrist follows the pile all the way along its path, over the felt where the chips land.
+    x = lerp(x, betX, push)
+    y = lerp(y, betY, push)
+    y += Math.sin(push * Math.PI) * lift
     x = lerp(x, restX, back)
     y = lerp(y, REST_Y, back)
-    // The push stops a finger short of the pot readout; the chips slide on.
-    y = clearPotLabel(y, x, anchors)
-    // Passing the hole-card tray (the second hand coming over to the pile, or heading home):
-    // ride just above its top edge instead of under it. The opaque cards hide a hand much
-    // worse than the small pot pill does, so this one has the last word.
+    // Over the hole-card tray (the hand coming over to the pile, or heading home): ride just above
+    // its top edge instead of under it. The opaque cards hide a hand much worse than the small pot
+    // pill does, so this one has the last word. The pill is only passed under for the last moment,
+    // when the fingers follow the pile to the spot it lands on.
     // (A hand resting beside the cards is not "passing": the constraint fades out near home so
     // the settle at the end of the gesture never pops the hand down.)
     const overCards = (1 - smooth((Math.abs(x - anchors.cardsX) - cardColumn(anchors)) / CARDS_CLEAR_FADE)) * smooth(Math.abs(x - restX) / 0.045)
@@ -594,11 +661,11 @@ function poseWager(e: number, input: HeroHandsInput, out: HeroHandsPose) {
     const land = Math.sin(clamp01((e - arriveAt - 0.32) / 0.3) * Math.PI) * back
     hand.x = x
     hand.y = y - 0.012 * land
-    // The wrist dips as the fingers close on the chips, drives flat through the push and
-    // flicks up as they let go.
+    // The wrist dips as the fingers close on the chips, drives through the push leaning in toward
+    // the spot, and flicks up as they let go.
     const flick = Math.sin(release * Math.PI) * (1 - back)
-    hand.pitch = REST_PITCH + 0.08 * rch - 0.08 * grab * (1 - push) + 0.18 * push * (1 - back) + 0.16 * flick
-    hand.yaw = 0.14 + 0.1 * rch * (1 - back)
+    hand.pitch = REST_PITCH + 0.08 * rch - 0.08 * grab * (1 - push) + 0.14 * push * (1 - back) + 0.16 * flick
+    hand.yaw = 0.14 + (0.1 * rch + 0.34 * push) * (1 - back)
     hand.roll = 0.05 - 0.14 * push * (1 - back)
     hand.fist = grab * 0.55 * (1 - release)
     hand.open = release * (1 - back) * 0.65
@@ -642,6 +709,8 @@ function mixHand(hand: HandPose, rest: HandPose, weight: number) {
   hand.roll = lerp(rest.roll, hand.roll, weight)
   hand.fist = lerp(rest.fist, hand.fist, weight)
   hand.open = lerp(rest.open, hand.open, weight)
+  hand.pinch = lerp(rest.pinch, hand.pinch, weight)
+  hand.flutter = lerp(rest.flutter, hand.flutter, weight)
 }
 
 function poseWin(w: number, out: HeroHandsPose) {
@@ -672,8 +741,8 @@ function poseWin(w: number, out: HeroHandsPose) {
 }
 
 /** Dealing: the right hand cocks and snaps cards off the deck, the left steadies it. */
-function poseDeal(deal: HeroDealInput, out: HeroHandsPose, anchors: HeroHandsAnchors) {
-  const w = clamp01(deal.weight)
+function poseDeal(deal: HeroDealInput, out: HeroHandsPose, anchors: HeroHandsAnchors, scale = 1) {
+  const w = clamp01(deal.weight) * scale
   const right = out.right
   const left = out.left
   right.x = lerp(right.x, anchors.dealRightX - 0.03 * deal.cock + 0.02 * deal.snap, w)

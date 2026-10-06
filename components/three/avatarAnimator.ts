@@ -290,6 +290,10 @@ const DRINK_SECONDS = 2.6
 export const DAZED_SECONDS = 2.6
 /** Winners rake the pot toward themselves before celebrating. */
 const WINNER_RAKE_SECONDS = 1.0
+/** Seconds into the celebration clock (after the rake) where the point-at-the-pot beat starts (the other flairs start at 2.5). */
+const POINT_START_SECONDS = 2.15
+/** Seconds into the point beat where the smug lounge takes over again. */
+const POINT_LOUNGE_SECONDS = 2.8
 const PEEK_DURATION = 2.1
 /** A server-driven peek reads on screen for at least this long, however short the tap. */
 export const LIVE_PEEK_MIN_HOLD_SECONDS = 1.8
@@ -777,8 +781,9 @@ export function winnerPointsLeft(anchors: AvatarAnchors, seed: number): boolean 
  */
 export function winnerPointFocus(winnerSince: number, winFlair: number, time: number, reducedMotion: boolean): number {
   if (winFlair !== 2 || reducedMotion || !Number.isFinite(winnerSince)) return 0
-  const fe = time - winnerSince - WINNER_RAKE_SECONDS - 2.5
-  return smoothStep((fe + 0.1) / 0.3) * (1 - smoothStep((fe - 1.7) / 0.4))
+  const fe = time - winnerSince - WINNER_RAKE_SECONDS - POINT_START_SECONDS
+  // Locks on as the arm cocks back, lets go as the lounge takes over.
+  return smoothStep((fe + 0.1) / 0.3) * (1 - smoothStep((fe - (POINT_LOUNGE_SECONDS - 0.3)) / 0.4))
 }
 
 /**
@@ -1875,7 +1880,7 @@ export function computeAvatarTargetPose(
     const hop = Math.max(0, Math.sin(clamp01((elapsed - 0.12) / 0.45) * Math.PI)) * motion
     // A second beat after the celebration (see pickWinFlair) before the smug lounge.
     const flairKind = state.winFlair
-    const loungeAt = flairKind === 0 ? 3.2 : 4.5
+    const loungeAt = flairKind === 0 ? 3.2 : flairKind === 2 ? POINT_START_SECONDS + POINT_LOUNGE_SECONDS : 4.5
     const lounge = smoothStep((elapsed - loungeAt) / 1.2) * motion
     const beat = time * 6 + seed * 10
     add(bones.Chest, 0.14 * antic, 0, 0)
@@ -1966,9 +1971,10 @@ export function computeAvatarTargetPose(
     }
     // The flair holds until the lounge takes over (it never hands back to the
     // celebration underneath, which would re-raise the arms).
-    const flair = flairKind === 0 ? 0 : smoothStep((elapsed - 2.5) / 0.45) * motion
+    const flairStart = flairKind === 2 ? POINT_START_SECONDS : 2.5
+    const flair = flairKind === 0 ? 0 : smoothStep((elapsed - flairStart) / (flairKind === 2 ? 0.3 : 0.45)) * motion
     if (flair > 0.001) {
-      const fe = elapsed - 2.5
+      const fe = elapsed - flairStart
       // The pointing beat uses whichever hand is on the pot's side (see winnerPointsLeft).
       const pointLeft = flairKind === 2 && winnerPointsLeft(anchors, seed)
       if (flairKind !== 1) {
@@ -2010,35 +2016,55 @@ export function computeAvatarTargetPose(
         handFrame(pose, 'L', flair, 0.9, 0.2, 0.4)
         pose.bodyPosition[1] += 0.02 * bounce * flair
       } else if (flairKind === 2) {
-        // Point at the pot coming their way ("that's mine"): the arm on the pot's
-        // side (never across the chest) cocks back, thrusts out along the line
-        // from the shoulder to the pot, stabs it twice, and holds; the head
-        // comes down off the celebration's chin-up to look at the pot.
+        // Point at the pot coming their way ("that's mine"). The pot is metres past
+        // the end of the arm, so the read comes from the shape of the gesture: the
+        // arm on the pot's side (never across the chest) winds up (fist cocked back
+        // beside the shoulder, elbow raised, shoulder turned away), snaps out dead
+        // straight at about shoulder height along the line to the pot (a little
+        // above it, over the chips rather than down at the player's own cards,
+        // the shoulder and chest driving through), stabs twice, taps the air toward
+        // the chips twice more and holds, the eyes locked on the pot (the face
+        // director, see winnerPointFocus) and the head level on it.
         const side: Side = pointLeft ? 'L' : 'R'
         const outward = pointLeft ? -1 : 1
         const hand = pointLeft ? pose.handL : pose.handR
         const sh = pointLeft ? anchors.shoulderL : anchors.shoulderR
-        const jab = (pulse(fe, 0.62, 0.07, 0.18) + pulse(fe, 0.98, 0.07, 0.18)) * motion
-        const thrust = smoothStep((fe - 0.18) / 0.26)
+        const stab = (pulse(fe, 0.96, 0.07, 0.2) + pulse(fe, 1.3, 0.07, 0.2)) * motion
+        const tap = (pulse(fe, 1.72, 0.06, 0.15) + pulse(fe, 1.96, 0.06, 0.15)) * 0.5 * motion
+        const jab = stab + tap
+        // Wind-up (fist drawn back and up), then the thrust.
+        const thrust = smoothStep((fe - 0.62) / 0.2)
+        const wind = 1 - thrust
         const bx = anchors.board[0] - sh[0]
         const by = anchors.board[1] - sh[1]
         const bz = anchors.board[2] - sh[2]
         const toPot = Math.hypot(bx, by, bz) || 1
-        const reach = 0.72 + 0.07 * jab
-        // Cocked: the fist drawn back beside the shoulder, elbow bent, a little
-        // outboard of the shoulder line and well clear of the chest and chin.
-        const gx = (outward * 0.1) * (1 - thrust) + (bx / toPot) * reach * thrust
-        const gy = -0.06 * (1 - thrust) + (by / toPot) * reach * thrust + 0.02 * jab
-        const gz = -0.2 * (1 - thrust) + (bz / toPot) * reach * thrust
+        // The aim: the line to the pot, flattened and tipped up several degrees
+        // (a hand pointing straight at a viewer across the table reads at chest height otherwise).
+        const ux = bx / toPot
+        const uy = (by / toPot) * 0.25 + 0.15
+        const uz = bz / toPot
+        const reach = 0.72 + 0.07 * stab + 0.03 * tap
+        const gx = (outward * 0.13) * wind + ux * reach * thrust
+        const gy = 0.15 * wind + uy * reach * thrust + 0.02 * stab - 0.05 * tap
+        const gz = -0.04 * wind + uz * reach * thrust
         blendTo(hand, offset(sh, gx, gy, gz), flair)
         if (pointLeft) pose.fingerCurlL = pose.fingerCurlL * (1 - flair) + 0.8 * flair
         else pose.fingerCurlR = pose.fingerCurlR * (1 - flair) + 0.8 * flair
         handShape(pose, side, 'point', flair)
         // Yaw toward the midline is -x for the right hand, +x for the left.
-        const lineX = anchors.board[0] - (sh[0] + gx)
-        handFrame(pose, side, flair, Math.atan2(-outward * lineX, -bz), Math.atan2(by, Math.hypot(bx, bz)) + 0.35 * (1 - thrust), 1.15)
-        add(bones.Head, 0.14 - 0.03 * jab, 0, 0, flair)
-        add(bones.Chest, 0.06 * jab - 0.04 * (1 - thrust), 0, 0, flair)
+        const lineX = ux * reach
+        handFrame(pose, side, flair, Math.atan2(-outward * lineX, -uz * reach), Math.atan2(uy, Math.hypot(ux, uz)) + 0.45 * wind, 1.15)
+        // The raised elbow of the wind-up (the arm IK lifts it only while the hand is high).
+        pose.elbowUp = Math.max(pose.elbowUp, 0.9 * wind * flair)
+        // Shoulder and chest wind away, then drive through toward the pot and lean in.
+        const turn = (thrust - 0.8 * wind + 0.15 * stab) * outward
+        add(bones.Torso, 0, 0.13 * turn, 0, flair)
+        add(bones.Chest, 0.05 * thrust + 0.05 * stab - 0.04 * wind, 0.07 * turn, 0, flair)
+        pose.bodyPosition[2] -= 0.05 * thrust * flair
+        // The head comes down off the celebration's chin-up and stays level on the pot,
+        // turned back against the shoulder drive.
+        add(bones.Head, 0.07 - 0.02 * stab, -0.1 * turn, 0, flair)
       } else {
         // The pull-down: a fist raised high, then yanked down to the chest, "yes!",
         // held there with a couple of little shakes.
