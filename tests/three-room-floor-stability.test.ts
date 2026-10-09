@@ -8,7 +8,8 @@ const roomArtSource = readFileSync(join(process.cwd(), 'components', 'three', 'r
 describe('desktop room rendering stability', () => {
   it('uses a bounded native WebGL renderer and disposes its resources', () => {
     expect(sceneSource).toContain('new THREE.WebGLRenderer')
-    expect(sceneSource).toContain('renderer.setPixelRatio(Math.min')
+    // Capped (and NaN-safe) through cameraSafety.getSafePixelRatio, covered in three-black-screen-guards.
+    expect(sceneSource).toContain('renderer.setPixelRatio(getSafePixelRatio(')
     expect(sceneSource).toContain("canvas.addEventListener('webglcontextlost'")
     expect(sceneSource).toContain("canvas.addEventListener('webglcontextrestored'")
     expect(sceneSource).toContain("document.addEventListener('visibilitychange'")

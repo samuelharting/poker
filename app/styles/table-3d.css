@@ -842,3 +842,46 @@
   text-overflow: ellipsis;
   max-width: 220px;
 }
+
+/* 3D room stepped down to the 2D table (graphics trouble): a small note with a way back. */
+.three-fallback-notice {
+  position: fixed;
+  z-index: calc(var(--room-layer-hud, 240) + 3);
+  top: calc(env(safe-area-inset-top) + var(--hud-h, 56px) + 8px);
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  padding: 6px 8px 6px 14px;
+  border: 1px solid var(--line-brass, rgba(242, 199, 102, 0.45));
+  border-radius: 999px;
+  background: var(--c-ink-800, #14110f);
+  box-shadow: var(--shadow-2);
+  color: var(--c-text-1, #f4efe4);
+  font-size: var(--fs-12, 12px);
+  font-weight: 700;
+  transform: translateX(-50%);
+}
+
+.three-fallback-notice button {
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.three-fallback-retry {
+  padding: 4px 10px;
+  background: var(--c-brass-400, #f2c766);
+  color: var(--c-text-on-brass, #1a1206);
+}
+
+.three-fallback-dismiss {
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  color: var(--c-text-2, #cfc6b4);
+  font-size: 16px;
+  line-height: 1;
+}

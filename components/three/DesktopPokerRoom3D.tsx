@@ -89,6 +89,13 @@ import { getHeroPushStyle } from './firstPersonHandPose'
 import { CHILL_BLOOM_SCALE, applySceneMode, type SceneMode } from './sceneMode'
 import { applyTableTheme, disposeTableTheme, getThemeBloomScale, setThemeQuality, type ThemeState } from './themeApply'
 import { useTableThemeId } from './useTableTheme'
+import { ensureSafeCamera, getSafePixelRatio, getSafeViewportSize } from './cameraSafety'
+import {
+  activateThreeFallback,
+  createRenderFailureTracker,
+  isWebGLUnavailableError,
+  type ThreeFallbackReason,
+} from './threeFallback'
 import {
   animateConfetti,
   animateLightCone,
@@ -1367,7 +1374,10 @@ async function requestRiggedAvatar(
     seat.fallbackAvatar.visible = false
     applySeatFoldVisualState(seat)
     startAvatarIdle(seat)
-    precompileScene(runtime.renderer, runtime.scene, runtime.camera, runtime.postFx)
+    // Only the new avatar's programs: recompiling the whole room (twice, every
+    // hidden prop flipped on) on each join was a long synchronous GPU stall,
+    // enough on weak integrated GPUs to trip a driver reset (a black canvas).
+    precompileObject(runtime.renderer, seat.root, runtime.scene, runtime.camera, runtime.postFx)
     // The load + compile is a one-off stall; keep it out of the frame budget.
     runtime.frameBudget.settle((performance.now() - runtime.startTime) / 1000)
     updateAvatarDiagnostics(runtime)
@@ -1561,8 +1571,15 @@ function syncPlayers(runtime: SceneRuntime, view: ThreeTableViewModel) {
     detachRiggedAvatar(seat)
     runtime.scene.remove(seat.root)
     seat.stack.group.removeFromParent()
+    // The stack's chip proxies live in a module-wide set the instancer walks
+    // every frame: drop them, or every leave adds ~50 dead chips forever.
+    releaseChipProxies(seat.stack.chipMeshes)
+    seat.holeCards.forEach(disposeCardMesh)
     disposeObject(seat.root)
     runtime.seats.delete(playerId)
+    const overlay = runtime.overlayElements.get(playerId)
+    if (overlay) unobservePlateBox(overlay)
+    runtime.overlayElements.delete(playerId)
   }
 
   const hasWinner = view.players.some(player => player.isWinner)
@@ -1680,6 +1697,8 @@ function getChipGeometry() {
   // One shared cylinder: the side group takes the edge-spot band and both caps
   // take the printed face, so each chip is a single draw with no detail mesh.
   sharedChipGeometry ??= createBeveledChipGeometry(CHIP_RADIUS, CHIP_HEIGHT, 48)
+  // Every chip (proxies and instancers) shares it: seat and wager disposal must leave it alone.
+  sharedChipGeometry.userData.shared = true
   return sharedChipGeometry
 }
 
@@ -1804,14 +1823,16 @@ function createChipInstancer(scene: THREE.Scene): ChipInstancer {
 const contactMatrix = new THREE.Matrix4()
 const contactPosition = new THREE.Vector3()
 
-function isChipShown(chip: THREE.Object3D, scene: THREE.Scene) {
+/** 1 = drawn, 0 = hidden in this scene, -1 = no longer in this scene at all (a removed group or an old, rebuilt scene). */
+export function getChipVisibility(chip: THREE.Object3D, scene: THREE.Scene): 1 | 0 | -1 {
   let node: THREE.Object3D | null = chip
+  let shown = true
   while (node) {
-    if (!node.visible) return false
-    if (node === scene) return true
+    if (node === scene) return shown ? 1 : 0
+    if (!node.visible) shown = false
     node = node.parent
   }
-  return false
+  return -1
 }
 
 /** Copies every visible chip proxy into its denomination's instanced mesh. */
@@ -1823,11 +1844,14 @@ function updateChipInstances(instancer: ChipInstancer, scene: THREE.Scene) {
   counts.fill(0)
   let contactCount = 0
   for (const chip of chipProxies) {
-    if (!chip.parent) {
+    const visibility = getChipVisibility(chip, scene)
+    if (visibility < 0) {
+      // Detached for good (a seat or wager removed, or a scene rebuilt): the
+      // module-wide set must not keep walking (and holding) dead chips.
       chipProxies.delete(chip)
       continue
     }
-    if (!isChipShown(chip, scene)) continue
+    if (visibility === 0) continue
     const denomination = Number(chip.userData.denomination ?? 0)
     const mesh = instancer.meshes[denomination]
     if (!mesh || counts[denomination]! >= CHIP_INSTANCE_CAPACITY) continue
@@ -2009,6 +2033,7 @@ function syncWagers(runtime: SceneRuntime, view: ThreeTableViewModel) {
   for (const [playerId, wager] of runtime.wagers) {
     if (activeIds.has(playerId)) continue
     wager.group.removeFromParent()
+    releaseChipProxies(wager.chipMeshes)
     disposeObject(wager.group)
     runtime.wagers.delete(playerId)
   }
@@ -2596,6 +2621,7 @@ function getDealerPuckTexture() {
     context.font = `800 176px ${font ? `${font}, ` : ''}'Arial Black', sans-serif`
     context.fillText('D', 128, 144)
   })
+  dealerPuckTexture.userData.shared = true
   return dealerPuckTexture
 }
 
@@ -3170,7 +3196,7 @@ function getAllInCameraImpact(
   return { strength: 0, visualSeat: null }
 }
 
-function disposeObject(root: THREE.Object3D) {
+export function disposeObject(root: THREE.Object3D) {
   const geometries = new Set<THREE.BufferGeometry>()
   const materialsToDispose = new Set<THREE.Material>()
   root.traverse(object => {
@@ -3180,15 +3206,25 @@ function disposeObject(root: THREE.Object3D) {
     materials.forEach(material => materialsToDispose.add(material))
   })
 
-  geometries.forEach(geometry => geometry.dispose())
+  // Shared geometry (chips, cards) and cached textures outlive any one seat or
+  // wager group: disposing them here only forced a re-upload on the next frame
+  // for every other seat still using them (churn on every join / leave).
+  geometries.forEach(geometry => {
+    if (!geometry.userData.shared) geometry.dispose()
+  })
   materialsToDispose.forEach(material => {
     // Shared (instanced) materials outlive any one seat or wager group.
     if (material.userData.shared) return
     for (const value of Object.values(material)) {
-      if (value instanceof THREE.Texture) value.dispose()
+      if (value instanceof THREE.Texture && !value.userData.shared) value.dispose()
     }
     material.dispose()
   })
+}
+
+/** Forgets chip proxies whose group left the table (a seat or wager removed). */
+function releaseChipProxies(chips: readonly THREE.Object3D[]) {
+  for (const chip of chips) chipProxies.delete(chip as THREE.Mesh)
 }
 
 /** Head-top anchor, in seat-root space, that each DOM nameplate follows. */
@@ -3409,21 +3445,15 @@ function projectSeatOverlays(runtime: SceneRuntime, host: HTMLDivElement, width:
 
 const overlayScratch = new THREE.Vector3()
 
-/** How long the 3D table may stay down (lost context, failed restarts) before the page reloads. */
-const TABLE_DOWN_RELOAD_MS = 12_000
-const TABLE_RELOAD_KEY = 'poker-night:3d-reload-at'
-
-function reloadForBrokenTable() {
-  try {
-    const last = Number(window.sessionStorage.getItem(TABLE_RELOAD_KEY) ?? 0)
-    if (Date.now() - last < 60_000) return
-    window.sessionStorage.setItem(TABLE_RELOAD_KEY, String(Date.now()))
-  } catch {
-    // No session storage: still reload; the page can't loop faster than the 12s wait.
-  }
-  console.warn('3D table could not recover; reloading the page.')
-  window.location.reload()
-}
+/**
+ * How long the 3D table may stay down (lost context, failed restarts) before
+ * this tab drops to the 2D table. It used to reload the page instead, which on
+ * a GPU that keeps resetting became a loop of black screens and reloads.
+ */
+const TABLE_DOWN_FALLBACK_MS = 12_000
+/** Lost contexts / failed starts / stalls / black output within the window before giving up on 3D. */
+const RENDER_FAILURE_LIMIT = 3
+const RENDER_FAILURE_WINDOW_MS = 3 * 60_000
 const overlayBetPositions = new WeakMap<HTMLElement, { x: number; y: number }>()
 const betLabelScratch: Array<{ x: number; y: number }> = []
 const BET_LABEL_WIDTH = 90
@@ -3692,6 +3722,35 @@ function precompileScene(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
   }
 }
 
+/**
+ * Links the programs one newly added object needs (with the room's lights),
+ * for both the direct and the post-FX render paths. Never throws: a failed
+ * warm-up only means the first draw compiles instead.
+ */
+function precompileObject(
+  renderer: THREE.WebGLRenderer,
+  object: THREE.Object3D,
+  scene: THREE.Scene,
+  camera: THREE.Camera,
+  postFx: PostFx | null
+) {
+  if (renderer.getContext().isContextLost()) return
+  const previousTarget = renderer.getRenderTarget()
+  try {
+    // compile() walks the whole subtree (hidden parts included), so nothing is toggled.
+    renderer.compile(object, camera, scene)
+    if (postFx) {
+      renderer.setRenderTarget(postFx.composer.readBuffer)
+      renderer.compile(object, camera, scene)
+    }
+    for (const program of renderer.info.programs ?? []) program.getUniforms()
+  } catch (error) {
+    console.warn('Avatar shader warm-up failed; it will compile on first draw.', error)
+  } finally {
+    renderer.setRenderTarget(previousTarget)
+  }
+}
+
 /** Drives the hero's own first-person drink; returns the head-tilt amount. */
 function updateHeroDrink(runtime: SceneRuntime, view: ThreeTableViewModel, time: number, reducedMotion: boolean) {
   let heroSeat: SeatRuntime | null = null
@@ -3775,7 +3834,7 @@ function createSceneRuntime(
     alpha: false,
     powerPreference: 'high-performance',
   })
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
+  renderer.setPixelRatio(getSafePixelRatio(window.devicePixelRatio, 0, false))
   // Checking every new shader's compile log is a synchronous GPU round trip
   // (40ms+ per program on ANGLE/D3D11): development keeps it, players skip it.
   renderer.debug.checkShaderErrors = process.env.NODE_ENV !== 'production'
@@ -3926,16 +3985,22 @@ function createSceneRuntime(
 
   let viewportWidth = 1
   let viewportHeight = 1
+  let lastViewport: { width: number; height: number } | null = null
+  /** The lens for the current aspect (what a broken camera is reset to). */
+  let baseFov: number = DESKTOP_CAMERA_FRAMING.fov
   /** Adaptive render quality from the frame budget (see FrameBudget). */
   let quality: RenderQuality = 0
   const resize = () => {
-    const width = Math.max(1, host.clientWidth)
-    const height = Math.max(1, host.clientHeight)
+    // A host that collapses to 0x0 for a moment (hidden, mid-layout) keeps the
+    // last real size: a 1x1 canvas and a NaN-prone aspect read as a black table.
+    const viewport = getSafeViewportSize(host.clientWidth, host.clientHeight, lastViewport)
+      ?? getSafeViewportSize(window.innerWidth, window.innerHeight, null)
+      ?? { width: 1280, height: 720 }
+    lastViewport = viewport
+    const { width, height } = viewport
     viewportWidth = width
     viewportHeight = height
-    const renderArea = width * height
-    const pixelRatioCap = renderArea > 2_200_000 ? 1.15 : renderArea > 1_300_000 ? 1.35 : 1.5
-    const pixelRatio = Math.max(0.75, Math.min(window.devicePixelRatio || 1, pixelRatioCap) * (quality >= 1 ? 0.85 : 1))
+    const pixelRatio = getSafePixelRatio(window.devicePixelRatio, width * height, quality >= 1)
     renderer.setPixelRatio(pixelRatio)
     renderer.setSize(width, height, false)
     // Top tier: 4x MSAA on the composer (crisp card, chip and rail edges);
@@ -3955,6 +4020,7 @@ function createSceneRuntime(
         : camera.aspect > 2.15
           ? 50
           : DESKTOP_CAMERA_FRAMING.fov
+    baseFov = camera.fov
     camera.updateProjectionMatrix()
   }
   const resizeObserver = new ResizeObserver(resize)
@@ -3982,6 +4048,7 @@ function createSceneRuntime(
   const accentTarget = new THREE.Vector3()
   let heroHeadTilt = 0
   let frameErrorReported = false
+  let cameraResetReported = false
   const animate = () => {
     if (runtime.disposed || runtime.suspended) return
     runtime.animationFrame = window.requestAnimationFrame(animate)
@@ -3996,6 +4063,8 @@ function createSceneRuntime(
         console.error('3D frame update failed; rendering without it.', error)
       }
       try {
+        // The update may have died halfway through moving the camera.
+        ensureSafeCamera(camera, cameraLookAt, { position: baseCameraPosition, lookAt: baseCameraLookAt, fov: baseFov })
         renderer.render(scene, camera)
         // The canvas stays transparent until the scene is ready: never let a
         // failing update keep it hidden (a black table).
@@ -4157,6 +4226,21 @@ function createSceneRuntime(
     }
     if (!runtime.debugCamera) funFx.applyCamera(camera, time)
     camera.updateMatrixWorld()
+    // A NaN pose (or one far off the seat) draws nothing but black, and lerping
+    // toward NaN never comes back: put the camera back on its seat.
+    if (ensureSafeCamera(camera, cameraLookAt, {
+      position: baseCameraPosition,
+      lookAt: baseCameraLookAt,
+      fov: baseFov,
+      maxDrift: runtime.debugCamera ? Number.POSITIVE_INFINITY : 4,
+    })) {
+      heroHeadTilt = 0
+      funFx.resetCamera()
+      if (!cameraResetReported) {
+        cameraResetReported = true
+        console.warn('3D camera pose was invalid; reset to the seat view.')
+      }
+    }
 
     updateLadyLuck(runtime, viewRef.current, host, time, delta, reducedMotion, viewportWidth, viewportHeight)
     updateHeroHands(runtime, {
@@ -4242,6 +4326,8 @@ function createSceneRuntime(
     if (gl.isContextLost() || blackFence) return
     const width = gl.drawingBufferWidth
     const height = gl.drawingBufferHeight
+    // A tiny or hidden canvas is not a black table: nothing to judge.
+    if (width < 16 || height < 16 || document.hidden) return
     if (isWebGL2) {
       const gl2 = gl as WebGL2RenderingContext
       blackPackBuffer ??= gl2.createBuffer()
@@ -4400,6 +4486,12 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
   const failedStartsRef = useRef(0)
   /** performance.now() when the 3D table stopped showing (context lost / failed start), or null while it's up. */
   const downSinceRef = useRef<number | null>(null)
+  /**
+   * Failures across rebuilds: one is worth a fresh scene, repeated ones mean
+   * this GPU cannot hold the room, so the tab drops to the 2D table instead of
+   * cycling through black rebuilds.
+   */
+  const failuresRef = useRef(createRenderFailureTracker({ limit: RENDER_FAILURE_LIMIT, windowMs: RENDER_FAILURE_WINDOW_MS }))
 
   viewRef.current = view
   highlightRef.current = highlightedCards
@@ -4411,11 +4503,29 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
 
     let disposed = false
     let rebuildTimer = 0
+    /** A rebuild is already on its way: later symptoms of the same incident are not new failures. */
+    let rebuildPending = false
+    let gaveUp = false
     const rebuild = (delayMs: number) => {
+      rebuildPending = true
       window.clearTimeout(rebuildTimer)
       rebuildTimer = window.setTimeout(() => {
         if (!disposed) setSceneGeneration(generation => generation + 1)
       }, delayMs)
+    }
+    const giveUp = (reason: ThreeFallbackReason, error?: unknown) => {
+      if (gaveUp) return
+      gaveUp = true
+      window.clearTimeout(rebuildTimer)
+      runtimeRef.current?.pause()
+      // PokerTable (and the room page) switch to the 2D table and unmount this view.
+      activateThreeFallback(reason, error)
+    }
+    /** One more failure: rebuild the scene, or fall back to 2D once they keep coming. */
+    const fail = (reason: ThreeFallbackReason, delayMs: number, error?: unknown) => {
+      if (disposed || gaveUp) return
+      if (failuresRef.current.record(performance.now())) giveUp(reason, error)
+      else rebuild(delayMs)
     }
     const handleContextLost = (event: Event) => {
       // preventDefault asks the browser to restore the context; if it does not
@@ -4425,12 +4535,12 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
         runtimeRef.current?.pause()
         downSinceRef.current ??= performance.now()
         setWebGLStatus('error')
-        rebuild(2_000)
+        if (!rebuildPending) fail('context-lost', 2_000)
       }
     }
     const handleContextRestored = () => {
       // Rebuilding from scratch is more reliable than resuming three.js state.
-      if (!disposed) rebuild(0)
+      if (!disposed && !gaveUp) rebuild(0)
     }
     canvas.addEventListener('webglcontextlost', handleContextLost)
     canvas.addEventListener('webglcontextrestored', handleContextRestored)
@@ -4440,7 +4550,7 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
       runtimeRef.current = runtime
       runtime.onBroken = () => {
         runtime.pause()
-        rebuild(0)
+        if (!rebuildPending) fail('black-frame', 0)
       }
       failedStartsRef.current = 0
       downSinceRef.current = null
@@ -4478,35 +4588,53 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
       console.error('Unable to start the desktop 3D poker room.', error)
       downSinceRef.current ??= performance.now()
       setWebGLStatus('error')
-      // A start can fail transiently (context limit, GPU busy): retry a few times.
-      // Never give up for good: a black table with a stuck message is the worst
-      // outcome, so keep retrying with a capped backoff.
-      failedStartsRef.current += 1
-      rebuild(Math.min(8_000, 700 * failedStartsRef.current))
+      if (isWebGLUnavailableError(error)) {
+        // No WebGL context at all (blocklisted GPU, hardware acceleration off,
+        // Chrome refusing contexts after a GPU reset): retrying only shows black.
+        giveUp('webgl-unavailable', error)
+      } else {
+        // A start can fail transiently (context limit, GPU busy): retry with a
+        // short backoff, and fall back to the 2D table if it keeps failing.
+        failedStartsRef.current += 1
+        fail('start-failed', Math.min(8_000, 700 * failedStartsRef.current), error)
+      }
     }
 
     // Black-screen watchdog: a loop that stopped producing frames while the tab
     // is visible (a lost context nobody reported, a stuck pause) or a canvas
     // collapsed to nothing is rebuilt instead of being left black.
     let stalledChecks = 0
+    // When the browser itself stops animation frames while the page still
+    // counts as visible (an occluded or backgrounded window, an embedded
+    // preview), the loop is not broken: rebuilding would not help, and
+    // counting it as a GPU failure would wrongly drop the player to 2D. A
+    // probe frame tells the two apart.
+    let rafAliveAt = performance.now()
+    let rafProbe = 0
     const watchdog = window.setInterval(() => {
       const runtime = runtimeRef.current
+      window.cancelAnimationFrame(rafProbe)
+      rafProbe = window.requestAnimationFrame(() => {
+        rafAliveAt = performance.now()
+      })
       // Chrome can refuse a page any new WebGL context after a GPU reset (Mac
       // sleep, app switching) until it reloads: the table would sit blank
-      // behind the nameplates forever. After a real try at recovering, reload
-      // (the room rejoins the seat), at most once a minute.
+      // behind the nameplates forever. After a real try at recovering, switch
+      // this tab to the 2D table (its notice offers a reload back into 3D).
       const downFor = downSinceRef.current === null ? 0 : performance.now() - downSinceRef.current
-      if (!disposed && !document.hidden && downFor > TABLE_DOWN_RELOAD_MS) {
-        reloadForBrokenTable()
+      if (!disposed && !document.hidden && downFor > TABLE_DOWN_FALLBACK_MS) {
+        giveUp('stalled')
         return
       }
-      if (disposed || !runtime || runtime.disposed || document.hidden) {
+      if (disposed || gaveUp || rebuildPending || !runtime || runtime.disposed || document.hidden) {
         stalledChecks = 0
         return
       }
       const contextLost = runtime.renderer.getContext().isContextLost()
       const collapsed = host.clientWidth > 0 && host.clientHeight > 0 && (canvas.width < 2 || canvas.height < 2)
-      const stalled = performance.now() - runtime.lastFrameAt > 3_000
+      const now = performance.now()
+      const framesRunning = now - rafAliveAt < 2_500
+      const stalled = framesRunning && now - runtime.lastFrameAt > 3_000
       if (!contextLost && !collapsed && !stalled) {
         stalledChecks = 0
         return
@@ -4517,13 +4645,14 @@ export const DesktopPokerRoom3D = memo(function DesktopPokerRoom3D({
       stalledChecks = 0
       console.warn('3D table stopped drawing; rebuilding the scene.', { contextLost, collapsed, stalled })
       runtime.pause()
-      rebuild(0)
+      fail(contextLost ? 'context-lost' : 'stalled', 0)
     }, 2_000)
 
     return () => {
       disposed = true
       window.clearTimeout(rebuildTimer)
       window.clearInterval(watchdog)
+      window.cancelAnimationFrame(rafProbe)
       canvas.removeEventListener('webglcontextlost', handleContextLost)
       canvas.removeEventListener('webglcontextrestored', handleContextRestored)
       const finished = runtimeRef.current

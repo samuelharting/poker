@@ -65,6 +65,8 @@ function cachedCanvasTexture(
 
   const texture = new THREE.CanvasTexture(canvas)
   texture.name = key
+  // Cached for every table and seat: per-object disposal (disposeObject) must leave it alone.
+  texture.userData.shared = true
   texture.colorSpace = options.colorSpace ?? THREE.SRGBColorSpace
   texture.anisotropy = 8
   if (options.repeat) {

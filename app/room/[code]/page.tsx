@@ -1,6 +1,7 @@
 'use client'
 
 import { normalizeSceneMode, type SceneMode } from '@/components/three/sceneMode'
+import { useThreeFallback } from '@/components/three/threeFallback'
 import { useState, useEffect, useCallback } from 'react'
 import { PokerTable } from '@/components/table/PokerTable'
 import { RoomHud } from '@/components/ui/RoomHud'
@@ -162,7 +163,9 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
   )
   // Drinks are a 3D-table feature: the 2D layout (phones, tablets) never shows them.
   // The Chill room is the same simple 2D table, even on a wide screen.
-  const isTwoDLayout = useIsTwoDLayout() || sceneMode === 'chill'
+  // So is the fallback when this GPU cannot hold the 3D room (see threeFallback.ts).
+  const threeFallback = useThreeFallback()
+  const isTwoDLayout = useIsTwoDLayout() || sceneMode === 'chill' || threeFallback !== null
   // Drunk players occasionally misread a freshly dealt card on their own screen only.
   const hallucinatedTableState = useDrunkHallucination(tableState, yourId)
   const displayTableState = isTwoDLayout ? tableState : hallucinatedTableState

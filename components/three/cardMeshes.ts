@@ -171,6 +171,8 @@ function getCardGeometry() {
   edge.setIndex(edgeIndices)
   edge.computeVertexNormals()
 
+  // Shared by every card: per-seat disposal must leave these alone.
+  for (const geometry of [face, back, edge]) geometry.userData.shared = true
   sharedGeometry = { face, back, edge }
   return sharedGeometry
 }

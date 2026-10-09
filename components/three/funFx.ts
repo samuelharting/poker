@@ -244,15 +244,35 @@ function catTexture() {
 // Per-seat props
 // ---------------------------------------------------------------------------
 
+interface Capsule {
+  group: THREE.Group
+  glass: DrinkProp
+  bubbles: THREE.Points
+  startedAt: number
+  owned: { geometries: THREE.BufferGeometry[]; materials: THREE.Material[] }
+}
+
+function disposeCapsule(capsule: Capsule) {
+  capsule.group.removeFromParent()
+  disposeDrinkProp(capsule.glass)
+  capsule.bubbles.geometry.dispose()
+  ;(capsule.bubbles.material as THREE.Material).dispose()
+  capsule.owned.geometries.forEach(geometry => geometry.dispose())
+  capsule.owned.materials.forEach(material => material.dispose())
+}
+
 interface SeatProps {
   group: THREE.Group
   aura: THREE.Sprite
   stars: THREE.Sprite[]
   spirals: THREE.Mesh[]
   shades: THREE.Group | null
-  capsule: { group: THREE.Group; glass: DrinkProp; bubbles: THREE.Points; startedAt: number } | null
+  capsule: Capsule | null
   /** The bone (or fallback group) the spirals and shades hang on. */
   headNode: THREE.Object3D | null
+  /** GPU resources made for this seat only; freed with the props (seats come and go all night). */
+  geometries: THREE.BufferGeometry[]
+  materials: THREE.Material[]
 }
 
 interface Tracked {
@@ -271,6 +291,11 @@ interface Tracked {
 const worldA = new THREE.Vector3()
 const worldB = new THREE.Vector3()
 const scratchColor = new THREE.Color()
+const TRIP_PURPLE = new THREE.Color('#7b2cff')
+const TRIP_ORANGE = new THREE.Color('#ff7a1a')
+const TRIP_TEAL = new THREE.Color('#12d6c4')
+const scratchTripA = new THREE.Color()
+const scratchTripB = new THREE.Color()
 
 export class FunFx {
   private readonly options: FunFxOptions
@@ -540,6 +565,15 @@ export class FunFx {
     if (this.appliedFovDelta !== 0 || trip > 0) camera.updateProjectionMatrix()
   }
 
+  /**
+   * The room camera was reset (it went non-finite): forget the lens offset this
+   * class added, so the next frame does not subtract it from the fresh FOV.
+   */
+  resetCamera() {
+    this.appliedFovDelta = 0
+    if (!Number.isFinite(this.tripLevel)) this.tripLevel = 0
+  }
+
   /** Post-processing uniforms. Call just before the composer renders. */
   beforeRender(time: number, width: number, height: number) {
     const trip = this.tripLevel
@@ -629,10 +663,9 @@ export class FunFx {
     // The felt melts purple -> orange -> teal.
     if (this.options.feltMaterial && this.baseFelt) {
       const cycle = (Math.sin(time * 0.35 * (motion || 0.2)) + 1) / 2
-      const purple = scratchColor.set('#7b2cff')
-      const orange = new THREE.Color('#ff7a1a')
-      const teal = new THREE.Color('#12d6c4')
-      const target = cycle < 0.5 ? purple.lerp(orange, cycle * 2) : orange.lerp(teal, (cycle - 0.5) * 2)
+      const target = cycle < 0.5
+        ? scratchTripA.copy(TRIP_PURPLE).lerp(TRIP_ORANGE, cycle * 2)
+        : scratchTripB.copy(TRIP_ORANGE).lerp(TRIP_TEAL, (cycle - 0.5) * 2)
       this.options.feltMaterial.color.copy(this.baseFelt).lerp(target, 0.75 * trip)
     }
     // The lights pulse through the rainbow.
@@ -702,20 +735,22 @@ export class FunFx {
     group.name = 'fun-props'
     this.options.scene.add(group)
 
+    const ownedGeometries: THREE.BufferGeometry[] = []
+    const ownedMaterials: THREE.Material[] = []
     const auraMaterial = new THREE.SpriteMaterial({
       map: this.textures.aura,
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     })
-    this.materials.push(auraMaterial)
+    ownedMaterials.push(auraMaterial)
     const aura = new THREE.Sprite(auraMaterial)
     aura.visible = false
     aura.renderOrder = 2
     group.add(aura)
 
     const starMaterial = new THREE.SpriteMaterial({ map: this.textures.star, transparent: true, depthWrite: false })
-    this.materials.push(starMaterial)
+    ownedMaterials.push(starMaterial)
     const stars = Array.from({ length: 4 }, () => {
       const star = new THREE.Sprite(starMaterial)
       star.scale.set(0.17, 0.17, 1)
@@ -729,7 +764,7 @@ export class FunFx {
     const headNode: THREE.Object3D | null = headBone ?? seat.head
     const spirals: THREE.Mesh[] = []
     const disc = new THREE.CircleGeometry(1, 24)
-    this.geometries.push(disc)
+    ownedGeometries.push(disc)
     if (seat.face && seat.face.eyes.length > 0) {
       for (const eye of seat.face.eyes) {
         const spiral = new THREE.Mesh(disc, this.spiralMaterial)
@@ -766,7 +801,7 @@ export class FunFx {
       lens.rotateZ(Math.PI / 2)
       lens.scale(1, 1, 0.35)
       const bridge = new THREE.BoxGeometry(span * 0.5, radius * 0.25, radius * 0.25)
-      this.geometries.push(lens, bridge)
+      ownedGeometries.push(lens, bridge)
       for (const eye of [a!, b!]) {
         const mesh = new THREE.Mesh(lens, this.shadesMaterial)
         mesh.position.copy(eye.root.position).sub(mid).setZ(radius * 0.95)
@@ -779,7 +814,7 @@ export class FunFx {
       headBone.add(shades)
     }
 
-    return { group, aura, stars, spirals, shades, capsule: null, headNode }
+    return { group, aura, stars, spirals, shades, capsule: null, headNode, geometries: ownedGeometries, materials: ownedMaterials }
   }
 
   /** The pill plops into their water and fizzes, right as the trip kicks in. */
@@ -787,10 +822,7 @@ export class FunFx {
     const since = entry.tripping && entry.tripStartedAt !== null ? time - entry.tripStartedAt : Infinity
     if (since > CAPSULE_SECONDS || this.reducedMotion) {
       if (props.capsule) {
-        props.capsule.group.removeFromParent()
-        disposeDrinkProp(props.capsule.glass)
-        props.capsule.bubbles.geometry.dispose()
-        ;(props.capsule.bubbles.material as THREE.Material).dispose()
+        disposeCapsule(props.capsule)
         props.capsule = null
       }
       return
@@ -801,11 +833,10 @@ export class FunFx {
       // Drink props are created hidden (they normally wait for a hand to lift them).
       glass.group.visible = true
       group.add(glass.group)
+      // Owned by the capsule (freed with it), not piled up for the whole night.
       const capsuleGeometry = new THREE.CapsuleGeometry(0.018, 0.035, 4, 10)
-      this.geometries.push(capsuleGeometry)
       const top = new THREE.MeshToonMaterial({ color: '#ff3d7f' })
       const bottom = new THREE.MeshToonMaterial({ color: '#ffffff' })
-      this.materials.push(top, bottom)
       const pill = new THREE.Group()
       const upper = new THREE.Mesh(capsuleGeometry, top)
       upper.scale.set(1, 0.55, 1)
@@ -827,7 +858,7 @@ export class FunFx {
       group.position.copy(worldA)
       group.scale.setScalar(1.4)
       this.options.scene.add(group)
-      props.capsule = { group, glass, bubbles, startedAt: time }
+      props.capsule = { group, glass, bubbles, startedAt: time, owned: { geometries: [capsuleGeometry], materials: [top, bottom] } }
     }
     const capsule = props.capsule
     // The glass grows in on the felt and shrinks away at the end, never pops.
@@ -856,12 +887,24 @@ export class FunFx {
     props.group.removeFromParent()
     props.spirals.forEach(spiral => spiral.removeFromParent())
     props.shades?.removeFromParent()
-    if (props.capsule) {
-      props.capsule.group.removeFromParent()
-      disposeDrinkProp(props.capsule.glass)
-      props.capsule.bubbles.geometry.dispose()
-      ;(props.capsule.bubbles.material as THREE.Material).dispose()
+    if (props.capsule) disposeCapsule(props.capsule)
+    props.capsule = null
+    props.geometries.forEach(geometry => geometry.dispose())
+    props.materials.forEach(material => material.dispose())
+    props.geometries.length = 0
+    props.materials.length = 0
+  }
+
+  /** Live GPU resources this class holds (tests: they must not grow as seats come and go). */
+  getResourceCounts() {
+    let geometries = this.geometries.length
+    let materials = this.materials.length
+    for (const entry of this.tracked.values()) {
+      if (!entry.props) continue
+      geometries += entry.props.geometries.length + (entry.props.capsule?.owned.geometries.length ?? 0)
+      materials += entry.props.materials.length + (entry.props.capsule?.owned.materials.length ?? 0)
     }
+    return { geometries, materials, trackedSeats: this.tracked.size }
   }
 }
 

@@ -28,6 +28,8 @@ const SUITS: Array<Card['suit']> = ['spades', 'hearts', 'diamonds', 'clubs']
 const RANK_LABEL: Record<string, string> = { T: '10' }
 const REVEAL_TOAST_MS = 5200
 const TRIP_DRAIN_MS = 5000
+/** The CSS blackout beat (fun.css) runs 4.5s; the flag never outlives it by much. */
+export const BLACKOUT_BEAT_MAX_MS = 4_800
 
 type Root = HTMLElement
 
@@ -94,15 +96,32 @@ export function FunLayer({ tableState, yourId, privateMushroom, mushroomEvents, 
   const [draining, setDraining] = useState(false)
   const wasTrippingRef = useRef(false)
 
+  // --- Blackout beat: the black eyelids are only ever up for one beat --------
+  // The flag used to stay on for the whole pass-out, so anything that restarted
+  // the CSS animation (the 3D stage remounting when someone joined, a scene
+  // rebuild) or a browser that skipped it could leave the lids shut: a black
+  // screen. Now the flag drops on a hard timer after the 4.5s beat.
+  const blackoutWanted = myDrinks.passedOut && drinkOn
+  const [blackoutBeat, setBlackoutBeat] = useState(false)
+  useEffect(() => {
+    if (!blackoutWanted) {
+      setBlackoutBeat(false)
+      return
+    }
+    setBlackoutBeat(true)
+    const timer = window.setTimeout(() => setBlackoutBeat(false), BLACKOUT_BEAT_MAX_MS)
+    return () => window.clearTimeout(timer)
+  }, [blackoutWanted])
+
   // --- Root flags: every visual reads these from CSS -----------------------
   useEffect(() => {
     const root = document.documentElement
-    setFlag(root, 'funBlackout', myDrinks.passedOut && drinkOn ? 'on' : null)
+    setFlag(root, 'funBlackout', blackoutBeat ? 'on' : null)
     setFlag(root, 'funHangover', myDrinks.hungover && !myDrinks.passedOut && drinkOn ? 'on' : null)
     setFlag(root, 'funSober', BUZZ.soberPenaltiesEnabled && drinkOn && capable && me && isSober(myDrinks.level) && !myDrinks.passedOut && !myDrinks.hungover && !tripping ? 'on' : null)
     setFlag(root, 'funTrip', tripping ? 'on' : draining ? 'ending' : null)
     setFlag(root, 'funMyTurn', isMyTurn ? 'on' : null)
-  }, [capable, draining, drinkOn, isMyTurn, me, myDrinks.hungover, myDrinks.level, myDrinks.passedOut, tripping])
+  }, [blackoutBeat, capable, draining, drinkOn, isMyTurn, me, myDrinks.hungover, myDrinks.level, myDrinks.passedOut, tripping])
 
   useEffect(() => () => {
     const root = document.documentElement

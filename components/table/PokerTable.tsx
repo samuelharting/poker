@@ -38,6 +38,9 @@ import { describeHandOutcome } from '@/lib/poker/handHistory'
 import { getHandOddsView, type SeatOddsView } from '@/lib/poker/handOddsView'
 import { HandOddsPanel, OddsPill } from '@/components/table/HandOdds'
 import { TWO_D_LAYOUT_QUERY, useMediaQuery } from '@/lib/layoutMode'
+import { useThreeFallback } from '@/components/three/threeFallback'
+import { ThreeErrorBoundary } from '@/components/three/ThreeErrorBoundary'
+import { ThreeFallbackNotice } from './ThreeFallbackNotice'
 import type { PokerSoundCueKind } from '@/lib/poker/soundscape'
 import {
   createPreAction,
@@ -1405,9 +1408,14 @@ export function PokerTable({
   // Narrow screens and touch-first devices (phones, tablets, iPad landscape)
   // use the simple 2D table; wide mouse-driven screens get the 3D room.
   // The Chill room is that same simple 2D table, even on a wide screen.
-  const isMobileViewport = useMediaQuery(TWO_D_LAYOUT_QUERY) || sceneMode === 'chill'
+  // A GPU that cannot hold the 3D room (lost contexts, render errors) falls
+  // back to that same 2D table instead of a black screen (threeFallback.ts).
+  const threeFallback = useThreeFallback()
+  const isTouchOrNarrow = useMediaQuery(TWO_D_LAYOUT_QUERY)
+  const isMobileViewport = isTouchOrNarrow || sceneMode === 'chill' || threeFallback !== null
   const drinkContext = useDrinks()
   const isDesktopWidth = useMediaQuery('(min-width: 1024px)')
+  const showThreeFallbackNotice = Boolean(threeFallback && isDesktopWidth && !isTouchOrNarrow && sceneMode !== 'chill')
   const shouldRenderDesktopThree = isDesktopWidth && !isMobileViewport
   const showdownView = useShowdownPresentation(state)
   const showdownPresentation = showdownView.presentation
@@ -2765,6 +2773,8 @@ export function PokerTable({
       } as CSSProperties}
     >
       {threeTableView ? (
+        // A render error inside the 3D room drops this tab to the 2D table, never a blank screen.
+        <ThreeErrorBoundary>
         <DesktopPokerRoom3D
           view={presentedThreeTableView ?? threeTableView}
           prankEvents={prankEvents}
@@ -2780,7 +2790,9 @@ export function PokerTable({
           suitColorMode={suitColorMode}
           sceneMode={sceneMode}
         />
+        </ThreeErrorBoundary>
       ) : null}
+      {showThreeFallbackNotice && threeFallback ? <ThreeFallbackNotice fallback={threeFallback} /> : null}
       {!isMobileViewport && showdownCinematic}
       {/* Busted: the cashier card is the one status, so no Watching bar on top of it. */}
       {!isMobileViewport && lobbyMe?.isSpectator && spectatorRailState && !settingsOpen && !isRailBusted ? (
