@@ -89,6 +89,8 @@ export type C2SMessage =
     chipValue?: number
   }
   | { type: 'leave_room' }
+  /** Host only: wipe the table to a fresh one (connected players are put back in the lobby). */
+  | { type: 'reset_table' }
   /** Buy back in for one full buy-in (the table's starting stack). `amount` is ignored. */
   | { type: 'rebuy'; amount?: number }
   /** Host: show everyone the end-of-night settle-up card. */
@@ -329,6 +331,9 @@ export function parseC2S(raw: string): C2SMessage | null {
       }
 
       case 'leave_room':
+        return { type }
+
+      case 'reset_table':
         return { type }
 
       case 'rebuy':

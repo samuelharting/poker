@@ -141,6 +141,7 @@ interface PokerTableProps {
   onPeekCards?: (peeking: boolean) => void
   onCloseSettings: () => void
   onLeaveGame?: () => void
+  onResetTable?: () => void
   onSendChat?: (message: string) => void
   onSendTargetChat?: (targetId: string, message: string) => void
   onSendEmote: (emote: string) => void
@@ -1387,6 +1388,7 @@ export function PokerTable({
   onPeekCards,
   onCloseSettings,
   onLeaveGame = () => {},
+  onResetTable = () => {},
   onSendChat = () => {},
   onSendTargetChat = () => {},
   onSendEmote,
@@ -3273,6 +3275,7 @@ export function PokerTable({
           onAdjustPlayerStack={onAdjustPlayerStack}
           onSetPlayerSpectator={onSetPlayerSpectator}
           onLeaveGame={onLeaveGame}
+          onResetTable={onResetTable}
           onFeedback={onFeedback}
           onSendLedgerMessage={onSendLedgerMessage}
           turnSecondsLeft={hasActionTray ? turnTimer.secondsLeft : undefined}
@@ -4431,6 +4434,7 @@ export function SettingsModal({
   onAdjustPlayerStack,
   onSetPlayerSpectator,
   onLeaveGame = () => {},
+  onResetTable = () => {},
   onFeedback,
   onSendLedgerMessage,
   turnSecondsLeft,
@@ -4469,6 +4473,8 @@ export function SettingsModal({
   onAdjustPlayerStack: (targetId: string, amount: number) => void
   onSetPlayerSpectator: (targetId: string, spectator: boolean) => void
   onLeaveGame?: () => void
+  /** Host only: wipe the table back to a fresh one (the host confirms first). */
+  onResetTable?: () => void
   onFeedback: (message: string, tone?: FeedbackTone) => void
 }) {
   type NumericDraftValue = number | ''
@@ -4482,6 +4488,7 @@ export function SettingsModal({
 
   const [activeTab, setActiveTab] = useState<'general' | 'avatar' | 'players' | 'ledger'>('general')
   const [showSevenTwoCustomize, setShowSevenTwoCustomize] = useState(false)
+  const [confirmingReset, setConfirmingReset] = useState(false)
   const [chipDrafts, setChipDrafts] = useState<Record<string, NumericDraftValue>>({})
   const [avatarDraft, setAvatarDraft] = useState<PlayerAvatarCustomization>(() => ({
     ...avatarCustomization,
@@ -5087,6 +5094,47 @@ export function SettingsModal({
                         : 'Save for next hand'
                       : 'Save table settings'}
                   </button>
+                </div>
+
+                <div className="settings-section settings-reset-section">
+                  <div className="settings-section-title">Reset table</div>
+                  <div className="settings-section-copy">
+                    Clears every seat, bot, stack and the leaderboard for everyone, then puts all players back in the lobby.
+                  </div>
+                  <div className="settings-inline-controls">
+                    {confirmingReset ? (
+                      <>
+                        <span className="settings-save-status" role="status">Are you sure?</span>
+                        <button
+                          type="button"
+                          className="btn-subtle btn-subtle-danger"
+                          disabled={!isConnected}
+                          onClick={() => {
+                            setConfirmingReset(false)
+                            onResetTable()
+                          }}
+                        >
+                          Yes, reset table
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-subtle"
+                          onClick={() => setConfirmingReset(false)}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-subtle btn-subtle-danger"
+                        disabled={!isConnected}
+                        onClick={() => setConfirmingReset(true)}
+                      >
+                        Reset table
+                      </button>
+                    )}
+                  </div>
                 </div>
               </>
             ) : (

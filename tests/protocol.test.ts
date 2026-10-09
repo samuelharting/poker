@@ -170,3 +170,9 @@ describe('peek_cards protocol', () => {
     expect(parseC2S(JSON.stringify({ type: 'peek_cards' }))).toBeNull()
   })
 })
+
+describe('reset_table protocol', () => {
+  it('parses the bare host reset message and ignores extra fields', () => {
+    expect(parseC2S(JSON.stringify({ type: 'reset_table', junk: 1 }))).toEqual({ type: 'reset_table' })
+  })
+})

@@ -207,6 +207,8 @@ interface RoomData {
   lastHumanSeenAt?: number
   /** False while zero humans are connected (the idle-reset clock runs from lastHumanSeenAt). */
   humansPresent?: boolean
+  /** STATE_VERSION this save was written with (see onStart). */
+  stateVersion?: number
 }
 
 /**
@@ -352,7 +354,7 @@ export const IDLE_RESET_BOTS_ONLY_MS = 2 * 60_000
  * wifi drop, a refresh): everything is kept this long for the people who may
  * come back. Never applies while anyone is connected.
  */
-export const IDLE_RESET_HELD_MS = 30 * 60_000
+export const IDLE_RESET_HELD_MS = 5 * 60_000
 /**
  * The idle timer fires this long after the boundary, and the reset only runs
  * when the idle time is strictly greater than the window: someone who comes
@@ -367,6 +369,13 @@ export const HAND_COUNTER_RETENTION = 50
 
 /** Durable copy of RoomData (a JSON string), restored by onStart. */
 const ROOM_STORAGE_KEY = 'room-data-v1'
+/**
+ * Version of the saved RoomData shape and rules. A save with no version, or a
+ * different one, is discarded on restore (and its stored copy deleted) so an
+ * old table can never be loaded into newer code. Bump on any change that old
+ * saves must not survive. (2: dropped the CREW22-era saves.)
+ */
+export const STATE_VERSION = 2
 /** Durable Object values cap at 128 KiB; leave headroom. */
 const ROOM_STORAGE_MAX_CHARS = 120_000
 
@@ -507,6 +516,7 @@ export default class PokerRoom implements PartyServer {
       ledger: createLedger(),
       lastHumanSeenAt: Date.now(),
       humansPresent: false,
+      stateVersion: STATE_VERSION,
     }
   }
 
@@ -522,6 +532,11 @@ export default class PokerRoom implements PartyServer {
       const saved = await storage.get<string>(ROOM_STORAGE_KEY)
       if (typeof saved !== 'string') return
       const restored = JSON.parse(saved) as Partial<RoomData>
+      if (restored?.stateVersion !== STATE_VERSION) {
+        // Unversioned or from another version: never load it, and remove it.
+        void storage.delete?.(ROOM_STORAGE_KEY)?.catch?.(() => {})
+        return
+      }
       if (!restored?.gameState || !Array.isArray(restored.gameState.players)) return
       this.data = {
         ...this.data,
@@ -773,8 +788,12 @@ export default class PokerRoom implements PartyServer {
    * human is connected (the arriving socket, which has no state yet, is passed
    * as `arrivingConnId`). Returns whether it reset.
    */
-  private resetTable(arrivingConnId?: string): boolean {
-    if (this.countLiveHumanConnections(arrivingConnId) > 0) return false
+  private resetTable(
+    arrivingConnId?: string,
+    options: { force?: boolean; afterReset?: () => void } = {}
+  ): boolean {
+    // `force` is only for the host's explicit reset (handleResetTable).
+    if (!options.force && this.countLiveHumanConnections(arrivingConnId) > 0) return false
 
     this.safely(() => this.clearAutoFold())
     this.safely(() => this.clearAutoStart())
@@ -828,19 +847,82 @@ export default class PokerRoom implements PartyServer {
     this.disconnectedHostId = null
     this.mushrooms = createMushroomTable(this.mushroomRandom)
     this.data = this.createFreshData()
-
-    // A normal fresh state for anyone who is connected (nobody should be).
-    this.safely(() => this.broadcastState())
-    this.safely(() => {
-      if (this.persistTimeout) clearTimeout(this.persistTimeout)
-      this.persistTimeout = null
-    })
     this.safely(() => {
       const storage = this.room.storage as Partial<Room['storage']> | undefined
       void storage?.deleteAlarm?.()
       void storage?.delete?.(ROOM_STORAGE_KEY)?.catch?.(() => {})
     })
+
+    // Forced reset: connected people are put back in the lobby before anyone
+    // is told, so every client gets one consistent fresh state.
+    if (options.afterReset) this.safely(options.afterReset)
+
+    // A normal fresh state for anyone who is connected (nobody should be).
+    this.safely(() => this.broadcastState())
+    if (options.force) {
+      // Humans are here: bookkeeping says so, and the fresh table is saved.
+      this.safely(() => this.syncPresence())
+    } else {
+      this.safely(() => {
+        if (this.persistTimeout) clearTimeout(this.persistTimeout)
+        this.persistTimeout = null
+      })
+    }
     return true
+  }
+
+  /**
+   * Host-only manual reset. Allowed with humans connected because the host
+   * asked. Everyone connected is re-admitted as a lobby player (same nickname
+   * and look, fresh identity and reconnect token, nothing seated); the host
+   * stays host. Watchers without a player entry stay connected as watchers.
+   */
+  private handleResetTable(conn: Connection) {
+    const hostId = this.requireGameCreator(conn, 'reset the table')
+    if (!hostId) return
+
+    const readmit: Array<{
+      conn: Connection
+      nickname: string
+      profile: PlayerProfileRecord | undefined
+      wasHost: boolean
+    }> = []
+    for (const [connId, playerId] of Object.entries(this.data.connectionToPlayer)) {
+      if (this.isBotPlayer(playerId) || this.data.playerToConnection[playerId] !== connId) continue
+      const live = this.room.getConnection(connId)
+      const nickname = this.data.playerNicknames[playerId]
+      if (!live || !nickname) continue
+      readmit.push({
+        conn: live,
+        nickname,
+        profile: this.data.playerProfiles[playerId],
+        wasHost: playerId === hostId,
+      })
+    }
+    readmit.sort((a, b) => Number(b.wasHost) - Number(a.wasHost))
+
+    this.resetTable(undefined, {
+      force: true,
+      afterReset: () => {
+        for (const entry of readmit) {
+          const playerId = generateId()
+          this.bindConnection(entry.conn, playerId)
+          this.data.reconnectTokens[playerId] = generateReconnectToken()
+          this.data.playerNicknames[playerId] = entry.nickname
+          this.data.playerProfiles[playerId] = {
+            email: entry.profile?.email ?? '',
+            venmoUsername: entry.profile?.venmoUsername ?? '',
+            avatar: entry.profile?.avatar,
+          }
+          this.data.membership.joinedAt[playerId] = Date.now()
+          this.ensureStats(entry.nickname)
+          if (!this.data.hostId) this.data.hostId = playerId
+        }
+      },
+    })
+    for (const entry of readmit) {
+      this.sendActionResult(entry.conn, 'The host reset the table. Take a seat to play again.')
+    }
   }
 
   onConnect(conn: Connection) {
@@ -897,6 +979,9 @@ export default class PokerRoom implements PartyServer {
           break
         case 'leave_room':
           this.handleLeave(sender)
+          break
+        case 'reset_table':
+          this.handleResetTable(sender)
           break
         case 'rebuy':
           this.handleRebuy(sender)

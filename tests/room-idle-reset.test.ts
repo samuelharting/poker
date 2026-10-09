@@ -117,9 +117,9 @@ function expectFreshTable(internals: Internals) {
 }
 
 describe('idle table: constants', () => {
-  it('resets a bots-only table after two minutes and a held table after thirty', () => {
+  it('resets a bots-only table after two minutes and a held table after five', () => {
     expect(IDLE_RESET_BOTS_ONLY_MS).toBe(2 * 60_000)
-    expect(IDLE_RESET_HELD_MS).toBe(30 * 60_000)
+    expect(IDLE_RESET_HELD_MS).toBe(5 * 60_000)
     expect(IDLE_RESET_SLACK_MS).toBeGreaterThan(0)
   })
 
@@ -160,11 +160,11 @@ describe('idle table: pause and reset', () => {
     expect(internals.data.gameState.phase).toBe('between_hands')
     const handsAtPause = internals.data.gameState.handNumber
     // ...but no new hand is dealt while nobody is connected.
-    await pass(5 * 60_000)
+    await pass(2 * 60_000)
     expect(internals.data.gameState.handNumber).toBe(handsAtPause)
     expect(internals.data.gameState.players.length).toBeGreaterThan(0)
 
-    await pass(IDLE_RESET_HELD_MS - 7 * 60_000 + IDLE_RESET_SLACK_MS + 5_000)
+    await pass(IDLE_RESET_HELD_MS - 4 * 60_000 + IDLE_RESET_SLACK_MS + 5_000)
     expectFreshTable(internals)
     expect(storage.has('room-data-v1')).toBe(false)
     expect(vi.getTimerCount()).toBe(0)
@@ -223,7 +223,7 @@ describe('idle table: pause and reset', () => {
     vi.useFakeTimers()
     const { room, server, host, internals } = await liveTable()
     disconnect(server, room, host.connection)
-    await pass(9 * 60_000)
+    await pass(IDLE_RESET_HELD_MS - 60_000)
     joinPlayer(server, room, 'c-back', 'Host', host.reconnectToken)
     await pass(30 * 60_000)
     expect(internals.data.gameState.players.some(player => player.id === host.playerId)).toBe(true)
@@ -327,7 +327,7 @@ describe('idle table: pause and reset', () => {
     await pass(2 * 60_000)
     expect(internals.data.humansPresent).toBe(false)
     const handsAtPause = internals.data.gameState.handNumber
-    await pass(5 * 60_000)
+    await pass(2 * 60_000)
     expect(internals.data.gameState.handNumber).toBe(handsAtPause)
     await pass(IDLE_RESET_HELD_MS + IDLE_RESET_SLACK_MS)
     expectFreshTable(internals)
@@ -414,6 +414,20 @@ describe('idle table: bots-only (a) and held (b) thresholds', () => {
   async function botsOnlyTable() {
     const table = await liveTable()
     await pass(1_000)
+    // Leave between hands so the seat goes at once (a mid-hand leaver keeps the
+    // seat until the hand ends, which would make the timing random).
+    for (let i = 0; i < 300 && table.internals.data.gameState.phase === 'in_hand'; i += 1) {
+      const state = table.internals.data.gameState as unknown as {
+        actingPlayerId: string | null
+        currentBet: number
+        players: Array<{ id: string; bet: number }>
+      }
+      if (state.actingPlayerId === table.host.playerId) {
+        const me = state.players.find(player => player.id === table.host.playerId)!
+        send(table.server, table.host.connection, { type: 'player_action', action: me.bet >= state.currentBet ? 'check' : 'call' })
+      }
+      await vi.advanceTimersByTimeAsync(1_000)
+    }
     send(table.server, table.host.connection, { type: 'leave_room' })
     disconnect(table.server, table.room, table.host.connection)
     return table
@@ -479,20 +493,20 @@ describe('idle table: bots-only (a) and held (b) thresholds', () => {
     expect(internals.data.gameState.players.length).toBe(3)
   })
 
-  it('(b) held seats of disconnected humans survive the bots-only window and are kept thirty minutes', async () => {
+  it('(b) held seats of disconnected humans survive the bots-only window and are kept five minutes', async () => {
     vi.useFakeTimers()
     const { room, server, host, internals } = await liveTable()
     await pass(1_000)
     disconnect(server, room, host.connection)
     // Paused, but everything is kept through the short window and well beyond it.
-    await pass(IDLE_RESET_BOTS_ONLY_MS + 10 * 60_000)
+    await pass(IDLE_RESET_BOTS_ONLY_MS + 60_000)
     expect(internals.data.gameState.players.some(player => player.id === host.playerId)).toBe(true)
     const hand = internals.data.gameState.handNumber
-    await pass(10 * 60_000)
+    await pass(60_000)
     expect(internals.data.gameState.handNumber).toBe(hand)
     expect(internals.data.gameState.players.some(player => player.id === host.playerId)).toBe(true)
-    // Past thirty minutes of nobody connected: reset.
-    await pass(IDLE_RESET_HELD_MS - (IDLE_RESET_BOTS_ONLY_MS + 20 * 60_000) + IDLE_RESET_SLACK_MS + 5_000)
+    // Past five minutes of nobody connected: reset.
+    await pass(IDLE_RESET_HELD_MS - (IDLE_RESET_BOTS_ONLY_MS + 2 * 60_000) + IDLE_RESET_SLACK_MS + 5_000)
     expectFreshTable(internals)
     expect(vi.getTimerCount()).toBe(0)
   })
@@ -512,12 +526,12 @@ describe('idle table: bots-only (a) and held (b) thresholds', () => {
     expect(internals.data.gameState.players.some(player => player.id === host.playerId)).toBe(true)
   })
 
-  it('(b) lazy reset: a friend rejoining after ten minutes finds their seat, after thirty a fresh table', async () => {
+  it('(b) lazy reset: a friend rejoining after two minutes finds their seat, after five a fresh table', async () => {
     vi.useFakeTimers()
     const first = await liveTable()
     await pass(1_000)
     disconnect(first.server, first.room, first.host.connection)
-    vi.setSystemTime(Date.now() + 10 * 60_000)
+    vi.setSystemTime(Date.now() + 2 * 60_000)
     const back = joinPlayer(first.server, first.room, 'c-back', 'Host', first.host.reconnectToken)
     expect(back.playerId).toBe(first.host.playerId)
     expect(first.internals.data.gameState.players.some(player => player.id === first.host.playerId)).toBe(true)
@@ -626,13 +640,13 @@ describe('idle table: lazy reset and persistence', () => {
     const leftAt = Date.now()
     vi.clearAllTimers()
 
-    vi.setSystemTime(leftAt + 20 * 60_000)
+    vi.setSystemTime(leftAt + 2 * 60_000)
     const secondRoom = roomWithStorage(storage)
     const second = quietServer(secondRoom)
     await second.onStart()
-    await pass(5 * 60_000)
+    await pass(2 * 60_000)
     expect(internalsOf(second).data.gameState.players.length).toBe(4)
-    await pass(6 * 60_000)
+    await pass(2 * 60_000)
     expectFreshTable(internalsOf(second))
   })
 

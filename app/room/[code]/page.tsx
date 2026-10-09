@@ -184,6 +184,10 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     window.setTimeout(() => window.location.assign('/'), 100)
   }, [roomCode, sendMessage])
 
+  const handleResetTable = useCallback(() => {
+    sendMessage({ type: 'reset_table' })
+  }, [sendMessage])
+
   useEffect(() => {
     const storedStack = sessionStorage.getItem(`poker_starting_stack_${roomCode}`)
     const parsed = storedStack ? Number(storedStack) : NaN
@@ -364,6 +368,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
           onPeekCards={peeking => sendMessage({ type: 'peek_cards', peeking })}
           onCloseSettings={() => setSettingsOpen(false)}
           onLeaveGame={handleLeaveGame}
+          onResetTable={handleResetTable}
           onSendChat={handleSendChat}
           onSendTargetChat={(targetId: string, message: string) => {
             const sanitized = sanitizeText(message)

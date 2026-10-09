@@ -132,6 +132,42 @@ describe('SettingsModal', () => {
     expect(onLeaveGame).toHaveBeenCalledOnce()
   })
 
+  it('shows Reset table only to the host, behind an Are you sure step', () => {
+    const onResetTable = vi.fn()
+    const hostView = renderModal(makeProps({ isHost: true, onResetTable }))
+
+    act(() => {
+      findButton(hostView.root, 'Reset table').props.onClick()
+    })
+    expect(onResetTable).not.toHaveBeenCalled()
+    expect(nodeText(hostView.root)).toContain('Are you sure?')
+
+    act(() => {
+      findButton(hostView.root, 'Cancel').props.onClick()
+    })
+    expect(onResetTable).not.toHaveBeenCalled()
+    expect(findButton(hostView.root, 'Reset table')).toBeTruthy()
+
+    act(() => {
+      findButton(hostView.root, 'Reset table').props.onClick()
+    })
+    act(() => {
+      findButton(hostView.root, 'Yes, reset table').props.onClick()
+    })
+    expect(onResetTable).toHaveBeenCalledOnce()
+    expect(findButton(hostView.root, 'Reset table')).toBeTruthy()
+
+    act(() => hostView.unmount())
+    renderer = null
+    const guestView = renderModal(makeProps({ isHost: false, onResetTable }))
+    expect(guestView.root.findAllByType('button').some(button => nodeText(button).includes('Reset table'))).toBe(false)
+  })
+
+  it('disables Reset table while disconnected', () => {
+    const view = renderModal(makeProps({ isHost: true, isConnected: false }))
+    expect(findButton(view.root, 'Reset table').props.disabled).toBe(true)
+  })
+
   it('lets numeric settings be cleared before typing replacement values', () => {
     const onUpdateSettings = vi.fn()
     const view = renderModal(makeProps({ onUpdateSettings }))
