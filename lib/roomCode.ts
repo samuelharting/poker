@@ -1,7 +1,7 @@
 export const ROOM_CODE_LENGTH = 6
 
 /** The one table the crew plays at: the landing page and every /room/<anything> link land here. */
-export const TABLE_ROOM_CODE = 'CREW22'
+export const TABLE_ROOM_CODE = '1'
 const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const SAFE_ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/
 const LEGACY_NUMERIC_ROOM_CODE_RE = /^[0-9]{1,20}$/
