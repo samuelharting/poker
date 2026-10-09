@@ -832,7 +832,7 @@ describe('PokerRoom timer handling', () => {
     expect(lobbyGuest?.isSpectator).toBe(true)
   })
 
-  it('hides live hands from a player once they move into spectator mode', () => {
+  it('shows live hands to a player once they move into spectator mode', () => {
     const { room, server } = createHarness()
 
     // Three-handed so the guest folding onto the rail leaves a live hand
@@ -853,11 +853,11 @@ describe('PokerRoom timer handling', () => {
     const hostSeatForSpectator = spectatorSnapshot?.state.players.find(player => player.id === host.playerId)
     const guestSeatForSpectator = spectatorSnapshot?.state.players.find(player => player.id === guest.playerId)
 
-    // Anti-cheat: while betting is open the benched guest sees no live cards or odds.
+    // Spectators watch with every live hand and the odds visible.
     expect(spectatorSnapshot?.state.phase).toBe('in_hand')
-    expect(spectatorSnapshot?.state.handOdds).toBeUndefined()
-    expect(hostSeatForSpectator?.holeCards).toBeUndefined()
-    expect(hostSeatForSpectator?.equityPercent).toBeUndefined()
+    expect(spectatorSnapshot?.state.handOdds?.mode).toBe('spectator')
+    expect(hostSeatForSpectator?.holeCards).toHaveLength(2)
+    expect(hostSeatForSpectator?.equityPercent).toEqual(expect.any(Number))
     expect(guestSeatForSpectator?.status).toBe('folded')
     expect(guestSeatForSpectator?.holeCards).toHaveLength(2)
     expect(guestSeatForSpectator?.equityPercent).toBeUndefined()
@@ -932,7 +932,7 @@ describe('PokerRoom timer handling', () => {
     ).toBe(true)
   })
 
-  it('hides live cards and odds from true spectators while betting is open', () => {
+  it('shows live cards and odds to spectators but not to players', () => {
     const { room, server } = createHarness()
 
     const host = joinPlayer(server, room, 'host', 'Alice')
@@ -951,11 +951,11 @@ describe('PokerRoom timer handling', () => {
     const guestSeatForRail = spectatorSnapshot?.state.players.find(player => player.id === guest.playerId)
 
     expect(spectatorSnapshot?.state.phase).toBe('in_hand')
-    expect(spectatorSnapshot?.state.handOdds).toBeUndefined()
-    expect(hostSeatForRail?.holeCards).toBeUndefined()
-    expect(guestSeatForRail?.holeCards).toBeUndefined()
-    expect(hostSeatForRail?.equityPercent).toBeUndefined()
-    expect(guestSeatForRail?.equityPercent).toBeUndefined()
+    expect(spectatorSnapshot?.state.handOdds?.mode).toBe('spectator')
+    expect(hostSeatForRail?.holeCards).toHaveLength(2)
+    expect(guestSeatForRail?.holeCards).toHaveLength(2)
+    expect(hostSeatForRail?.equityPercent).toEqual(expect.any(Number))
+    expect(guestSeatForRail?.equityPercent).toEqual(expect.any(Number))
 
     const hostSnapshot = lastMessage(host.connection, 'room_snapshot')
     const guestSeatForHost = hostSnapshot?.state.players.find(player => player.id === guest.playerId)
@@ -1000,7 +1000,7 @@ describe('PokerRoom timer handling', () => {
     expect(hiddenOpponent?.showCards).toBe('none')
   })
 
-  it('automatically turns a full-table entrant into a spectator without access to live hands', () => {
+  it('automatically turns a full-table entrant into a spectator who sees live hands', () => {
     const { room, server } = createHarness()
     const seated = Array.from({ length: 8 }, (_, index) => {
       const player = joinPlayer(server, room, `seat-${index}`, `Player ${index + 1}`)
@@ -1022,9 +1022,8 @@ describe('PokerRoom timer handling', () => {
     expect(lobbyWatcher?.stack).toBe(1_000)
     expect(snapshot?.state.players).toHaveLength(8)
     expect(snapshot?.state.phase).toBe('in_hand')
-    expect(snapshot?.state.handOdds).toBeUndefined()
-    expect(snapshot?.state.players.every(player => player.holeCards === undefined)).toBe(true)
-    expect(snapshot?.state.players.every(player => player.showCards === 'none')).toBe(true)
+    expect(snapshot?.state.handOdds?.mode).toBe('spectator')
+    expect(snapshot?.state.players.every(player => player.holeCards?.length === 2)).toBe(true)
   })
 
   it('seats a spectating bot immediately when the Players setting requests it', () => {
@@ -1118,7 +1117,7 @@ describe('PokerRoom timer handling', () => {
     expect(lobbyLoser?.stack).toBe(0)
   })
 
-  it('keeps live hands hidden from busted spectators while they stay on the rail', () => {
+  it('shows live hands to busted spectators on the rail', () => {
     const { room, server } = createHarness()
 
     const host = joinPlayer(server, room, 'host', 'Alice')
@@ -1160,11 +1159,14 @@ describe('PokerRoom timer handling', () => {
 
     expect(railSnapshot?.state.phase).toBe('in_hand')
     expect(railSnapshot?.state.players.some(player => player.id === busted.playerId)).toBe(false)
-    expect(railSnapshot?.state.handOdds).toBeUndefined()
-    expect(hostSeatForRail?.holeCards).toBeUndefined()
-    expect(thirdSeatForRail?.holeCards).toBeUndefined()
-    expect(hostSeatForRail?.showCards).toBe('none')
-    expect(thirdSeatForRail?.showCards).toBe('none')
+    expect(railSnapshot?.state.handOdds?.mode).toBe('spectator')
+    expect(hostSeatForRail?.holeCards).toHaveLength(2)
+    expect(thirdSeatForRail?.holeCards).toHaveLength(2)
+    expect(hostSeatForRail?.equityPercent).toEqual(expect.any(Number))
+
+    // Players still in the hand never see opponents' cards.
+    const hostSnapshot = lastMessage(host.connection, 'room_snapshot')
+    expect(hostSnapshot?.state.players.find(player => player.id === third.playerId)?.holeCards).toBeUndefined()
   })
 
   it('requires chips before a busted spectator can seat themselves again', () => {

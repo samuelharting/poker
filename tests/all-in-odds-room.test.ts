@@ -58,10 +58,10 @@ describe('broadcast all-in odds in the room', { timeout: 30_000 }, () => {
     // The spectator is never dealt in.
     expect(setup.internals.data.gameState.players.map(player => player.id)).not.toContain(rail.playerId)
 
-    // Anti-cheat: while betting is open the rail sees no live cards or odds.
+    // The rail watches with every hand and the odds visible.
     const railBefore = snapshot(rail.connection)
-    expect(railBefore.handOdds).toBeUndefined()
-    expect(railBefore.players.every(player => player.holeCards === undefined)).toBe(true)
+    expect(railBefore.handOdds?.mode).toBe('spectator')
+    expect(railBefore.players.every(player => player.holeCards?.length === 2)).toBe(true)
 
     const shoverId = act(setup, 'all_in')
     const callerId = shoverId === sam.playerId ? alex.playerId : sam.playerId
@@ -70,8 +70,8 @@ describe('broadcast all-in odds in the room', { timeout: 30_000 }, () => {
 
     // Action is still open: no odds and no opposing cards for either player.
     const railMid = snapshot(rail.connection)
-    expect(railMid.handOdds).toBeUndefined()
-    expect(railMid.players.every(player => player.holeCards === undefined)).toBe(true)
+    expect(railMid.handOdds?.mode).toBe('spectator')
+    expect(railMid.players.every(player => player.holeCards?.length === 2)).toBe(true)
     for (const viewer of [shover, caller]) {
       const view = snapshot(viewer.connection)
       expect(view.handOdds).toBeUndefined()
@@ -124,7 +124,7 @@ describe('broadcast all-in odds in the room', { timeout: 30_000 }, () => {
     expect(snapshot(rail.connection).handOdds).toBeUndefined()
   })
 
-  it('never gives a seated player or the rail live odds or cards during a normal hand', () => {
+  it('never gives a seated player live odds or opposing cards during a normal hand; the rail sees all', () => {
     const setup = setupRoom()
     send(setup.server, setup.sam.connection, { type: 'start_game' })
     for (let guard = 0; guard < 12 && setup.internals.data.gameState.phase === 'in_hand'; guard += 1) {
@@ -134,8 +134,8 @@ describe('broadcast all-in odds in the room', { timeout: 30_000 }, () => {
         expect(view.players.find(player => player.id !== viewer.playerId)!.holeCards).toBeUndefined()
       }
       const railView = snapshot(setup.rail.connection)
-      expect(railView.handOdds).toBeUndefined()
-      expect(railView.players.every(player => player.holeCards === undefined)).toBe(true)
+      expect(railView.handOdds?.mode).toBe('spectator')
+      expect(railView.players.every(player => player.holeCards?.length === 2)).toBe(true)
       const actor = setup.internals.data.gameState.players.find(player => player.id === setup.internals.data.gameState.actingPlayerId)!
       act(setup, actor.bet >= setup.internals.data.gameState.currentBet ? 'check' : 'call')
     }

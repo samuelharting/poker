@@ -630,6 +630,29 @@ describe('idle table: lazy reset and persistence', () => {
     expectFreshTable(internalsOf(second))
   })
 
+  it('a saved table adopts the new 10 s turn clock once, then keeps the host setting', async () => {
+    const storage = new Map<string, unknown>()
+    const first = await liveTable(storage)
+    const saved = JSON.parse(storage.get('room-data-v1') as string ?? JSON.stringify((first.server as unknown as { data: unknown }).data)) as Record<string, any>
+    saved.tableSettings.actionTimerDuration = 13_000
+    delete saved.timerDefaultApplied
+    storage.set('room-data-v1', JSON.stringify(saved))
+
+    const second = quietServer(roomWithStorage(storage))
+    await second.onStart()
+    const settings = (second as unknown as { data: { tableSettings: { actionTimerDuration: number } } }).data.tableSettings
+    expect(settings.actionTimerDuration).toBe(10_000)
+
+    const again = JSON.parse(storage.get('room-data-v1') as string) as Record<string, any>
+    again.tableSettings.actionTimerDuration = 20_000
+    again.timerDefaultApplied = 10_000
+    storage.set('room-data-v1', JSON.stringify(again))
+    const third = quietServer(roomWithStorage(storage))
+    await third.onStart()
+    expect((third as unknown as { data: { tableSettings: { actionTimerDuration: number } } }).data.tableSettings.actionTimerDuration)
+      .toBe(20_000)
+  })
+
   it('a restarted empty table resets on its own timer when nobody comes back', async () => {
     vi.useFakeTimers()
     const storage = new Map<string, unknown>()

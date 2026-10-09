@@ -209,6 +209,8 @@ interface RoomData {
   humansPresent?: boolean
   /** STATE_VERSION this save was written with (see onStart). */
   stateVersion?: number
+  /** Default turn clock last pushed onto this table (saved tables adopt a new default once). */
+  timerDefaultApplied?: number
 }
 
 /**
@@ -278,7 +280,7 @@ const DEFAULT_SETTINGS: TableSettings = {
   bigBlind: 20,
   startingStack: 1000,
   maxPlayers: 8,
-  actionTimerDuration: 30000,
+  actionTimerDuration: 10000,
   autoStartDelay: 7000,
   rabbitHuntingEnabled: false,
   sevenTwoRuleEnabled: true,
@@ -523,6 +525,7 @@ export default class PokerRoom implements PartyServer {
       lastHumanSeenAt: Date.now(),
       humansPresent: false,
       stateVersion: STATE_VERSION,
+      timerDefaultApplied: DEFAULT_SETTINGS.actionTimerDuration,
     }
   }
 
@@ -555,6 +558,11 @@ export default class PokerRoom implements PartyServer {
       }
       for (const player of this.data.gameState.players) {
         if (!this.isBotPlayer(player.id)) player.isConnected = false
+      }
+      // A new default turn clock applies once to a saved table; the host can change it after.
+      if (restored.timerDefaultApplied !== DEFAULT_SETTINGS.actionTimerDuration) {
+        this.data.tableSettings = { ...this.data.tableSettings, actionTimerDuration: DEFAULT_SETTINGS.actionTimerDuration }
+        this.data.timerDefaultApplied = DEFAULT_SETTINGS.actionTimerDuration
       }
       // Every socket is gone, so nobody is here. If the save was written while
       // humans were connected (or predates this field) the idle clock starts
@@ -4309,12 +4317,10 @@ export default class PokerRoom implements PartyServer {
       viewerSeat.holeCards.length > 0 &&
       (viewerSeat.status === 'active' || viewerSeat.status === 'all_in')
     )
-    // Watchers (busted, benched, on the rail) never see live hole cards: they
-    // could pass them to someone still in the hand. They see what everyone
-    // sees (tabled all-in hands, showdown).
-    const spectatorCanSeeLiveHands = false as boolean
-    void isSpectatorViewer
-    void viewerIsLiveInHand
+    // Spectators see every live hand plus win odds (friends-only table, so
+    // the broadcast view wins over strict anti-collusion).
+    const spectatorCanSeeLiveHands =
+      isSpectatorViewer && !viewerIsLiveInHand && this.data.gameState.phase === 'in_hand'
     const bettingClosed = isBettingClosed(this.data.gameState)
     const isCardRevealWindow = this.data.gameState.phase === 'in_hand' || (
       this.data.gameState.phase === 'between_hands' && Boolean(this.data.gameState.winners?.length)
