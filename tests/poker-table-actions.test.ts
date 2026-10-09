@@ -10,6 +10,7 @@ import {
   formatPlayerStatsSummary,
   getSpectatorRailState,
   getMobileCheckCallLabel,
+  getTurnActions,
   getVisibleOwnHandDescription,
   resolveRaiseDraftAmount,
   resolveCheckFoldPreAction,
@@ -136,6 +137,20 @@ describe('facing an all-in with nobody left to act', () => {
       allInAmount: 1000,
       othersCanRespond: true,
     }).map(button => button.key)).toEqual(['call', 'raise', 'all_in', 'fold'])
+  })
+})
+
+describe('betting not reopened (short all-in)', () => {
+  it('offers only Fold and Call when the server says the player may not raise', () => {
+    expect(getTurnActions({ stack: 900, toCall: 50, canCheck: false, canRaise: false })).toEqual(['fold', 'call'])
+  })
+
+  it('still offers All-in when it is only a call for less', () => {
+    expect(getTurnActions({ stack: 30, toCall: 30, canCheck: false, canRaise: false })).toEqual(['fold', 'call', 'all_in'])
+  })
+
+  it('keeps Raise and All-in when betting is open', () => {
+    expect(getTurnActions({ stack: 900, toCall: 50, canCheck: false })).toEqual(['fold', 'call', 'raise', 'all_in'])
   })
 })
 

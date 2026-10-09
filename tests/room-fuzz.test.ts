@@ -9,6 +9,28 @@ import { createThreeTableViewModel } from '@/components/three/tableViewModel'
 import { createHarness, disconnect, joinPlayer, lastMessage, send } from './helpers/roomHarness'
 import { bestReferenceHand, cardKey, compareReference, scoreFive, type ReferenceScore } from './helpers/bruteForceHand'
 
+type ProcessAction = typeof import('@/lib/poker/engine').processAction
+type ActionArgs = Parameters<ProcessAction>
+
+/**
+ * Every player action the room sends to the engine (humans, bots, timeouts,
+ * host chip changes) passes through this audit hook, which judges it against
+ * an independent model of the No-Limit betting rules.
+ */
+const actionAudit = vi.hoisted(() => ({
+  hook: null as null | ((original: ProcessAction, ...args: ActionArgs) => ReturnType<ProcessAction>),
+}))
+
+vi.mock('@/lib/poker/engine', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/poker/engine')>()
+  return {
+    ...actual,
+    processAction: (...args: ActionArgs) => (
+      actionAudit.hook ? actionAudit.hook(actual.processAction, ...args) : actual.processAction(...args)
+    ),
+  }
+})
+
 /**
  * Fuzz: thousands of random hands through the real PokerRoom (fake timers,
  * seeded RNG) with all-ins, timeouts, disconnects, sit-outs, rebuys, run it
@@ -74,8 +96,12 @@ function referencePots(players: InternalPlayer[]): Array<{ amount: number; eligi
     const eligible = players
       .filter(player => player.status !== 'folded' && player.holeCards.length === 2 && player.totalInPot >= level)
       .map(player => player.id)
-    if (eligible.length === 0 && pots.length > 0) {
-      pots[pots.length - 1]!.amount += amount
+    const previousPot = pots[pots.length - 1]
+    if (eligible.length === 0 && previousPot) {
+      previousPot.amount += amount
+    } else if (previousPot && previousPot.eligible.join() === eligible.join()) {
+      // Same contenders: one pot (odd chips are split once per pot).
+      previousPot.amount += amount
     } else if (amount > 0) {
       pots.push({ amount, eligible })
     }
@@ -96,7 +122,8 @@ describe('fuzz: random hands through the real room', () => {
 
   const seeds = process.env.FUZZ_SEED ? [Number(process.env.FUZZ_SEED)] : DEFAULT_SEEDS
   for (const seed of seeds) {
-    it(`keeps every hand correct (seed ${seed})`, { timeout: 600_000 }, () => {
+    // Big runs (FUZZ_HANDS=20000) take roughly 50 ms a hand.
+    it(`keeps every hand correct (seed ${seed})`, { timeout: Math.max(600_000, HANDS_PER_SEED * 200) }, () => {
       const summary = runFuzz(seed, HANDS_PER_SEED)
       console.log(`[fuzz] seed=${seed} ${JSON.stringify(summary)}`)
     })
@@ -112,7 +139,10 @@ function runFuzz(seed: number, targetHands: number) {
   const pick = <T,>(items: readonly T[]): T => items[Math.floor(rand() * items.length)]!
   const chance = (p: number) => rand() < p
 
-  const summary = { hands: 0, showdowns: 0, foldWins: 0, runItTwice: 0, sidePotHands: 0, timeouts: 0, timeoutChecks: 0, tables: 0, steps: 0 }
+  const summary = {
+    hands: 0, showdowns: 0, foldWins: 0, runItTwice: 0, sidePotHands: 0, timeouts: 0, timeoutChecks: 0, tables: 0, steps: 0,
+    raises: 0, shortAllIns: 0, closedToRaise: 0, illegalRejected: 0,
+  }
 
   while (summary.hands < targetHands) {
     summary.tables += 1
@@ -148,6 +178,79 @@ function runFuzz(seed: number, targetHands: number) {
       throw new Error(`[fuzz seed=${seed} table=${tableNumber} hand=${state.handNumber} phase=${state.phase} round=${state.round}] ${message}`)
     }
 
+    /** Independent street model: bet to match, last full raise, and the bet each player last answered. */
+    let street: { key: string; currentBet: number; fullRaise: number; actedAt: Map<string, number> } | null = null
+    // The room swallows engine errors, so a rules violation is parked here and raised by checkStep.
+    let auditFailure: string | null = null
+    const auditFail = (message: string): never => {
+      auditFailure ??= `${message} (last op ${lastOp})`
+      throw new Error(message)
+    }
+    actionAudit.hook = (original, state, playerId, action, amount) => {
+      const key = `${state.handNumber}:${state.round}`
+      if (!street || street.key !== key) {
+        street = { key, currentBet: state.round === 'preflop' ? state.bigBlind : 0, fullRaise: state.bigBlind, actedAt: new Map() }
+      }
+      const model = street
+      const player = state.players.find(candidate => candidate.id === playerId)
+      const isTurn = state.phase === 'in_hand' && state.actingPlayerId === playerId && player?.status === 'active'
+      if (isTurn && state.currentBet !== model.currentBet) {
+        auditFail(`engine bet to match is ${state.currentBet}, the rules model says ${model.currentBet}`)
+      }
+      const maxTotal = player ? player.stack + player.bet : 0
+      const othersCanAnswer = state.players.some(other => other.id !== playerId && other.status === 'active' && other.stack > 0)
+      const answered = model.actedAt.get(playerId)
+      const reopened = answered === undefined || model.currentBet - answered >= model.fullRaise
+      const mayRaise = isTurn && maxTotal > model.currentBet && othersCanAnswer && reopened
+      if (isTurn && maxTotal > model.currentBet && !mayRaise) summary.closedToRaise += 1
+
+      let after: InternalGameState
+      try {
+        after = original(state, playerId, action, amount)
+      } catch (error) {
+        if (isTurn) {
+          const toCall = model.currentBet - player!.bet
+          const legalRaise = action === 'raise' && mayRaise && Number.isInteger(amount) &&
+            amount! >= model.currentBet + model.fullRaise && amount! <= maxTotal
+          const legal = action === 'fold' || action === 'call' || (action === 'check' && toCall <= 0) || legalRaise ||
+            (action === 'all_in' && (maxTotal <= model.currentBet || mayRaise))
+          if (legal) auditFail(`legal ${action}${amount !== undefined ? ` ${amount}` : ''} by ${player!.nickname} was rejected: ${(error as Error).message}`)
+          summary.illegalRejected += 1
+        }
+        throw error
+      }
+
+      const playerAfter = after.players.find(candidate => candidate.id === playerId)!
+      // Betting goes on in the same street only while someone holds the action
+      // (a paced all-in runout or a run-it-twice vote keeps the round name but closes it).
+      const sameStreet = after.phase === 'in_hand' && after.handNumber === state.handNumber &&
+        after.round === state.round && after.actingPlayerId !== null
+      const newBet = sameStreet
+        ? playerAfter.bet
+        : action === 'fold' || action === 'check' ? player!.bet : Math.min(maxTotal, model.currentBet)
+      if (!sameStreet && (action === 'raise' || action === 'all_in') && maxTotal > model.currentBet && playerAfter.status !== 'folded') {
+        auditFail(`${player!.nickname}'s raise closed the street with nobody left to answer it`)
+      }
+      if (newBet > model.currentBet) {
+        const raiseBy = newBet - model.currentBet
+        if (!mayRaise) {
+          auditFail(`${player!.nickname} raised to ${newBet} although betting was not reopened to them (answered ${answered}, bet ${model.currentBet}, full raise ${model.fullRaise})`)
+        }
+        if (raiseBy < model.fullRaise && playerAfter.stack > 0) {
+          auditFail(`${player!.nickname} raised by ${raiseBy}, less than the minimum ${model.fullRaise}, without being all-in`)
+        }
+        summary.raises += 1
+        if (raiseBy >= model.fullRaise) model.fullRaise = raiseBy
+        else summary.shortAllIns += 1
+        model.currentBet = newBet
+      }
+      if (playerAfter.status !== 'folded') model.actedAt.set(playerId, model.currentBet)
+      if (sameStreet && after.currentBet !== model.currentBet) {
+        auditFail(`after ${player!.nickname}'s ${action} the engine bet is ${after.currentBet}, the rules model says ${model.currentBet}`)
+      }
+      return after
+    }
+
     const ended = new Map<number, EndedHand>()
     const toValidate: number[] = []
     const historyChecks: number[] = []
@@ -177,7 +280,51 @@ function runFuzz(seed: number, targetHands: number) {
       originalDealt()
       const state = srv.data.gameState
       dealtIn = state.players.filter(player => player.holeCards.length === 2).map(player => player.id)
+      checkBlinds(state)
       track = { handNumber: state.handNumber, statuses: new Map(state.players.filter(p => p.holeCards.length === 2).map(p => [p.id, p.status])) }
+    }
+
+    let previousBlinds: { handNumber: number; bbSeat: number; dealt: number } | null = null
+    /** Button and blinds: one big blind, never a double blind, heads-up button = small blind, the big blind moves one seat at a time. */
+    function checkBlinds(state: InternalGameState) {
+      const dealt = state.players.filter(player => player.holeCards.length === 2)
+      const sbs = state.players.filter(player => player.isSB)
+      const bbs = state.players.filter(player => player.isBB)
+      const dealer = state.players.filter(player => player.isDealer)
+      if (bbs.length !== 1) fail(`${bbs.length} big blinds posted`)
+      if (sbs.length > 1) fail(`${sbs.length} small blinds posted`)
+      if (dealer.length !== 1 || dealer[0]!.seatIndex !== state.dealerSeatIndex) fail('the button is not on exactly one dealt-in player')
+      if (state.players.some(player => player.isSB && player.isBB)) fail('a player posted both blinds')
+      for (const blind of [...sbs, ...bbs, ...dealer]) {
+        if (blind.holeCards.length !== 2) fail(`${blind.nickname} holds a blind or the button without being dealt in`)
+      }
+      const bb = bbs[0]!
+      if (dealt.length === 2) {
+        if (sbs.length !== 1 || !sbs[0]!.isDealer) fail('heads-up the button must post the small blind')
+      } else if (sbs[0]?.isDealer) {
+        fail('the button posted the small blind with more than two players')
+      }
+      // Preflop action starts left of the big blind with the first player able to act.
+      const preflopOrder = (player: InternalPlayer) => (player.seatIndex - bb.seatIndex + 8) % 8
+      const canAct = dealt.filter(player => player.status === 'active' && player.stack > 0 && player.id !== bb.id)
+      if (state.phase === 'in_hand' && state.actingPlayerId && canAct.length > 0) {
+        const first = [...canAct].sort((a, b) => preflopOrder(a) - preflopOrder(b))[0]!
+        if (state.actingPlayerId !== first.id) {
+          fail(`preflop action starts with ${state.players.find(p => p.id === state.actingPlayerId)?.nickname}, not ${first.nickname} left of the big blind`)
+        }
+      }
+      if (previousBlinds && previousBlinds.handNumber === state.handNumber - 1 && previousBlinds.dealt >= 2) {
+        if (bb.seatIndex === previousBlinds.bbSeat) fail(`${bb.nickname} posted the big blind two hands in a row`)
+        // Nobody dealt in sits between last hand's big blind and this one: no one skipped it.
+        const lastBb = previousBlinds.bbSeat
+        const gap = (bb.seatIndex - lastBb + 8) % 8
+        const skipped = dealt.find(player => {
+          const offset = (player.seatIndex - lastBb + 8) % 8
+          return offset > 0 && offset < gap
+        })
+        if (skipped) fail(`${skipped.nickname} skipped the big blind (it moved from seat ${lastBb} to ${bb.seatIndex})`)
+      }
+      previousBlinds = { handNumber: state.handNumber, bbSeat: bb.seatIndex, dealt: dealt.length }
     }
 
     let connCounter = 0
@@ -258,6 +405,7 @@ function runFuzz(seed: number, targetHands: number) {
       if (human.conn) disconnect(server, room, human.conn)
     }
     vi.clearAllTimers()
+    actionAudit.hook = null
 
     // -------------------------------------------------------------------------
 
@@ -442,6 +590,7 @@ function runFuzz(seed: number, targetHands: number) {
 
     function checkStep() {
       const state = srv.data.gameState
+      if (auditFailure) fail(`rules audit: ${auditFailure}`)
       if (track) {
         const endedTrack = ended.get(track.handNumber)
         if (endedTrack) {
@@ -451,7 +600,7 @@ function runFuzz(seed: number, targetHands: number) {
       }
       const ledger = srv.buildLedgerSnapshot()
       if (ledger.totalChips !== ledger.totalBoughtIn) {
-        fail(`chips not conserved: ${ledger.totalChips} on the books vs ${ledger.totalBoughtIn} bought in; last op ${lastOp}; rows ${JSON.stringify(ledger.rows.map(row => [row.name, row.where, row.boughtIn, row.chips]))}; players ${JSON.stringify(state.players.map(p => [p.nickname, p.status, p.stack, p.totalInPot]))} spectators ${JSON.stringify(srv.data.spectatorStacks)}`)
+        fail(`chips not conserved: ${ledger.totalChips} on the books vs ${ledger.totalBoughtIn} bought in; last op ${lastOp}; rows ${JSON.stringify(ledger.rows.map(row => [row.name, row.where, row.boughtIn, row.chips]))}; players ${JSON.stringify(state.players.map(p => [p.nickname, p.status, p.stack, p.totalInPot]))} spectators ${JSON.stringify(srv.data.spectatorStacks)} actions ${JSON.stringify(state.recentActions.slice(0, 14))}`)
       }
       for (const player of state.players) {
         if (player.stack < 0 || player.totalInPot < 0 || player.bet < 0) fail(`${player.nickname} has negative chips`)
@@ -586,7 +735,7 @@ function runFuzz(seed: number, targetHands: number) {
             distribute(share, pot.eligible, board, expected)
           }
         })
-        comparePayouts(expected, totals, pots.length * 2 + 2, failHand)
+        comparePayouts(expected, totals, 0, failHand)
         for (const winner of winners) {
           const runs = runBoards.map((_, index) => state.runItTwice!.boards![index]!.winners.find(entry => entry.playerId === winner.playerId)?.handDescription)
           const description = winner.handDescription ?? ''
@@ -601,7 +750,7 @@ function runFuzz(seed: number, targetHands: number) {
       if (state.communityCards.length !== 5) failHand(`showdown with ${state.communityCards.length} board cards`)
       const expected = new Map<string, number>()
       for (const pot of pots) distribute(pot.amount, pot.eligible, state.communityCards, expected)
-      comparePayouts(expected, totals, pots.length + 1, failHand)
+      comparePayouts(expected, totals, 0, failHand)
       for (const winner of winners) {
         const player = state.players.find(candidate => candidate.id === winner.playerId)!
         const best = bestOf(player, state.communityCards)
@@ -613,7 +762,10 @@ function runFuzz(seed: number, targetHands: number) {
         if (amount <= 0 || eligible.length === 0) return
         const scored = eligible.map(id => ({ id, score: bestOf(state.players.find(candidate => candidate.id === id)!, board) }))
         const top = scored.reduce((best, entry) => (compareReference(entry.score, best.score) > 0 ? entry : best))
-        const tied = scored.filter(entry => compareReference(entry.score, top.score) === 0)
+        const fromButton = (id: string) => (state.players.find(candidate => candidate.id === id)!.seatIndex - state.dealerSeatIndex - 1 + 16) % 8
+        const tied = scored
+          .filter(entry => compareReference(entry.score, top.score) === 0)
+          .sort((a, b) => fromButton(a.id) - fromButton(b.id))
         const share = Math.floor(amount / tied.length)
         let remainder = amount - share * tied.length
         for (const entry of tied) {
@@ -628,7 +780,7 @@ function runFuzz(seed: number, targetHands: number) {
       for (const id of ids) {
         const want = expected.get(id) ?? 0
         const got = actual.get(id) ?? 0
-        // Odd chips may land on a different tied winner; anything more is a wrong payout.
+        // Exact: odd chips go one at a time to the first tied winners left of the button.
         if (Math.abs(want - got) > tolerance) {
           const name = srv.data.gameState.players.find(player => player.id === id)?.nickname ?? id
           failHand(`${name} was paid ${got}, the reference evaluator pays ${want}`)

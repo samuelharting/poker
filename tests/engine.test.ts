@@ -57,6 +57,16 @@ function setup2Players(): InternalGameState {
   return state
 }
 
+/** Everyone still in calls the big blind, so no bet is left uncalled at the showdown. */
+function callTheBigBlind(state: InternalGameState): void {
+  for (const player of state.players) {
+    const owed = state.bigBlind - player.totalInPot
+    player.stack -= owed
+    player.totalInPot += owed
+    player.bet += owed
+  }
+}
+
 function setup3Players(): InternalGameState {
   let state = createInitialGameState('TEST')
   state = addPlayer(state, 'p1', 'Alice', 0)
@@ -358,19 +368,19 @@ describe('bounty payouts', () => {
       { rank: '9', suit: 'spades' },
     ]
     state.round = 'showdown'
-    state.round = 'showdown'
+    callTheBigBlind(state)
 
     const before = Object.fromEntries(state.players.map(p => [p.id, p.stack] as const))
     const resolved = resolveShowdown(state)
     const winnerResult = resolved.winners?.find(w => w.playerId === winner.id)
 
-    expect(winnerResult?.amount).toBe(30)
+    expect(winnerResult?.amount).toBe(60)
     expect(resolved.bounty?.active).toBe(true)
     expect(resolved.bounty?.amount).toBe(40)
     expect(resolved.bounty?.recipientPlayerIds).toEqual([winner.id])
     expect(new Set(resolved.bounty?.contributors ?? [])).toEqual(new Set([loserA.id, loserB.id]))
 
-    expect(resolved.players.find(p => p.id === winner.id)?.stack).toBe(before[winner.id]! + 70)
+    expect(resolved.players.find(p => p.id === winner.id)?.stack).toBe(before[winner.id]! + 100)
     expect(resolved.players.find(p => p.id === loserA.id)?.stack).toBe(before[loserA.id]! - 20)
     expect(resolved.players.find(p => p.id === loserB.id)?.stack).toBe(before[loserB.id]! - 20)
   })
@@ -392,7 +402,7 @@ describe('bounty payouts', () => {
       { rank: '4', suit: 'hearts' },
     ]
     state.round = 'showdown'
-    state.round = 'showdown'
+    callTheBigBlind(state)
 
     const before = Object.fromEntries(state.players.map(p => [p.id, p.stack] as const))
     const resolved = resolveShowdown(state)
@@ -400,14 +410,14 @@ describe('bounty payouts', () => {
       resolved.winners?.map(w => [w.playerId, w.amount] as const) ?? []
     )
 
-    expect(amounts).toMatchObject({ [p1.id]: 15, [p2.id]: 15 })
+    expect(amounts).toMatchObject({ [p1.id]: 30, [p2.id]: 30 })
     expect(resolved.bounty?.active).toBe(true)
     expect(resolved.bounty?.amount).toBe(20)
     expect(new Set(resolved.bounty?.contributors ?? [])).toEqual(new Set([p3.id]))
     expect(new Set(resolved.bounty?.recipientPlayerIds ?? [])).toEqual(new Set([p1.id, p2.id]))
 
-    expect(resolved.players.find(p => p.id === p1.id)?.stack).toBe(before[p1.id]! + 15 + 10)
-    expect(resolved.players.find(p => p.id === p2.id)?.stack).toBe(before[p2.id]! + 15 + 10)
+    expect(resolved.players.find(p => p.id === p1.id)?.stack).toBe(before[p1.id]! + 30 + 10)
+    expect(resolved.players.find(p => p.id === p2.id)?.stack).toBe(before[p2.id]! + 30 + 10)
     expect(resolved.players.find(p => p.id === p3.id)?.stack).toBe(before[p3.id]! - 20)
   })
 
@@ -536,11 +546,12 @@ describe('bounty payouts', () => {
 
     const resolved = resolveShowdown(state)
 
-    expect(resolved.totalPot).toBe(220)
+    // The winner's last 20 (100 vs 80) was never called: it goes back first.
+    expect(resolved.totalPot).toBe(200)
     expect(resolved.bounty?.active).toBe(true)
     expect(resolved.bounty?.amount).toBe(20)
     expect(resolved.bounty?.contributors).toEqual([sidePotContributor.id])
-    expect(resolved.winners?.map(w => w.amount)).toEqual([220])
+    expect(resolved.winners?.map(w => w.amount)).toEqual([200])
     expect(resolved.winners?.[0]?.playerId).toBe(winner.id)
   })
 })

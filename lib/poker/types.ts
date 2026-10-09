@@ -236,6 +236,12 @@ export interface TableState {
   currentBet: number
   minRaise: number
   actingPlayerId: string | null
+  /**
+   * Set only for the acting player's own snapshot: false when they may just
+   * call or fold (a short all-in did not reopen the betting to them, or
+   * everyone else is all-in).
+   */
+  canRaise?: boolean
   dealerSeatIndex: number
   smallBlind: number
   bigBlind: number
@@ -296,6 +302,19 @@ export interface LadyLuckCompanionState {
 export interface InternalPlayer extends Omit<SeatPlayer, 'holeCards' | 'hasCards'> {
   holeCards: Card[]
   hasActedThisRound: boolean
+  /**
+   * The bet to match when this player last acted this street. Betting only
+   * reopens to them once the bet has grown by a full raise since (one full
+   * raise, or several short all-ins that add up to one).
+   */
+  actedAtBet?: number
+}
+
+/** Where the blinds and button were last hand, so the big blind moves forward one player at a time. */
+export interface BlindPositions {
+  button: number
+  smallBlind: number | null
+  bigBlind: number
 }
 
 export interface InternalGameState {
@@ -315,6 +334,8 @@ export interface InternalGameState {
   actingPlayerId: string | null
   actingPlayerIndex: number
   dealerSeatIndex: number
+  /** Seats of last hand's button and blinds (absent before the first hand). */
+  blindPositions?: BlindPositions
   smallBlind: number
   bigBlind: number
   startingStack: number

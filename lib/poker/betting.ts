@@ -2,6 +2,9 @@ import type { InternalPlayer, Pot } from './types'
 
 type PotParticipant = Pick<InternalPlayer, 'id' | 'status' | 'totalInPot'>
 
+/** Only a hand still in play (not folded, not sitting out) can win a pot. */
+const canWinPot = (p: PotParticipant) => p.status === 'active' || p.status === 'all_in'
+
 /**
  * Calculate the minimum raise amount.
  * The minimum raise is at least the size of the last raise, or the big blind.
@@ -51,7 +54,7 @@ export function buildSidePots(players: PotParticipant[]): Pot[] {
 
     if (potAmount > 0) {
       const eligible = activePlayers
-        .filter(p => p.totalInPot >= level && p.status !== 'folded')
+        .filter(p => p.totalInPot >= level && canWinPot(p))
         .map(p => p.id)
 
       pots.push({ amount: potAmount, eligiblePlayerIds: eligible })
@@ -67,13 +70,13 @@ export function buildSidePots(players: PotParticipant[]): Pot[] {
 
   if (remainingAmount > 0) {
     const eligible = activePlayers
-      .filter(p => p.status !== 'folded' && p.status !== 'all_in')
+      .filter(p => p.status === 'active')
       .map(p => p.id)
 
     // If all remaining eligible are all-in too, include them
     if (eligible.length === 0) {
       const allEligible = activePlayers
-        .filter(p => p.status !== 'folded' && p.totalInPot > previousLevel)
+        .filter(p => canWinPot(p) && p.totalInPot > previousLevel)
         .map(p => p.id)
       if (allEligible.length > 0) {
         pots.push({ amount: remainingAmount, eligiblePlayerIds: allEligible })
@@ -86,7 +89,7 @@ export function buildSidePots(players: PotParticipant[]): Pot[] {
   // If no side pots were created, build a single main pot
   if (pots.length === 0) {
     const total = activePlayers.reduce((sum, p) => sum + p.totalInPot, 0)
-    const eligible = activePlayers.filter(p => p.status !== 'folded').map(p => p.id)
+    const eligible = activePlayers.filter(canWinPot).map(p => p.id)
     if (total > 0) {
       pots.push({ amount: total, eligiblePlayerIds: eligible })
     }

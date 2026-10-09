@@ -16,6 +16,7 @@ import { buildHandHistoryEntry, upsertHandHistory, type HandForensics } from '..
 import { normalizePlayerUsername, type PlayerAvatarCustomization } from '../lib/profile'
 import {
   advanceAllInRunout,
+  canPlayerRaise,
   createInitialGameState,
   foldLeavingPlayer,
   isBettingClosed,
@@ -5149,9 +5150,11 @@ export default class PokerRoom implements PartyServer {
 
     const toCall = Math.max(0, this.data.gameState.currentBet - player.bet)
     const maxTotalBet = player.stack + player.bet
+    // After a short all-in (or with everyone else all-in) only call or fold is legal.
+    const mayRaise = canPlayerRaise(this.data.gameState, playerId)
 
     if (toCall === 0) {
-      if (player.stack > this.data.gameState.bigBlind * 2 && Math.random() < 0.22) {
+      if (mayRaise && player.stack > this.data.gameState.bigBlind * 2 && Math.random() < 0.22) {
         const raiseTo = Math.min(
           maxTotalBet,
           Math.max(this.data.gameState.minRaise, this.data.gameState.currentBet + this.data.gameState.bigBlind)
@@ -5171,7 +5174,7 @@ export default class PokerRoom implements PartyServer {
 
     const pressureThreshold = Math.max(this.data.gameState.bigBlind * 2, Math.floor(player.stack * 0.18))
     if (toCall <= pressureThreshold) {
-      if (player.stack > toCall + this.data.gameState.bigBlind * 2 && Math.random() < 0.14) {
+      if (mayRaise && player.stack > toCall + this.data.gameState.bigBlind * 2 && Math.random() < 0.14) {
         const raiseTo = Math.min(
           maxTotalBet,
           Math.max(this.data.gameState.minRaise, this.data.gameState.currentBet + this.data.gameState.bigBlind)

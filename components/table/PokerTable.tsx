@@ -956,6 +956,30 @@ export function canAnyOpponentRespond(
   ))
 }
 
+/**
+ * Actions for the player to act. When the server says betting is not reopened
+ * (a short all-in, or everyone else all-in) only call or fold remain, and
+ * all-in only when it is no more than a call.
+ */
+export function getTurnActions({
+  stack,
+  toCall,
+  canCheck,
+  canRaise = true,
+}: {
+  stack: number
+  toCall: number
+  canCheck: boolean
+  canRaise?: boolean
+}): PokerAction[] {
+  const actions: PokerAction[] = ['fold']
+  if (canCheck) actions.push('check')
+  else if (toCall > 0) actions.push('call')
+  if (canRaise && stack > toCall) actions.push('raise')
+  if (canRaise || stack <= toCall) actions.push('all_in')
+  return actions
+}
+
 export function buildActionButtonDescriptors({
   legalActions,
   toCall,
@@ -1845,37 +1869,22 @@ export function PokerTable({
 
   const toCall = me ? Math.min(state.currentBet - me.bet, me.stack) : 0
   const canCheck = me ? me.bet >= state.currentBet : false
+  const mayRaise = state.canRaise !== false
 
   const legalActions = useMemo(() => {
     if (!isMyTurn || !me || me.status !== 'active' || !isConnected) {
       return []
     }
-
-    const actions: Array<'fold' | 'check' | 'call' | 'raise' | 'all_in'> = ['fold']
-    if (canCheck) {
-      actions.push('check')
-    } else if (toCall > 0) {
-      actions.push('call')
-    }
-    if (me.stack > toCall) {
-      actions.push('raise')
-    }
-    actions.push('all_in')
-    return actions
-  }, [canCheck, isConnected, isMyTurn, me, toCall])
+    return getTurnActions({ stack: me.stack, toCall, canCheck, canRaise: mayRaise })
+  }, [canCheck, isConnected, isMyTurn, mayRaise, me, toCall])
   // Desktop keeps the tray up (buttons disabled) through a brief reconnect so
   // the decision does not vanish; mobile has its own reconnect banner.
   const turnActions = useMemo<Array<'fold' | 'check' | 'call' | 'raise' | 'all_in'>>(() => {
     if (!isMyTurn || !me || me.status !== 'active') {
       return []
     }
-    const actions: Array<'fold' | 'check' | 'call' | 'raise' | 'all_in'> = ['fold']
-    if (canCheck) actions.push('check')
-    else if (toCall > 0) actions.push('call')
-    if (me.stack > toCall) actions.push('raise')
-    actions.push('all_in')
-    return actions
-  }, [canCheck, isMyTurn, me, toCall])
+    return getTurnActions({ stack: me.stack, toCall, canCheck, canRaise: mayRaise })
+  }, [canCheck, isMyTurn, mayRaise, me, toCall])
   const isTrayReconnecting = !isConnected && !isMobileViewport && turnActions.length > 0
   const trayActions = legalActions.length > 0 ? legalActions : isTrayReconnecting ? turnActions : legalActions
   const hasActionTray = isInHand && isMyTurn && Boolean(me) && trayActions.length > 0

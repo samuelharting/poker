@@ -63,6 +63,69 @@ function seatIndexToPlayerIndex(
   return players.findIndex(p => p.seatIndex === seatIndex)
 }
 
+const SEAT_COUNT = 8
+
+/** The nearest seat counter-clockwise (to the right) whose seat passes the test. */
+function previousSeat(fromSeat: number, isEligible: (seat: number) => boolean): number {
+  for (let i = 1; i <= SEAT_COUNT; i++) {
+    const seat = (fromSeat - i + SEAT_COUNT) % SEAT_COUNT
+    if (isEligible(seat)) return seat
+  }
+  return fromSeat
+}
+
+/** The nearest seat clockwise (to the left) whose seat passes the test. */
+function followingSeat(fromSeat: number, isEligible: (seat: number) => boolean): number {
+  for (let i = 1; i <= SEAT_COUNT; i++) {
+    const seat = (fromSeat + i) % SEAT_COUNT
+    if (isEligible(seat)) return seat
+  }
+  return fromSeat
+}
+
+/**
+ * Button and blinds for the next hand, among the seats being dealt in.
+ *
+ * The big blind moves forward exactly one player every hand (the next player
+ * dealt in after last hand's big blind), so nobody skips it when someone busts
+ * or leaves, and nobody pays it twice in a row. The small blind is last hand's
+ * big blind; if that player is gone the small blind is dead (nobody posts it).
+ * The button sits just to the right of the blinds, always on a live player.
+ * Heads-up the button posts the small blind (acts first preflop, last after).
+ */
+function chooseBlindPositions(
+  s: InternalGameState,
+  dealt: Set<number>
+): { button: number; smallBlind: number | null; bigBlind: number } {
+  const isDealt = (seat: number) => dealt.has(seat)
+  const previous = s.blindPositions
+  // Continue from last hand only if the button was not moved by hand since.
+  const bigBlind = previous && previous.button === s.dealerSeatIndex
+    ? followingSeat(previous.bigBlind, isDealt)
+    : null
+
+  if (bigBlind === null) {
+    // First hand (or a reset): button to the next player, blinds after it.
+    const buttonSeat = followingSeat(s.dealerSeatIndex, isDealt)
+    if (dealt.size === 2) {
+      return { button: buttonSeat, smallBlind: buttonSeat, bigBlind: followingSeat(buttonSeat, isDealt) }
+    }
+    const sb = followingSeat(buttonSeat, isDealt)
+    return { button: buttonSeat, smallBlind: sb, bigBlind: followingSeat(sb, isDealt) }
+  }
+
+  if (dealt.size === 2) {
+    const other = followingSeat(bigBlind, isDealt)
+    return { button: other, smallBlind: other, bigBlind }
+  }
+
+  const smallBlind = previous!.bigBlind !== bigBlind && isDealt(previous!.bigBlind)
+    ? previous!.bigBlind
+    : null
+  const button = previousSeat(smallBlind ?? bigBlind, seat => isDealt(seat) && seat !== bigBlind)
+  return { button, smallBlind, bigBlind }
+}
+
 /** Find the next occupied seat index (clockwise) */
 function nextSeatIndex(
   players: InternalPlayer[],
@@ -202,6 +265,26 @@ export function runRabbitHunt(state: InternalGameState): InternalGameState {
   }
 
   return s
+}
+
+/**
+ * Winners of a split pot in seat order starting left of the button: odd chips
+ * go one at a time to the first of them (TDA).
+ */
+function orderFromButton(s: InternalGameState, playerIds: string[]): string[] {
+  const distance = (id: string) => {
+    const seat = s.players.find(player => player.id === id)?.seatIndex ?? 0
+    return (seat - s.dealerSeatIndex - 1 + SEAT_COUNT * 2) % SEAT_COUNT
+  }
+  return [...playerIds].sort((a, b) => distance(a) - distance(b))
+}
+
+/** Split a pot evenly; leftover chips go one each to the first winners left of the button. */
+function splitPotShares(s: InternalGameState, amount: number, winnerIds: string[]): Array<[string, number]> {
+  const ordered = orderFromButton(s, winnerIds)
+  const share = Math.floor(amount / ordered.length)
+  const remainder = amount - share * ordered.length
+  return ordered.map((id, index) => [id, share + (index < remainder ? 1 : 0)])
 }
 
 function splitAmountByWeight(
@@ -455,6 +538,7 @@ export function startHand(state: InternalGameState): InternalGameState {
     player.totalInPot = 0
     player.holeCards = []
     player.hasActedThisRound = false
+    player.actedAtBet = undefined
     player.lastAction = undefined
     player.lastActionId = undefined
     player.isDealer = false
@@ -468,12 +552,12 @@ export function startHand(state: InternalGameState): InternalGameState {
     }
   }
 
-  // Advance dealer button to next eligible player
-  s.dealerSeatIndex = nextSeatIndex(
-    s.players,
-    s.dealerSeatIndex,
-    p => eligible.some(e => e.id === p.id)
+  const { button, smallBlind: sbSeatIndex, bigBlind: bbSeatIndex } = chooseBlindPositions(
+    s,
+    new Set(eligible.map(player => player.seatIndex))
   )
+  s.dealerSeatIndex = button
+  s.blindPositions = { button, smallBlind: sbSeatIndex, bigBlind: bbSeatIndex }
 
   // Assign dealer, SB, BB
   const dealerPlayerIdx = seatIndexToPlayerIndex(s.players, s.dealerSeatIndex)
@@ -481,26 +565,10 @@ export function startHand(state: InternalGameState): InternalGameState {
     s.players[dealerPlayerIdx]!.isDealer = true
   }
 
-  // SB = next after dealer. Heads-up, the button itself posts the small blind
-  // so it acts first preflop and last on every later street.
-  const sbSeatIndex = eligible.length === 2
-    ? s.dealerSeatIndex
-    : nextSeatIndex(
-      s.players,
-      s.dealerSeatIndex,
-      p => eligible.some(e => e.id === p.id)
-    )
-  const sbPlayerIdx = seatIndexToPlayerIndex(s.players, sbSeatIndex)
-
-  // BB = next after SB
-  const bbSeatIndex = nextSeatIndex(
-    s.players,
-    sbSeatIndex,
-    p => eligible.some(e => e.id === p.id)
-  )
+  const sbPlayerIdx = sbSeatIndex === null ? -1 : seatIndexToPlayerIndex(s.players, sbSeatIndex)
   const bbPlayerIdx = seatIndexToPlayerIndex(s.players, bbSeatIndex)
 
-  // Post small blind
+  // Post small blind (none when it is dead: last hand's big blind left or busted)
   if (sbPlayerIdx >= 0) {
     const sbPlayer = s.players[sbPlayerIdx]!
     s.players[sbPlayerIdx]!.isSB = true
@@ -561,6 +629,45 @@ export function startHand(state: InternalGameState): InternalGameState {
 }
 
 /**
+ * Whether this player may put in more than a call right now (raise, or an
+ * all-in bigger than the call). No-Limit rules (TDA / Robert's Rules):
+ * - they must have chips beyond the call, and someone else must be able to
+ *   answer (not everyone else all-in);
+ * - a player who has not acted yet this street may always raise;
+ * - a player who already acted may raise again only once the bet has grown
+ *   by at least a full raise since they acted. An all-in for less than a full
+ *   raise does not reopen the betting to them (they may only call or fold),
+ *   but several short all-ins that add up to a full raise do.
+ */
+function playerMayRaise(state: InternalGameState, player: InternalPlayer): boolean {
+  if (player.status !== 'active' || player.stack <= 0) return false
+  if (player.stack <= Math.max(0, state.currentBet - player.bet)) return false
+  const othersCanAnswer = state.players.some(other => (
+    other.id !== player.id && other.status === 'active' && other.stack > 0
+  ))
+  if (!othersCanAnswer) return false
+  if (!player.hasActedThisRound) return true
+  const fullRaise = Math.max(state.lastRaiseSize, state.bigBlind)
+  return state.currentBet - (player.actedAtBet ?? 0) >= fullRaise
+}
+
+/** True when it is this player's turn and they may raise (not just call or fold). */
+export function canPlayerRaise(state: InternalGameState, playerId: string): boolean {
+  if (state.phase !== 'in_hand' || state.actingPlayerId !== playerId) return false
+  const player = state.players.find(candidate => candidate.id === playerId)
+  return Boolean(player) && playerMayRaise(state, player!)
+}
+
+function bettingNotReopenedError(state: InternalGameState, player: InternalPlayer): Error {
+  const othersCanAnswer = state.players.some(other => (
+    other.id !== player.id && other.status === 'active' && other.stack > 0
+  ))
+  return new Error(othersCanAnswer
+    ? 'The all-in was less than a full raise, so betting is not reopened to you: call or fold'
+    : 'Everyone else is all-in: you can only call or fold')
+}
+
+/**
  * Process a player action (fold, check, call, raise, all_in).
  * Returns new state or throws on invalid action.
  */
@@ -585,6 +692,7 @@ export function processAction(
     throw new Error(`Player ${player.nickname} cannot act (status: ${player.status})`)
   }
 
+  const mayRaise = playerMayRaise(s, player)
   player.hasActedThisRound = true
   player.lastAction = undefined
   player.lastActionId = undefined
@@ -639,13 +747,19 @@ export function processAction(
       if (amount === player.stack + player.bet) {
         return processAction(state, playerId, 'all_in')
       }
-      const minRaise = calculateMinRaise(s.currentBet, s.lastRaiseSize, s.bigBlind)
-      if (amount < minRaise && amount !== player.stack + player.bet) {
-        throw new Error(`Minimum raise is $${minRaise}, got $${amount}`)
+      if (!Number.isFinite(amount) || !Number.isInteger(amount)) {
+        throw new Error('Raise amount must be a whole number of chips')
       }
       const raiseExtra = amount - player.bet
       if (raiseExtra > player.stack) {
         throw new Error(`Not enough chips: need $${raiseExtra}, have $${player.stack}`)
+      }
+      if (!mayRaise) {
+        throw bettingNotReopenedError(s, player)
+      }
+      const minRaise = calculateMinRaise(s.currentBet, s.lastRaiseSize, s.bigBlind)
+      if (amount < minRaise) {
+        throw new Error(`Minimum ${s.currentBet > 0 ? 'raise' : 'bet'} is $${minRaise}, got $${amount}`)
       }
       const oldBet = s.currentBet
       s.lastRaiseSize = amount - oldBet
@@ -672,8 +786,10 @@ export function processAction(
 
     case 'all_in': {
       const allInAmount = player.stack + player.bet
-      const raiseExtra = player.stack
       const oldCurrentBet = s.currentBet
+      if (allInAmount > oldCurrentBet && !mayRaise) {
+        throw bettingNotReopenedError(s, player)
+      }
       player.totalInPot += player.stack
       player.bet = allInAmount
       player.stack = 0
@@ -683,22 +799,29 @@ export function processAction(
       // If this all-in constitutes a raise, update current bet
       if (allInAmount > oldCurrentBet) {
         const raiseSize = allInAmount - oldCurrentBet
-        if (raiseSize >= s.lastRaiseSize) {
+        // A full raise reopens the betting to everyone; a short one does not
+        // (players who already acted may only call it or fold).
+        if (raiseSize >= Math.max(s.lastRaiseSize, s.bigBlind)) {
           s.lastRaiseSize = raiseSize
-          s.minRaise = calculateMinRaise(allInAmount, raiseSize, s.bigBlind)
-          // Reset others' action flags
           for (const p of s.players) {
             if (p.id !== playerId && p.status === 'active') {
               p.hasActedThisRound = false
             }
           }
         }
-        s.currentBet = Math.max(s.currentBet, allInAmount)
+        s.currentBet = allInAmount
       }
+      s.minRaise = calculateMinRaise(s.currentBet, s.lastRaiseSize, s.bigBlind)
 
       addAction(s, `${player.nickname} goes all-in for $${allInAmount}`)
       break
     }
+  }
+
+  // Remember the bet this player answered: only a full raise past it reopens
+  // the betting to them.
+  if (player.status !== 'folded') {
+    player.actedAtBet = s.currentBet
   }
 
   s.totalPot = s.players.reduce((sum, p) => sum + p.totalInPot, 0)
@@ -880,7 +1003,8 @@ function advanceRoundStep(state: InternalGameState, continuingRunout: boolean): 
   const s = cloneState(state)
   s.allInRunout = undefined
 
-  // Collect bets into pots
+  // Collect bets into pots (an uncalled bet goes back first)
+  refundUnclaimableChips(s)
   s.pots = buildSidePots(s.players)
   s.totalPot = s.pots.reduce((sum, p) => sum + p.amount, 0)
 
@@ -888,6 +1012,7 @@ function advanceRoundStep(state: InternalGameState, continuingRunout: boolean): 
   for (const player of s.players) {
     player.bet = 0
     player.hasActedThisRound = false
+    player.actedAtBet = undefined
   }
   s.currentBet = 0
   s.lastRaiseSize = s.bigBlind
@@ -999,19 +1124,28 @@ function advanceRoundStep(state: InternalGameState, continuingRunout: boolean): 
  * or was folded out. They go back to whoever put them in (an uncalled bet)
  * instead of vanishing from the side pots.
  */
-function refundUnclaimableChips(s: InternalGameState): void {
+function refundUnclaimableChips(s: InternalGameState, returnUncalled = true): void {
   const contenders = s.players.filter(player => player.status !== 'folded' && player.holeCards.length === 2)
   if (contenders.length === 0) return
-  const cap = Math.max(...contenders.map(player => player.totalInPot))
-  for (const player of s.players) {
-    if (player.totalInPot > cap) {
-      const excess = player.totalInPot - cap
-      player.totalInPot = cap
-      player.bet = Math.max(0, player.bet - excess)
-      player.stack += excess
-      addAction(s, `$${excess} uncalled returned to ${player.nickname}`)
-    }
+  const refund = (player: InternalPlayer, cap: number) => {
+    if (player.totalInPot <= cap) return
+    const excess = player.totalInPot - cap
+    player.totalInPot = cap
+    player.bet = Math.max(0, player.bet - excess)
+    player.stack += excess
+    addAction(s, `$${excess} uncalled returned to ${player.nickname}`)
   }
+  const cap = Math.max(...contenders.map(player => player.totalInPot))
+  for (const player of s.players) refund(player, cap)
+
+  // The uncalled part of the biggest bet (more than anyone else put in) goes
+  // straight back to the bettor before the showdown: it is never part of a
+  // pot, never "won". (A hand won by folds pays the winner every chip anyway.)
+  if (!returnUncalled || contenders.length < 2) return
+  const ranked = [...s.players].sort((a, b) => b.totalInPot - a.totalInPot)
+  const top = ranked[0]
+  const second = ranked[1]?.totalInPot ?? 0
+  if (top && top.totalInPot > second) refund(top, second)
 }
 
 /**
@@ -1030,7 +1164,7 @@ function awardLastPlayer(
   if (winnerIdx < 0) return s
 
   const winner = s.players[winnerIdx]!
-  refundUnclaimableChips(s)
+  refundUnclaimableChips(s, false)
 
   // Build final pots
   s.pots = buildSidePots(s.players)
@@ -1049,6 +1183,10 @@ function awardLastPlayer(
   addAction(s, `${winner.nickname} wins $${s.totalPot}`)
   applyRabbitHuntRunout(s)
   s.allInRunout = undefined
+  // A pending run-it-twice vote dies with the hand: it must never pay out again.
+  if (s.runItTwice?.status === 'voting') {
+    s.runItTwice = undefined
+  }
   s.phase = 'between_hands'
   s.round = null
   s.actingPlayerId = null
@@ -1130,12 +1268,11 @@ function resolveRunItTwiceBoards(state: InternalGameState): InternalGameState {
 
       const bestResult = contenders[0]!.result
       const winners = contenders.filter(({ result }) => compareHands(result, bestResult) === 0)
-      const winnerShare = Math.floor(potAmount / winners.length)
-      const remainder = potAmount - winnerShare * winners.length
+      const shares = new Map(splitPotShares(s, potAmount, winners.map(winner => winner.playerId)))
 
-      winners.forEach((winner, winnerIndex) => {
-        const amount = winnerShare + (winnerIndex === 0 ? remainder : 0)
+      winners.forEach(winner => {
         const playerId = winner.playerId
+        const amount = shares.get(playerId) ?? 0
         boardWinnerTotals[boardIndex]!.set(
           playerId,
           (boardWinnerTotals[boardIndex]!.get(playerId) ?? 0) + amount
@@ -1216,7 +1353,7 @@ export function resolveRunItTwiceDecision(
   runTwice: boolean
 ): InternalGameState {
   const voteState = state.runItTwice
-  if (!voteState || voteState.status !== 'voting') {
+  if (!voteState || voteState.status !== 'voting' || state.phase !== 'in_hand') {
     throw new Error('Run it twice is not awaiting votes')
   }
 
@@ -1239,7 +1376,7 @@ export function voteRunItTwice(
   vote: 'yes' | 'no'
 ): InternalGameState {
   const voteState = state.runItTwice
-  if (!voteState || voteState.status !== 'voting') {
+  if (!voteState || voteState.status !== 'voting' || state.phase !== 'in_hand') {
     throw new Error('Run it twice is not available')
   }
 
@@ -1344,16 +1481,12 @@ export function resolveShowdown(state: InternalGameState): InternalGameState {
       ({ result }) => compareHands(result, bestResult) === 0
     )
 
-    // Split pot (handle odd chips - give remainder to first winner clockwise)
-    const share = Math.floor(pot.amount / winners.length)
-    const remainder = pot.amount - share * winners.length
-
-    for (let i = 0; i < winners.length; i++) {
-      const id = winners[i]!.id
-      const extra = i === 0 ? remainder : 0
-      winnerTotals.set(id, (winnerTotals.get(id) ?? 0) + share + extra)
-      winnerDescriptions.set(id, winners[i]!.result.description)
-      winnerCards.set(id, winners[i]!.result.cards)
+    // Split pot: odd chips go to the first winners left of the button
+    for (const [id, amount] of splitPotShares(s, pot.amount, winners.map(winner => winner.id))) {
+      const result = handResults.get(id)!
+      winnerTotals.set(id, (winnerTotals.get(id) ?? 0) + amount)
+      winnerDescriptions.set(id, result.description)
+      winnerCards.set(id, result.cards)
     }
   }
 
@@ -1403,6 +1536,7 @@ export function prepareNextHand(state: InternalGameState): InternalGameState {
     player.totalInPot = 0
     player.holeCards = []
     player.hasActedThisRound = false
+    player.actedAtBet = undefined
     player.showCards = 'none'
     player.lastAction = undefined
     player.lastActionId = undefined
@@ -1558,6 +1692,9 @@ export function toTableState(
     currentBet: state.currentBet,
     minRaise: state.minRaise,
     actingPlayerId: state.actingPlayerId,
+    ...(viewerPlayerId && state.phase === 'in_hand' && state.actingPlayerId === viewerPlayerId
+      ? { canRaise: canPlayerRaise(state, viewerPlayerId) }
+      : {}),
     dealerSeatIndex: state.dealerSeatIndex,
     smallBlind: state.smallBlind,
     bigBlind: state.bigBlind,
