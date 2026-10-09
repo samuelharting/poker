@@ -179,12 +179,14 @@ export function evaluateHand(cards: Card[]): HandResult {
     const topValue = rankValue(sf[0]!.rank)
     const isRoyal = topValue === 14 && rankValue(sf[1]!.rank) === 13
     const rank: HandRank = isRoyal ? 'royal_flush' : 'straight_flush'
+    // A-2-3-4-5 of one suit is a five-high straight flush (the ace plays low).
+    const isSteelWheel = topValue === 5 && sf.some(c => c.rank === 'A')
     return {
       rank,
       rankIndex: HAND_RANK_INDEX[rank],
-      tiebreakers: sf.map(c => rankValue(c.rank)),
+      tiebreakers: isSteelWheel ? [5, 4, 3, 2, 1] : sf.map(c => rankValue(c.rank)),
       cards: sf,
-      description: describeHand(rank, sf),
+      description: isSteelWheel ? 'Straight Flush, Five-high' : describeHand(rank, sf),
     }
   }
 

@@ -176,3 +176,19 @@ describe('player profile helpers', () => {
     })
   })
 })
+
+describe('applyTabNickname', () => {
+  const stored = { nickname: 'Bob', email: '', venmoUsername: '' }
+
+  it('keeps the nickname this tab joined with over the shared browser profile', async () => {
+    const { applyTabNickname } = await import('@/lib/profile')
+    expect(applyTabNickname(stored, 'Alice')).toEqual({ ...stored, nickname: 'Alice' })
+  })
+
+  it('leaves the profile alone when the tab has no nickname or the same one', async () => {
+    const { applyTabNickname } = await import('@/lib/profile')
+    expect(applyTabNickname(stored, null)).toBe(stored)
+    expect(applyTabNickname(stored, '  ')).toBe(stored)
+    expect(applyTabNickname(stored, 'Bob')).toBe(stored)
+  })
+})

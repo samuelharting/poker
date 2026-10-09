@@ -85,10 +85,11 @@ export function FunLayer({ tableState, yourId, privateMushroom, mushroomEvents, 
   const serverDrinks = useMemo(() => normalizeDrinkState(me?.drinks), [me?.drinks])
   // A shot blackout starts once the glass is down, not when it's poured.
   const myDrinks = useShotLaggedDrinks(serverDrinks)
-  const funOn = tableState.funModeEnabled !== false
+  // funModeEnabled now means DRINKING only; Lady Luck, pranks and the mushroom ignore it.
+  const drinkOn = tableState.funModeEnabled !== false
   const capable = me?.drinkCapable === true
   const isMyTurn = tableState.phase === 'in_hand' && tableState.actingPlayerId === yourId
-  const tripping = Boolean(me?.trip) && funOn
+  const tripping = Boolean(me?.trip)
   const [tripSuits, setTripSuits] = useState<Record<Card['suit'], string> | null>(null)
   const [draining, setDraining] = useState(false)
   const wasTrippingRef = useRef(false)
@@ -96,12 +97,12 @@ export function FunLayer({ tableState, yourId, privateMushroom, mushroomEvents, 
   // --- Root flags: every visual reads these from CSS -----------------------
   useEffect(() => {
     const root = document.documentElement
-    setFlag(root, 'funBlackout', myDrinks.passedOut && funOn ? 'on' : null)
-    setFlag(root, 'funHangover', myDrinks.hungover && !myDrinks.passedOut && funOn ? 'on' : null)
-    setFlag(root, 'funSober', BUZZ.soberPenaltiesEnabled && funOn && capable && me && isSober(myDrinks.level) && !myDrinks.passedOut && !myDrinks.hungover && !tripping ? 'on' : null)
+    setFlag(root, 'funBlackout', myDrinks.passedOut && drinkOn ? 'on' : null)
+    setFlag(root, 'funHangover', myDrinks.hungover && !myDrinks.passedOut && drinkOn ? 'on' : null)
+    setFlag(root, 'funSober', BUZZ.soberPenaltiesEnabled && drinkOn && capable && me && isSober(myDrinks.level) && !myDrinks.passedOut && !myDrinks.hungover && !tripping ? 'on' : null)
     setFlag(root, 'funTrip', tripping ? 'on' : draining ? 'ending' : null)
     setFlag(root, 'funMyTurn', isMyTurn ? 'on' : null)
-  }, [capable, draining, funOn, isMyTurn, me, myDrinks.hungover, myDrinks.level, myDrinks.passedOut, tripping])
+  }, [capable, draining, drinkOn, isMyTurn, me, myDrinks.hungover, myDrinks.level, myDrinks.passedOut, tripping])
 
   useEffect(() => () => {
     const root = document.documentElement
@@ -146,7 +147,7 @@ export function FunLayer({ tableState, yourId, privateMushroom, mushroomEvents, 
   // --- Sober tax chip: posted this hand, or coming next hand.
   const dealtIn = Boolean(me?.hasCards) && tableState.phase === 'in_hand'
   const taxThisHand = tableState.phase === 'in_hand' ? myDrinks.soberTax : 0
-  const taxNext = funOn && capable && me
+  const taxNext = drinkOn && capable && me
     ? projectNextSoberTax(myDrinks, {
       smallBlind: tableState.smallBlind,
       bigBlind: tableState.bigBlind,
@@ -155,13 +156,13 @@ export function FunLayer({ tableState, yourId, privateMushroom, mushroomEvents, 
     })
     : 0
 
-  if (!drinks || !me || !funOn || !capable) {
+  if (!drinks || !me || !capable) {
     return <PillReveal events={mushroomEvents} yourId={yourId} />
   }
 
   return (
     <>
-      {(taxThisHand > 0 || taxNext > 0) && (
+      {drinkOn && (taxThisHand > 0 || taxNext > 0) && (
         <SoberTaxChip
           key={`${tableState.handNumber}:${taxThisHand}`}
           amount={taxThisHand > 0 ? taxThisHand : taxNext}

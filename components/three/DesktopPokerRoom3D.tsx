@@ -4088,20 +4088,21 @@ function createSceneRuntime(
       targetLook.z -= 0.25
     }
     if (!reducedMotion) {
-      // Seated breathing: a gentle head sway rather than a floating camera.
-      targetCamera.x += Math.sin(time * 0.13) * 0.07
-      targetCamera.y += Math.sin(time * 0.09 + 1.2) * 0.035
-      targetLook.x += Math.sin(time * 0.11 + 0.4) * 0.05
+      // Seated breathing: barely there (kept tiny to avoid motion sickness).
+      targetCamera.x += Math.sin(time * 0.13) * 0.01
+      targetCamera.y += Math.sin(time * 0.09 + 1.2) * 0.005
+      targetLook.x += Math.sin(time * 0.11 + 0.4) * 0.008
     }
     if (actingSeat !== null && actingSeat !== 0 && !winnerSeat) {
       // Glance toward whoever is acting, like turning your head at the table.
       const actingPosition = TABLE_SEAT_POSITIONS[toVisualSeat(actingSeat)]
       actingFocus.set(actingPosition[0] * 0.85, 1.05, actingPosition[2] * 0.85)
-      targetLook.lerp(actingFocus, 0.34)
+      // A small glance only: big look-arounds caused motion sickness.
+      targetLook.lerp(actingFocus, 0.08)
       // Neighbours sit almost beside the camera, so an unclamped glance swings
       // the board out of frame; keep the felt centre in view.
       targetLook.x = THREE.MathUtils.clamp(targetLook.x, -0.95, 0.95)
-      targetCamera.x += actingPosition[0] * 0.04
+      targetCamera.x += actingPosition[0] * 0.008
     }
     // No camera move when someone wins: the winner is shown by the halo, sparkles,
     // confetti and the lit winning cards, and the view stays where it is.
@@ -4109,15 +4110,14 @@ function createSceneRuntime(
       const impactSeat = allInImpact.visualSeat === null
         ? null
         : TABLE_SEAT_POSITIONS[toVisualSeat(allInImpact.visualSeat)]
-      const microShake = Math.sin(time * 61) * allInImpact.strength * 0.026
-      targetCamera.x += microShake + (impactSeat?.[0] ?? 0) * allInImpact.strength * 0.018
-      targetCamera.y -= allInImpact.strength * 0.06
-      targetCamera.z -= allInImpact.strength * 0.3
-      targetLook.x += (impactSeat?.[0] ?? 0) * allInImpact.strength * 0.035
-      targetLook.z += (impactSeat?.[2] ?? 0) * allInImpact.strength * 0.025
+      // A gentle lean in on all-ins (no shake: it caused motion sickness).
+      targetCamera.y -= allInImpact.strength * 0.015
+      targetCamera.z -= allInImpact.strength * 0.06
+      targetLook.x += (impactSeat?.[0] ?? 0) * allInImpact.strength * 0.008
+      targetLook.z += (impactSeat?.[2] ?? 0) * allInImpact.strength * 0.006
     }
     const smoothing = reducedMotion ? 1 : Math.max(0, 1 - Math.exp(
-      -delta * (allInImpact.strength > 0 ? 3.8 : winnerSeat ? 1.1 : 1.35)
+      -delta * (allInImpact.strength > 0 ? 1.2 : winnerSeat ? 0.9 : 0.9)
     ))
     camera.position.lerp(targetCamera, smoothing)
     cameraLookAt.lerp(targetLook, smoothing)

@@ -10,9 +10,9 @@ import type {
   SocialSnapshot,
   TableChatEntry,
 } from '../shared/protocol'
-import type { ShowCardsMode } from '../lib/poker/types'
+import type { BettingRound, HandExitReason, ShowCardsMode } from '../lib/poker/types'
 import type { CardRevealRequest, HandHistoryEntry, InternalGameState, InternalPlayer, LobbyPlayer, PlayerStats, SeatPlayer } from '../lib/poker/types'
-import { buildHandHistoryEntry, upsertHandHistory } from '../lib/poker/handHistory'
+import { buildHandHistoryEntry, upsertHandHistory, type HandForensics } from '../lib/poker/handHistory'
 import { normalizePlayerUsername, type PlayerAvatarCustomization } from '../lib/profile'
 import {
   advanceAllInRunout,
@@ -278,7 +278,7 @@ const DEFAULT_SETTINGS: TableSettings = {
   bigBlind: 20,
   startingStack: 1000,
   maxPlayers: 8,
-  actionTimerDuration: 13000,
+  actionTimerDuration: 30000,
   autoStartDelay: 7000,
   rabbitHuntingEnabled: false,
   sevenTwoRuleEnabled: true,
@@ -463,6 +463,12 @@ export default class PokerRoom implements PartyServer {
    */
   idleResetBotsOnlyMs = IDLE_RESET_BOTS_ONLY_MS
   idleResetHeldMs = IDLE_RESET_HELD_MS
+  /** How each player's current hand ended early (fold, timeout, left...), for the hand history. */
+  private handForensics: {
+    handNumber: number
+    exits: Record<string, { reason: HandExitReason; street: BettingRound | null; disconnected?: boolean; away?: boolean }>
+    timedOutChecks: Record<string, number>
+  } = { handNumber: -1, exits: {}, timedOutChecks: {} }
 
   constructor(readonly room: Room) {
     this.data = this.createFreshData()
@@ -1175,8 +1181,17 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
-    const reconnectPlayerId = reconnectToken
+    const tokenPlayerId = reconnectToken
       ? Object.entries(this.data.reconnectTokens).find(([, token]) => token === reconnectToken)?.[0]
+      : undefined
+    // The token is only for the same person coming back. Two tabs of one
+    // browser share one stored token; a different nickname is a different
+    // player and must not take over (and boot) the first tab's seat.
+    const tokenNickname = tokenPlayerId ? this.data.playerNicknames[tokenPlayerId] : undefined
+    const reconnectPlayerId = tokenPlayerId && (
+      !tokenNickname || normalizePlayerUsername(tokenNickname) === normalizePlayerUsername(trimmed)
+    )
+      ? tokenPlayerId
       : undefined
 
     if (reconnectPlayerId) {
@@ -1505,6 +1520,8 @@ export default class PokerRoom implements PartyServer {
       this.data.gameState = startHand({ ...this.data.gameState, pacedRunout: this.allInRunoutPacing })
       this.recordDealtIn()
       this.recordHandsPlayedForCurrentHand()
+      // Blinds can put everyone all-in: an unpaced deal may already be over.
+      this.recordCompletedHandStats()
       this.wakeRestedDrinkers()
       this.advanceMushroomsForNewHand()
       this.clearStickyNotes()
@@ -1602,10 +1619,12 @@ export default class PokerRoom implements PartyServer {
     try {
       // The clock only stops once the action is accepted: a rejected one (out
       // of turn, illegal size) must not cancel the acting player's timer.
+      const street = this.data.gameState.round
       this.data.gameState = processAction(this.data.gameState, playerId, action, amount)
       this.clearAutoFold()
       this.markPlayerPresent(playerId)
       if (action === 'fold') {
+        this.noteHandExit(playerId, 'fold', street)
         this.recordFold(playerId)
       }
       this.recordCompletedHandStats()
@@ -1665,10 +1684,10 @@ export default class PokerRoom implements PartyServer {
 
     if (msg.funModeEnabled !== undefined) {
       // Cosmetic, so it applies immediately instead of waiting for the next hand.
-      this.setFunMode(msg.funModeEnabled)
+      this.setDrinking(msg.funModeEnabled)
       const onlyFunMode = Object.keys(msg).every(key => key === 'type' || key === 'funModeEnabled')
       if (onlyFunMode) {
-        this.sendActionResult(conn, msg.funModeEnabled ? 'Fun mode on: drinks and Lady Luck are back.' : 'Fun mode off: no drinks or Lady Luck.')
+        this.sendActionResult(conn, msg.funModeEnabled ? 'Drinking on.' : 'Drinking off: no drinks, everything else stays on.')
         this.broadcastState()
         return
       }
@@ -1763,25 +1782,40 @@ export default class PokerRoom implements PartyServer {
     }
   }
 
-  private isFunModeEnabled(): boolean {
+  /**
+   * The 'Fun mode' table setting (key funModeEnabled, kept for compatibility)
+   * now only controls DRINKING: beer, water, shots, house drinks, buzz and
+   * blackouts. Lady Luck, pranks, sticky notes, the mushroom and the rest
+   * stay on regardless.
+   */
+  private isDrinkingEnabled(): boolean {
     return this.data.tableSettings.funModeEnabled !== false
   }
 
-  /** Turning fun mode off sobers everyone up and sends Lady Luck home. */
-  private setFunMode(enabled: boolean) {
+  /** Turning drinking off sobers everyone up. Non-drink fun (Lady Luck, pranks, notes, mushroom) is untouched. */
+  private setDrinking(enabled: boolean) {
     this.data.tableSettings.funModeEnabled = enabled
     if (enabled) return
-    for (const timer of Array.from(this.drinkWaterTimers.values())) clearTimeout(timer)
-    this.drinkWaterTimers.clear()
+    // A spiked glass cut short still delivers its trip (see clearWaterTimers).
+    let spikedCut = false
+    for (const [key, timer] of Array.from(this.drinkWaterTimers.entries())) {
+      clearTimeout(timer)
+      this.drinkWaterTimers.delete(key)
+      if (this.spikedWaterKeys.delete(key)) spikedCut = true
+    }
     this.clearBlackoutTimers()
-    this.clearAllMushrooms()
+    this.pendingBlackouts.clear()
     this.drinkLedger = {}
     for (const timer of this.botShotTimers) clearTimeout(timer)
     this.botShotTimers.clear()
-    this.lastChipFlickAt.clear()
-    this.clearStickyNotes()
+    for (const timer of this.botDrinkTimers) clearTimeout(timer)
+    this.botDrinkTimers.clear()
     this.shotQueue = []
-    this.data.ladyLuck = createLadyLuckTracker()
+    // A mushroom already slipped into a water that can no longer be ordered
+    // goes straight to a queued trip.
+    const spiked = this.mushrooms.mushroom
+    if (spiked?.status === 'spiked') drinkSpikedWater(this.mushrooms, spiked.victimId)
+    if (spikedCut || this.mushrooms.trip) this.syncTrips()
   }
 
   private applyTableSettings(settings: Partial<TableSettings>) {
@@ -2221,7 +2255,7 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
-    this.evictPlayer(targetId)
+    this.evictPlayer(targetId, 'kicked')
     if (seatedPlayer && !seatedPlayer.isBot && !this.isBotPlayer(targetId)) {
       this.data.membership.kickedNames[normalizePlayerUsername(targetName)] = true
     }
@@ -2263,11 +2297,9 @@ export default class PokerRoom implements PartyServer {
           if (player.id === this.data.gameState.actingPlayerId) {
             try {
               this.clearAutoFold()
-              const forcedAction = player.bet >= this.data.gameState.currentBet ? 'check' : 'fold'
-              this.data.gameState = processAction(this.data.gameState, targetId, forcedAction)
-              if (forcedAction === 'fold') {
-                this.recordFold(targetId)
-              }
+              // No chips left behind: they are all-in for what is already in
+              // the pot (a zero-chip call), never folded out of it.
+              this.data.gameState = processAction(this.data.gameState, targetId, 'call')
               this.recordCompletedHandStats()
             } catch {
               player.status = 'folded'
@@ -2356,6 +2388,14 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
+    // Already left: their chips walk out with them when the seat clears. Moving
+    // them to the rail would park the stack under a session that no longer
+    // exists (off the books, and lost when they come back by name).
+    if (this.data.pendingRemovals[targetId] && !this.data.playerNicknames[targetId]) {
+      this.sendActionFailed(conn, 'That player already left the table')
+      return
+    }
+
     if (spectator) {
       const seatedPlayer = this.getPlayer(targetId)
       const targetName = seatedPlayer?.nickname ?? this.data.playerNicknames[targetId] ?? 'That player'
@@ -2363,7 +2403,7 @@ export default class PokerRoom implements PartyServer {
         const wasActingPlayer = this.data.gameState.actingPlayerId === targetId
         this.data.pendingSpectators[targetId] = true
         this.data.spectatorIds[targetId] = true
-        this.foldDepartingPlayer(targetId)
+        this.foldDepartingPlayer(targetId, 'moved_to_rail')
         this.finalizeState()
         this.syncActionTimer(wasActingPlayer)
         this.sendActionResult(conn, `Moved ${targetName} to spectator mode. They fold now and watch the rest of this hand.`)
@@ -2652,8 +2692,8 @@ export default class PokerRoom implements PartyServer {
       return
     }
 
-    if (!this.isFunModeEnabled()) {
-      this.sendActionFailed(conn, 'Fun mode is off at this table')
+    if (!this.isDrinkingEnabled()) {
+      this.sendActionFailed(conn, 'Drinking is off at this table')
       return
     }
 
@@ -2690,7 +2730,7 @@ export default class PokerRoom implements PartyServer {
     // Slow water waits for the next hand; but the victim's next water is the
     // spiked one: it does nothing else and starts the trip once the sip is
     // down. Nobody can tell yet.
-    if (result.water && this.isFunModeEnabled() && drinkSpikedWater(this.mushrooms, playerId)) {
+    if (result.water && this.isDrinkingEnabled() && drinkSpikedWater(this.mushrooms, playerId)) {
       discardQueuedWater(entry, result.water.id)
       this.scheduleSpikedWater(playerId, result.water.id)
     } else if (result.water) {
@@ -2736,7 +2776,7 @@ export default class PokerRoom implements PartyServer {
    * Common checks for a prank aimed at another seated player. Returns the
    * sender's player id, or null after telling the sender why not.
    */
-  private validatePrank(conn: Connection, targetId: string, noun: string): string | null {
+  private validatePrank(conn: Connection, targetId: string, noun: string, drinkingOnly = false): string | null {
     const playerId = this.data.connectionToPlayer[conn.id]
     if (!playerId) {
       this.sendActionFailed(conn, `Join the room before ${noun}`)
@@ -2746,8 +2786,8 @@ export default class PokerRoom implements PartyServer {
       this.sendActionFailed(conn, `Take a seat before ${noun}`)
       return null
     }
-    if (!this.isFunModeEnabled()) {
-      this.sendActionFailed(conn, 'Fun mode is off at this table')
+    if (drinkingOnly && !this.isDrinkingEnabled()) {
+      this.sendActionFailed(conn, 'Drinking is off at this table')
       return null
     }
     if (targetId === playerId) {
@@ -2772,7 +2812,7 @@ export default class PokerRoom implements PartyServer {
   }
 
   private handleBuyShot(conn: Connection, targetId: string) {
-    const playerId = this.validatePrank(conn, targetId, 'buying a shot')
+    const playerId = this.validatePrank(conn, targetId, 'buying a shot', true)
     if (!playerId) return
     const result = this.buyShotFor(playerId, targetId)
     if (!result.ok) {
@@ -2853,7 +2893,7 @@ export default class PokerRoom implements PartyServer {
   private deliverQueuedShots(): Set<string> {
     const delivered = new Set<string>()
     if (this.shotQueue.length === 0) return delivered
-    if (!this.isFunModeEnabled()) {
+    if (!this.isDrinkingEnabled()) {
       this.shotQueue = []
       return delivered
     }
@@ -2900,7 +2940,7 @@ export default class PokerRoom implements PartyServer {
   /** Runs the random-thirst clock only while fun mode is on and a drink-capable player is seated. */
   private syncAutoBeerTimer() {
     // Bots drink on their own, but a table nobody is watching stays quiet.
-    const wanted = this.isFunModeEnabled() &&
+    const wanted = this.isDrinkingEnabled() &&
       this.hasLiveHuman() &&
       this.data.gameState.players.some(player => this.isDrinkCapable(player))
     if (wanted && !this.autoBeerTimer) {
@@ -2913,7 +2953,7 @@ export default class PokerRoom implements PartyServer {
 
   /** Each drink-capable seated player may down a beer on their own (accidental blackouts welcome). */
   private rollAutoBeers() {
-    if (!this.isFunModeEnabled() || !this.hasLiveHuman()) return
+    if (!this.isDrinkingEnabled() || !this.hasLiveHuman()) return
     const state = this.data.gameState
     const now = Date.now()
     let drank = false
@@ -2947,7 +2987,7 @@ export default class PokerRoom implements PartyServer {
     for (const playerId of Array.from(this.pendingBlackouts)) {
       const target = this.getPlayer(playerId)
       const entry = this.drinkLedger[playerId]
-      if (!target || !entry || !this.isFunModeEnabled() || entry.passedOut) {
+      if (!target || !entry || !this.isDrinkingEnabled() || entry.passedOut) {
         this.pendingBlackouts.delete(playerId)
         continue
       }
@@ -2983,7 +3023,7 @@ export default class PokerRoom implements PartyServer {
       this.sendActionFailed(conn, 'Take a seat before taking a shot')
       return
     }
-    if (!this.isFunModeEnabled() || !this.isDrinkCapable(player)) {
+    if (!this.isDrinkingEnabled() || !this.isDrinkCapable(player)) {
       this.sendActionFailed(conn, 'No bar service here')
       return
     }
@@ -3030,10 +3070,6 @@ export default class PokerRoom implements PartyServer {
     const senderId = this.data.connectionToPlayer[conn.id]
     if (!senderId) {
       this.sendActionFailed(conn, 'Join the room before sticking a note')
-      return
-    }
-    if (!this.isFunModeEnabled()) {
-      this.sendActionFailed(conn, 'Fun mode is off at this table')
       return
     }
     // Seated players and bots can wear one (yourself included); the sender may be seated or watching.
@@ -3128,7 +3164,7 @@ export default class PokerRoom implements PartyServer {
   private applyHouseRules(winnerAmounts: ReadonlyMap<string, number>) {
     const starts = this.handStartStacks
     this.handStartStacks = new Map()
-    if (!this.isFunModeEnabled()) return
+    if (!this.isDrinkingEnabled()) return
     const state = this.data.gameState
     if (state.phase !== 'between_hands') return
     const runBoards = state.runItTwice?.status === 'accepted'
@@ -3197,7 +3233,7 @@ export default class PokerRoom implements PartyServer {
    * under the same one-shot-per-five-hands rule as everyone else.
    */
   private maybeScheduleBotShot(winnerAmounts: ReadonlyMap<string, number>) {
-    if (!this.isFunModeEnabled()) return
+    if (!this.isDrinkingEnabled()) return
     const bigPot = Math.max(1, this.data.tableSettings.bigBlind) * BOT_SHOT_BIG_POT_BLINDS
     const handNumber = this.data.gameState.handNumber
     for (const [botId, amount] of winnerAmounts) {
@@ -3213,7 +3249,7 @@ export default class PokerRoom implements PartyServer {
       const target = humans[Math.min(humans.length - 1, Math.floor(this.botShotRandom() * humans.length))]!
       const timer = setTimeout(() => {
         this.botShotTimers.delete(timer)
-        if (!this.isFunModeEnabled()) return
+        if (!this.isDrinkingEnabled()) return
         // Same path as a human purchase: queued, delivered only outside a live hand.
         if (this.buyShotFor(botId, target.id).ok) this.broadcastState()
       }, BOT_SHOT_DELAY_MS)
@@ -3238,7 +3274,7 @@ export default class PokerRoom implements PartyServer {
   private scheduleBotDrinks() {
     for (const timer of this.botDrinkTimers) clearTimeout(timer)
     this.botDrinkTimers.clear()
-    if (!this.isFunModeEnabled()) return
+    if (!this.isDrinkingEnabled()) return
     for (const player of this.data.gameState.players) {
       if (!this.isBotPlayer(player.id)) continue
       // Bots sit down with a buzz already on, so a fresh table isn't all designated drivers.
@@ -3249,7 +3285,7 @@ export default class PokerRoom implements PartyServer {
 
       const timer = setTimeout(() => {
         this.botDrinkTimers.delete(timer)
-        if (!this.isFunModeEnabled() || !this.getPlayer(player.id)) return
+        if (!this.isDrinkingEnabled() || !this.getPlayer(player.id)) return
         if (this.orderDrinkFor(player.id, kind).ok) this.broadcastState()
       }, delay)
       this.botDrinkTimers.add(timer)
@@ -3326,6 +3362,11 @@ export default class PokerRoom implements PartyServer {
       { kind: 'spiked', spikerId, spikerNickname: spiker.nickname, victimId: targetId, victimNickname: target.nickname },
       [spikerId]
     )
+    // Drinking off: nobody can order the spiked water, so the mushroom
+    // skips the glass and queues the trip directly.
+    if (!this.isDrinkingEnabled() && drinkSpikedWater(this.mushrooms, targetId)) {
+      this.syncTrips()
+    }
     return { ok: true }
   }
 
@@ -3357,7 +3398,7 @@ export default class PokerRoom implements PartyServer {
     if (!trip) return
     const handNumber = this.data.gameState.handNumber
     const victim = this.getPlayer(trip.victimId)
-    if (!victim || !this.isFunModeEnabled()) {
+    if (!victim) {
       removeMushroomPlayer(this.mushrooms, trip.victimId, handNumber, this.mushroomRandom)
       this.clearTripTimer()
       return
@@ -3396,8 +3437,6 @@ export default class PokerRoom implements PartyServer {
 
   /** Called when a hand starts: old mushrooms go bad, a new one may turn up, bots may use theirs. */
   private advanceMushroomsForNewHand() {
-    if (!this.isFunModeEnabled()) return
-
     const handNumber = this.data.gameState.handNumber
     const expired = expireStaleMushroom(this.mushrooms, handNumber, this.mushroomRandom)
     if (expired?.kind === 'held') {
@@ -3433,7 +3472,7 @@ export default class PokerRoom implements PartyServer {
    */
   private syncMushroomPrompt() {
     const mushroom = this.mushrooms.mushroom
-    if (!mushroom || mushroom.status !== 'held' || !this.isFunModeEnabled()) {
+    if (!mushroom || mushroom.status !== 'held') {
       this.clearBotSpikeTimer()
       return
     }
@@ -3452,7 +3491,7 @@ export default class PokerRoom implements PartyServer {
     this.botSpikeTimer = setTimeout(() => {
       this.botSpikeTimer = null
       const due = getDueAutoSpike(this.mushrooms, Date.now())
-      if (due && this.isFunModeEnabled()) {
+      if (due) {
         const result = this.spikeWaterFor(due.holderId, due.victimId)
         if (!result.ok) {
           // The pick became invalid: choose again on the next sync.
@@ -3595,7 +3634,7 @@ export default class PokerRoom implements PartyServer {
 
   /** Fun mode on and the client can drink (bots always can). */
   private isBuzzTaxable(player: Pick<InternalPlayer, 'id'>): boolean {
-    return this.isFunModeEnabled() && this.isDrinkCapable(player)
+    return this.isDrinkingEnabled() && this.isDrinkCapable(player)
   }
 
   /**
@@ -3690,7 +3729,7 @@ export default class PokerRoom implements PartyServer {
     this.data.social.chatLog = this.data.social.chatLog.slice(0, MAX_CHAT_HISTORY)
   }
 
-  private evictPlayer(playerId: string) {
+  private evictPlayer(playerId: string, reason: 'left' | 'kicked' = 'left') {
     const wasActingPlayer = this.data.gameState.actingPlayerId === playerId
     const player = this.getPlayer(playerId)
 
@@ -3705,7 +3744,7 @@ export default class PokerRoom implements PartyServer {
     if (this.data.gameState.phase === 'in_hand') {
       this.data.pendingRemovals[playerId] = true
       // Out of turn too: nobody should wait on a player who already left.
-      this.foldDepartingPlayer(playerId)
+      this.foldDepartingPlayer(playerId, reason)
 
       const remainingPlayer = this.getPlayer(playerId)
       if (remainingPlayer) {
@@ -3724,7 +3763,7 @@ export default class PokerRoom implements PartyServer {
    * Fold a player who is leaving the hand right now, on turn or not, and
    * settle a run-it-twice vote they can no longer answer (one board).
    */
-  private foldDepartingPlayer(playerId: string) {
+  private foldDepartingPlayer(playerId: string, reason: HandExitReason = 'left') {
     if (this.data.gameState.phase !== 'in_hand') {
       return
     }
@@ -3735,7 +3774,9 @@ export default class PokerRoom implements PartyServer {
         if (this.data.gameState.actingPlayerId === playerId) {
           this.clearAutoFold()
         }
+        const street = this.data.gameState.round
         this.data.gameState = foldLeavingPlayer(this.data.gameState, playerId)
+        this.noteHandExit(playerId, reason, street)
         this.recordFold(playerId)
         this.recordCompletedHandStats()
       } catch {
@@ -3947,8 +3988,30 @@ export default class PokerRoom implements PartyServer {
       }
     }
 
+    this.ensureHostReachable()
     this.syncPresence()
     this.syncAutoStart()
+  }
+
+  /**
+   * A host who is not connected gets the usual grace period and then hands the
+   * host over to a connected human. The grace timer normally starts when the
+   * host's socket drops, but a restored table (deploy, crash) has no such
+   * moment: the saved host is simply absent. Without this, a guest who came
+   * back first would watch an empty host seat forever.
+   */
+  private ensureHostReachable() {
+    const hostId = this.data.hostId
+    if (!hostId || this.isBotPlayer(hostId) || this.data.playerToConnection[hostId]) {
+      return
+    }
+    if (this.hostTransferTimeout && this.disconnectedHostId === hostId) {
+      return
+    }
+    if (!this.selectNextHost(hostId)) {
+      return
+    }
+    this.scheduleDisconnectedHostTransfer(hostId)
   }
 
   /**
@@ -4064,11 +4127,35 @@ export default class PokerRoom implements PartyServer {
     this.data.membership.dealtIn = this.data.gameState.players
       .filter(player => player.holeCards.length === 2)
       .map(player => player.id)
+    this.handForensics = { handNumber: this.data.gameState.handNumber, exits: {}, timedOutChecks: {} }
     // House rules measure losses against what each player started the hand with
     // (blinds already posted count as still theirs).
     this.handStartStacks = new Map(this.data.gameState.players
       .filter(player => player.holeCards.length === 2)
       .map(player => [player.id, player.stack + player.totalInPot]))
+  }
+
+  /** Forensics for the hand history: how (and on which street) a player's hand ended early. */
+  private noteHandExit(playerId: string, reason: HandExitReason, street: BettingRound | null) {
+    const state = this.data.gameState
+    if (this.handForensics.handNumber !== state.handNumber) {
+      this.handForensics = { handNumber: state.handNumber, exits: {}, timedOutChecks: {} }
+    }
+    const player = this.getPlayer(playerId)
+    this.handForensics.exits[playerId] = {
+      reason,
+      street,
+      ...(player && !player.isConnected ? { disconnected: true } : {}),
+      ...(this.data.membership.awayIds[playerId] ? { away: true } : {}),
+    }
+  }
+
+  private noteTimedOutCheck(playerId: string) {
+    const state = this.data.gameState
+    if (this.handForensics.handNumber !== state.handNumber) {
+      this.handForensics = { handNumber: state.handNumber, exits: {}, timedOutChecks: {} }
+    }
+    this.handForensics.timedOutChecks[playerId] = (this.handForensics.timedOutChecks[playerId] ?? 0) + 1
   }
 
   private handleSetSittingOut(conn: Connection, sittingOut: boolean) {
@@ -4280,15 +4367,13 @@ export default class PokerRoom implements PartyServer {
         pendingTableSettings,
         lobbyPlayers: this.buildLobbyPlayers(),
         handHistory: this.data.handHistory ?? [],
-        funModeEnabled: this.isFunModeEnabled(),
+        funModeEnabled: this.isDrinkingEnabled(),
         blindSchedule: this.data.tableSettings.blindSchedule ?? 'off',
         nextBlindsUpAt: (() => {
           const levelMs = getBlindLevelMs(this.data.tableSettings.blindSchedule, this.data.tableSettings.blindLevel ?? 0)
           return levelMs === null ? null : (this.data.tableSettings.blindsLevelStartedAt ?? Date.now()) + levelMs
         })(),
-        companion: this.isFunModeEnabled()
-          ? getVisibleLadyLuck(this.data.ladyLuck, this.getSeatedPlayerIds())
-          : null,
+        companion: getVisibleLadyLuck(this.data.ladyLuck, this.getSeatedPlayerIds()),
         ledger: this.buildLedgerSnapshot(),
       },
     }
@@ -4355,7 +4440,7 @@ export default class PokerRoom implements PartyServer {
       yourId: playerId,
       reconnectToken,
       isHost: this.data.hostId === playerId,
-      ...(this.isFunModeEnabled() && getPrivateMushroomState(this.mushrooms, playerId)
+      ...(getPrivateMushroomState(this.mushrooms, playerId)
         ? { mushroom: getPrivateMushroomState(this.mushrooms, playerId)! }
         : {}),
     }
@@ -4368,14 +4453,14 @@ export default class PokerRoom implements PartyServer {
       venmoUsername: this.data.playerProfiles[player.id]?.venmoUsername,
       stats: this.getPublicStats(player.id),
       drinkCapable: this.isDrinkCapable(player),
-      ...(this.isFunModeEnabled() && getPublicTrip(this.mushrooms, player.id)
+      ...(getPublicTrip(this.mushrooms, player.id)
         ? { trip: getPublicTrip(this.mushrooms, player.id)! }
         : {}),
       drinks: {
         ...toPublicDrinkState(this.drinkLedger[player.id] ?? (this.isBotPlayer(player.id) ? undefined : this.newSeatedDrinkEntry())),
         shotsWaiting: this.shotQueue.filter(shot => shot.targetId === player.id).length,
       },
-      ...(this.isFunModeEnabled() && this.stickyNotes.has(player.id) ? { stickyNote: this.stickyNotes.get(player.id)! } : {}),
+      ...(this.stickyNotes.has(player.id) ? { stickyNote: this.stickyNotes.get(player.id)! } : {}),
       ...(this.isPlayerPeeking(player.id) ? { isPeeking: true } : {}),
       ...(this.data.membership.awayIds[player.id] ? { isAway: true } : {}),
     }
@@ -4664,7 +4749,10 @@ export default class PokerRoom implements PartyServer {
     }
 
     const previous = history.find(entry => entry.handNumber === state.handNumber)
-    const entry = buildHandHistoryEntry(toTableState(state, ''), previous?.endedAt ?? Date.now())
+    const forensics: HandForensics = this.handForensics.handNumber === state.handNumber
+      ? { exits: this.handForensics.exits, timedOutChecks: this.handForensics.timedOutChecks }
+      : {}
+    const entry = buildHandHistoryEntry(toTableState(state, ''), previous?.endedAt ?? Date.now(), forensics)
     if (!entry) {
       return
     }
@@ -4673,6 +4761,8 @@ export default class PokerRoom implements PartyServer {
       // The board and winners are fixed when the hand ends; only shown hands can change.
       entry.board = previous.board
       entry.shown = mergeShownHands(previous.shown, entry.shown)
+      // How each hand ended is fixed at the end too (post-hand relabels must not rewrite it).
+      if (previous.outcomes) entry.outcomes = previous.outcomes
     }
 
     const soberTax = Object.entries(this.drinkLedger)
@@ -4713,7 +4803,7 @@ export default class PokerRoom implements PartyServer {
   /** Cosmetic only: feeds the finished hand to the Lady Luck companion rules. */
   private recordLadyLuckOutcome() {
     const state = this.data.gameState
-    if (!state.winners?.length || !this.isFunModeEnabled()) {
+    if (!state.winners?.length) {
       return
     }
 
@@ -4844,11 +4934,15 @@ export default class PokerRoom implements PartyServer {
       const actingPlayer = this.getPlayer(playerId)
       const shouldCheck = actingPlayer ? actingPlayer.bet >= gameState.currentBet : false
       const action = shouldCheck ? 'check' : 'fold'
+      const street = gameState.round
       this.data.gameState = processAction(gameState, playerId, action)
       // The clock ran out: count toward sitting them out if it keeps happening.
       this.data.membership.timedOutThisHand[playerId] = true
       if (action === 'fold') {
+        this.noteHandExit(playerId, 'timeout', street)
         this.recordFold(playerId)
+      } else {
+        this.noteTimedOutCheck(playerId)
       }
       this.recordCompletedHandStats()
       this.finalizeState()
@@ -4895,6 +4989,7 @@ export default class PokerRoom implements PartyServer {
 
       try {
         const botAction = this.chooseBotAction(playerId)
+        const street = this.data.gameState.round
         this.data.gameState = processAction(
           this.data.gameState,
           playerId,
@@ -4902,6 +4997,7 @@ export default class PokerRoom implements PartyServer {
           botAction.amount
         )
         if (botAction.action === 'fold') {
+          this.noteHandExit(playerId, 'fold', street)
           this.recordFold(playerId)
         }
         this.recordCompletedHandStats()
@@ -4910,7 +5006,9 @@ export default class PokerRoom implements PartyServer {
         this.broadcastState()
       } catch {
         try {
+          const street = this.data.gameState.round
           this.data.gameState = processAction(this.data.gameState, playerId, 'fold')
+          this.noteHandExit(playerId, 'fold', street)
           this.recordFold(playerId)
           this.recordCompletedHandStats()
           this.finalizeState()
@@ -5156,6 +5254,7 @@ export default class PokerRoom implements PartyServer {
         this.data.gameState = startHand({ ...this.data.gameState, pacedRunout: this.allInRunoutPacing })
         this.recordDealtIn()
         this.recordHandsPlayedForCurrentHand()
+        this.recordCompletedHandStats()
         this.wakeRestedDrinkers()
         this.advanceMushroomsForNewHand()
         this.clearStickyNotes()

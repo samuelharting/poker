@@ -11,6 +11,7 @@ import { useIsTwoDLayout } from '@/lib/layoutMode'
 import { isAllowedEmote, sanitizeText } from '@/shared/protocol'
 import {
   DEFAULT_PLAYER_AVATAR_CUSTOMIZATION,
+  applyTabNickname,
   loadStoredPlayerProfile,
   normalizePlayerAvatarCustomization,
   saveStoredPlayerProfile,
@@ -59,8 +60,12 @@ export default function RoomPage() {
     const storedProfile = loadStoredPlayerProfile()
     setProfileChecked(true)
     if (storedProfile) {
-      setProfile(storedProfile)
-      setProfileInput(storedProfile)
+      // The profile is shared by every tab of this browser, but a tab keeps
+      // the nickname it joined with: reloading it must not turn it into
+      // whoever typed a name last in another tab.
+      const tabProfile = applyTabNickname(storedProfile, sessionStorage.getItem('poker_nickname'))
+      setProfile(tabProfile)
+      setProfileInput(tabProfile)
       return
     }
 
@@ -310,6 +315,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
       events={drinkEvents}
       serverNow={tableState?.serverNow}
       isConnected={isConnected}
+      drinkingEnabled={tableState?.funModeEnabled !== false}
       onOrder={orderDrink}
       onTakeShot={() => sendMessage({ type: 'take_shot' })}
     >

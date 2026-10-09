@@ -86,16 +86,18 @@ export function loadStoredReconnectToken(roomCode: string): string | null {
   const sessionStorage = getBrowserStorage('sessionStorage')
 
   try {
-    const persistentToken = persistentStorage?.getItem(key)
-    if (persistentToken) {
-      return persistentToken
+    // This tab's own identity first: two tabs of one browser (different
+    // nicknames) share localStorage, and a reload must not pick up the other
+    // tab's token. A brand-new tab falls back to the browser-wide one.
+    const tabToken = sessionStorage?.getItem(key) ?? null
+    if (tabToken) {
+      if (!persistentStorage?.getItem(key)) {
+        persistentStorage?.setItem(key, tabToken)
+      }
+      return tabToken
     }
 
-    const legacySessionToken = sessionStorage?.getItem(key) ?? null
-    if (legacySessionToken) {
-      persistentStorage?.setItem(key, legacySessionToken)
-    }
-    return legacySessionToken
+    return persistentStorage?.getItem(key) ?? null
   } catch {
     return null
   }

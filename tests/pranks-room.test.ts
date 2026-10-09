@@ -405,7 +405,7 @@ describe('PokerRoom buy_shot', () => {
     expect(lastFailure(sam)).toContain('already blacked out')
   })
 
-  it('is disabled with fun mode off (both pranks), and turning it off drops queued shots', () => {
+  it('drinking off blocks buying shots and drops queued shots, but chip flick still works', () => {
     vi.useFakeTimers()
     const { join } = createTable()
     const sam = join('sam', 'Sam', 0)
@@ -418,10 +418,10 @@ describe('PokerRoom buy_shot', () => {
     expect(drinksOf(sam, alex.playerId)?.shotsWaiting ?? 0).toBe(0)
 
     sam.send({ type: 'buy_shot', targetId: alex.playerId })
-    expect(lastFailure(sam)).toBe('Fun mode is off at this table')
-    sam.send({ type: 'flick_chip', targetId: alex.playerId })
-    expect(lastFailure(sam)).toBe('Fun mode is off at this table')
+    expect(lastFailure(sam)).toBe('Drinking is off at this table')
     expect(prankEvents(alex.connection).filter(event => event.kind !== 'shot_queued')).toHaveLength(0)
+    sam.send({ type: 'flick_chip', targetId: alex.playerId })
+    expect(prankEvents(alex.connection).filter(event => event.kind === 'chip_flick')).toHaveLength(1)
   })
 })
 

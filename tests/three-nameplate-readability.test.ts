@@ -52,14 +52,14 @@ describe('desktop opponent panel readability', () => {
     expect(styleSource).toMatch(/\.cinematic-seat-5 \.cinematic-seat-social\s*\{[^}]*right:\s*calc\(100% \+ 12px\);[^}]*left:\s*auto;[^}]*top:\s*50%;/s)
   })
 
-  it('keeps the normal camera stable while preserving the short all-in impact', () => {
+  it('keeps the camera calm (motion sickness): no all-in shake, only a gentle lean', () => {
     expect(sceneSource).toContain('const baseCameraPosition = camera.position.clone()')
     expect(sceneSource).toContain('const baseCameraLookAt = cameraLookAt.clone()')
     expect(sceneSource).toContain('targetCamera.copy(baseCameraPosition)')
     expect(sceneSource).toContain('targetLook.copy(baseCameraLookAt)')
     expect(sceneSource).not.toContain('getTurnCameraPose(actingSeat)')
     expect(sceneSource).toContain('getAllInCameraImpact(runtime.seats.values(), time, reducedMotion)')
-    expect(sceneSource).toContain('const microShake = Math.sin(time * 61)')
-    expect(sceneSource).toContain('targetCamera.z -= allInImpact.strength * 0.3')
+    expect(sceneSource).not.toContain('const microShake = Math.sin(time * 61)')
+    expect(sceneSource).toContain('targetCamera.z -= allInImpact.strength * 0.06')
   })
 })

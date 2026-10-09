@@ -3540,6 +3540,35 @@
   color: #12873f;
 }
 
+.hand-history-outcomes {
+  display: grid;
+  gap: 2px;
+  margin: 2px 0 0;
+  padding: 6px 0 0;
+  border-top: 1px solid var(--line-soft);
+  list-style: none;
+}
+
+.hand-history-outcome {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+}
+
+.hand-history-outcome.is-won {
+  color: var(--c-text-1);
+}
+
+.hand-history-outcome.is-timeout,
+.hand-history-outcome.is-left,
+.hand-history-outcome.is-kicked,
+.hand-history-outcome.is-moved_to_rail {
+  color: var(--c-brass-200);
+}
+
 .hand-history-muted,
 .hand-history-empty {
   color: var(--c-text-3);
@@ -3569,6 +3598,11 @@
   box-shadow:
     inset 0 0 0 2px rgba(255, 122, 61, 0.7),
     inset 0 0 72px 6px rgba(255, 122, 61, 0.26);
+}
+
+.turn-prompt-kicker.is-timeout-warning,
+.timer-bar-label.is-timeout-warning {
+  color: #ff8a52;
 }
 
 @keyframes turn-edge-in {

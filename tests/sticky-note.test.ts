@@ -159,7 +159,7 @@ describe('PokerRoom sticky_note', () => {
     expect(noteOf(sam, alex.playerId)?.text).toBe('banana')
   })
 
-  it('needs a seated target, a joined sender and fun mode', () => {
+  it('needs a seated target and a joined sender, and still works with drinking off', () => {
     vi.useFakeTimers()
     const { join, room, server } = createTable()
     const sam = join('sam', 'Sam', 0)
@@ -180,8 +180,7 @@ describe('PokerRoom sticky_note', () => {
 
     sam.send({ type: 'update_table_settings', funModeEnabled: false })
     alex.send({ type: 'sticky_note', targetId: sam.playerId, text: 'HI' })
-    expect(failure(alex)).toBe('Fun mode is off at this table')
-    expect(noteOf(sam, sam.playerId)).toBeUndefined()
+    expect(noteOf(sam, sam.playerId)?.text).toBe('HI')
   })
 
   it('lets you note yourself and a bot', () => {

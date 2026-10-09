@@ -540,17 +540,24 @@ export function startHand(state: InternalGameState): InternalGameState {
     p => p.status === 'active' && p.stack > 0
   )
   const firstActIdx = seatIndexToPlayerIndex(s.players, firstActSeatIndex)
-
-  if (firstActIdx >= 0) {
-    s.actingPlayerId = s.players[firstActIdx]!.id
-    s.actingPlayerIndex = firstActIdx
-    s.actionTimerStart = Date.now()
-  }
+  const firstActor = firstActIdx >= 0 ? s.players[firstActIdx]! : null
 
   s.totalPot = s.players.reduce((sum, p) => sum + p.totalInPot, 0)
-
   addAction(s, `Hand #${s.handNumber} started`)
-  return s
+
+  if (firstActor && firstActor.status === 'active' && firstActor.stack > 0) {
+    s.actingPlayerId = firstActor.id
+    s.actingPlayerIndex = firstActIdx
+    s.actionTimerStart = Date.now()
+    return s
+  }
+
+  // The blinds put everyone all-in: nobody can act, so run the board out
+  // instead of handing the turn to an all-in player (which stalls the hand).
+  s.actingPlayerId = null
+  s.actingPlayerIndex = -1
+  s.actionTimerStart = null
+  return advanceRound(s)
 }
 
 /**
@@ -626,6 +633,12 @@ export function processAction(
 
     case 'raise': {
       if (amount === undefined) throw new Error('Raise amount required')
+      // A "raise" for the whole stack is an all-in: it may be a call for less
+      // or an incomplete raise, and must follow the all-in rules (never lower
+      // the bet to match, never reopen the betting on a short raise).
+      if (amount === player.stack + player.bet) {
+        return processAction(state, playerId, 'all_in')
+      }
       const minRaise = calculateMinRaise(s.currentBet, s.lastRaiseSize, s.bigBlind)
       if (amount < minRaise && amount !== player.stack + player.bet) {
         throw new Error(`Minimum raise is $${minRaise}, got $${amount}`)
@@ -721,13 +734,15 @@ function advanceAction(state: InternalGameState): InternalGameState {
     }
   }
 
-  // Find next player to act
+  // Find next player to act: anyone who has not acted yet, and anyone who did
+  // act but now faces more (an all-in for less than a full raise leaves them
+  // owing the difference: they may call it or fold, never be skipped).
   let nextIdx = s.actingPlayerIndex
   let found = false
   for (let i = 1; i <= s.players.length; i++) {
     const idx = (s.actingPlayerIndex + i) % s.players.length
     const p = s.players[idx]!
-    if (p.status === 'active' && p.stack > 0 && !p.hasActedThisRound) {
+    if (p.status === 'active' && p.stack > 0 && (!p.hasActedThisRound || p.bet < s.currentBet)) {
       nextIdx = idx
       found = true
       break
@@ -979,6 +994,27 @@ function advanceRoundStep(state: InternalGameState, continuingRunout: boolean): 
 }
 
 /**
+ * Chips put in above what any player still in the hand put in can never be
+ * won by anyone: a player who bet, was called all-in for less, and then left
+ * or was folded out. They go back to whoever put them in (an uncalled bet)
+ * instead of vanishing from the side pots.
+ */
+function refundUnclaimableChips(s: InternalGameState): void {
+  const contenders = s.players.filter(player => player.status !== 'folded' && player.holeCards.length === 2)
+  if (contenders.length === 0) return
+  const cap = Math.max(...contenders.map(player => player.totalInPot))
+  for (const player of s.players) {
+    if (player.totalInPot > cap) {
+      const excess = player.totalInPot - cap
+      player.totalInPot = cap
+      player.bet = Math.max(0, player.bet - excess)
+      player.stack += excess
+      addAction(s, `$${excess} uncalled returned to ${player.nickname}`)
+    }
+  }
+}
+
+/**
  * Award all pots to the last remaining player (everyone else folded).
  */
 function awardLastPlayer(
@@ -994,6 +1030,7 @@ function awardLastPlayer(
   if (winnerIdx < 0) return s
 
   const winner = s.players[winnerIdx]!
+  refundUnclaimableChips(s)
 
   // Build final pots
   s.pots = buildSidePots(s.players)
@@ -1047,6 +1084,7 @@ function resolveRunItTwiceBoards(state: InternalGameState): InternalGameState {
     throw new Error('Run it twice is not awaiting votes')
   }
 
+  refundUnclaimableChips(s)
   s.pots = buildSidePots(s.players)
   s.totalPot = s.pots.reduce((sum, pot) => sum + pot.amount, 0)
 
@@ -1105,10 +1143,27 @@ function resolveRunItTwiceBoards(state: InternalGameState): InternalGameState {
         boardWinnerDescriptions[boardIndex]!.set(playerId, winner.result.description)
         boardWinnerCards[boardIndex]!.set(playerId, winner.result.cards)
         combinedWinnerTotals.set(playerId, (combinedWinnerTotals.get(playerId) ?? 0) + amount)
-        combinedWinnerDescriptions.set(playerId, winner.result.description)
-        combinedWinnerCards.set(playerId, winner.result.cards)
       })
     })
+  }
+
+  // The combined result is shown next to run 1's board (communityCards), so
+  // never pair it with a hand made on the other run: name each run's hand,
+  // and only highlight cards from run 1.
+  for (const playerId of combinedWinnerTotals.keys()) {
+    const runDescriptions = boards
+      .map((_, boardIndex) => boardWinnerDescriptions[boardIndex]!.get(playerId))
+    const [first, second] = runDescriptions
+    const description = first && second
+      ? first === second ? `${first} (both runs)` : `Run 1: ${first} / Run 2: ${second}`
+      : first
+        ? `Run 1: ${first}`
+        : second
+          ? `Run 2: ${second}`
+          : undefined
+    if (description) combinedWinnerDescriptions.set(playerId, description)
+    const runOneCards = boardWinnerCards[0]!.get(playerId)
+    if (runOneCards) combinedWinnerCards.set(playerId, runOneCards)
   }
 
   applyHandPayouts(
@@ -1226,26 +1281,29 @@ export function resolveShowdown(state: InternalGameState): InternalGameState {
   s.actingPlayerIndex = -1
 
   // Finalize pots
+  refundUnclaimableChips(s)
   s.pots = buildSidePots(s.players)
   s.totalPot = s.pots.reduce((sum, p) => sum + p.amount, 0)
 
   const communityCards = s.communityCards
 
-  // Evaluate hands for all eligible players
+  // Evaluate every hand still contesting a pot: anyone who has not folded and
+  // holds two cards. Status alone must never drop a live hand from the
+  // showdown (its cards are tabled to everyone, so it must also be judged).
   const handResults = new Map<
     string,
     ReturnType<typeof evaluateHand>
   >()
+  const contestingIds = new Set(s.pots.flatMap(pot => pot.eligiblePlayerIds))
 
   for (const player of s.players) {
-    if (player.status === 'active' || player.status === 'all_in') {
-      if (player.holeCards.length === 2) {
-        const allCards = [...player.holeCards, ...communityCards]
-        try {
-          handResults.set(player.id, evaluateHand(allCards))
-        } catch {
-          // Player has incomplete hand (shouldn't happen)
-        }
+    const contesting = player.status === 'active' || player.status === 'all_in' || contestingIds.has(player.id)
+    if (contesting && player.status !== 'folded' && player.holeCards.length === 2) {
+      const allCards = [...player.holeCards, ...communityCards]
+      try {
+        handResults.set(player.id, evaluateHand(allCards))
+      } catch {
+        // Player has incomplete hand (shouldn't happen)
       }
     }
   }
@@ -1256,11 +1314,13 @@ export function resolveShowdown(state: InternalGameState): InternalGameState {
   const winnerCards = new Map<string, Card[]>()
 
   for (const pot of s.pots) {
-    const eligible = pot.eligiblePlayerIds.filter(id => handResults.has(id))
+    let eligible = pot.eligiblePlayerIds.filter(id => handResults.has(id))
 
     if (eligible.length === 0) {
-      // Give back to the contributing player (edge case)
-      continue
+      // Nobody left who can claim this layer (should not happen): give it to
+      // the best live hand rather than letting the chips disappear.
+      eligible = Array.from(handResults.keys())
+      if (eligible.length === 0) continue
     }
 
     if (eligible.length === 1) {

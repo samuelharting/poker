@@ -115,6 +115,29 @@ describe('PokerRoom Lady Luck companion', () => {
     expect(bobs!.id).not.toBe(arrived!.id)
   })
 
+  it('keeps her around with drinking off (the Fun mode setting is drinking only)', () => {
+    const { server, join } = createRoom()
+    const ann = join('ann', 'Ann', 0)
+    const bob = join('bob', 'Bob', 1)
+    server.onMessage(JSON.stringify({ type: 'update_table_settings', funModeEnabled: false }), ann.connection)
+    const internals = server as unknown as Internals
+    for (const handNumber of [1, 2]) {
+      internals.data.gameState.phase = 'between_hands'
+      internals.data.gameState.handNumber = handNumber
+      for (const player of internals.data.gameState.players) {
+        player.holeCards = [{ rank: 'A', suit: 'spades' }, { rank: 'K', suit: 'hearts' }]
+        player.status = 'active'
+        player.totalInPot = 40
+      }
+      internals.data.gameState.winners = [{ playerId: ann.playerId, amount: 80 }]
+      internals.recordHandsPlayedForCurrentHand()
+      internals.recordCompletedHandStats()
+    }
+    const state = internals.buildSnapshotFor(bob.connection.id).state
+    expect(state.funModeEnabled).toBe(false)
+    expect(state.companion).toMatchObject({ ownerId: ann.playerId, mood: 'arrive' })
+  })
+
   it('lets only her owner tell her to shut up, and resets that when she reappears', () => {
     const { server, join } = createRoom()
     const ann = join('ann', 'Ann', 0)

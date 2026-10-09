@@ -103,6 +103,16 @@ export function normalizePlayerUsername(value: string): string {
   return value.trim().toLowerCase()
 }
 
+/**
+ * The browser-wide profile with this tab's own nickname on top. Two tabs of one
+ * browser share the stored profile, so a reload must keep the nickname the tab
+ * joined with instead of whichever name was typed last in another tab.
+ */
+export function applyTabNickname(profile: PlayerProfile, tabNickname: string | null | undefined): PlayerProfile {
+  const nickname = tabNickname?.trim()
+  return nickname && nickname !== profile.nickname ? { ...profile, nickname } : profile
+}
+
 export function normalizeVenmoUsername(value: string): string {
   const trimmed = value.trim()
   if (!trimmed) {

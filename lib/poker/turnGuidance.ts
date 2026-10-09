@@ -246,3 +246,15 @@ export function describeAutoAction(action: 'check' | 'call' | 'fold', amount: nu
   if (action === 'fold') return 'Auto-folded'
   return `Auto-called ${formatChips(amount)}`
 }
+
+/** Seconds left on your clock at which the table warns what a timeout will do. */
+export const TURN_TIMEOUT_WARNING_SECONDS = 5
+
+/**
+ * In the last few seconds of your turn: say what the clock will do for you
+ * (check when checking is free, otherwise fold). Null while there is time.
+ */
+export function getTurnTimeoutWarning(secondsLeft: number, toCall: number): string | null {
+  if (secondsLeft > TURN_TIMEOUT_WARNING_SECONDS) return null
+  return toCall > 0 ? `Auto-fold in ${secondsLeft}s` : `Auto-check in ${secondsLeft}s`
+}

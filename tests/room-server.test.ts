@@ -1635,13 +1635,13 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
     const live = lastMessage(host.connection, 'room_snapshot')!.state
     const aliceId = live.players.find(player => player.nickname === 'Alice')!.id
     const [shover, caller] = live.actingPlayerId === aliceId ? [host, guest] : [guest, host]
-    expect(live.actionTimerDuration).toBe(13_000)
+    expect(live.actionTimerDuration).toBe(AUTO_FOLD_DELAY)
     send(server, shover.connection, { type: 'player_action', action: 'all_in' })
 
     const facing = lastMessage(caller.connection, 'room_snapshot')!.state
-    expect(facing.actionTimerDuration).toBe(13_000 + 15_000)
+    expect(facing.actionTimerDuration).toBe(AUTO_FOLD_DELAY + 15_000)
     const runtime = server as unknown as { autoFoldDeadline: number | null }
-    expect(runtime.autoFoldDeadline).toBe(Date.now() + 28_000)
+    expect(runtime.autoFoldDeadline).toBe(Date.now() + AUTO_FOLD_DELAY + 15_000)
   })
 
   it('rejects invalid table-setting ranges and relationships', () => {
@@ -1665,7 +1665,7 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
     expect(snapshot?.state.smallBlind).toBe(10)
     expect(snapshot?.state.bigBlind).toBe(20)
     expect(snapshot?.state.startingStack).toBe(1_000)
-    expect(snapshot?.state.actionTimerDuration).toBe(13_000)
+    expect(snapshot?.state.actionTimerDuration).toBe(AUTO_FOLD_DELAY)
     expect(snapshot?.state.autoStartDelay).toBe(7_000)
     expect(snapshot?.state.sevenTwoBountyPercent).toBe(2)
   })
@@ -1703,7 +1703,7 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
     expect(snapshot?.state.smallBlind).toBe(10)
     expect(snapshot?.state.bigBlind).toBe(20)
     expect(snapshot?.state.startingStack).toBe(1_000)
-    expect(snapshot?.state.actionTimerDuration).toBe(13_000)
+    expect(snapshot?.state.actionTimerDuration).toBe(AUTO_FOLD_DELAY)
     expect(snapshot?.state.rabbitHuntingEnabled).toBe(false)
     expect(snapshot?.state.pendingTableSettings).toMatchObject({
       smallBlind: 50,
@@ -1717,7 +1717,7 @@ describe('PokerRoom protocol safety and host-only enforcement', () => {
       autoFoldDeadline: number | null
     }
     expect(snapshot?.state.actionTimerStart).toBe(Date.now() - 1_000)
-    expect(runtime.autoFoldDeadline).toBe(Date.now() + 12_000)
+    expect(runtime.autoFoldDeadline).toBe(Date.now() + AUTO_FOLD_DELAY - 1_000)
 
     const actingPlayer = snapshot?.state.actingPlayerId === host.playerId ? host : nonHost
     send(server, actingPlayer.connection, { type: 'player_action', action: 'fold' })
@@ -2333,7 +2333,7 @@ describe('PokerRoom snapshots include bounty metadata', () => {
 })
 
 describe('PokerRoom fun mode', () => {
-  it('turns drinks and Lady Luck off immediately and sobers everyone up', () => {
+  it('turns drinking off immediately, sobers everyone up and keeps Lady Luck', () => {
     const { room, server } = createHarness()
 
     const host = joinPlayer(server, room, 'host', 'Alice')
@@ -2348,15 +2348,14 @@ describe('PokerRoom fun mode', () => {
     expect(drinker?.drinks?.beers).toBe(1)
 
     send(server, host.connection, { type: 'update_table_settings', funModeEnabled: false })
-    expect(lastMessage(host.connection, 'action_result')?.message).toBe('Fun mode off: no drinks or Lady Luck.')
+    expect(lastMessage(host.connection, 'action_result')?.message).toBe('Drinking off: no drinks, everything else stays on.')
     const off = lastMessage(guest.connection, 'room_snapshot')?.state
     expect(off?.funModeEnabled).toBe(false)
-    expect(off?.companion).toBeNull()
     expect(off?.pendingTableSettings).toBeUndefined()
     expect(off?.players.find(player => player.nickname === 'Bob')?.drinks?.beers).toBe(0)
 
     send(server, guest.connection, { type: 'order_drink', kind: 'beer' })
-    expect(lastMessage(guest.connection, 'action_failed')?.message).toBe('Fun mode is off at this table')
+    expect(lastMessage(guest.connection, 'action_failed')?.message).toBe('Drinking is off at this table')
 
     send(server, host.connection, { type: 'update_table_settings', funModeEnabled: true })
     expect(lastMessage(guest.connection, 'room_snapshot')?.state.funModeEnabled).toBe(true)

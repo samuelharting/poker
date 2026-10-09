@@ -519,7 +519,7 @@ export class FunFx {
         const down = smooth((e - BONK_AT) / BONK_DOWN)
         const bounce = e > BONK_AT + BONK_DOWN ? Math.exp(-(e - BONK_AT - BONK_DOWN) * 9) * Math.sin((e - BONK_AT - BONK_DOWN) * 38) : 0
         const rise = smooth((e - BLACK_UNTIL) / RISE_SECONDS)
-        pitch = (0.62 * down - 0.05 * bounce * motion) * (1 - rise)
+        pitch = (0.35 * down - 0.01 * bounce * motion) * (1 - rise)
       } else if (e >= BLACK_UNTIL + RISE_SECONDS) {
         this.heroBlackoutAt = null
       }
@@ -530,11 +530,10 @@ export class FunFx {
     if (trip > 0 && motion > 0 && this.heroTripStartedAt !== null) {
       const elapsed = time - this.heroTripStartedAt
       // The room slowly rolls upside down and back, once, ~40s in.
-      const rollU = (elapsed - 40) / 26
-      const roll = rollU > 0 && rollU < 1 ? Math.PI * (1 - Math.cos(rollU * Math.PI * 2)) / 2 : 0
-      const sway = Math.sin(elapsed * 0.45) * 0.07
-      camera.rotateZ((roll + sway) * trip)
-      const lens = (Math.sin(elapsed * 0.85) * 6 + Math.sin(elapsed * 0.31) * 3) * trip
+      // No full room roll and only a faint sway: big camera rolls caused motion sickness.
+      const sway = Math.sin(elapsed * 0.45) * 0.015
+      camera.rotateZ(sway * trip)
+      const lens = (Math.sin(elapsed * 0.85) * 1.5 + Math.sin(elapsed * 0.31) * 0.8) * trip
       camera.fov += lens
       this.appliedFovDelta = lens
     }

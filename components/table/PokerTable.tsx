@@ -34,6 +34,7 @@ import { SearchableEmojiPicker } from '@/components/ui/SearchableEmojiPicker'
 import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
 import { evaluateHand } from '@/lib/poker/evaluator'
 import { getShowdownRevealMode, isTrueShowdown } from '@/lib/poker/showdown'
+import { describeHandOutcome } from '@/lib/poker/handHistory'
 import { getHandOddsView, type SeatOddsView } from '@/lib/poker/handOddsView'
 import { HandOddsPanel, OddsPill } from '@/components/table/HandOdds'
 import { TWO_D_LAYOUT_QUERY, useMediaQuery } from '@/lib/layoutMode'
@@ -47,6 +48,7 @@ import {
   isPreActionOptionActive,
   reconcilePreAction,
   resolvePreAction,
+  getTurnTimeoutWarning,
   type PreActionKind,
   type QueuedPreAction,
   type TurnPromptInput,
@@ -2183,6 +2185,8 @@ export function PokerTable({
     state.actionTimerDuration,
     state.serverNow
   )
+  // Last seconds of your own clock: say what a timeout will do (fold, or a free check).
+  const turnTimeoutWarning = hasActionTray ? getTurnTimeoutWarning(turnTimer.secondsLeft, toCall) : null
   // Everyone sees the acting opponent's clock drain on their nameplate.
   const opponentTimerVisible = isInHand && Boolean(actingPlayer) && !isMyTurn && Boolean(state.actionTimerStart)
 
@@ -2661,22 +2665,20 @@ export function PokerTable({
   const canStickyTarget = Boolean(
     onStickyNote &&
     targetedPlayer &&
-    targetedPlayer.id !== yourId &&
-    state.funModeEnabled !== false
+    targetedPlayer.id !== yourId
   )
 
-  // Pranks: desktop only (phones have none of it, either direction), fun mode
-  // on, you are seated, and the target is someone else at the table.
+  // Pranks: desktop only (phones have none of it, either direction), you are seated, and the target is someone else at the table.
   const canPrankTarget = Boolean(
     !isMobileViewport &&
     targetedPlayer &&
     me &&
     targetedPlayer.id !== yourId &&
     targetedPlayer.drinkCapable === true &&
-    state.funModeEnabled !== false &&
     (onBuyShot || onFlickChip)
   )
-  const canShootTarget = Boolean(canPrankTarget && onBuyShot)
+  // Buying a shot is drinking: it follows the Drinking setting, chip flick does not.
+  const canShootTarget = Boolean(canPrankTarget && onBuyShot && state.funModeEnabled !== false)
   const shotBlockReason = targetedPlayer && canShootTarget
     ? getShotBlockReasonFromState(me?.drinks, targetedPlayer.drinks, state.handNumber, targetedPlayer.nickname)
     : null
@@ -3279,6 +3281,7 @@ export function PokerTable({
           onFeedback={onFeedback}
           onSendLedgerMessage={onSendLedgerMessage}
           turnSecondsLeft={hasActionTray ? turnTimer.secondsLeft : undefined}
+          turnTimeoutWarning={turnTimeoutWarning}
         />
       )}
 
@@ -3340,7 +3343,7 @@ export function PokerTable({
 
             <div className="turn-prompt mobile-turn-prompt" role="status" aria-live="assertive">
               <div className="turn-prompt-copy">
-                <span className="turn-prompt-kicker">{turnPrompt?.kicker ?? 'Your turn'}</span>
+                <span className={`turn-prompt-kicker ${turnTimeoutWarning ? 'is-timeout-warning' : ''}`}>{turnTimeoutWarning ?? turnPrompt?.kicker ?? 'Your turn'}</span>
                 <strong className="turn-prompt-headline">{bettingTrayHeader}</strong>
                 {turnPrompt?.context && (
                   <span className="turn-prompt-context">{turnPrompt.context}</span>
@@ -3482,7 +3485,7 @@ export function PokerTable({
             )}
             <div className="betting-tray-header turn-prompt" role="status" aria-live="assertive">
               <div className="turn-prompt-copy">
-                <span className="turn-prompt-kicker">{turnPrompt?.kicker ?? 'Your turn'}</span>
+                <span className={`turn-prompt-kicker ${turnTimeoutWarning ? 'is-timeout-warning' : ''}`}>{turnTimeoutWarning ?? turnPrompt?.kicker ?? 'Your turn'}</span>
                 <strong className="betting-tray-kicker turn-prompt-headline">
                   {bettingTrayHeader}
                 </strong>
@@ -3503,7 +3506,9 @@ export function PokerTable({
               data-urgency={turnTimer.percent <= 28 || turnTimer.secondsLeft <= 3 ? 'low' : turnTimer.percent <= 55 ? 'warn' : 'calm'}
             >
               <div className="timer-bar-header">
-                <span className="timer-bar-label">Time to act</span>
+                <span className={`timer-bar-label ${turnTimeoutWarning ? 'is-timeout-warning' : ''}`} role={turnTimeoutWarning ? 'alert' : undefined}>
+                  {turnTimeoutWarning ?? 'Time to act'}
+                </span>
                 <span className={`timer-bar-seconds ${turnTimer.secondsLeft <= 5 ? 'is-low' : ''}`}>
                   <b key={turnTimer.secondsLeft}>{turnTimer.secondsLeft}</b>s<span className="timer-bar-left"> left</span>
                 </span>
@@ -4438,6 +4443,7 @@ export function SettingsModal({
   onFeedback,
   onSendLedgerMessage,
   turnSecondsLeft,
+  turnTimeoutWarning = null,
 }: {
   state: TableState
   yourId: string
@@ -4446,6 +4452,8 @@ export function SettingsModal({
   onSendLedgerMessage?: (message: LedgerC2SMessage) => void
   /** Set while it is your turn: the clock stays in sight and one tap gets back to the table. */
   turnSecondsLeft?: number
+  /** Last seconds of your turn: what the clock will do (e.g. "Auto-fold in 4s"). */
+  turnTimeoutWarning?: string | null
   suitColorMode: 'two' | 'four'
   sceneMode?: SceneMode
   soundMuted?: boolean
@@ -4677,7 +4685,9 @@ export function SettingsModal({
             className={`panel-turn-strip settings-turn-strip ${turnSecondsLeft <= 5 ? 'is-low' : ''}`}
             onClick={onClose}
           >
-            <span>Your turn · {turnSecondsLeft}s</span>
+            <span role={turnTimeoutWarning ? 'alert' : undefined}>
+              {turnTimeoutWarning ? `Your turn · ${turnTimeoutWarning}` : `Your turn · ${turnSecondsLeft}s`}
+            </span>
             <b>Back to the table</b>
           </button>
         )}
@@ -4934,8 +4944,8 @@ export function SettingsModal({
                   <div className="settings-section-title">Rules</div>
                   <div className="settings-rule-row settings-desktop-only">
                     <div>
-                      <div className="settings-rule-name">Fun mode</div>
-                      <div className="settings-rule-copy">Beer, water and Lady Luck for players on the desktop 3D table. Phones and tablets always keep it simple. Turning it off sobers everyone up right away.</div>
+                      <div className="settings-rule-name">Drinking</div>
+                      <div className="settings-rule-copy">Beer, water, shots and drunk effects. Off keeps Lady Luck, pranks and everything else.</div>
                     </div>
                     <div className="settings-toggle-row">
                       <button
@@ -5453,6 +5463,16 @@ export function HandHistoryList({
               <HistoryCards cards={hand.cards} label={`${hand.nickname} showed`} />
             </div>
           ))}
+          {entry.outcomes?.length ? (
+            <ul className="hand-history-outcomes" aria-label={`How hand ${entry.handNumber} ended for each player`}>
+              {entry.outcomes.map(outcome => (
+                <li key={outcome.playerId} className={`hand-history-outcome is-${outcome.result}${outcome.reason ? ` is-${outcome.reason}` : ''}`}>
+                  <span className="hand-history-label">{nameOf(outcome.playerId, outcome.nickname)}</span>
+                  <span>{describeHandOutcome(outcome)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </li>
       ))}
     </ol>

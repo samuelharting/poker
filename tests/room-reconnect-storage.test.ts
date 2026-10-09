@@ -65,6 +65,14 @@ describe('mobile room reconnect storage', () => {
     expect(localStorage.getItem('poker_reconnect_ABC123')).toBe('legacy-token')
   })
 
+  it('prefers the token of this tab over the one another tab left in shared storage', () => {
+    const { localStorage, sessionStorage } = stubBrowserStorage()
+    sessionStorage.setItem('poker_reconnect_ABC123', 'alice-token')
+    localStorage.setItem('poker_reconnect_ABC123', 'bob-token')
+
+    expect(loadStoredReconnectToken('ABC123')).toBe('alice-token')
+  })
+
   it('clears both copies only when the player explicitly leaves', () => {
     const { localStorage, sessionStorage } = stubBrowserStorage()
     storeReconnectToken('ABC123', 'stable-token')

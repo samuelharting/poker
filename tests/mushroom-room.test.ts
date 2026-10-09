@@ -3,6 +3,7 @@ import type { Connection, Room } from 'partykit/server'
 import PokerRoom from '@/partykit/room'
 import { createDrinkLedgerEntry, DRINK_COOLDOWN_MS, WATER_KICK_IN_MS, type DrinkLedgerEntry } from '@/lib/drinks'
 import {
+  giveMushroom,
   maybeSpawnMushroom,
   createMushroomTable,
   MUSHROOM_AUTO_SPIKE_MS,
@@ -329,7 +330,7 @@ describe('PokerRoom mushroom (pill)', () => {
     expect(internals.mushrooms.mushroom?.status).toBe('held')
   })
 
-  it('fun mode off removes the mushroom and ends an active trip', () => {
+  it('drinking off keeps the mushroom and the trip, and a spike skips the water', () => {
     vi.useFakeTimers()
     const { internals, join } = createTable()
     const alice = join('alice', 'Alice', 0)
@@ -343,15 +344,30 @@ describe('PokerRoom mushroom (pill)', () => {
     expect(seatOf(alice, bob.playerId)?.trip).toBeDefined()
 
     alice.send({ type: 'update_table_settings', funModeEnabled: false })
-    expect(seatOf(alice, bob.playerId)?.trip).toBeUndefined()
-    expect(internals.mushrooms.trip).toBeNull()
-    expect(internals.mushrooms.mushroom).toBeNull()
+    expect(seatOf(alice, bob.playerId)?.trip).toBeDefined()
+    expect(internals.mushrooms.trip).not.toBeNull()
 
-    // And none spawn while it is off.
+    // New mushrooms still spawn while drinking is off.
+    internals.mushrooms.trip = null
     dueNow(internals)
     vi.advanceTimersByTime(DRINK_COOLDOWN_MS)
     alice.send({ type: 'start_game' })
+    expect(internals.mushrooms.mushroom).not.toBeNull()
+  })
+
+  it('with drinking off a spike starts the trip directly (no water to order)', () => {
+    vi.useFakeTimers()
+    const { internals, join } = createTable()
+    const alice = join('alice', 'Alice', 0)
+    const bob = join('bob', 'Bob', 1)
+    alice.send({ type: 'update_table_settings', funModeEnabled: false })
+    giveMushroom(internals.mushrooms, alice.playerId, 0)
+    alice.send({ type: 'spike_water', targetId: bob.playerId })
+    expect(last(alice.connection, 'action_failed')?.message ?? '').not.toContain('Drinking')
     expect(internals.mushrooms.mushroom).toBeNull()
+    expect(seatOf(alice, bob.playerId)?.trip).toBeDefined()
+    bob.send({ type: 'order_drink', kind: 'water' })
+    expect(last(bob.connection, 'action_failed')?.message).toBe('Drinking is off at this table')
   })
 
   it('ignores the dev shortcuts from a non-local connection and honours them locally', () => {

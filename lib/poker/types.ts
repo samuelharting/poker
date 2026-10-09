@@ -163,6 +163,44 @@ export interface HandHistoryEntry {
   shown: Array<{ playerId: string; nickname: string; cards: Card[] }>
   /** Sober tax posted into this pot at the deal (drinking game). */
   soberTax?: Array<{ playerId: string; nickname: string; amount: number }>
+  /** How every dealt-in player's hand ended, so disputes can be settled. */
+  outcomes?: HandOutcome[]
+}
+
+/** Why a player's hand ended before the showdown. */
+export type HandExitReason =
+  /** They pressed fold (or a queued pre-action did). */
+  | 'fold'
+  /** Their clock ran out facing a bet. */
+  | 'timeout'
+  /** They left the table mid-hand. */
+  | 'left'
+  /** The host kicked them. */
+  | 'kicked'
+  /** The host moved them to the rail mid-hand. */
+  | 'moved_to_rail'
+
+export interface HandOutcome {
+  playerId: string
+  nickname: string
+  result: 'won' | 'lost' | 'folded'
+  /** won / lost: decided at a showdown, or uncontested after everyone else folded. */
+  via?: 'showdown' | 'uncontested'
+  /** folded: why, and on which street. */
+  reason?: HandExitReason
+  street?: BettingRound
+  /** Chips this player put in the pot this hand. */
+  stake: number
+  /** won: chips taken from the pot. */
+  amount?: number
+  /** Showdown hands (public at a showdown; omitted when the hand was run twice). */
+  handDescription?: string
+  /** Their connection was down when their hand ended. */
+  disconnected?: boolean
+  /** They had asked to sit out (or were marked away) when their hand ended. */
+  away?: boolean
+  /** Times the clock ran out with a free check this hand (checked for them, not folded). */
+  timedOutChecks?: number
 }
 
 export interface TableSettingsSnapshot {

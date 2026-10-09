@@ -39,6 +39,7 @@ export function DrinkProvider({
   events,
   serverNow,
   isConnected,
+  drinkingEnabled = true,
   onOrder,
   onTakeShot,
   children,
@@ -49,6 +50,8 @@ export function DrinkProvider({
   /** TableState.serverNow from the latest snapshot. */
   serverNow?: number
   isConnected: boolean
+  /** The Drinking table setting (funModeEnabled). Off: the drink controls stay idle. */
+  drinkingEnabled?: boolean
   onOrder: (kind: DrinkKind) => void
   onTakeShot?: () => void
   children: ReactNode
@@ -76,7 +79,7 @@ export function DrinkProvider({
     [serverNow]
   )
   const isSeated = Boolean(me)
-  const canOrder = isSeated && isConnected && !myDrinks.passedOut
+  const canOrder = isSeated && isConnected && drinkingEnabled && !myDrinks.passedOut
 
   const order = useCallback((kind: DrinkKind) => {
     const now = Date.now()
