@@ -1,0 +1,11 @@
+{
+  // Game server: PartyServer on Cloudflare Workers (hosted PartyKit shut down Oct 2026).
+  "name": "poker",
+  "main": "partykit/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "Main", "class_name": "Main" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Main"] }]
+}

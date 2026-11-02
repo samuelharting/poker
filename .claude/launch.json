@@ -11,7 +11,7 @@
     {
       "name": "poker-party",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["partykit", "dev"],
+      "runtimeArgs": ["wrangler", "dev", "--port", "1999"],
       "port": 1999
     }
   ]

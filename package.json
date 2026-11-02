@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"next dev\" \"npx partykit dev\"",
+    "dev": "concurrently \"next dev\" \"wrangler dev --port 1999\"",
     "dev:next": "next dev",
-    "dev:party": "npx partykit dev",
+    "dev:party": "wrangler dev --port 1999",
     "build": "next build",
     "start": "next start",
     "test": "vitest run tests",
@@ -16,19 +16,21 @@
     "assets:avatars:check": "node scripts/slim-avatars.mjs --check && node scripts/verify-slim-avatars.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "check": "npm run test && npm run typecheck && npm run build && npm run audit:prod",
-    "deploy:partykit": "npx partykit deploy",
+    "deploy:server": "wrangler deploy",
     "deploy:vercel": "vercel --prod"
   },
   "dependencies": {
     "clsx": "^2.1.1",
     "emoji-picker-react": "^4.18.0",
     "next": "^15.5.18",
+    "partyserver": "^0.5.10",
     "partysocket": "^1.0.3",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "three": "^0.184.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261102.1",
     "@playwright/test": "^1.60.0",
     "@types/node": "^20.17.0",
     "@types/react": "^19.2.15",
@@ -43,7 +45,8 @@
     "react-test-renderer": "^19.2.6",
     "tailwindcss": "^3.4.14",
     "typescript": "^5.6.3",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.7",
+    "wrangler": "^4.156.2"
   },
   "overrides": {
     "postcss": "$postcss",

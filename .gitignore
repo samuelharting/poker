@@ -40,3 +40,6 @@ Thumbs.db
 .superpowers/
 
 .vercel
+
+# wrangler local state
+.wrangler/
