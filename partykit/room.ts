@@ -576,6 +576,10 @@ export default class PokerRoom implements PartyServer {
       this.data.humansPresent = false
       this.finalizeState()
       this.syncActionTimer()
+      // Timers died with the old instance: re-arm a pending run-it-twice vote
+      // and a paced all-in runout, or the hand sits frozen until a rejoin.
+      this.syncRunItTwiceVote()
+      this.syncAllInRunout()
     } catch (error) {
       console.warn('Could not restore the saved table; starting fresh.', error)
     }

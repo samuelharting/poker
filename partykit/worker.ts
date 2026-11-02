@@ -49,6 +49,17 @@ export class Main extends Server<Env> {
     this.table().onClose(connection as unknown as PartyConnection)
   }
 
+  /**
+   * PartyServer drops a socket from its connection set on an error, and its
+   * close event is not guaranteed to follow. Treat the error as the close so
+   * the player is marked away (host handover, presence, idle reset) instead
+   * of staying bound to a dead socket. A later close is a harmless no-op.
+   */
+  onError(connection: Connection, error: unknown) {
+    console.warn(`Socket error on ${connection.id}:`, error)
+    this.table().onClose(connection as unknown as PartyConnection)
+  }
+
   onAlarm() {
     this.table().onAlarm()
   }

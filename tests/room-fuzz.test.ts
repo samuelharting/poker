@@ -39,10 +39,12 @@ vi.mock('@/lib/poker/engine', async importOriginal => {
  * against an independent brute-force evaluator and independent side pots.
  *
  * Reproduce a failure: FUZZ_SEED=<seed> FUZZ_HANDS=<n> npx vitest run tests/room-fuzz.test.ts
+ * Add drinks, shots, pranks, sticky notes, the pill and the 7-2 bounty: FUZZ_FUN=1
  */
 
 const DEFAULT_SEEDS = [20261008, 7, 424242, 31337]
 const HANDS_PER_SEED = Number(process.env.FUZZ_HANDS ?? 250)
+const FUZZ_FUN = process.env.FUZZ_FUN === '1'
 
 function mulberry32(seed: number) {
   let a = seed >>> 0
@@ -357,6 +359,10 @@ function runFuzz(seed: number, targetHands: number) {
       op(joined.connection, { type: 'seat_me' })
     }
     const hostHuman = () => humans.find(human => human.conn && human.playerId === srv.data.hostId) ?? null
+    if (FUZZ_FUN) {
+      for (const human of humans) op(human.conn!, { type: 'set_drink_capable', capable: true })
+      op(humans[0]!.conn!, { type: 'update_table_settings', sevenTwoRuleEnabled: true, sevenTwoBountyPercent: 50 })
+    }
     if (playerCount < 8 && chance(0.3)) {
       op(humans[0]!.conn!, { type: 'add_bots', count: 1 + Math.floor(rand() * Math.min(2, 8 - playerCount)) })
     }
@@ -504,10 +510,29 @@ function runFuzz(seed: number, targetHands: number) {
       }
     }
 
+    function randomFunOp(human: Human) {
+      if (!human.conn) return
+      const others = srv.data.gameState.players.filter(player => player.id !== human.playerId)
+      const target = others.length ? pick(others).id : human.playerId
+      const roll = rand()
+      if (roll < 0.25) op(human.conn, { type: 'order_drink', kind: pick(['beer', 'beer', 'water'] as const) })
+      else if (roll < 0.4) op(human.conn, { type: 'buy_shot', targetId: target })
+      else if (roll < 0.5) op(human.conn, { type: 'take_shot' })
+      else if (roll < 0.6) op(human.conn, { type: 'flick_chip', targetId: target })
+      else if (roll < 0.7) op(human.conn, { type: 'sticky_note', targetId: target, text: 'fish' })
+      else if (roll < 0.8) op(human.conn, { type: 'spike_water', targetId: target })
+      else if (roll < 0.9) op(human.conn, { type: 'peek_cards', peeking: chance(0.5) })
+      else op(human.conn, { type: 'set_drink_capable', capable: chance(0.8) })
+    }
+
     function randomMembershipOp() {
       const state = srv.data.gameState
       const human = pick(humans)
       const host = hostHuman()
+      if (FUZZ_FUN && chance(0.35)) {
+        randomFunOp(human)
+        return
+      }
       const roll = rand()
       if (roll < 0.3) {
         opKind = 'advance'
