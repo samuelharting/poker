@@ -18,7 +18,6 @@ import {
   getDrunkEffectProfile,
   normalizeDrinkState,
   orderDrink,
-  pickMisreadCard,
   toPublicDrinkState,
   wakeIfRested,
   WAKE_UP_LEVEL,
@@ -26,7 +25,6 @@ import {
   type DrinkLedgerEntry,
   type DrinkOrderContext,
 } from '@/lib/drinks'
-import type { Card } from '@/lib/poker/types'
 
 let drinkCounter = 0
 function order(
@@ -347,19 +345,17 @@ describe('drunk vision profile', () => {
       blurPx: 0,
       ghostPx: 0,
       swayDeg: 0,
-      hallucinationChance: 0,
       hiccups: false,
       wobblyButtons: false,
     })
   })
 
-  it('keeps normal vision below buzz 6, then blurs and misreads from 7', () => {
+  it('keeps normal vision below buzz 6, then blurs from 7', () => {
     for (const level of [0, 1, 2, 3, 4, 5, 5.5]) {
-      expect(getDrunkEffectProfile(level)).toMatchObject({ tier: 'sober', blurPx: 0, ghostPx: 0, swayDeg: 0, hallucinationChance: 0 })
+      expect(getDrunkEffectProfile(level)).toMatchObject({ tier: 'sober', blurPx: 0, ghostPx: 0, swayDeg: 0 })
     }
     expect(getDrunkEffectProfile(6).blurPx).toBe(0)
     const drunk = getDrunkEffectProfile(7)
-    expect(drunk.hallucinationChance).toBeGreaterThan(0)
     expect(drunk.blurPx).toBeGreaterThan(0)
   })
 
@@ -372,19 +368,6 @@ describe('drunk vision profile', () => {
     }
     expect(getDrunkEffectProfile(7).hiccups).toBe(false)
     expect(getDrunkEffectProfile(8)).toMatchObject({ hiccups: true, wobblyButtons: true })
-    expect(getDrunkEffectProfile(9).hallucinationChance).toBeLessThanOrEqual(0.8)
     expect(getDrunkEffectProfile(10, true).tier).toBe('out')
-  })
-
-  it('never misreads a card as one the viewer can already see', () => {
-    const visible: Card[] = [
-      { rank: 'A', suit: 'spades' },
-      { rank: 'K', suit: 'hearts' },
-    ]
-    for (let step = 0; step < 50; step += 1) {
-      const misread = pickMisreadCard(visible, () => step / 50)
-      expect(visible.some(card => card.rank === misread.rank && card.suit === misread.suit)).toBe(false)
-    }
-    expect(pickMisreadCard(visible, () => 0.999999)).toBeTruthy()
   })
 })

@@ -32,7 +32,7 @@ import { ChipStack } from '@/components/ui/ChipStack'
 import { PlayingCard } from '@/components/ui/PlayingCard'
 import { SearchableEmojiPicker } from '@/components/ui/SearchableEmojiPicker'
 import { EmojiGlyph } from '@/components/ui/EmojiGlyph'
-import { evaluateHand } from '@/lib/poker/evaluator'
+import { getVisibleOwnHandDescription } from '@/lib/poker/handLabel'
 import { getShowdownRevealMode, isTrueShowdown } from '@/lib/poker/showdown'
 import { describeHandOutcome } from '@/lib/poker/handHistory'
 import { getHandOddsView, type SeatOddsView } from '@/lib/poker/handOddsView'
@@ -1141,73 +1141,7 @@ function formatEquityPercent(value: number): string {
   return `${value.toFixed(1)}%`
 }
 
-const RANK_NAMES: Record<Card['rank'], string> = {
-  '2': 'Two',
-  '3': 'Three',
-  '4': 'Four',
-  '5': 'Five',
-  '6': 'Six',
-  '7': 'Seven',
-  '8': 'Eight',
-  '9': 'Nine',
-  T: 'Ten',
-  J: 'Jack',
-  Q: 'Queen',
-  K: 'King',
-  A: 'Ace',
-}
-
-const RANK_ORDER: Record<Card['rank'], number> = {
-  '2': 2,
-  '3': 3,
-  '4': 4,
-  '5': 5,
-  '6': 6,
-  '7': 7,
-  '8': 8,
-  '9': 9,
-  T: 10,
-  J: 11,
-  Q: 12,
-  K: 13,
-  A: 14,
-}
-
-function pluralRankName(rank: Card['rank']): string {
-  const name = RANK_NAMES[rank]
-  return name.endsWith('x') ? `${name}es` : `${name}s`
-}
-
-function describePreflopHand(holeCards: Card[]): string | null {
-  if (holeCards.length < 2) {
-    return null
-  }
-
-  const [first, second] = holeCards
-  if (first!.rank === second!.rank) {
-    return `Pair of ${pluralRankName(first!.rank)}`
-  }
-
-  const highCard = [...holeCards].sort((a, b) => RANK_ORDER[b.rank] - RANK_ORDER[a.rank])[0]!
-  return `${RANK_NAMES[highCard.rank]}-high`
-}
-
-export function getVisibleOwnHandDescription(
-  holeCards: Card[],
-  communityCards: Card[]
-): string | null {
-  const visibleCards = [...holeCards, ...communityCards]
-
-  if (holeCards.length === 0) {
-    return null
-  }
-
-  if (visibleCards.length < 5) {
-    return describePreflopHand(holeCards)
-  }
-
-  return evaluateHand(visibleCards).description
-}
+export { getVisibleOwnHandDescription }
 
 function getLobbyStatusLabel(state: TableState, player: LobbyPlayer): string {
   if (player.isSpectator) {
@@ -1330,6 +1264,30 @@ export function resolveRaiseDraftAmount({
 
   const nextAmount = Number.isFinite(currentAmount) ? currentAmount : effectiveMin
   return Math.max(effectiveMin, Math.min(maxRaise, nextAmount))
+}
+
+/**
+ * Rabbit-hunt cards: never played, so never drawn as board cards. A small
+ * labelled strip of chips that cannot be mistaken for the real board.
+ */
+function RabbitHuntStrip({ cards, className }: { cards: Card[]; className: string }) {
+  return (
+    <div className={className} role="note" data-rabbit-hunt="true">
+      <span className="table-rabbit-tag-title">Rabbit hunt — not played</span>
+      <span className="table-rabbit-tag-cards">
+        {cards.map(card => (
+          <span
+            key={`${card.rank}${card.suit}`}
+            className={`table-rabbit-card is-${card.suit}`}
+            aria-label={`${card.rank === 'T' ? '10' : card.rank} of ${card.suit}`}
+          >
+            <b>{card.rank === 'T' ? '10' : card.rank}</b>
+            <i aria-hidden="true">{SUIT_GLYPHS[card.suit]}</i>
+          </span>
+        ))}
+      </span>
+    </div>
+  )
 }
 
 export function canManualRabbitHunt(state: TableState): boolean {
@@ -1723,11 +1681,9 @@ export function PokerTable({
     [betweenHands, state.rabbitCards, state.round]
   )
   const rabbitCardCount = rabbitCards.length
+  // The board shows only the cards that were played. Rabbit cards never sit
+  // in a board slot (dimmed or not): they get their own labelled strip.
   const playedBoardCards = state.communityCards
-  const boardCardsWithRabbit = useMemo(
-    () => rabbitCardCount > 0 ? [...state.communityCards, ...rabbitCards] : state.communityCards,
-    [rabbitCardCount, rabbitCards, state.communityCards]
-  )
   const heroWentToShowdown = showdownPresentation.isShowdown &&
     showdownView.participants.some(player => player.id === yourId)
   // A folded hand has no strength to report, including between hands.
@@ -2970,13 +2926,12 @@ export function PokerTable({
                 <RunItTwiceBoards runItTwice={acceptedRunItTwice} players={state.players} />
               ) : (
                 <CommunityCards
-                  cards={boardCardsWithRabbit}
+                  cards={playedBoardCards}
                   highlightedCards={highlightedWinningCards}
-                  unplayedFromIndex={hasVisibleRabbitRunout ? playedBoardCards.length : undefined}
                 />
               )}
               {hasVisibleRabbitRunout && (
-                <div className="mobile-rabbit-label">Rabbit hunt — not played</div>
+                <RabbitHuntStrip cards={rabbitCards} className="mobile-rabbit-tag" />
               )}
               <div className="mobile-board-footer">{showdownCinematic}</div>
             </div>
@@ -3095,9 +3050,8 @@ export function PokerTable({
               <RunItTwiceBoards runItTwice={acceptedRunItTwice} players={state.players} />
             ) : (
               <CommunityCards
-                cards={boardCardsWithRabbit}
+                cards={playedBoardCards}
                 highlightedCards={highlightedWinningCards}
-                unplayedFromIndex={hasVisibleRabbitRunout ? playedBoardCards.length : undefined}
               />
             )}
 
@@ -3111,21 +3065,7 @@ export function PokerTable({
             <HeroTableBet amount={heroTableBetAmount} />
 
             {hasVisibleRabbitRunout && (
-              <div className="table-rabbit-tag" role="note">
-                <span className="table-rabbit-tag-title">Rabbit hunt — not played</span>
-                <span className="table-rabbit-tag-cards">
-                  {rabbitCards.map(card => (
-                    <span
-                      key={`${card.rank}${card.suit}`}
-                      className={`table-rabbit-card is-${card.suit}`}
-                      aria-label={`${card.rank === 'T' ? '10' : card.rank} of ${card.suit}`}
-                    >
-                      <b>{card.rank === 'T' ? '10' : card.rank}</b>
-                      <i aria-hidden="true">{SUIT_GLYPHS[card.suit]}</i>
-                    </span>
-                  ))}
-                </span>
-              </div>
+              <RabbitHuntStrip cards={rabbitCards} className="table-rabbit-tag" />
             )}
 
             {showDesktopWaitingBanner && !isBustedViewer && !isRailBusted ? (

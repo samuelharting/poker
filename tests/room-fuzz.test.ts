@@ -3,11 +3,12 @@ import type { Connection } from 'partykit/server'
 import { AUTO_FOLD_GRACE_MS } from '@/partykit/room'
 import { isBettingClosed, toTableState } from '@/lib/poker/engine'
 import { calculateMinRaise } from '@/lib/poker/betting'
-import type { Card, HandHistoryEntry, InternalGameState, InternalPlayer } from '@/lib/poker/types'
+import type { Card, HandHistoryEntry, InternalGameState, InternalPlayer, TableState } from '@/lib/poker/types'
 import type { LedgerSnapshot } from '@/lib/poker/ledger'
 import { createThreeTableViewModel } from '@/components/three/tableViewModel'
 import { createHarness, disconnect, joinPlayer, lastMessage, send } from './helpers/roomHarness'
 import { bestReferenceHand, cardKey, compareReference, scoreFive, type ReferenceScore } from './helpers/bruteForceHand'
+import { findSnapshotProblems } from './helpers/snapshotInvariants'
 
 type ProcessAction = typeof import('@/lib/poker/engine').processAction
 type ActionArgs = Parameters<ProcessAction>
@@ -141,7 +142,7 @@ function runFuzz(seed: number, targetHands: number) {
 
   const summary = {
     hands: 0, showdowns: 0, foldWins: 0, runItTwice: 0, sidePotHands: 0, timeouts: 0, timeoutChecks: 0, tables: 0, steps: 0,
-    raises: 0, shortAllIns: 0, closedToRaise: 0, illegalRejected: 0,
+    raises: 0, shortAllIns: 0, closedToRaise: 0, illegalRejected: 0, snapshotsChecked: 0,
   }
 
   while (summary.hands < targetHands) {
@@ -154,14 +155,33 @@ function runFuzz(seed: number, targetHands: number) {
     const harness = createHarness()
     const { room, server } = harness
     const srv = server as unknown as FuzzInternals
-    // Snapshots are rebuilt from server state by the checks; skip parsing them per socket.
+    // Every table snapshot any socket receives is checked against the server's
+    // truth (what the player would see: cards, board, labels, 3D view model),
+    // then dropped instead of being stored per socket.
+    let snapshotFailure: string | null = null
+    const lastSnapshotByConnection = new Map<string, string>()
     const addConnection = room.addConnection.bind(room)
     room.addConnection = (id: string) => {
       const connection = addConnection(id)
       const mock = connection as unknown as { send: (message: string) => void }
       const original = mock.send.bind(mock)
       mock.send = (message: string) => {
-        if (message.startsWith('{"type":"room_snapshot"') || message.startsWith('{"type":"social_snapshot"')) return
+        if (message.startsWith('{"type":"room_snapshot"')) {
+          // Like the client, a re-send that changes nothing but the clock is skipped.
+          const key = message.replace(/"serverNow":\d+,?/, '')
+          if (lastSnapshotByConnection.get(id) === key) return
+          lastSnapshotByConnection.set(id, key)
+          if (!snapshotFailure) {
+            const snapshot = JSON.parse(message) as { state: TableState }
+            const problems = findSnapshotProblems(snapshot.state, srv.data.gameState)
+            summary.snapshotsChecked += 1
+            if (problems.length > 0) {
+              snapshotFailure = `snapshot to ${id} (viewer ${snapshot.state.viewerId || 'anonymous'}): ${problems.join('; ')} (last op ${lastOp})`
+            }
+          }
+          return
+        }
+        if (message.startsWith('{"type":"social_snapshot"')) return
         original(message)
       }
       return connection
@@ -551,6 +571,14 @@ function runFuzz(seed: number, targetHands: number) {
         if (human.conn) op(human.conn, { type: 'set_show_cards', mode: pick(['both', 'left', 'right', 'none'] as const) })
       } else if (roll < 0.87) {
         if (human.conn) op(human.conn, { type: 'rabbit_hunt' })
+      } else if (roll < 0.88) {
+        // Ask to see someone's cards, or answer a request (snapshot checks judge what that reveals).
+        const other = pick(humans)
+        if (human.conn && other.playerId !== human.playerId) {
+          op(human.conn, chance(0.5)
+            ? { type: 'request_card_reveal', targetId: other.playerId }
+            : { type: 'respond_card_reveal', requesterId: other.playerId, allow: chance(0.7) })
+        }
       } else if (roll < 0.9) {
         if (host) op(host.conn!, { type: 'start_game' })
       } else {
@@ -591,6 +619,7 @@ function runFuzz(seed: number, targetHands: number) {
     function checkStep() {
       const state = srv.data.gameState
       if (auditFailure) fail(`rules audit: ${auditFailure}`)
+      if (snapshotFailure) fail(snapshotFailure)
       if (track) {
         const endedTrack = ended.get(track.handNumber)
         if (endedTrack) {
@@ -604,6 +633,23 @@ function runFuzz(seed: number, targetHands: number) {
       }
       for (const player of state.players) {
         if (player.stack < 0 || player.totalInPot < 0 || player.bet < 0) fail(`${player.nickname} has negative chips`)
+      }
+
+      // One deck per hand: every dealt card, the board, run-outs, rabbit cards
+      // and the undealt deck are distinct cards (burns leave the deck).
+      if (state.handNumber > 0) {
+        const runBoards = state.runItTwice?.status === 'accepted' ? state.runItTwice.boards ?? [] : []
+        const shared = state.runItTwice?.sharedCardCount ?? 0
+        const inPlay = [
+          ...state.players.flatMap(player => player.holeCards),
+          ...state.communityCards,
+          ...(runBoards[1]?.cards.slice(shared) ?? []),
+          ...(state.rabbitCards ?? []),
+          ...state.deck,
+        ].map(cardKey)
+        if (new Set(inPlay).size !== inPlay.length) fail(`a card exists twice in hand ${state.handNumber} (last op ${lastOp})`)
+        if (inPlay.length > 52) fail(`${inPlay.length} cards in play`)
+        if (![0, 3, 4, 5].includes(state.communityCards.length)) fail(`board has ${state.communityCards.length} cards`)
       }
 
       if (state.phase === 'in_hand') {

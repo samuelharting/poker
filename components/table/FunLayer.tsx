@@ -23,8 +23,8 @@ import { useDrinks } from './DrinkContext'
  * board strip stay crisp on top.
  */
 
-const TRIP_SUIT_EMOJI = ['🐸', '🍩', '🦄', '🌵', '🍄', '👽', '🐙', '🌈', '🦩', '🍕', '🪐', '🐝', '🍭', '🦖', '🌻', '🐌']
-const SUITS: Array<Card['suit']> = ['spades', 'hearts', 'diamonds', 'clubs']
+/** Real suit glyphs: a trip may warp the room, never what a card is. */
+const SUIT_GLYPHS: Record<Card['suit'], string> = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' }
 const RANK_LABEL: Record<string, string> = { T: '10' }
 const REVEAL_TOAST_MS = 5200
 const TRIP_DRAIN_MS = 5000
@@ -36,16 +36,6 @@ type Root = HTMLElement
 function setFlag(root: Root, name: string, value: string | null) {
   if (value === null) delete root.dataset[name]
   else if (root.dataset[name] !== value) root.dataset[name] = value
-}
-
-function pickTripSuits(): Record<Card['suit'], string> {
-  const pool = [...TRIP_SUIT_EMOJI]
-  const picked = {} as Record<Card['suit'], string>
-  for (const suit of SUITS) {
-    const index = Math.floor(Math.random() * pool.length)
-    picked[suit] = pool.splice(index, 1)[0]!
-  }
-  return picked
 }
 
 /** A dull cartoon "bonk" (only if sound is on). */
@@ -92,7 +82,6 @@ export function FunLayer({ tableState, yourId, privateMushroom, mushroomEvents, 
   const capable = me?.drinkCapable === true
   const isMyTurn = tableState.phase === 'in_hand' && tableState.actingPlayerId === yourId
   const tripping = Boolean(me?.trip)
-  const [tripSuits, setTripSuits] = useState<Record<Card['suit'], string> | null>(null)
   const [draining, setDraining] = useState(false)
   const wasTrippingRef = useRef(false)
 
@@ -126,34 +115,23 @@ export function FunLayer({ tableState, yourId, privateMushroom, mushroomEvents, 
   useEffect(() => () => {
     const root = document.documentElement
     for (const name of ['funBlackout', 'funHangover', 'funSober', 'funTrip', 'funMyTurn']) delete root.dataset[name]
-    for (const suit of SUITS) root.style.removeProperty(`--trip-suit-${suit}`)
   }, [])
 
-  // --- Trip: consistent emoji per suit for the whole trip, and a slow drain at the end.
+  // --- Trip: a slow drain at the end.
   useEffect(() => {
     if (tripping && !wasTrippingRef.current) {
-      setTripSuits(pickTripSuits())
       setDraining(false)
     }
     if (!tripping && wasTrippingRef.current) {
       setDraining(true)
       const timer = window.setTimeout(() => {
         setDraining(false)
-        setTripSuits(null)
       }, TRIP_DRAIN_MS)
       wasTrippingRef.current = tripping
       return () => window.clearTimeout(timer)
     }
     wasTrippingRef.current = tripping
   }, [tripping])
-
-  useEffect(() => {
-    const root = document.documentElement
-    for (const suit of SUITS) {
-      if (tripSuits && tripping) root.style.setProperty(`--trip-suit-${suit}`, `"${tripSuits[suit]}"`)
-      else root.style.removeProperty(`--trip-suit-${suit}`)
-    }
-  }, [tripSuits, tripping])
 
   // --- Blackout: the thud lands as the head hits the table.
   const passedOut = myDrinks.passedOut
@@ -188,8 +166,8 @@ export function FunLayer({ tableState, yourId, privateMushroom, mushroomEvents, 
           upcoming={taxThisHand <= 0}
         />
       )}
-      {tripping && tripSuits && tableState.communityCards.length > 0 && (
-        <TripBoardStrip cards={tableState.communityCards} suits={tripSuits} />
+      {tripping && tableState.communityCards.length > 0 && (
+        <TripBoardStrip cards={tableState.communityCards} />
       )}
       <PillPrompt
         state={privateMushroom}
@@ -232,14 +210,14 @@ function SoberTaxChip({ amount, upcoming }: { amount: number; upcoming: boolean 
   )
 }
 
-/** While tripping the 3D board melts, so the ranks sit here, crisp (suits are the trip's emoji). */
-function TripBoardStrip({ cards, suits }: { cards: Card[]; suits: Record<Card['suit'], string> }) {
+/** While tripping the 3D board melts, so the real board sits here, crisp. */
+function TripBoardStrip({ cards }: { cards: Card[] }) {
   return (
     <div className="trip-board-strip" aria-label={`Board: ${cards.map(card => `${RANK_LABEL[card.rank] ?? card.rank} of ${card.suit}`).join(', ')}`}>
       {cards.map((card, index) => (
         <span key={`${card.rank}${card.suit}${index}`} className="trip-board-card" style={{ ['--i' as string]: index } as CSSProperties}>
           <b>{RANK_LABEL[card.rank] ?? card.rank}</b>
-          <i aria-hidden="true">{suits[card.suit]}</i>
+          <i aria-hidden="true" className={`is-${card.suit}`}>{SUIT_GLYPHS[card.suit]}</i>
         </span>
       ))}
     </div>

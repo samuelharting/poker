@@ -30,7 +30,6 @@ import {
   type PokerSoundPreferences,
 } from '@/lib/poker/soundscape'
 import { usePokerSoundscape } from '@/hooks/usePokerSoundscape'
-import { useDrunkHallucination } from '@/hooks/useDrunkHallucination'
 import { DrinkProvider } from '@/components/table/DrinkContext'
 import { DrinkControls } from '@/components/table/DrinkControls'
 import { DrinkToasts } from '@/components/table/DrinkToasts'
@@ -166,9 +165,9 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
   // So is the fallback when this GPU cannot hold the 3D room (see threeFallback.ts).
   const threeFallback = useThreeFallback()
   const isTwoDLayout = useIsTwoDLayout() || sceneMode === 'chill' || threeFallback !== null
-  // Drunk players occasionally misread a freshly dealt card on their own screen only.
-  const hallucinatedTableState = useDrunkHallucination(tableState, yourId)
-  const displayTableState = isTwoDLayout ? tableState : hallucinatedTableState
+  // Cards are always shown exactly as dealt. The old drunk "misread" effect
+  // swapped card faces on screen and made players think hands were wrong.
+  const displayTableState = tableState
   const { playCue: playSoundCue } = usePokerSoundscape(tableState ?? undefined, yourId, {
     enabled: soundPreferencesReady,
     connected: isConnected,

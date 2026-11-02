@@ -9,8 +9,6 @@ import { PlayingCard } from '@/components/ui/PlayingCard'
 interface CommunityCardsProps {
   cards: Card[]
   highlightedCards?: Card[]
-  /** Cards from this index on were never played (rabbit hunt): drawn dimmed. */
-  unplayedFromIndex?: number
 }
 
 const CARD_REVEAL_STAGGER_MS = 180
@@ -20,7 +18,7 @@ export function getVisibleCommunityCardCount(cards: Card[]): number {
   return Math.min(cards.length, 5)
 }
 
-export function CommunityCards({ cards, highlightedCards = [], unplayedFromIndex }: CommunityCardsProps) {
+export function CommunityCards({ cards, highlightedCards = [] }: CommunityCardsProps) {
   const visibleCount = getVisibleCommunityCardCount(cards)
   const [revealedCount, setRevealedCount] = useState(visibleCount)
   const [revealingIndexes, setRevealingIndexes] = useState<number[]>([])
@@ -88,8 +86,7 @@ export function CommunityCards({ cards, highlightedCards = [], unplayedFromIndex
             className={clsx(
               'community-card-slot',
               (isRevealed || isAnimating) && 'is-live',
-              isAnimating && 'is-revealing',
-              typeof unplayedFromIndex === 'number' && i >= unplayedFromIndex && isBoardCard && 'is-unplayed'
+              isAnimating && 'is-revealing'
             )}
           >
             <PlayingCard

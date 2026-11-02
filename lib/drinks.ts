@@ -38,7 +38,6 @@
  *   applies INSTANTLY and takes CHASER_LEVELS (2) off. It is never also queued
  *   as an ordinary water (no double-apply); the window closes on any water.
  */
-import type { Card, Rank, Suit } from './poker/types'
 
 export type DrinkKind = 'beer' | 'water'
 
@@ -848,8 +847,6 @@ export interface DrunkEffectProfile {
   pulseSeconds: number
   /** Warm tint / vignette strength 0..1. */
   tint: number
-  /** Chance a newly seen card is misread for a moment. */
-  hallucinationChance: number
   hiccups: boolean
   wobblyButtons: boolean
 }
@@ -869,11 +866,11 @@ export function getDrunkEffectProfile(rawLevel: number, passedOut = false): Drun
   if (!passedOut && level < BUZZ.visionStartLevel) {
     return {
       tier: 'sober', level, blurPx: 0, ghostPx: 0, swayDeg: 0, swayPx: 0, pulseSeconds: 0,
-      tint: 0, hallucinationChance: 0, hiccups: false, wobblyButtons: false,
+      tint: 0, hiccups: false, wobblyButtons: false,
     }
   }
   const tier = getDrunkTier(level, passedOut)
-  // 6 is a gentle buzz on screen; blur, sway and misreads build from 7 to 9.
+  // 6 is a gentle buzz on screen; blur and sway build from 7 to 9.
   const blurry = level >= BUZZ.visionStartLevel + 1
   const steps = Math.max(0, level - BUZZ.visionStartLevel)
 
@@ -886,7 +883,6 @@ export function getDrunkEffectProfile(rawLevel: number, passedOut = false): Drun
     swayPx: blurry ? round(3 + steps * 1.8) : 0,
     pulseSeconds: level > 0 ? round(Math.max(3.4, 9.5 - level * 0.65)) : 0,
     tint: round(Math.min(1, level / DRUNK_LEVEL_MAX)),
-    hallucinationChance: blurry ? round(Math.min(0.8, 0.32 + steps * 0.08)) : 0,
     hiccups: level >= 8,
     wobblyButtons: level >= 8,
   }
@@ -894,27 +890,4 @@ export function getDrunkEffectProfile(rawLevel: number, passedOut = false): Drun
 
 function round(value: number): number {
   return Math.round(value * 100) / 100
-}
-
-const RANKS: Rank[] = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A']
-const SUITS: Suit[] = ['spades', 'hearts', 'diamonds', 'clubs']
-
-/**
- * Picks a random card that is NOT any of `avoid` (the cards the viewer can
- * already see), so a misread never duplicates a visible card. The result is
- * random, never derived from hidden game state, so it cannot leak anything.
- */
-export function pickMisreadCard(avoid: readonly Card[], random: () => number = Math.random): Card {
-  const taken = new Set(avoid.map(card => `${card.rank}${card.suit}`))
-  const pool: Card[] = []
-  for (const rank of RANKS) {
-    for (const suit of SUITS) {
-      if (!taken.has(`${rank}${suit}`)) {
-        pool.push({ rank, suit })
-      }
-    }
-  }
-
-  const index = Math.min(pool.length - 1, Math.floor(random() * pool.length))
-  return pool[index] ?? { rank: '2', suit: 'clubs' }
 }

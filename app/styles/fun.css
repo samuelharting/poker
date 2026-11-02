@@ -589,32 +589,6 @@
   75% { transform: rotate(-2deg) scale(1.03); }
 }
 
-/* Your 2D cards: ranks stay put, suits become the trip's emoji. */
-:root[data-fun-trip='on'] :is(.card-suit-top, .card-center-suit) :is(svg) {
-  display: none;
-}
-
-:root[data-fun-trip='on'] :is(.card-suit-top, .card-center-suit)::after {
-  display: inline-block;
-  font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
-  line-height: 1;
-}
-
-:root[data-fun-trip='on'] :is(.card-suit-top, .card-center-suit).card-suit-spades::after { content: var(--trip-suit-spades, '♠'); }
-:root[data-fun-trip='on'] :is(.card-suit-top, .card-center-suit).card-suit-hearts::after { content: var(--trip-suit-hearts, '♥'); }
-:root[data-fun-trip='on'] :is(.card-suit-top, .card-center-suit).card-suit-diamonds::after { content: var(--trip-suit-diamonds, '♦'); }
-:root[data-fun-trip='on'] :is(.card-suit-top, .card-center-suit).card-suit-clubs::after { content: var(--trip-suit-clubs, '♣'); }
-
-:root[data-fun-trip='on'] .card-center-suit::after {
-  font-size: 1.6em;
-  animation: fun-suit-spin 3s ease-in-out infinite;
-}
-
-@keyframes fun-suit-spin {
-  0%, 100% { transform: rotate(-10deg) scale(1); }
-  50% { transform: rotate(10deg) scale(1.12); }
-}
-
 /* The board, legible above the melting table. */
 .trip-board-strip {
   position: fixed;
@@ -653,6 +627,11 @@
   font-style: normal;
   font-size: 20px;
   line-height: 1;
+}
+
+.trip-board-card i.is-hearts,
+.trip-board-card i.is-diamonds {
+  color: #b3152a;
 }
 
 @keyframes fun-board-bob {

@@ -85,6 +85,17 @@ export function useShowdownPresentation(state: TableState): ShowdownPresentation
   return { participants, presentation }
 }
 
+/**
+ * Every distinct winning hand, exactly as the server named it (side pots can
+ * be won with different hands; naming only the first would mislabel the rest).
+ */
+export function getWinningHandLabel(winners: TableState['winners']): string | null {
+  const labels = Array.from(new Set((winners ?? [])
+    .map(winner => winner.handDescription)
+    .filter((label): label is string => Boolean(label))))
+  return labels.length > 0 ? labels.join(' / ') : null
+}
+
 function getStageCopy(presentation: ShowdownPresentation): string {
   if (presentation.stage === 'intro') return 'Revealing hands…'
   if (presentation.stage === 'reveal') return 'Revealing hands…'
@@ -173,6 +184,7 @@ export function ShowdownCinematic({
   }
 
   const payoutAmount = winners.reduce((sum, winner) => sum + winner.amount, 0)
+  const winningHandLabel = getWinningHandLabel(winners)
 
   return (
     <aside
@@ -184,8 +196,8 @@ export function ShowdownCinematic({
         <span>Showdown</span>
         <strong>{getStageCopy(presentation)}</strong>
         {/* Name the hand as soon as its five cards light up (who won comes with the result). */}
-        {presentation.stage === 'highlight' && winners[0]?.handDescription && (
-          <em className="showdown-table-hand">{winners[0].handDescription}</em>
+        {presentation.stage === 'highlight' && winningHandLabel && (
+          <em className="showdown-table-hand">{winningHandLabel}</em>
         )}
       </div>
 

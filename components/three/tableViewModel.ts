@@ -448,7 +448,9 @@ export function createThreeTableViewModel(state: TableState, yourId: string): Th
     actingPlayerName: actingPlayer?.nickname ?? null,
     actingVisualSeat: actingPlayer?.visualSeat ?? null,
     isHeroTurn: state.actingPlayerId === yourId,
-    communityCards: state.communityCards.map((card, index) => toThreeCard(card, `board-${index}`, true)),
+    // A hand run twice is shown only on the Run 1 / Run 2 panel: drawing run 1
+    // on the felt as well would put every one of its cards on screen twice.
+    communityCards: getThreeBoardCards(state).map((card, index) => toThreeCard(card, `board-${index}`, true)),
     heroCards: (heroPlayer?.holeCards ?? []).map((card, index) => toThreeCard(card, `hero-${index}`, true)),
     pot: state.totalPot,
     collectedPot: state.pots.reduce((sum, pot) => sum + pot.amount, 0),
@@ -730,6 +732,12 @@ export function spreadVisualSeats(relativeSeats: number[]): Map<number, number> 
   const mapping = new Map<number, number>([[0, 0]])
   opponents.forEach((seat, index) => mapping.set(seat, slots[index] ?? seat))
   return mapping
+}
+
+/** The cards the physical 3D board shows: exactly the played board, never rabbit cards. */
+export function getThreeBoardCards(state: Pick<TableState, 'communityCards' | 'runItTwice'>): Card[] {
+  if (state.runItTwice?.status === 'accepted') return []
+  return state.communityCards.slice(0, 5)
 }
 
 function toThreeCard(card: Card, prefix: string, visible: boolean): ThreeCardView {

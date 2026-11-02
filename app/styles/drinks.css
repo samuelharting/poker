@@ -6,7 +6,6 @@
      data-drunk-tier   buzzed | tipsy | drunk | wasted | out
      data-drunk-wobble action buttons wobble (level 6+)
      data-drunk-hiccup a hiccup is happening right now
-     data-drunk-misread a card is being misread right now
    and CSS variables --drunk-blur, --drunk-ghost, --drunk-sway-deg,
    --drunk-sway-px, --drunk-pulse and --drunk-tint.
    ========================================================================== */
@@ -500,6 +499,15 @@
   text-shadow: none;
 }
 
+/* Card faces never get a ghosted second rank/suit: a doubled "J" reads as
+   an extra jack. Blur and sway are fine; a copied face is not. */
+:root[data-drunk-tier] :is(
+  .card, .card-container, .cinematic-hole-cards, .run-it-twice-board-cards,
+  .table-rabbit-tag, .mobile-rabbit-tag, .trip-board-strip, .player-held-cards
+) {
+  text-shadow: none;
+}
+
 :root[data-drunk-tier] .table-scene :is(.community-cards, .own-card-row, .mobile-edge-seat-cards) .card-container {
   filter: drop-shadow(
     calc(var(--drunk-ghost, 0px) * var(--drunk-phase) * 1.4)
@@ -533,12 +541,6 @@
 /* Hide the edges of the 3D room while it sways */
 :root:is([data-drunk-tier='tipsy'], [data-drunk-tier='drunk'], [data-drunk-tier='wasted']) .desktop-3d-stage {
   scale: 1.045;
-}
-
-/* While a card is being misread the viewer's eyes are visibly unfocused */
-:root[data-drunk-misread='hole'] .own-card-row,
-:root[data-drunk-misread='board'] .community-cards {
-  animation: drunk-misread-swim 520ms ease-in-out infinite alternate;
 }
 
 .drunk-vision {
@@ -757,11 +759,6 @@
   }
 }
 
-@keyframes drunk-misread-swim {
-  from { filter: blur(0.4px); scale: 1; }
-  to { filter: blur(1.6px); scale: 1.015; }
-}
-
 @keyframes drunk-hiccup {
   0% { translate: 0 0; scale: 1; }
   14% { translate: 0 -10px; scale: 1.012; }
@@ -888,7 +885,6 @@
   :root[data-drunk-tier] :is(.desktop-3d-stage, .mobile-poker-field > :not(.mobile-hero-lane), .mobile-hero-lane, .own-hand-area),
   :root[data-drunk-hiccup] .room-shell,
   :root[data-drunk-wobble] :is(.mobile-main-action, .bet-action-row .btn-action),
-  :root[data-drunk-misread] :is(.own-card-row, .community-cards),
   .mobile-edge-seat-position:has(.seat-drink-badge[data-wobble]) .mobile-seat-puck,
   .seat-position:has(.seat-drink-badge[data-wobble]) > :first-child {
     animation: none;
@@ -896,11 +892,6 @@
 
   :root[data-drunk-tier] .table-scene {
     text-shadow: none;
-  }
-
-  :root[data-drunk-misread='hole'] .own-card-row,
-  :root[data-drunk-misread='board'] .community-cards {
-    filter: blur(1px);
   }
 
   .drunk-hiccup,

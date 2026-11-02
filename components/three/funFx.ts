@@ -15,7 +15,7 @@ import { createDrinkProp, disposeDrinkProp, type DrinkProp } from './drinkProps'
  *   DrunkVisionLayer).
  * - Hangover: shades and temple rubs for everyone else to see.
  * - The pill trip: a post-processing pass (colour melt, breathing warp,
- *   kaleidoscope bursts in waves, chromatic smear) plus afterimage trails,
+ *   chromatic smear) plus afterimage trails,
  *   a slow room roll, a breathing lens, a melting felt, pulsing lights, candy
  *   chips, balloon heads with spiral eyes on everyone else, and Lady Luck as a
  *   giant cat. Everyone else sees the victim staring at their hands in a
@@ -82,7 +82,6 @@ const TripShader = {
     tDiffuse: { value: null as THREE.Texture | null },
     time: { value: 0 },
     strength: { value: 0 },
-    kaleido: { value: 0 },
     warp: { value: 0 },
     aspect: { value: 1 },
   },
@@ -97,7 +96,6 @@ const TripShader = {
     uniform sampler2D tDiffuse;
     uniform float time;
     uniform float strength;
-    uniform float kaleido;
     uniform float warp;
     uniform float aspect;
     varying vec2 vUv;
@@ -123,21 +121,15 @@ const TripShader = {
       p *= 1.0 + swell * warp;
       p += vec2(sin(p.y * 7.0 + time * 1.7), cos(p.x * 6.0 - time * 1.3)) * 0.01 * warp;
 
-      // Kaleidoscope bursts: fold the angle into mirrored wedges.
-      if (kaleido > 0.001) {
-        float wedge = 6.2831853 / 8.0;
-        float folded = mod(a + time * 0.25, wedge);
-        folded = abs(folded - wedge * 0.5);
-        vec2 kp = vec2(cos(folded), sin(folded)) * length(p) * (1.0 + 0.15 * sin(time * 2.0));
-        p = mix(p, kp, kaleido);
-      }
+      // No kaleidoscope: mirrored wedges copied the board, so one jack could
+      // read as several. The trip may warp the room, never multiply cards.
 
       p.x /= aspect;
       vec2 uv = mirror(p + 0.5);
 
       // Chromatic smear.
       vec2 dir = normalize(vUv - 0.5 + 1e-4);
-      float ab = (0.0035 + 0.006 * kaleido) * strength;
+      float ab = 0.0035 * strength;
       vec3 color;
       color.r = texture2D(tDiffuse, mirror(uv + dir * ab)).r;
       color.g = texture2D(tDiffuse, uv).g;
@@ -151,7 +143,7 @@ const TripShader = {
       // Liquid rainbow bands washing over everything.
       float bands = 0.5 + 0.5 * sin(r * 26.0 - time * 3.1 + a * 3.0);
       vec3 rainbow = 0.5 + 0.5 * cos(6.2831853 * (vec3(0.0, 0.33, 0.67) + bands * 0.6 + time * 0.12));
-      melted = mix(melted, melted * 0.75 + rainbow * 0.5 * (0.35 + luma), 0.22 + 0.2 * kaleido);
+      melted = mix(melted, melted * 0.75 + rainbow * 0.5 * (0.35 + luma), 0.22);
 
       vec3 base = texture2D(tDiffuse, vUv).rgb;
       gl_FragColor = vec4(mix(base, max(melted, 0.0), clamp(strength, 0.0, 1.0)), 1.0);
@@ -583,12 +575,8 @@ export class FunFx {
       const uniforms = this.tripPass.material.uniforms
       if (this.tripPass.enabled && this.heroTripStartedAt !== null) {
         const elapsed = time - this.heroTripStartedAt
-        // Bursts come in waves: every ~13s a few seconds of kaleidoscope.
-        const wave = Math.max(0, Math.sin((elapsed - 6) * (Math.PI * 2 / 13)))
-        const burst = Math.pow(wave, 3)
         uniforms.time!.value = motion ? time : 0
         uniforms.strength!.value = this.reducedMotion ? trip * 0.35 : trip
-        uniforms.kaleido!.value = motion ? burst * trip * 0.7 : 0
         uniforms.warp!.value = motion ? trip * (0.8 + 0.6 * Math.max(0, Math.sin(elapsed * 0.4))) : 0
         uniforms.aspect!.value = width / Math.max(1, height)
       }
