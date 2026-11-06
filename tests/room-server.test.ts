@@ -1,3 +1,4 @@
+import { enableDrinking } from './helpers/enableDrinking'
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import type { Connection, Room } from 'partykit/server'
 import PokerRoom, { AUTO_FOLD_DELAY, AUTO_FOLD_GRACE_MS, AUTO_START_DELAY, BOT_ACTION_DELAY, HOST_DISCONNECT_GRACE_MS, PEEK_MAX_DURATION_MS } from '@/partykit/room'
@@ -88,6 +89,7 @@ class MockRoom {
 function createHarness() {
   const room = new MockRoom()
   const server = new PokerRoom(room as unknown as Room)
+  enableDrinking(server)
   // Random thirst off unless a test turns it on.
   server.autoBeerRandom = () => 1
   return { room, server }

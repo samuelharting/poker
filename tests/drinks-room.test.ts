@@ -1,3 +1,4 @@
+import { enableDrinking } from './helpers/enableDrinking'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Connection, Room } from 'partykit/server'
 import PokerRoom from '@/partykit/room'
@@ -57,6 +58,7 @@ function createTable() {
     broadcast: () => {},
   }
   const server = new PokerRoom(room as unknown as Room)
+  enableDrinking(server)
   // Random thirst off unless a test turns it on.
   server.autoBeerRandom = () => 1
   // These rules are easier to read from a sober start; real seats begin at BUZZ.startLevel.

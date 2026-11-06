@@ -3371,3 +3371,86 @@
 [data-layout='2d'] .mobile-board-footer .showdown-table-hand {
   font-size: var(--fs-12);
 }
+
+/* ============================================================
+   Chill room on a wide mouse screen: the same 2D table, zoomed in.
+   Bigger board, hole cards, seats and text so it fills the screen.
+   data-chill-wide is set by PokerTable / the room page.
+   ============================================================ */
+.table-scene[data-layout='2d'][data-chill-wide='true'] {
+  --fs-11: 0.95rem;
+  --fs-12: 1.02rem;
+  --fs-14: 1.15rem;
+  --fs-16: 1.3rem;
+  --fs-20: 1.55rem;
+  --fs-24: 1.8rem;
+}
+
+.table-scene[data-chill-wide='true'] .mobile-poker-field {
+  --hero-card-w: clamp(96px, 15vh, 150px);
+  width: min(100%, 1500px);
+}
+
+/* Your turn: the bet tray takes room, so your cards shrink and the board keeps its size */
+.table-scene[data-chill-wide='true'][data-tray-open='true'] .mobile-poker-field {
+  --hero-card-w: clamp(64px, 9vh, 96px);
+}
+
+.table-scene[data-chill-wide='true'] .mobile-arena > .mobile-seat-grid,
+.table-scene[data-chill-wide='true'] .mobile-arena > .mobile-board-zone,
+.table-scene[data-chill-wide='true'] .mobile-arena {
+  --chip-w: clamp(170px, 15cqw, 240px);
+}
+
+.table-scene[data-chill-wide='true'] .mobile-arena > .mobile-board-zone,
+.table-scene[data-chill-wide='true'] .mobile-arena:has([data-slot='l2'], [data-slot='r2']) > .mobile-board-zone {
+  --board-card-w: clamp(70px, min(9cqw, 30cqh), 124px);
+  --board-gap: 10px;
+  top: calc(50% + 76px);
+}
+
+.table-scene[data-chill-wide='true'] .mobile-edge-seat {
+  --avatar: 40px;
+  padding: 10px 12px 9px;
+  column-gap: 9px;
+  row-gap: 5px;
+}
+
+.table-scene[data-chill-wide='true'] .mobile-edge-seat-cards.is-revealed .card.card-xs,
+.table-scene[data-chill-wide='true'] .mobile-edge-seat-cards.is-revealed .mobile-edge-card-back {
+  width: 40px;
+  height: 56px;
+  border-radius: 6px;
+  font-size: 19px;
+}
+
+.table-scene[data-chill-wide='true'] .mobile-betting-panel,
+.table-scene[data-chill-wide='true'] .mobile-between-hands-dock,
+.table-scene[data-chill-wide='true'] .rabbit-hunt-dock {
+  width: min(100%, 860px);
+}
+
+.table-scene[data-chill-wide='true'] .mobile-main-action {
+  min-height: 60px;
+}
+
+.table-scene[data-chill-wide='true'] .mobile-hero-seat {
+  --avatar: 44px;
+  column-gap: 12px;
+  padding: 10px 16px 10px 10px;
+}
+
+.table-scene[data-chill-wide='true'] .mobile-hero-seat-status {
+  font-size: 14px;
+}
+
+/* Chill adds a quarter-pot size: all six sizes on one row */
+.table-scene[data-chill-wide='true'] .mobile-bet-row {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+/* Chill: a smaller nav pill in the corner */
+.room-shell[data-chill-wide='true'] .room-hud .room-hud-main {
+  scale: 0.78;
+  transform-origin: top left;
+}

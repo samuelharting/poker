@@ -3,6 +3,7 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import {
   DEFAULT_TABLE_THEME,
+  INITIAL_TABLE_THEME,
   TABLE_THEME_STORAGE_KEY,
   normalizeTableTheme,
   readStoredTableTheme,
@@ -39,7 +40,7 @@ function getSnapshot(): TableThemeId {
 }
 
 function getServerSnapshot(): TableThemeId {
-  return DEFAULT_TABLE_THEME
+  return INITIAL_TABLE_THEME
 }
 
 function subscribe(listener: () => void) {

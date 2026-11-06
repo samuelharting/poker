@@ -164,7 +164,10 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
   // The Chill room is the same simple 2D table, even on a wide screen.
   // So is the fallback when this GPU cannot hold the 3D room (see threeFallback.ts).
   const threeFallback = useThreeFallback()
-  const isTwoDLayout = useIsTwoDLayout() || sceneMode === 'chill' || threeFallback !== null
+  const isNarrowOrTouch = useIsTwoDLayout()
+  const isTwoDLayout = isNarrowOrTouch || sceneMode === 'chill' || threeFallback !== null
+  // Chill on a wide mouse screen: the 2D table is zoomed in to fill the space.
+  const isChillWide = sceneMode === 'chill' && !isNarrowOrTouch
   // Cards are always shown exactly as dealt. The old drunk "misread" effect
   // swapped card faces on screen and made players think hands were wrong.
   const displayTableState = tableState
@@ -321,7 +324,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
       onOrder={orderDrink}
       onTakeShot={() => sendMessage({ type: 'take_shot' })}
     >
-    <div className="room-shell">
+    <div className="room-shell" data-chill-wide={isChillWide ? 'true' : undefined}>
       <RoomHud
         isConnected={isConnected}
         isHost={isHost}

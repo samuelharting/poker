@@ -1395,6 +1395,8 @@ export function PokerTable({
   const threeFallback = useThreeFallback()
   const isTouchOrNarrow = useMediaQuery(TWO_D_LAYOUT_QUERY)
   const isMobileViewport = isTouchOrNarrow || sceneMode === 'chill' || threeFallback !== null
+  // Chill on a wide mouse screen: bigger table, bet sizes always showing.
+  const isChillWide = sceneMode === 'chill' && !isTouchOrNarrow
   const drinkContext = useDrinks()
   const isDesktopWidth = useMediaQuery('(min-width: 1024px)')
   const showThreeFallbackNotice = Boolean(threeFallback && isDesktopWidth && !isTouchOrNarrow && sceneMode !== 'chill')
@@ -2039,7 +2041,9 @@ export function PokerTable({
   const [raiseAmount, setRaiseAmount] = useState(effectiveMin)
   const bettingDecisionKey = `${state.handNumber}:${state.round ?? 'none'}:${state.actingPlayerId ?? 'none'}`
   // 2D tray: Fold / Call / Raise first; sizing only opens after tapping Raise.
-  const [raiseSizingOpen, setRaiseSizingOpen] = useState(false)
+  const [raiseSizingToggled, setRaiseSizingOpen] = useState(false)
+  // Chill on a wide screen: the bet sizes are always out, one click to bet.
+  const raiseSizingOpen = raiseSizingToggled || isChillWide
 
   useEffect(() => {
     setRaiseSizingOpen(false)
@@ -2463,6 +2467,7 @@ export function PokerTable({
     : 100
   const mobileQuickBets = [
     { key: 'min', label: 'Min', amount: effectiveMin },
+    ...(isChillWide ? [{ key: 'quarter', label: '¼ Pot', amount: Math.floor(state.totalPot / 4) }] : []),
     { key: 'half', label: '½ Pot', amount: Math.floor(state.totalPot / 2) },
     { key: 'three-quarter', label: '¾ Pot', amount: Math.floor((state.totalPot * 3) / 4) },
     { key: 'pot', label: 'Pot', amount: state.totalPot },
@@ -2732,6 +2737,7 @@ export function PokerTable({
       data-showdown-stage={showdownPresentation.stage}
       data-settings-open={settingsOpen ? 'true' : 'false'}
       data-layout={isMobileViewport ? '2d' : 'desktop'}
+      data-chill-wide={isChillWide ? 'true' : undefined}
       data-acting-timer={opponentTimerVisible ? (turnTimer.percent < 25 ? 'low' : 'live') : 'none'}
       style={{
         ...(isMobileViewport && mobileTrayHeight > 0 ? { ['--mobile-tray-h' as string]: `${mobileTrayHeight}px` } : {}),
@@ -3343,14 +3349,16 @@ export function PokerTable({
                   >
                     +
                   </HoldStepButton>
-                  <button
-                    type="button"
-                    className="mobile-raise-close"
-                    onClick={() => setRaiseSizingOpen(false)}
-                    aria-label="Close raise sizing"
-                  >
-                    <PanelCloseIcon />
-                  </button>
+                  {!isChillWide && (
+                    <button
+                      type="button"
+                      className="mobile-raise-close"
+                      onClick={() => setRaiseSizingOpen(false)}
+                      aria-label="Close raise sizing"
+                    >
+                      <PanelCloseIcon />
+                    </button>
+                  )}
                 </div>
 
                 <input

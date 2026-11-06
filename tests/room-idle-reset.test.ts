@@ -1,3 +1,4 @@
+import { enableDrinking } from './helpers/enableDrinking'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Connection, Room } from 'partykit/server'
 import PokerRoom, {
@@ -73,6 +74,7 @@ function roomWithStorage(values: Map<string, unknown>, env: Record<string, unkno
 
 function quietServer(room: MockRoom) {
   const server = new PokerRoom(room as unknown as Room)
+  enableDrinking(server)
   server.autoBeerRandom = () => 1
   const tunable = server as unknown as { botDrinkRandom?: () => number; botPeekRandom?: () => number }
   tunable.botDrinkRandom = () => 1

@@ -167,15 +167,15 @@ describe('theme persistence', () => {
     const store = (value: string | null) => ({ getItem: (key: string) => (key === TABLE_THEME_STORAGE_KEY ? value : null) })
     expect(readStoredTableTheme(store('basement'))).toBe('basement')
     expect(readStoredTableTheme(store('rooftop'))).toBe('rooftop')
-    expect(readStoredTableTheme(store('garbage'))).toBe('lounge')
-    expect(readStoredTableTheme(store('{"id":"basement"}'))).toBe('lounge')
-    expect(readStoredTableTheme(store(null))).toBe('lounge')
-    expect(readStoredTableTheme(null)).toBe('lounge')
+    expect(readStoredTableTheme(store('garbage'))).toBe('basement')
+    expect(readStoredTableTheme(store('{"id":"basement"}'))).toBe('basement')
+    expect(readStoredTableTheme(store(null))).toBe('basement')
+    expect(readStoredTableTheme(null)).toBe('basement')
   })
 
   it('never throws when storage is blocked', () => {
     const blocked = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') } }
-    expect(readStoredTableTheme(blocked)).toBe('lounge')
+    expect(readStoredTableTheme(blocked)).toBe('basement')
     expect(writeStoredTableTheme('highroller', blocked)).toBe(false)
     expect(writeStoredTableTheme('highroller', null)).toBe(false)
   })

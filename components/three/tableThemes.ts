@@ -16,6 +16,8 @@ export type TableThemeId = 'lounge' | 'highroller' | 'basement' | 'rooftop'
 
 export const TABLE_THEME_IDS: readonly TableThemeId[] = ['lounge', 'highroller', 'basement', 'rooftop']
 export const DEFAULT_TABLE_THEME: TableThemeId = 'lounge'
+/** What a player sees before they ever pick a theme. The lounge stays the base scene. */
+export const INITIAL_TABLE_THEME: TableThemeId = 'basement'
 
 /** localStorage key for the local player's choice. */
 export const TABLE_THEME_STORAGE_KEY = 'poker-night:table-theme'
@@ -41,13 +43,14 @@ function browserStorage(): Storage | null {
   }
 }
 
-/** Reads the saved theme. Never throws: bad or missing data gives the lounge. */
+/** Reads the saved theme. Never throws: bad or missing data gives the basement. */
 export function readStoredTableTheme(storage: StorageReader | null = browserStorage()): TableThemeId {
-  if (!storage) return DEFAULT_TABLE_THEME
+  if (!storage) return INITIAL_TABLE_THEME
   try {
-    return normalizeTableTheme(storage.getItem(TABLE_THEME_STORAGE_KEY))
+    const saved = storage.getItem(TABLE_THEME_STORAGE_KEY)
+    return isTableThemeId(saved) ? saved : INITIAL_TABLE_THEME
   } catch {
-    return DEFAULT_TABLE_THEME
+    return INITIAL_TABLE_THEME
   }
 }
 

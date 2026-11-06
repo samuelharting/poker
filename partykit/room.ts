@@ -212,6 +212,8 @@ interface RoomData {
   stateVersion?: number
   /** Default turn clock last pushed onto this table (saved tables adopt a new default once). */
   timerDefaultApplied?: number
+  /** Drinking default (off) applied once to a saved table. */
+  drinkDefaultOffApplied?: boolean
 }
 
 /**
@@ -286,7 +288,7 @@ const DEFAULT_SETTINGS: TableSettings = {
   rabbitHuntingEnabled: false,
   sevenTwoRuleEnabled: true,
   sevenTwoBountyPercent: 2,
-  funModeEnabled: true,
+  funModeEnabled: false,
 }
 
 export const AUTO_FOLD_DELAY = DEFAULT_SETTINGS.actionTimerDuration
@@ -527,6 +529,7 @@ export default class PokerRoom implements PartyServer {
       humansPresent: false,
       stateVersion: STATE_VERSION,
       timerDefaultApplied: DEFAULT_SETTINGS.actionTimerDuration,
+      drinkDefaultOffApplied: true,
     }
   }
 
@@ -564,6 +567,11 @@ export default class PokerRoom implements PartyServer {
       if (restored.timerDefaultApplied !== DEFAULT_SETTINGS.actionTimerDuration) {
         this.data.tableSettings = { ...this.data.tableSettings, actionTimerDuration: DEFAULT_SETTINGS.actionTimerDuration }
         this.data.timerDefaultApplied = DEFAULT_SETTINGS.actionTimerDuration
+      }
+      // Drinking is now off by default: switch it off once on a saved table; the host can turn it back on.
+      if (!restored.drinkDefaultOffApplied) {
+        this.data.tableSettings = { ...this.data.tableSettings, funModeEnabled: false }
+        this.data.drinkDefaultOffApplied = true
       }
       // Every socket is gone, so nobody is here. If the save was written while
       // humans were connected (or predates this field) the idle clock starts

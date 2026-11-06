@@ -1,3 +1,4 @@
+import { enableDrinking } from './enableDrinking'
 import { vi } from 'vitest'
 import type { Connection, Room } from 'partykit/server'
 import PokerRoom from '@/partykit/room'
@@ -101,6 +102,7 @@ export interface RoomInternals {
 export function createHarness() {
   const room = new MockRoom()
   const server = new PokerRoom(room as unknown as Room)
+  enableDrinking(server)
   // Random thirst off unless a test turns it on.
   server.autoBeerRandom = () => 1
   // Deterministic: no bot drinks / peeks sneaking in timers.
