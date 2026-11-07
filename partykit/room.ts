@@ -214,6 +214,8 @@ interface RoomData {
   timerDefaultApplied?: number
   /** Drinking default (off) applied once to a saved table. */
   drinkDefaultOffApplied?: boolean
+  /** Hyper blinds became the default: a saved table switches to it once. */
+  hyperDefaultApplied?: boolean
 }
 
 /**
@@ -289,6 +291,7 @@ const DEFAULT_SETTINGS: TableSettings = {
   sevenTwoRuleEnabled: true,
   sevenTwoBountyPercent: 2,
   funModeEnabled: false,
+  blindSchedule: 'hyper',
 }
 
 export const AUTO_FOLD_DELAY = DEFAULT_SETTINGS.actionTimerDuration
@@ -530,6 +533,7 @@ export default class PokerRoom implements PartyServer {
       stateVersion: STATE_VERSION,
       timerDefaultApplied: DEFAULT_SETTINGS.actionTimerDuration,
       drinkDefaultOffApplied: true,
+      hyperDefaultApplied: true,
     }
   }
 
@@ -572,6 +576,11 @@ export default class PokerRoom implements PartyServer {
       if (!restored.drinkDefaultOffApplied) {
         this.data.tableSettings = { ...this.data.tableSettings, funModeEnabled: false }
         this.data.drinkDefaultOffApplied = true
+      }
+      // Hyper blinds are now the default: switch a saved table once; the host can change it.
+      if (!restored.hyperDefaultApplied) {
+        this.data.tableSettings = { ...this.data.tableSettings, blindSchedule: 'hyper', blindsLevelStartedAt: undefined }
+        this.data.hyperDefaultApplied = true
       }
       // Every socket is gone, so nobody is here. If the save was written while
       // humans were connected (or predates this field) the idle clock starts
