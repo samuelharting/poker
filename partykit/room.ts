@@ -145,6 +145,7 @@ interface TableSettings {
   rabbitHuntingEnabled: boolean
   sevenTwoRuleEnabled: boolean
   sevenTwoBountyPercent: number
+  sevenTwoBountyMode?: 'small_blind' | 'percent'
   /** Drinks and Lady Luck. Optional so rooms saved before it existed default to on. */
   funModeEnabled?: boolean
   /** Blind schedule (lib/poker/blindSchedule); blinds double at the end of each level. */
@@ -290,6 +291,7 @@ const DEFAULT_SETTINGS: TableSettings = {
   rabbitHuntingEnabled: false,
   sevenTwoRuleEnabled: true,
   sevenTwoBountyPercent: 2,
+  sevenTwoBountyMode: 'small_blind',
   funModeEnabled: false,
   blindSchedule: 'hyper',
 }
@@ -495,13 +497,16 @@ export default class PokerRoom implements PartyServer {
   /** A brand-new table: what a never-used room (and a reset room) looks like. */
   private createFreshData(): RoomData {
     return {
-      gameState: createInitialGameState(
-        this.room.id.toUpperCase(),
-        DEFAULT_SETTINGS.smallBlind,
-        DEFAULT_SETTINGS.bigBlind,
-        DEFAULT_SETTINGS.startingStack,
-        DEFAULT_SETTINGS.actionTimerDuration
-      ),
+      gameState: {
+        ...createInitialGameState(
+          this.room.id.toUpperCase(),
+          DEFAULT_SETTINGS.smallBlind,
+          DEFAULT_SETTINGS.bigBlind,
+          DEFAULT_SETTINGS.startingStack,
+          DEFAULT_SETTINGS.actionTimerDuration
+        ),
+        sevenTwoBountyMode: DEFAULT_SETTINGS.sevenTwoBountyMode,
+      },
       hostId: null,
       connectionToPlayer: {},
       playerToConnection: {},
@@ -577,6 +582,11 @@ export default class PokerRoom implements PartyServer {
         this.data.tableSettings = { ...this.data.tableSettings, funModeEnabled: false }
         this.data.drinkDefaultOffApplied = true
       }
+      // 7-2 pays one small blind per opponent by default (saved tables without a mode switch to it).
+      if (!this.data.tableSettings.sevenTwoBountyMode) {
+        this.data.tableSettings = { ...this.data.tableSettings, sevenTwoBountyMode: 'small_blind' }
+      }
+      this.data.gameState.sevenTwoBountyMode = this.data.tableSettings.sevenTwoBountyMode
       // Hyper blinds are now the default: switch a saved table once; the host can change it.
       if (!restored.hyperDefaultApplied) {
         this.data.tableSettings = { ...this.data.tableSettings, blindSchedule: 'hyper', blindsLevelStartedAt: undefined }
@@ -1732,6 +1742,7 @@ export default class PokerRoom implements PartyServer {
     if (msg.rabbitHuntingEnabled !== undefined) settingsPatch.rabbitHuntingEnabled = msg.rabbitHuntingEnabled
     if (msg.sevenTwoRuleEnabled !== undefined) settingsPatch.sevenTwoRuleEnabled = msg.sevenTwoRuleEnabled
     if (msg.sevenTwoBountyPercent !== undefined) settingsPatch.sevenTwoBountyPercent = msg.sevenTwoBountyPercent
+    if (msg.sevenTwoBountyMode !== undefined) settingsPatch.sevenTwoBountyMode = msg.sevenTwoBountyMode
 
     const effectiveSettings = {
       ...this.data.tableSettings,
@@ -1871,6 +1882,9 @@ export default class PokerRoom implements PartyServer {
     if (settings.sevenTwoRuleEnabled !== undefined) {
       this.data.tableSettings.sevenTwoRuleEnabled = settings.sevenTwoRuleEnabled
     }
+    if (settings.sevenTwoBountyMode !== undefined) {
+      this.data.tableSettings.sevenTwoBountyMode = settings.sevenTwoBountyMode
+    }
     if (settings.sevenTwoBountyPercent !== undefined) {
       this.data.tableSettings.sevenTwoBountyPercent = Math.min(
         100,
@@ -1886,6 +1900,7 @@ export default class PokerRoom implements PartyServer {
     this.data.gameState.rabbitHuntingEnabled = this.data.tableSettings.rabbitHuntingEnabled
     this.data.gameState.sevenTwoRuleEnabled = this.data.tableSettings.sevenTwoRuleEnabled
     this.data.gameState.sevenTwoBountyPercent = this.data.tableSettings.sevenTwoBountyPercent
+    this.data.gameState.sevenTwoBountyMode = this.data.tableSettings.sevenTwoBountyMode ?? 'small_blind'
   }
 
   private applyPendingTableSettings() {
@@ -4379,6 +4394,7 @@ export default class PokerRoom implements PartyServer {
           rabbitHuntingEnabled: this.data.pendingTableSettings.rabbitHuntingEnabled ?? this.data.tableSettings.rabbitHuntingEnabled,
           sevenTwoRuleEnabled: this.data.pendingTableSettings.sevenTwoRuleEnabled ?? this.data.tableSettings.sevenTwoRuleEnabled,
           sevenTwoBountyPercent: this.data.pendingTableSettings.sevenTwoBountyPercent ?? this.data.tableSettings.sevenTwoBountyPercent,
+          sevenTwoBountyMode: this.data.pendingTableSettings.sevenTwoBountyMode ?? this.data.tableSettings.sevenTwoBountyMode ?? 'small_blind',
         }
       : undefined
 

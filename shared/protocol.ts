@@ -78,6 +78,7 @@ export type C2SMessage =
     rabbitHuntingEnabled?: boolean
     sevenTwoRuleEnabled?: boolean
     sevenTwoBountyPercent?: number
+    sevenTwoBountyMode?: 'small_blind' | 'percent'
     funModeEnabled?: boolean
     /** Blind schedule id (lib/poker/blindSchedule); applies immediately. */
     blindSchedule?: BlindScheduleId
@@ -311,6 +312,9 @@ export function parseC2S(raw: string): C2SMessage | null {
         }
         if (typeof parsed.sevenTwoBountyPercent === 'number') {
           next.sevenTwoBountyPercent = Math.max(0, Number(parsed.sevenTwoBountyPercent))
+        }
+        if (parsed.sevenTwoBountyMode === 'small_blind' || parsed.sevenTwoBountyMode === 'percent') {
+          next.sevenTwoBountyMode = parsed.sevenTwoBountyMode
         }
         if (typeof parsed.funModeEnabled === 'boolean') {
           next.funModeEnabled = parsed.funModeEnabled

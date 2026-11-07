@@ -330,7 +330,8 @@ function applyBountyPayout(
   state: InternalGameState,
   winnerTotals: Map<string, number>
 ): BountyMetadata {
-  if (!state.sevenTwoRuleEnabled || !(state.sevenTwoBountyPercent > 0)) {
+  const bySmallBlind = state.sevenTwoBountyMode === 'small_blind'
+  if (!state.sevenTwoRuleEnabled || (!bySmallBlind && !(state.sevenTwoBountyPercent > 0))) {
     return {
       active: false,
       amount: 0,
@@ -370,10 +371,9 @@ function applyBountyPayout(
     }
   }
 
-  const bountyContribution = Math.max(
-    1,
-    Math.floor((state.startingStack * state.sevenTwoBountyPercent) / 100)
-  )
+  const bountyContribution = bySmallBlind
+    ? Math.max(1, state.smallBlind)
+    : Math.max(1, Math.floor((state.startingStack * state.sevenTwoBountyPercent) / 100))
 
   let amount = 0
   const contributorIds: string[] = []
@@ -417,7 +417,9 @@ function applyBountyPayout(
     percentage: state.sevenTwoBountyPercent,
     contributors: contributorIds,
     recipientPlayerIds,
-    reason: `${recipientPlayerIds.length} winner(s) with 7-2 collected ${state.sevenTwoBountyPercent}% of the table buy-in from each eligible opponent`,
+    reason: bySmallBlind
+      ? `${recipientPlayerIds.length} winner(s) with 7-2 collected one small blind (${bountyContribution}) from each eligible opponent`
+      : `${recipientPlayerIds.length} winner(s) with 7-2 collected ${state.sevenTwoBountyPercent}% of the table buy-in from each eligible opponent`,
   }
 }
 
@@ -1704,6 +1706,7 @@ export function toTableState(
     rabbitHuntingEnabled: state.rabbitHuntingEnabled,
     sevenTwoRuleEnabled: state.sevenTwoRuleEnabled,
     sevenTwoBountyPercent: state.sevenTwoBountyPercent,
+    sevenTwoBountyMode: state.sevenTwoBountyMode ?? 'percent',
     handNumber: state.handNumber,
     actionSequence: state.actionSequence ?? 0,
     showdownAt: state.showdownAt,

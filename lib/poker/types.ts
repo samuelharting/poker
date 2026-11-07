@@ -22,6 +22,8 @@ export type HandRank =
   | 'straight_flush'
   | 'royal_flush'
 
+export type SevenTwoBountyMode = 'small_blind' | 'percent'
+
 export interface HandResult {
   rank: HandRank
   rankIndex: number    // 0-9, higher = better
@@ -212,6 +214,8 @@ export interface TableSettingsSnapshot {
   rabbitHuntingEnabled: boolean
   sevenTwoRuleEnabled: boolean
   sevenTwoBountyPercent: number
+  /** 'small_blind' (default): each opponent pays one small blind. 'percent': % of the buy-in. */
+  sevenTwoBountyMode?: SevenTwoBountyMode
 }
 
 export interface TableState {
@@ -251,6 +255,8 @@ export interface TableState {
   rabbitHuntingEnabled: boolean
   sevenTwoRuleEnabled: boolean
   sevenTwoBountyPercent: number
+  /** 'small_blind' (default): each opponent pays one small blind. 'percent': % of the buy-in. */
+  sevenTwoBountyMode?: SevenTwoBountyMode
   pendingTableSettings?: TableSettingsSnapshot
   handNumber: number
   actionSequence?: number
@@ -344,6 +350,8 @@ export interface InternalGameState {
   rabbitHuntingEnabled: boolean
   sevenTwoRuleEnabled: boolean
   sevenTwoBountyPercent: number
+  /** 'small_blind' (default): each opponent pays one small blind. 'percent': % of the buy-in. */
+  sevenTwoBountyMode?: SevenTwoBountyMode
   handNumber: number
   actionSequence?: number
   showdownAt?: number
