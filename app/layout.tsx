@@ -18,6 +18,7 @@ import './styles/hand-odds.css'
 import './styles/spectator.css'
 import './styles/ui-pass.css'
 import './styles/sticky-note.css'
+import './styles/table-pokernow.css'
 
 const jakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],

@@ -4,6 +4,7 @@ import { normalizeSceneMode, type SceneMode } from '@/components/three/sceneMode
 import { useThreeFallback } from '@/components/three/threeFallback'
 import { useState, useEffect, useCallback } from 'react'
 import { PokerTable } from '@/components/table/PokerTable'
+import { TwoDToolbar } from '@/components/ui/TwoDToolbar'
 import { RoomHud } from '@/components/ui/RoomHud'
 import { LandingHeroArt } from '@/components/ui/LandingHeroArt'
 import { NicknameField } from '@/components/ui/NicknameField'
@@ -194,6 +195,17 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
     window.setTimeout(() => window.location.assign('/'), 100)
   }, [roomCode, sendMessage])
 
+  const seatedMe = tableState?.players.find(player => player.id === yourId)
+  const lobbyMe = tableState?.lobbyPlayers.find(player => player.id === yourId)
+  // Leave seat (2D top bar): stand up to the rail, keeping your chips.
+  const handleLeaveSeat = useCallback(() => {
+    if (!yourId) return
+    if (!window.confirm('Leave your seat and watch from the rail? Your chips stay with you.')) {
+      return
+    }
+    sendMessage({ type: 'set_player_spectator', targetId: yourId, spectator: true })
+  }, [sendMessage, yourId])
+
   const handleResetTable = useCallback(() => {
     sendMessage({ type: 'reset_table' })
   }, [sendMessage])
@@ -324,7 +336,24 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
       onOrder={orderDrink}
       onTakeShot={() => sendMessage({ type: 'take_shot' })}
     >
-    <div className="room-shell" data-chill-wide={isChillWide ? 'true' : undefined}>
+    <div
+      className="room-shell"
+      data-chill-wide={isChillWide ? 'true' : undefined}
+      data-skin={isTwoDLayout ? 'pn' : undefined}
+    >
+      {isTwoDLayout ? (
+        <TwoDToolbar
+          settingsOpen={settingsOpen}
+          onToggleSettings={() => setSettingsOpen(current => !current)}
+          isSeated={Boolean(seatedMe) && !lobbyMe?.isSpectator}
+          isAway={Boolean(seatedMe?.isAway)}
+          isConnected={isConnected}
+          onLeaveSeat={handleLeaveSeat}
+          onToggleAway={() => sendMessage({ type: 'set_sitting_out', sittingOut: !seatedMe?.isAway })}
+          soundMuted={soundPreferences.muted}
+          onToggleSound={() => updateSoundPreferences({ muted: !soundPreferences.muted })}
+        />
+      ) : (
       <RoomHud
         isConnected={isConnected}
         isHost={isHost}
@@ -337,6 +366,7 @@ function GameRoom({ roomCode, profile }: { roomCode: string; profile: PlayerProf
         soundMuted={soundPreferences.muted}
         onToggleSound={() => updateSoundPreferences({ muted: !soundPreferences.muted })}
       />
+      )}
 
       {tableState ? (
         <PokerTable

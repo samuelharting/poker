@@ -2293,6 +2293,20 @@ export function PokerTable({
   const openSeatCount = Math.max(0, 8 - state.players.length)
   const spectatorRailState = getSpectatorRailState(lobbyMe, isConnected, { openSeats: openSeatCount })
   const canRetakeSeat = Boolean(spectatorRailState?.canTakeSeat)
+  // 2D table: every open chair is drawn as a numbered dashed box at its real
+  // place around the felt; a viewer on the rail taps one to sit in.
+  const twoDEmptySeats = useMemo(() => {
+    if (!isMobileViewport) return []
+    const occupied = new Set(orderedOpponents.map(player => player.visualSeat))
+    const anchorSeat = me && !isSpectator ? me.seatIndex : 0
+    return Array.from({ length: 8 }, (_, visualSeat) => visualSeat)
+      .filter(visualSeat => !occupied.has(visualSeat))
+      .map(visualSeat => ({
+        visualSeat,
+        seatNumber: ((visualSeat + anchorSeat) % 8) + 1,
+        canSit: canRetakeSeat && !me,
+      }))
+  }, [canRetakeSeat, isMobileViewport, isSpectator, me, orderedOpponents])
   // On the rail (not in a chair): the watching bar / dock is always up.
   const isOnRail = Boolean(lobbyMe?.isSpectator && !me)
 
@@ -2833,11 +2847,41 @@ export function PokerTable({
             data-hero-lane={shouldShowOwnHand && visibleOwnPlayer ? 'true' : 'false'}
           >
             <div className="mobile-arena">
+            {/* The flat felt: a tall rounded table on phones, a wide oval on a wide screen. */}
+            <div className="pn-felt" aria-hidden="true">
+              <span className="pn-felt-label">
+                NLH ~ {formatAmount(state.smallBlind)} / {formatAmount(state.bigBlind)}
+              </span>
+            </div>
             <div
               className="mobile-seat-grid mobile-edge-seats"
               aria-label="Players"
               data-seat-count={mobileEdgeOpponents.length}
             >
+              {twoDEmptySeats.map(seat => (
+                seat.canSit ? (
+                  <button
+                    key={`pn-empty-${seat.visualSeat}`}
+                    type="button"
+                    className="pn-empty-seat is-open"
+                    data-vseat={seat.visualSeat}
+                    onClick={onSeatMe}
+                    aria-label={`Seat ${seat.seatNumber} is open: take a seat`}
+                  >
+                    <span className="pn-seat-number">{seat.seatNumber}</span>
+                    <span className="pn-empty-seat-cta">Sit</span>
+                  </button>
+                ) : (
+                  <div
+                    key={`pn-empty-${seat.visualSeat}`}
+                    className="pn-empty-seat"
+                    data-vseat={seat.visualSeat}
+                    aria-label={`Seat ${seat.seatNumber} is empty`}
+                  >
+                    <span className="pn-seat-number">{seat.seatNumber}</span>
+                  </div>
+                )
+              ))}
               {mobileEdgeOpponents.map((player, seatIndex) => {
                 const seatSocial = activeSocialByPlayer.get(player.id) ?? {}
                 const isActingSeat = state.actingPlayerId === player.id
@@ -2847,6 +2891,7 @@ export function PokerTable({
                     key={player.id}
                     className={`mobile-edge-seat-position mobile-seat-position-${player.visualSeat}`}
                     data-slot={getMobileSeatSlot(seatIndex, mobileEdgeOpponents.length)}
+                    data-vseat={player.visualSeat}
                   >
                     <MobileEdgeSeat
                       player={player}
@@ -2941,7 +2986,6 @@ export function PokerTable({
               )}
               <div className="mobile-board-footer">{showdownCinematic}</div>
             </div>
-            </div>
 
             {shouldShowOwnHand && visibleOwnPlayer && (
               <div
@@ -2992,6 +3036,7 @@ export function PokerTable({
                 />
               </div>
             )}
+            </div>
           </div>
         ) : (
         <div className="table-wrapper">
@@ -3264,6 +3309,16 @@ export function PokerTable({
         />
       )}
 
+      {isMobileViewport && !settingsOpen && (
+        <TwoDLogDock
+          recentActions={state.recentActions}
+          history={state.handHistory ?? []}
+          players={state.players}
+          yourId={yourId}
+          closeOnTurnKey={heroTurnKey}
+        />
+      )}
+
       {isMobileViewport && (showLobbyControls || isBustedViewer || isRailBusted || canRetakeSeat || isOnRail) && !settingsOpen && !hasActionTray && (
         <MobileBetweenHandsDock
           state={state}
@@ -3337,10 +3392,47 @@ export function PokerTable({
                   >
                     −
                   </HoldStepButton>
-                  <div className="mobile-bet-amount" aria-live="polite">
-                    <strong>{formatAmount(raiseAmount)}</strong>
-                    <span className="mobile-raise-bb">{mobileRaiseBlindCount} BB</span>
-                  </div>
+                  <label className={`mobile-bet-amount ${raiseDraftHint ? `is-${raiseDraftHint}` : ''}`}>
+                    <span className="mobile-bet-amount-currency" aria-hidden="true">$</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      className="mobile-bet-input"
+                      value={raiseDraft ?? raiseAmount.toLocaleString('en-US')}
+                      aria-label={`${state.currentBet > 0 ? 'Raise to' : 'Bet'} amount, minimum ${formatAmount(effectiveMin)}`}
+                      aria-invalid={raiseDraftHint ? true : undefined}
+                      onFocus={event => event.currentTarget.select()}
+                      onChange={event => {
+                        const text = event.target.value
+                        setRaiseDraft(text)
+                        const typed = parseRaiseDraft(text)
+                        if (typed !== null && typed >= effectiveMin && typed <= maxRaise) {
+                          setRaiseAmount(typed)
+                        }
+                      }}
+                      onBlur={() => {
+                        if (raiseDraft !== null) commitRaiseDraft()
+                      }}
+                      onKeyDown={event => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          commitRaiseDraft()
+                          event.currentTarget.blur()
+                        } else if (event.key === 'Escape') {
+                          setRaiseDraft(null)
+                          event.currentTarget.blur()
+                        }
+                      }}
+                    />
+                    <span className="mobile-raise-bb" aria-live="polite">
+                      {raiseDraftHint === 'above-max'
+                        ? `max ${formatAmount(maxRaise)}`
+                        : raiseDraftHint === 'below-min'
+                          ? `min ${formatAmount(effectiveMin)}`
+                          : `${mobileRaiseBlindCount} BB`}
+                    </span>
+                  </label>
                   <HoldStepButton
                     className="mobile-raise-step"
                     disabled={raiseAmount >= maxRaise}
@@ -3422,7 +3514,7 @@ export function PokerTable({
                   disabled={mobileRaiseIsAllIn ? !mobileAllInAction : !mobileBetRaiseAction}
                 >
                   <span>{mobileRaiseLabel}</span>
-                  <strong>{formatAmount(raiseAmount)}</strong>
+                  <strong>{formatAmount(displayRaiseAmount)}</strong>
                 </button>
               ) : (
                 <button
@@ -3899,6 +3991,129 @@ function TableSocialDock({
         <span aria-hidden="true"><ChatBubbleIcon /></span>
         <strong>Table talk</strong>
         {unreadCount > 0 && <em aria-hidden="true">{Math.min(unreadCount, 99)}</em>}
+      </button>
+    </aside>
+  )
+}
+
+/**
+ * 2D table LOG button and sheet: this hand's actions (newest first) and the
+ * last finished hands. Read-only; it never covers your turn.
+ */
+function TwoDLogDock({
+  recentActions,
+  history,
+  players,
+  yourId,
+  closeOnTurnKey = null,
+}: {
+  recentActions: readonly string[]
+  history: HandHistoryEntry[]
+  players: ReadonlyArray<Pick<SeatPlayer, 'id' | 'isBot' | 'nickname'>>
+  yourId: string
+  closeOnTurnKey?: string | null
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const dockRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    if (closeOnTurnKey) setIsOpen(false)
+  }, [closeOnTurnKey])
+
+  // CHAT / LOG ride just above whatever bar is docked at the bottom (action
+  // bar, waiting dock, sit-out bar), so they never cover a button.
+  useEffect(() => {
+    const shell = dockRef.current?.closest<HTMLElement>('.room-shell')
+    if (!shell || typeof ResizeObserver === 'undefined' || typeof MutationObserver === 'undefined') {
+      return
+    }
+    const selector = [
+      '.mobile-betting-panel',
+      '.mobile-raise-sizing',
+      '.mobile-between-hands-dock',
+      '.check-fold-pre-action-dock',
+      '.rabbit-hunt-dock',
+      '.membership-sitout',
+    ].join(',')
+    const resize = new ResizeObserver(() => schedule())
+    let observed: Element[] = []
+    const sync = () => {
+      const docks = Array.from(shell.querySelectorAll(selector))
+      if (docks.length !== observed.length || docks.some((dock, index) => dock !== observed[index])) {
+        observed.forEach(dock => resize.unobserve(dock))
+        docks.forEach(dock => resize.observe(dock))
+        observed = docks
+      }
+      const viewportBottom = window.innerHeight
+      const lift = docks.reduce((top, dock) => {
+        const rect = dock.getBoundingClientRect()
+        return rect.height > 0 ? Math.max(top, viewportBottom - rect.top) : top
+      }, 0)
+      shell.style.setProperty('--pn-dock-lift', `${Math.max(0, Math.round(lift))}px`)
+    }
+    let frame = 0
+    const schedule = () => {
+      if (frame) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        sync()
+      })
+    }
+    const mutations = new MutationObserver(schedule)
+    mutations.observe(shell, { childList: true, subtree: true })
+    window.addEventListener('resize', sync)
+    sync()
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      mutations.disconnect()
+      resize.disconnect()
+      window.removeEventListener('resize', sync)
+      shell.style.removeProperty('--pn-dock-lift')
+    }
+  }, [])
+
+  return (
+    <aside ref={dockRef} className={`pn-log-dock ${isOpen ? 'is-open' : ''}`} aria-label="Hand log">
+      {isOpen && (
+        <div className="pn-log-panel" role="dialog" aria-label="Hand log">
+          <div className="pn-log-header">
+            <strong>Log</strong>
+            <button
+              type="button"
+              className="pn-log-close"
+              onClick={() => setIsOpen(false)}
+              aria-label="Close hand log"
+            >
+              <PanelCloseIcon />
+            </button>
+          </div>
+          <div className="pn-log-body">
+            <section className="pn-log-section" aria-label="Recent actions">
+              <h3>This hand</h3>
+              {recentActions.length > 0 ? (
+                <ol className="pn-log-actions">
+                  {recentActions.map((entry, index) => (
+                    <li key={`${index}-${entry}`}>{entry}</li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="pn-log-empty">No actions yet.</p>
+              )}
+            </section>
+            <section className="pn-log-section" aria-label="Last hands">
+              <h3>Last hands</h3>
+              <HandHistoryList history={history} players={players} yourId={yourId} />
+            </section>
+          </div>
+        </div>
+      )}
+      <button
+        type="button"
+        className="pn-corner-button pn-log-toggle"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen(current => !current)}
+      >
+        Log
       </button>
     </aside>
   )

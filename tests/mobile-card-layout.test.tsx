@@ -94,6 +94,17 @@ describe('2D layout cards and seats', () => {
     expect(pokerTableSource).not.toContain('mobile-seat-number')
   })
 
+  it('draws the 2D felt, numbered open seats and real chair positions (skin)', () => {
+    const skinCss = readFileSync(join(process.cwd(), 'app', 'styles', 'table-pokernow.css'), 'utf8')
+    expect(pokerTableSource).toContain('className="pn-felt"')
+    expect(pokerTableSource).toContain('className="pn-seat-number"')
+    expect(pokerTableSource).toContain('data-vseat={player.visualSeat}')
+    expect(layoutSource.indexOf("import './styles/table-pokernow.css'")).toBeGreaterThan(
+      layoutSource.indexOf("import './styles/ui-pass.css'")
+    )
+    expect(skinCss).toMatch(/\.room-shell\[data-skin='pn'\]/)
+  })
+
   it('gives card reveal controls their own row in the chip, never over the bet', () => {
     expect(table2dCss).toMatch(
       /\.mobile-card-reveal-control\s*\{[^}]*grid-area:\s*reveal;/s
